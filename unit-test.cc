@@ -340,6 +340,54 @@ void test_8_rand(void)
     printf("%s: OK\n", __func__);
 }
 
+void test_9_delete(void)
+{
+    extmap::objmap map;
+    int max = 800;
+    
+    for (int i = 0; i < max; i++) {
+	int base = i*10, limit = base + 5;
+	extmap::obj_offset ptr = {0, base};
+	map.update(base, limit, ptr);
+	test_ptr(&map);
+    }
+    
+    std::vector<extmap::lba2obj> v;
+    extmap::obj_offset ptr = {0, 2222};
+    
+    map.update(252, 328, ptr, &v);
+
+    // should knock out 252-255, 260-265, ... 320..325
+    int i = 0;
+    for (auto it = map.begin(); it != map.end(); it++, i++) {
+	auto [base, limit, ptr] = it->vals();
+	if (i < 25) 
+	    assert(base == i*10 && limit == i*10 + 5 &&
+		   ptr.obj == 0 && ptr.offset == base);
+	else if (i == 25)
+	    assert(base == 250 && limit == 252);
+	else if (i == 26)
+	    assert(base == 252 && limit == 328 && ptr.offset == 222);
+	else if (i > 26)
+	    assert (base == (i+7)*10 && limit == (i+7)*10 + 5 &&
+		    ptr.offset == base);
+    }
+
+    assert(v.size() == 8);
+    auto it = v.begin();
+    auto [_base, _limit, _ptr] = it->vals();
+    assert(_base == 252 && _limit == 255 && _ptr.offset == 252);
+    it++;
+    
+    for (int i = 0; it != v.end(); it++, i++) {
+	auto [base, limit, ptr] = it->vals();
+	assert(base == 255 + i*10 && limit == base+5 && ptr.offset == base);
+    }
+    
+    printf("%s: OK\n", __func__);
+}
+
+
 // only thing left to 
 
 int main()
