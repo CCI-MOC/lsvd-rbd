@@ -8,33 +8,6 @@
 #include "extent.cc"
 #include <vector>
 
-#include <random>
-std::mt19937 gen;
-
-std::pair<int64_t,int64_t> rnd_pair(int64_t max)
-{
-    std::uniform_int_distribution<> distrib(0, max-2);
-    int64_t base = distrib(gen);
-    std::geometric_distribution<> d(10);
-    int64_t len = d(gen) + 1;
-    int64_t limit = std::min(base+len, max-1);
-    return std::make_pair(base, limit);
-}
-
-std::vector<std::pair<int64_t,int64_t>> *rnd_list(int64_t max, int n)
-{
-    auto v = new std::vector<std::pair<int64_t,int64_t>>;
-    for (int i = 0; i < n; i++)
-	v->push_back(rnd_pair(max));
-    return v;
-}
-        
-
-void addit(extmap::objmap *m, int64_t base, int64_t limit)
-{
-    extmap::obj_offset ptr = {0, base};
-    m->update(base, limit, ptr);
-}
 
 // test that ptr.offset == base in all cases
 //
@@ -149,6 +122,9 @@ void test_3_seq_merge(void)
 }
 
 // various infrastructure for random tests
+//
+#include <random>
+std::mt19937 gen;
 
 // create a random vector of @n extents in [0..max)
 //
@@ -220,17 +196,18 @@ std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
     return v;
 }
 
-#if 0
-void test_rand_800_10k(void)
+void test_4_rand(void)
 {
+    int max = 8000, n = 20000;
+    auto writes = rnd_extents(max, n, false, false);
+
     extmap::objmap map;
-    auto writes = rnd_list(1000, 80);
-    int i = 0;
-    for (auto [base, limit] : *writes) {
-	addit(&map, base, limit);
+    for (auto l2o : *writes) {
+	auto [base, limit, ptr] = l2o.vals();
+	map.update(base, limit, ptr);
 	test_ptr(&map);
-	i++;
     }
+
     auto flat = flatten(writes);
     auto merged = merge(flat);
 
@@ -240,25 +217,33 @@ void test_rand_800_10k(void)
 	assert(map_it != map.end());
 	auto [base, limit, ptr] = map_it->vals();
 	auto [mbase, mlimit, mptr] = merged_it->vals();
+#if 0
 	printf("map: %lld..%lld %lld in: %lld..%lld %lld\n", base, limit, ptr.offset,
 	       mbase, mlimit, mptr.offset);
 	printf("val %d\n", (mbase == base && mlimit == limit && mptr == ptr));
-
+#endif
 	assert(mbase == base && mlimit == limit && mptr == ptr);
 	merged_it++;
 	map_it++;
     }
     assert(map_it == map.end());
     
-    printf("rand_800_10k: OK\n");
+    printf("%s: OK\n", __func__);
 }
-#endif
+
+// first a standard set of random tests
+
+// do another random test where I create a fixed vector, then iterate knocking out
+// various sections of it
+
+// finally test shrinking everything
 
 int main()
 {
     test_1_seq();
     test_2_mod17();
     test_3_seq_merge();
+    test_4_rand();
     
     //test_seqw_800();
     //test_17w_800();
