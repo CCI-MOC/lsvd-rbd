@@ -181,13 +181,13 @@ std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
     auto v = new std::vector<extmap::lba2obj>;
     int i = 0;
     while (i < writes->size()) {
-	while ((*writes)[i].obj == -1 && i < writes->size()) {
+	while (i < writes->size() && (*writes)[i].obj == -1) {
 	    base = i+1;
 	    i++;
 	}
 	auto obj = (*writes)[i].obj;
 	auto offset = (*writes)[i].offset;
-	while ((*writes)[i].obj != -1 && (*writes)[i].obj == obj && i < writes->size()) {
+	while (i < writes->size() && (*writes)[i].obj != -1 && (*writes)[i].obj == obj) {
 	    limit = i+1;
 	    i++;
 	}
