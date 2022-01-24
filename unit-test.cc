@@ -1,3 +1,8 @@
+//
+// file:        unit-test.cc
+// description: unit tests for extent.cc (first set?)
+//
+
 #include <stdlib.h>
 #include <assert.h>
 #include "extent.cc"
@@ -84,40 +89,100 @@ void addit(extmap::objmap *m, int64_t base, int64_t limit)
     m->update(base, limit, ptr);
 }
 
+// test that ptr.offset == base in all cases
+//
 void test_ptr(extmap::objmap *map)
 {
+    return;
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	assert(base == ptr.offset);
     }
 }
 
-// verify that merge works at different positions in the map
-void test_seqw_800(void)
+// test 1 - insert sequentially, verify
+//
+void test_1_seq(void)
 {
-    for (int k = 2; k < 600; k++) {
-	extmap::objmap map;
-	for (int i = 0; i < 8000; i += 10) {
-	    addit(&map, i, i+5);
-	    test_ptr(&map);
-	    
-//	for (int j = 0; j < map.lists.size(); j++) 
-//	    printf(" %ld", map.lists[j]->size());
-//	printf("\n");
-	}
+    extmap::objmap map;
+    int max = 800;
     
-	int i = 0;
-	for (auto it = map.begin(); it != map.end(); it++, i += 10) {
-	    auto [base, limit, ptr] = it->vals();
-	    assert(base == i);
-	    assert(limit == i+5);
-	    assert(ptr.offset == i);
-	}
+    for (int i = 0; i < max; i++) {
+	int base = i*10, limit = base + 5;
+	extmap::obj_offset ptr = {0, base};
+	map.update(base, limit, ptr);
+	test_ptr(&map);
+    }
     
+    int i = 0;
+    for (auto it = map.begin(); it != map.end(); it++, i++) {
+	auto [base, limit, ptr] = it->vals();
+	assert(base == i*10 && limit == i*10 + 5 && ptr.obj == 0 && ptr.offset == base);
+    }
 
-	assert(map.lists.size() == 3);
-	assert(map.lists[0]->size() == 256);
-	addit(&map, k*10+5, k*10+10);
+    for (i = 0; i < max; i++) {
+	int base = i*10 + 2, limit = base + 6;
+	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
+	    auto [_base, _limit, _ptr] = it->vals(base, limit);
+	    assert(_base == base && _limit == base+3 && _ptr.offset == base);
+	}
+    }
+    printf("%s: OK\n", __func__);
+}
+
+// same as the previous test, but order inserts mod 17
+//
+void test_2_mod17(void)
+{
+    extmap::objmap map;
+    int max = 800;
+    
+    for (int i = 0, j = 0; i < max; i++, j = (j+17) % max) {
+	int base = j*10, limit = base + 5;
+	extmap::obj_offset ptr = {0, base};
+	map.update(base, limit, ptr);
+	test_ptr(&map);
+    }
+    
+    int i = 0;
+    for (auto it = map.begin(); it != map.end(); it++, i++) {
+	auto [base, limit, ptr] = it->vals();
+	assert(base == i*10);
+	assert(limit == i*10+5);
+	assert(ptr.offset == base);
+    }
+    assert(i == max);
+    
+    printf("%s: OK\n", __func__);
+}
+
+// verify that merge works at different positions in the map
+//
+void test_3_seq_merge(void)
+{
+    int max = 800, merge_min = 2, merge_max = max-5;
+    
+    for (int k = merge_min; k < merge_max; k++) {
+	extmap::objmap map;
+	for (int i = 0; i < max; i++) {
+	    int base = i*10, limit = base + 5;
+	    extmap::obj_offset ptr = {0, base};
+	    map.update(base, limit, ptr);
+	    test_ptr(&map);
+	}
+	    
+	int i = 0;
+	for (auto it = map.begin(); it != map.end(); it++, i++) {
+	    auto [base, limit, ptr] = it->vals();
+	    assert(base == i*10 && limit == i*10+5 && ptr.offset == base);
+	}
+
+	{
+	    int base = k*10, limit = base + 15;
+	    extmap::obj_offset ptr = {0, base};
+	    map.update(base, limit, ptr);
+	    test_ptr(&map);
+	}
 
 	auto it = map.begin();
 	for (i = 0; i < k; i++, it++) {
@@ -128,33 +193,37 @@ void test_seqw_800(void)
 	auto [base, limit, ptr] = it->vals();
 	assert(base == k*10 && limit == k*10+15 && ptr.offset == k*10);
 	it++;
-	for (i = k+2; i < 800; i++, it++) {
+	for (i = k+2; i < max; i++, it++) {
 	    auto [base, limit, ptr] = it->vals();
 	    assert(base == i*10 && limit == i*10+5 && ptr.offset == base);
 	}
     }
-    printf("seqw_800: OK\n");
+    printf("%s: OK\n", __func__);
 }
 
-void test_17w_800(void)
+// create a random vector of @n extents in [0..max)
+//
+std::vector<extmap::lba2obj> *rnd_extents(int64_t max, int n, bool rnd_obj, bool rnd_offset)
 {
-    extmap::objmap map;
-    for (int i = 0, j = 0; i < 800; i++, j = (j+17)%800) {
-	addit(&map, j*10, j*10+5);
-	test_ptr(&map);
+    std::uniform_int_distribution<> unif(0, max-2);
+    std::geometric_distribution<> geo(0.05); // mean 20
+    auto v = new std::vector<extmap::lba2obj>;
+
+    for (int i = 0; i < n; i++) {
+	int64_t base = unif(gen);
+	int64_t len = geo(gen) + 1;
+	int64_t limit = std::min(base+len, max-1);
+
+	int64_t obj = 0, offset = base;
+	if (rnd_obj) 
+	    obj = unif(gen);
+	if (rnd_offset)
+	    offset = unif(gen);
+	extmap::obj_offset oo = {obj, offset};
+	extmap::lba2obj l2o(base, limit-base, oo);
+	v->push_back(l2o);
     }
-		
-    int i = 0;
-    for (auto it = map.begin(); it != map.end(); it++, i += 10) {
-	auto [base, limit, ptr] = it->vals();
-	assert(base == i);
-	assert(limit == i+5);
-	assert(ptr.offset == i);
-    }
-    assert(i == 8000);
-    printf("17w_800: OK\n");
-//    printf("%d %d %d\n", (int) map.lists[0]->size(), (int)map.lists.size(),
-//	   (int)map.lists[1]->size());
+    return v;
 }
 
 void test_rand_800_10k(void)
@@ -191,32 +260,11 @@ void test_rand_800_10k(void)
 
 int main()
 {
+    test_1_seq();
+    test_2_mod17();
+    test_3_seq_merge();
+    
     //test_seqw_800();
     //test_17w_800();
-    test_rand_800_10k();
-
-#if 0
-    extmap::objmap   map1;
-    extmap::cachemap map2;
-    extmap::bufmap   map3;
-
-    for (int i = 0; i < 100000; i++) {
-	int64_t base = random() % 1000000;
-	int len = random() % 300;
-	if (len > 32)
-	    int len = random() % 300;
-	if (len > 128)
-	    int len = random() % 300;
-	int64_t offset = random() % 1000000;
-	extmap::obj_offset oo = {0, offset};
-	map1.update(base, base+len, oo);
-    }
-    
-    extmap::obj_offset e = {1, 2};
-    map1.update(10, 20, e);
-    map2.update(e, e+30, 1000);
-    char b[512];
-    map3.update(40, 41, b);
-    auto it = map1.lookup(100);
-#endif
+    //test_rand_800_10k();
 }
