@@ -139,6 +139,20 @@ namespace extmap {
 	bool operator<(const _extent &other) const {
 	    return s.base < other.s.base;
 	}
+
+	std::tuple<T_in, T_in, T_out> vals(void) {
+	    return std::make_tuple(s.base, s.base+s.len, s.ptr);
+	}
+
+	std::tuple<T_in, T_in, T_out> vals(T_in _base, T_in _limit) {
+	    auto _ptr = s.ptr;
+	    if (s.base < _base)
+		_ptr += (_base - s.base);
+	    else
+		_base = s.base;
+	    _limit = std::min(s.limit(), _limit);
+	    return std::make_tuple(_base, _limit, _ptr);
+	}
     };
 
     // template <class T, class T_in, class T_out> 
@@ -160,15 +174,12 @@ namespace extmap {
     struct extmap {
 	static const int _load = 256;
 
-	typedef          x_pair<T,T_in>        local_xpair;
-	typedef          std::set<local_xpair> l1_map;
-	typedef typename l1_map::iterator      l1_iter;
-	typedef          std::vector<T>        l2_map;
-	typedef typename l2_map::iterator      l2_iter;
+	typedef std::vector<T>      extent_vector;
+	std::vector<extent_vector*> lists;
+	std::vector<T_in>           maxes;
 	
-	l1_map the_map;
-	//std::set<x_pair<T>> the_map;
-
+	int count;
+	
 	// slices off [len]..[end] and returns it
 	//
 	static std::vector<T> *slice(std::vector<T> *A, int len) {
@@ -180,31 +191,12 @@ namespace extmap {
 	    return half;
 	}
 	
-	bool next_to_last(l1_iter it) {
-	    it++;
-	    return it == the_map.end();
-	}
-
-	l1_iter last(void) {
-	    auto it = the_map.end();
-	    it--;
-	    return it;
-	}
-
-	l1_iter next(l1_iter it) {
-	    it++;
-	    return it;
-	}
-	l1_iter prev(l1_iter it) {
-	    it--;
-	    return it;
-	}
-
 	class iterator {
 	public:
 	    extmap *m;
-	    l1_iter l1;
-	    l2_iter l2;
+	    int     i;
+	    typename extent_vector::iterator it;
+	    
 	    using iterator_category = std::random_access_iterator_tag;
 	    using value_type = T;
 	    using difference_type = std::ptrdiff_t;
@@ -212,27 +204,30 @@ namespace extmap {
 	    using reference = T&;
 
 	    iterator() {}
+	    
 	    bool  operator==(const iterator &other) const {
-		return m == other.m && l1 == other.l1 && l2 == other.l2;
+		return m == other.m && i == other.i && it == other.it;
 	    }
 
 	    bool operator!=(const iterator &other) const {
-		return m != other.m || l1 != other.l1 || l2 != other.l2;
+		return m != other.m || i != other.i || it != other.it;
 	    }
-	    iterator(extmap *m, l1_iter _l1, l2_iter _l2) {
+	    
+	    iterator(extmap *m, int i, typename extent_vector::iterator it) {
 		this->m = m;
-		this->l1 = l1;
-		this->l2 = l2;
+		this->i = i;
+		this->it = it;
 	    }
+	    
 	    reference operator*() const {
-		return *l2;
+		return *it;
 	    }
+
 	    pointer operator->() {
-		return &(*l2);
+		return &(*it);
 	    }
 	    iterator& operator++(int) {
-		int i = l1 - m->the_map->begin();
-		assert(l2 < m->lists[i]->end());
+		assert(it < m->lists[i]->end());
 		it++;
 		if (it == m->lists[i]->end()) {
 		    if (i + 1 <  m->lists.size()) {
@@ -243,45 +238,108 @@ namespace extmap {
 		return *this;
 	    }
 	    
+	    // TODO: (begin()--)++ doesn't work correctly
+	    iterator& operator--(int) {
+		if (it == m->lists[i]->begin()) {
+		    if (i > 0) {
+			i--;
+			it = m->lists[i]->end() - 1;
+		    }
+		}
+		else
+		    it--;
+		return *this;
+	    }
+
+	    iterator operator-(std::ptrdiff_t n) {
+		if (n > 1)
+		    return (*this + 1) + (n-1);
+		if (it == m->lists[i]->begin() && i == 0)
+		    return m->begin();
+		if ((it == m->lists[i]->begin()))
+		    return iterator(m, i-1, m->lists[i-1]->end() - 1);
+		return iterator(m, i, it-1);
+	    }
+
+	    iterator operator+(std::ptrdiff_t n) {
+		if (n > 1)
+		   return (*this + 1) + (n-1);
+		if (it+1 == m->lists[i]->end()) {
+		    if (i+1 == m->lists.size())
+			return m->end();
+		    else
+			return iterator(m, i+1, m->lists[i+1]->begin());
+		}
+		return iterator(m, i, it+1);
+	    }
+
+	    bool operator<(T_in val) const {
+		return (*this == m->end() || it->base < val);
+	    }
 	};
 	
-	// never call this when empty
-	std::pair<l1_iter,l2_iter> lower_bound(T_in base) {
-	    local_xpair key = {.max = base, .list = nullptr};
-	    auto iter1 = std::lower_bound(the_map.begin(), the_map.end(), key);
-	    if (iter1 == the_map.end()) {
-		iter1--;
-		return std::make_pair(iter1, last()->list->end());
-	    }
-	    auto list = iter1->list;
-	    T _key(base);
-	    auto list_iter = std::lower_bound(list->begin(), list->end(), _key);
+	iterator begin() {
+	    return iterator(this, 0, lists[0]->begin());
+	}
 
-	    if (list_iter != list->begin()) {
-		auto prev = list_iter - 1;
-		if (prev->base() <= base && prev->limit() > base)
-		    return std::make_pair(iter1, prev);
+	iterator end() {
+	    if (lists.size() == 0) {
+		iterator it;
+		return it;
 	    }
-	    if (!next_to_last(iter1) && list_iter == list->end())
-		return std::make_pair(next(iter1), next(iter1)->list->begin());
-	    return std::make_pair(iter1, list_iter);
+	    int n = lists.size()-1;
+	    return iterator(this, n, lists[n]->end());
 	}
 	
-	std::pair<l1_iter, l2_iter> _expand(l1_iter i, l2_iter it) {
-	    if (i->list->size() >= _load * 2) {
-		int j = it - i->list->begin();
-		auto half = slice(i->list, _load);
-		i->max = i->list->back().limit();
-		//lists.insert(&lists[i+1], half);
-		the_map.insert((local_xpair){.max = half->back().limit(),
-			    .list = half});
+	iterator lower_bound(T_in base) {
+	    if (count == 0)	// should never get called
+		return end();
+
+	    // search maxes to find the list containing @base
+	    // remember that max is 1+highest legal addr
+	    //
+	    auto max_iter = std::lower_bound(maxes.begin(), maxes.end(), base);
+	    if (max_iter != maxes.end() && base == *max_iter)
+		max_iter++; // TODO delete? search base+1?
+	    if (max_iter == maxes.end())
+		return end();
+
+	    // find lowest entry with @base >= @base
+	    //
+	    auto i = max_iter - maxes.begin();
+	    T _key(base);
+	    auto list_iter = std::lower_bound(lists[i]->begin(), lists[i]->end(), _key);
+
+	    // whoops, could match the entry before this...
+	    //
+	    if (list_iter != lists[i]->begin()) {
+		auto prev = list_iter - 1;
+		if (prev->base() <= base && prev->limit() > base)
+		    return iterator(this, i, prev);
+	    }
+
+	    // this shouldn't happen??? because we searched max
+	    //
+	    if (i < (lists.size()-1) && list_iter == lists[i]->end())
+		return iterator(this, i+1, lists[i+1]->begin());
+
+	    return iterator(this, i, list_iter);
+	}
+	
+	iterator _expand(iterator it) {
+	    if (lists[it.i]->size() >= _load * 2) {
+		int j = it.it - lists[it.i]->begin();
+		auto half = slice(lists[it.i], _load);
+		maxes[it.i] = lists[it.i]->back().limit();
+		lists.insert(lists.begin()+it.i+1, half);
+		maxes.insert(maxes.begin()+it.i+1, half->back().limit());
 		if (j >= _load) {
 		    j -= _load;
-		    i++;
+		    it.i++;
 		}
-		it = i->list->begin()+j;
+		it.it = lists[it.i]->begin()+j;
 	    }
-	    return std::make_pair(i, it);
+	    return it;
 	}
 
 	void verify_max(void) {
@@ -289,120 +347,79 @@ namespace extmap {
 
 	// inserts just before iterator 'it'
 	// returns pointer to inserted value
-	std::pair<l1_iter, l2_iter> insert(l1_iter i, l2_iter it, T _e) {
-	    if (it == i->list->end())
-		i->max = _e.limit();
-	    it = i->list->insert(it, _e);
-	    return _expand(i, it);
+	iterator insert(iterator it, T _e) {
+	    it.it = lists[it.i]->insert(it.it, _e);
+	    maxes[it.i] = lists[it.i]->back().limit();
+	    count++;
+	    return _expand(it);
 	}
 	
 	// corresponds to sortedlist._delete
 	//
-	std::pair<l1_iter, l2_iter> _erase(l1_iter it1, l2_iter it) {
-	    assert(it != it1->list->end());
-	    it = it1->list->erase(it);
-	    it1->max = it1->list->back().limit();
-	    if (it1->list->size() > _load / 2)
+	iterator _erase(iterator it) {
+	    it.it = lists[it.i]->erase(it.it);
+	    maxes[it.i] = lists[it.i]->back().limit();
+	    count--;
+	    
+	    if (lists[it.i]->size() > _load / 2)
 		;
-	    else if (the_map.size() > 1) {
-		int j = it - it1->list->begin();
-		auto pos_it = it1;
-		auto prev_it = it1;
-		if (pos_it == the_map.begin())
-		    pos_it++;
-		else {
-		    prev_it--;
-		    j += prev_it->list->size();
-		}
-		prev_it->list->insert(prev_it->list->end(),
-				    pos_it->list->begin(), pos_it->list->end());
-		prev_it->max = prev_it->list->back().limit();
+	    else if (lists.size() > 1) {
+		int j = it.it - lists[it.i]->begin();
+		int pos = (it.i > 0) ? it.i : it.i+1;
+		int prev = pos-1;
+		if (pos == it.i)
+		    j += lists[prev]->size();
 
-		delete pos_it->list;
-		the_map.erase(pos_it);
-		std::tie(it1, it) = _expand(prev_it, prev_it->list->begin() + j);
-	    }
-	    else if (it1->list->size() > 0)
-		it1->max = it1->list->back().limit();
+		lists[prev]->insert(lists[prev]->end(),
+				    lists[pos]->begin(), lists[pos]->end());
+		maxes[prev] = lists[prev]->back().limit();
 
-	    if (it == it1->list->end() && !next_to_last(it1)) {
-		it1++;
-		it = it1->list->begin();
+		delete lists[pos];
+		lists.erase(lists.begin()+pos);
+		maxes.erase(maxes.begin()+pos);
+
+		it = _expand(iterator(this, prev, lists[prev]->begin() + j));
 	    }
-	    return std::make_pair(it1, it);
+	    else if (lists[it.i]->size() > 0)
+		maxes[it.i] = lists[it.i]->back().limit();
+
+	    if (it.it == lists[it.i]->end() && it.i != lists.size()-1) {
+		it.i++;
+		it.it = lists[it.i]->begin();
+	    }
+	    return it;
 	}
 	
-	std::pair<l1_iter, l2_iter> begin(void) {
-	    return std::make_pair(the_map.begin(), the_map.begin()->list->begin());
-	}
-	bool is_begin(l1_iter i, l2_iter it) {
-	    return i == the_map.begin() && it == i->list->begin();
-	}
-
-	std::pair<l1_iter,l2_iter> end(void) {
-	    auto i = the_map.end();
-	    i--;
-	    return std::make_pair(i, i->list->end());
-	}
-	bool is_end(l1_iter i, l2_iter it) {
-	    return next_to_last(i) && it == i->list->end();
-	}
-
-	std::pair<l1_iter,l2_iter> decr(l1_iter i, l2_iter it) {
-	    if (it == i->list->begin())
-		return (i == the_map.begin()) ? begin() :
-		    std::pair(prev(i), prev(i)->list->end() - 1);
-	    return std::make_pair(i, it-1);
-	}
-
-	std::pair<l1_iter,l2_iter> incr(l1_iter i, l2_iter it) {
-	    if (it+1 == i->list->end())
-		return next_to_last(i) ?
-		    end() : std::make_pair(next(i), next(i)->list->begin());
-	    return std::make_pair(i, it+1);
-	}
-	
-	std::pair<l1_iter,l2_iter> fix_it(T_in base, l1_iter i, l2_iter it) {
-	    if (!is_begin(i, it)) {
-		auto [prev_i, prev] = decr(i, it);
-		if (prev->base() <= base && prev->limit() > base)
-		    return std::make_pair(prev_i, prev);
-	    }
-	    return std::make_pair(i, it);
-	}
-
 	static bool adjacent(T left, T right) {
 	    return left.limit() == right.base() &&
 		left.s.ptr + (left.limit() - left.base()) == right.s.ptr;
 	}
 
-	void _update(T_in base, T_in limit, T_out e, bool trim, std::vector<T> *del) {
+	void _update(T_in base, T_in limit, T_out e, bool trim, extent_vector *del) {
 	    //= {.base = base, .limit = limit, .ext = e};
 	    T _e(base, limit-base, e);
 
 	    verify_max();
 
-	    if (the_map.size() == 0) {
-		auto vec = new l2_map();
+	    if (maxes.size() == 0) {
+		auto vec = new extent_vector();
 		vec->reserve(_load);
 		vec->push_back(_e);
-		the_map.insert((local_xpair){.max = limit, .list = vec});
+		lists.push_back(vec);
+		maxes.push_back(limit);
 		return;
 	    }
 
-	    auto [i, it] = lower_bound(base);
-	    assert(is_end(i, it) || it != i->list->end());
-	    std::tie(i, it) = fix_it(base, i, it);
-	    assert(is_end(i, it) || it != i->list->end());
-
+	    // TODO - old fixit() function?
 	    verify_max();
 
-	    if (!is_end(i,it)) {
+	    auto it = lower_bound(base);
+	    if (it != end()) {
+		// we bisect an extent
+		//   [-----------------]       *it          _new
+		//          [+++++]       -> [-----][+++++][----]
+		//
 		if (it->base() < base && it->limit() > limit) {
-		    // we bisect an extent
-		    //   [-----------------]       *it          _new
-		    //          [+++++]       -> [-----][+++++][----]
-		    //
 		    if (del != nullptr) {
 			T _old(base,		    // base
 			       limit - base,	    // len
@@ -413,14 +430,11 @@ namespace extmap {
 			   it->limit() - limit, /* len */
 			   it->s.ptr + (limit - it->base()));
 		    it->limit(base);
-		    i->max = i->list->back().limit();
-		    std::tie(i, it) = incr(i, it);
-		    assert(is_end(i, it) || it != i->list->end());
-		    std::tie(i, it) = insert(i, it, _new);
-		    assert(is_end(i, it) || it != i->list->end());
+		    maxes[it.i] = lists[it.i]->back().limit();
+		    it = insert(it+1, _new);
 		    verify_max();
-
 		}
+		
 		// left-hand overlap
 		//   [---------]
 		//       [++++++++++]  ->  [----][++++++++++]
@@ -433,9 +447,8 @@ namespace extmap {
 			del->push_back(_old);
 		    }
 		    it->limit(base);
-		    i->max = i->list->back().limit();
-		    std::tie(i, it) = incr(i, it);
-		    assert(is_end(i, it) || it != i->list->end());
+		    maxes[it.i] = lists[it.i]->back().limit();
+		    it++;
 		    verify_max();
 		}
 
@@ -443,30 +456,25 @@ namespace extmap {
 		//       [----] [---] 
 		//   [+++++++++++++++++] -> [+++++++++++++++++]
 		//
-		while (!is_end(i,it)) {
-		    assert(it != i->list->end());
+		while (it != end()) {
 		    if (it->base() >= base && it->limit() <= limit) {
-			if (del != nullptr) 
-			    del->push_back(*it);
-			std::tie(i,it) = _erase(i, it);
-			assert(is_end(i, it) || it != i->list->end());
-			verify_max();
+			it = _erase(it);
 		    } else
 			break;
-		    assert(is_end(i, it) || it != i->list->end());
 		}
+
 		// update right-hand overlap
 		//        [---------]
 		//   [++++++++++]        -> [++++++++++][----]
 		//
-		if (!is_end(i, it) && limit > it->base()) {
+		if (it != end() && limit > it->base()) {
 		    if (del != nullptr) {
 			T _old(it->base(),	   // base
 			       limit - it->base(),  // len
 			       it->s.ptr);
 			del->push_back(_old);
 		    }
-		    it->s.ptr += (limit - it->base());
+		    it->s.ptr += (limit - it->base()); // TODO is this right???
 		    it->base(limit);
 		    verify_max();
 		}
@@ -474,65 +482,62 @@ namespace extmap {
 
 	    // insert before 'it'
 	    if (!trim) {
-		auto [p, prev] = decr(i, it);
-		if (!is_begin(i, it) && adjacent(*prev, _e)) {
+		auto prev = it-1;
+		if (it != begin() && adjacent(*prev, _e)) {
 		    prev->limit(limit);
-		    p->max = p->list->back().limit();
-		    if (!is_end(i, it) && adjacent(*prev, *it)) {
+		    maxes[prev.i] = lists[prev.i]->back().limit();
+		    if (it != end() && adjacent(*prev, *it)) {
 			prev->limit(it->limit());
-			p->max = p->list->back().limit();
-			_erase(i, it);
+			maxes[prev.i] = lists[prev.i]->back().limit();
+			_erase(it);
 			verify_max();
 			return;
 		    }
 		}
-		else if (!is_end(i, it) && adjacent(_e, *it)) {
+		else if (it != end() && adjacent(_e, *it)) {
 		    it->s.ptr += (base - limit); // subtract
 		    it->base(base);
 		}
 		else {
-		    insert(i, it, _e);
+		    insert(it, _e);
 		    verify_max();
 		}
 	    }
 	}
 
+    public:
 	// returns iterator pointing to one of:
 	// - extent containing @base
 	// - lowest extent with base > @base
 	// - end()
-	std::pair<l1_iter,l2_iter> _lookup(T_in base) {
-	    auto [i, it] = lower_bound(base);
-	    if (is_end(i, it)) 
-		return std::pair(i, it);
-	    auto [base1, limit1, ext1] = *it;
+	iterator _lookup(T_in base) {
+	    auto it = lower_bound(base);
+	    if (it == end())
+		return it;
+	    auto [base1, limit1, ext1] = it->vals();
 
 	    // 222222222  1111111111
 	    // |       |  |        +- limit1
 	    // |       |  +- base1
 	    // |       +- limit2
 	    // +- base2
-	    if (base1 > base && !is_begin(i, it)) {
-		auto [i2, it2] = decr(i, it);
-		auto [base2, limit2, ext2] = *it2;
+	    if (base1 > base && it != begin()) {
+		auto prev = it-1;
+		auto [base2, limit2, ext2] = prev->vals();
 		if (base < limit2)
-		    return std::make_pair(i2, it2);
+		    return prev;
 	    }
-	    return std::make_pair(i, it);
+	    return it;
 	}
-
-    public:
+	
 	int size() {
-	    int sum = 0;
-	    for (auto entry : the_map)
-		sum += entry.list->size();
-	    return sum;
+	    return count;
 	}
 
 	int capacity() {
 	    int sum = 0;
-	    for (auto entry : the_map)
-		sum += entry.list->capacity();
+	    for (auto list : lists)
+		sum += list->capacity();
 	    return sum;
 	}
 
