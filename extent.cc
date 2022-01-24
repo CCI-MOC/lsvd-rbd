@@ -165,7 +165,7 @@ namespace extmap {
 		_ptr += (_base - s.base);
 	    else
 		_base = s.base;
-	    _limit = std::min(s.limit(), _limit);
+	    _limit = std::min(limit(), _limit);
 	    return std::make_tuple(_base, _limit, _ptr);
 	}
     };
