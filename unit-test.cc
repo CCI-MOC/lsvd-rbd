@@ -28,60 +28,7 @@ std::vector<std::pair<int64_t,int64_t>> *rnd_list(int64_t max, int n)
 	v->push_back(rnd_pair(max));
     return v;
 }
-    
-// returns a vector of obj_offset indexed by LBA. missing entries are
-// flagged by obj==-1. Last element of array is guaranteed to be missing
-//
-std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
-{
-    int64_t max = 0;
-    for (auto w : *writes) 
-	max = (w.limit() > max) ? w.limit() : max;
-    auto v = new std::vector<extmap::obj_offset>;
-    for (int i = 0; i < max+2; i++)
-	v->push_back((extmap::obj_offset){-1, 0});
-
-    for (auto w : *writes) {
-	int64_t i, j, obj = w.s.ptr.obj;
-	for (i = w.base(), j = w.s.ptr.offset; i < w.limit(); i++, j++) 
-	    (*v)[i] = (extmap::obj_offset){obj, j};
-    }
-    
-    return v;
-}
-
-std::vector<extmap::obj_offset> *flatten(std::vector<std::pair<int64_t,int64_t>> *writes)
-{
-    auto v = new std::vector<extmap::lba2obj>;
-    for (auto [base, limit] : *writes) {
-	extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){0, base});
-	v->push_back(l2o);
-    }
-    auto val = flatten(v);
-    delete v;
-    return val;
-}
-    
-std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
-{
-    int64_t base = -1, limit = -1;
-    auto v = new std::vector<extmap::lba2obj>;
-    int i = 0;
-    while (i < writes->size()) {
-	while ((*writes)[i].obj == -1 && i < writes->size()) {
-	    base = i+1;
-	    i++;
-	}
-	auto obj = (*writes)[i].obj;
-	while ((*writes)[i].obj != -1 && i < writes->size()) {
-	    limit = i+1;
-	    i++;
-	}
-	extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){obj, base});
-	v->push_back(l2o);
-    }
-    return v;
-}
+        
 
 void addit(extmap::objmap *m, int64_t base, int64_t limit)
 {
@@ -201,6 +148,8 @@ void test_3_seq_merge(void)
     printf("%s: OK\n", __func__);
 }
 
+// various infrastructure for random tests
+
 // create a random vector of @n extents in [0..max)
 //
 std::vector<extmap::lba2obj> *rnd_extents(int64_t max, int n, bool rnd_obj, bool rnd_offset)
@@ -226,6 +175,52 @@ std::vector<extmap::lba2obj> *rnd_extents(int64_t max, int n, bool rnd_obj, bool
     return v;
 }
 
+// returns a vector of obj_offset indexed by LBA. missing entries are
+// flagged by obj==-1. Last element of array is guaranteed to be missing
+//
+std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
+{
+    int64_t max = 0;
+    for (auto w : *writes) 
+	max = (w.limit() > max) ? w.limit() : max;
+    auto v = new std::vector<extmap::obj_offset>;
+    for (int i = 0; i < max+2; i++)
+	v->push_back((extmap::obj_offset){-1, 0});
+
+    for (auto w : *writes) {
+	int64_t i, j, obj = w.s.ptr.obj;
+	for (i = w.base(), j = w.s.ptr.offset; i < w.limit(); i++, j++) 
+	    (*v)[i] = (extmap::obj_offset){obj, j};
+    }
+    
+    return v;
+}
+
+// Merge a flattened vector back into a vector of extents. Should be in the
+// same order as we iterate them from the map.
+//
+std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
+{
+    int64_t base = -1, limit = -1;
+    auto v = new std::vector<extmap::lba2obj>;
+    int i = 0;
+    while (i < writes->size()) {
+	while ((*writes)[i].obj == -1 && i < writes->size()) {
+	    base = i+1;
+	    i++;
+	}
+	auto obj = (*writes)[i].obj;
+	while ((*writes)[i].obj != -1 && i < writes->size()) {
+	    limit = i+1;
+	    i++;
+	}
+	extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){obj, base});
+	v->push_back(l2o);
+    }
+    return v;
+}
+
+#if 0
 void test_rand_800_10k(void)
 {
     extmap::objmap map;
@@ -257,6 +252,7 @@ void test_rand_800_10k(void)
     
     printf("rand_800_10k: OK\n");
 }
+#endif
 
 int main()
 {
