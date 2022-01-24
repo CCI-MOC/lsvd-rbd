@@ -186,14 +186,16 @@ std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 	    i++;
 	}
 	auto obj = (*writes)[i].obj;
-	while ((*writes)[i].obj != -1 && i < writes->size()) {
+	auto offset = (*writes)[i].offset;
+	while ((*writes)[i].obj != -1 && (*writes)[i].obj == obj && i < writes->size()) {
 	    limit = i+1;
 	    i++;
 	}
 	if (limit > base) {
-	    extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){obj, base});
+	    extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){obj, offset});
 	    v->push_back(l2o);
 	}
+	base = limit;
     }
     return v;
 }
@@ -233,12 +235,112 @@ void test_4_rand(void)
     printf("%s: OK\n", __func__);
 }
 
-// first a standard set of random tests
+void _test_5_rand(int max, int n)
+{
+    auto writes = rnd_extents(max, n, false, false);
 
-// do another random test where I create a fixed vector, then iterate knocking out
-// various sections of it
+    extmap::objmap map;
+    for (auto l2o : *writes) {
+	auto [base, limit, ptr] = l2o.vals();
+	map.update(base, limit, ptr);
+	test_ptr(&map);
+    }
 
-// finally test shrinking everything
+    auto flat = flatten(writes);
+    auto merged = merge(flat);
+
+    auto merged_it = merged->begin();
+    auto map_it = map.begin();
+    while (merged_it != merged->end()) {
+	assert(map_it != map.end());
+	auto [base, limit, ptr] = map_it->vals();
+	auto [mbase, mlimit, mptr] = merged_it->vals();
+#if 0
+	printf("map: %lld..%lld %lld in: %lld..%lld %lld\n", base, limit, ptr.offset,
+	       mbase, mlimit, mptr.offset);
+	printf("val %d\n", (mbase == base && mlimit == limit && mptr == ptr));
+#endif
+	assert(mbase == base && mlimit == limit && mptr == ptr);
+	merged_it++;
+	map_it++;
+    }
+    assert(map_it == map.end());
+}
+
+// test heavily loaded map
+//
+void test_5_rand(void)
+{
+    _test_5_rand(80000, 20000);
+    printf("%s: OK\n", __func__);
+}
+
+// and sparse map
+//
+void test_6_rand(void)
+{
+    _test_5_rand(800000, 20000);
+    printf("%s: OK\n", __func__);
+}    
+
+// test 7 - verify lookup where base overlaps prior extent
+//
+void test_7_lookup(void)
+{
+    int max = 800;
+
+    for (int k = 5; k < max-5; k++) {
+      extmap::objmap map;
+      for (int i = 0; i < max; i++) {
+	int base = i*10, limit = base + 5;
+	extmap::obj_offset ptr = {0, base};
+	map.update(base, limit, ptr);
+	test_ptr(&map);
+      }
+
+      auto it = map.lookup(k*10 + 3);
+      auto [base, limit, ptr] = it->vals(k*10+3, k*10+8);
+      assert(base == k*10+3 && ptr.offset == k*10+3 && limit == k*10+5);
+    }
+    printf("%s: OK\n", __func__);
+}
+
+// like the previous random test, except that we knock out a whole bunch 
+void test_8_rand(void)
+{
+    int max = 2000000, n = 200000;
+    auto writes = rnd_extents(max, n, true, true);
+
+    int64_t base = max/10, limit = max - base;
+    extmap::lba2obj l2o(base, limit, (extmap::obj_offset){0, base});
+    writes->push_back(l2o);
+    
+    extmap::objmap map;
+    for (auto l2o : *writes) {
+	auto [base, limit, ptr] = l2o.vals();
+	map.update(base, limit, ptr);
+	test_ptr(&map);
+    }
+
+    auto flat = flatten(writes);
+    auto merged = merge(flat);
+
+    auto merged_it = merged->begin();
+    auto map_it = map.begin();
+    while (merged_it != merged->end()) {
+	assert(map_it != map.end());
+	auto [base, limit, ptr] = map_it->vals();
+	auto [mbase, mlimit, mptr] = merged_it->vals();
+	assert(mbase == base && mlimit == limit && mptr == ptr);
+	merged_it++;
+	map_it++;
+    }
+    assert(map_it == map.end());
+    
+    printf("%s: OK\n", __func__);
+}
+
+// only thing left to 
 
 int main()
 {
@@ -246,8 +348,8 @@ int main()
     test_2_mod17();
     test_3_seq_merge();
     test_4_rand();
-    
-    //test_seqw_800();
-    //test_17w_800();
-    //test_rand_800_10k();
+    test_5_rand();
+    test_6_rand();
+    test_7_lookup();
+    test_8_rand();
 }

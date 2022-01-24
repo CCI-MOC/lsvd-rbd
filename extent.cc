@@ -571,23 +571,7 @@ namespace extmap {
 	//    auto [base, limit, ptr] = it->vals(base, limit);
 	//
 	iterator lookup(T_in base) {
-	    auto it = lower_bound(base);
-	    if (it == end())
-		return it;
-	    auto [base1, limit1, ext1] = it->vals();
-
-	    // 222222222  1111111111
-	    // |       |  |        +- limit1
-	    // |       |  +- base1
-	    // |       +- limit2
-	    // +- base2
-	    if (base1 > base && it != begin()) {
-		auto prev = it-1;
-		auto [base2, limit2, ext2] = prev->vals();
-		if (base < limit2)
-		    return prev;
-	    }
-	    return it;
+	    return lower_bound(base);
 	}
 
 	// various ways of calling _update...
