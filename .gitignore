@@ -1,3 +1,8 @@
+# coverage
+*.gcov
+*.gcda
+*.gcno
+
 # Prerequisites
 *.d
 
