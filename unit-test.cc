@@ -124,7 +124,7 @@ void test_3_seq_merge(void)
 // various infrastructure for random tests
 //
 #include <random>
-std::mt19937 gen;
+std::mt19937 gen(17);
 
 // create a random vector of @n extents in [0..max)
 //
