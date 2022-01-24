@@ -190,15 +190,17 @@ std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 	    limit = i+1;
 	    i++;
 	}
-	extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){obj, base});
-	v->push_back(l2o);
+	if (limit > base) {
+	    extmap::lba2obj l2o(base, limit-base, (extmap::obj_offset){obj, base});
+	    v->push_back(l2o);
+	}
     }
     return v;
 }
 
 void test_4_rand(void)
 {
-    int max = 8000, n = 20000;
+    int max = 8000, n = 2000;
     auto writes = rnd_extents(max, n, false, false);
 
     extmap::objmap map;
