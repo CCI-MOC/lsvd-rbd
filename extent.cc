@@ -135,11 +135,11 @@ namespace extmap {
 	// 
 	T_in base(void) { return s.base; }
 	T_in limit(void) { return s.base + s.len; }
-	void limit(T_in _limit) { s.len = _limit - s.base; }
+	void relimit(T_in _limit) { s.len = _limit - s.base; }
 
 	// if we change the base, we need to update the pointer by the same amount
 	//
-	void base(T_in _base) {
+	void rebase(T_in _base) {
 	    auto delta = _base - s.base;
 	    s.ptr += delta;
 	    s.len -= delta;
@@ -187,6 +187,8 @@ namespace extmap {
 	std::vector<T_in>           maxes;
 	int                         count;
 
+	extmap(){ count = 0; }
+	
 	// debug code
 	//
 	void verify_max(void) {
@@ -463,7 +465,7 @@ namespace extmap {
 		    T _new(limit, /* base */
 			   it->limit() - limit, /* len */
 			   it->s.ptr + (limit - it->base()));
-		    it->limit(base);
+		    it->relimit(base);
 		    maxes[it.i] = lists[it.i]->back().limit();
 		    it = _insert(it+1, _new);
 		    verify_max();
@@ -480,7 +482,7 @@ namespace extmap {
 			       it->s.ptr + (base - it->base())); // ptr
 			del->push_back(_old);
 		    }
-		    it->limit(base);
+		    it->relimit(base);
 		    maxes[it.i] = lists[it.i]->back().limit();
 		    it++;
 		    verify_max();
@@ -508,8 +510,8 @@ namespace extmap {
 			       it->s.ptr);
 			del->push_back(_old);
 		    }
-		    it->s.ptr += (limit - it->base()); // TODO is this right???
-		    it->base(limit);
+		    //it->s.ptr += (limit - it->base()); // TODO is this right???
+		    it->rebase(limit);
 		    verify_max();
 		}
 	    }
@@ -520,12 +522,12 @@ namespace extmap {
 		if (it != begin() && adjacent(*prev, _e)) {
 		    // we can merge with the previous extent
 		    //
-		    prev->limit(limit);
+		    prev->relimit(limit);
 		    maxes[prev.i] = lists[prev.i]->back().limit();
 		    if (it != end() && adjacent(*prev, *it)) {
 			// we plug a hole, and can merge with the next extent
 			//
-			prev->limit(it->limit());
+			prev->relimit(it->limit());
 			maxes[prev.i] = lists[prev.i]->back().limit();
 			_erase(it);
 			verify_max();
@@ -535,8 +537,8 @@ namespace extmap {
 		else if (it != end() && adjacent(_e, *it)) {
 		    // we can merge with the next extent
 		    //
-		    it->s.ptr += (base - limit); // subtract
-		    it->base(base);
+		    //it->s.ptr += (base - limit); // subtract
+		    it->rebase(base);
 		}
 		else {
 		    // no merging, just insert the damn thing
