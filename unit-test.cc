@@ -367,9 +367,9 @@ void test_9_delete(void)
 	else if (i == 25)
 	    assert(base == 250 && limit == 252);
 	else if (i == 26)
-	    assert(base == 252 && limit == 328 && ptr.offset == 222);
+	    assert(base == 252 && limit == 328 && ptr.offset == 2222);
 	else if (i > 26)
-	    assert (base == (i+7)*10 && limit == (i+7)*10 + 5 &&
+	    assert (base == (i+6)*10 && limit == (i+6)*10 + 5 &&
 		    ptr.offset == base);
     }
 
@@ -381,7 +381,7 @@ void test_9_delete(void)
     
     for (int i = 0; it != v.end(); it++, i++) {
 	auto [base, limit, ptr] = it->vals();
-	assert(base == 255 + i*10 && limit == base+5 && ptr.offset == base);
+	assert(base == 260 + i*10 && limit == base+5 && ptr.offset == base);
     }
     
     printf("%s: OK\n", __func__);
@@ -400,4 +400,5 @@ int main()
     test_6_rand();
     test_7_lookup();
     test_8_rand();
+    test_9_delete();
 }

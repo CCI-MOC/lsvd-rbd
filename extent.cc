@@ -494,6 +494,8 @@ namespace extmap {
 		//
 		while (it != end()) {
 		    if (it->base() >= base && it->limit() <= limit) {
+			if (del != nullptr) 
+			    del->push_back(*it);
 			it = _erase(it);
 		    } else
 			break;
