@@ -5,6 +5,17 @@
 // license:     GNU LGPL v2.1 or newer
 //
 
+// There may be an elegant way to do this in C++; this isn't it.
+
+// Defines three types of map:
+//  objmap (int64_t => obj_offset)   - maps LBA to obj+offset
+//  cachemap (obj_offset => int64_t) - maps obj+offset to LBA
+//  bufmap (int64_t => sector_ptr)   - maps LBA to char*
+//
+// Update/trim takes a pointer to a vector for discarded extents, so
+// we don't have to search the map twice, and we can use read-only
+// iterators for lookup
+
 #include <cstddef>
 #include <stdint.h>
 #include <stdlib.h>
@@ -13,8 +24,6 @@
 #include <tuple>
 #include <cassert>
 
-// LBA -> backend:   map<lba_len,obj_offset>
-// backend -> cache: map<obj_offset_len,lba>
 namespace extmap {
 
     struct obj_offset {
@@ -30,6 +39,15 @@ namespace extmap {
 	}
 	bool operator<(const obj_offset other) const {
 	    return (obj == other.obj) ? (offset < other.offset) : (obj < other.obj);
+	}
+	bool operator>(const obj_offset other) const {
+	    return (obj == other.obj) ? (offset > other.offset) : (obj > other.obj);
+	}
+	bool operator>=(const obj_offset other) const {
+	    return (obj == other.obj) ? (offset >= other.offset) : (obj >= other.obj);
+	}
+	bool operator<=(const obj_offset other) const {
+	    return (obj == other.obj) ? (offset <= other.offset) : (obj <= other.obj);
 	}
 	obj_offset operator+(int val) {
 	    return (obj_offset){.obj = obj, .offset = offset + val};
@@ -54,6 +72,9 @@ namespace extmap {
 	}
 	bool operator<(const sector_ptr other) const {
 	    return buf < other.buf;
+	}
+	bool operator>(const sector_ptr other) const {
+	    return buf > other.buf;
 	}
 	bool operator==(const sector_ptr other) const {
 	    return buf == other.buf;
@@ -88,23 +109,23 @@ namespace extmap {
 	obj_offset ptr;
     };
 
-    template <class T, class T2, class T3> 
+    template <class T, class T_in, class T_out> 
     struct _extent {
 	T s;
     public:
-	_extent(T3 _base, int64_t _len, T2 _ptr) {
+	_extent(T_in _base, int64_t _len, T_out _ptr) {
 	    s.base = _base;
 	    s.len = _len;
 	    s.ptr = _ptr;
 	}
-	_extent(int64_t _base) {
+	_extent(T_in _base) {
 	    s.base = _base;
 	}
 	_extent() {}
-	T3 base(void) { return s.base; }
-	T3 limit(void) { return s.base + s.len; }
-	void limit(T3 _limit) { s.len = _limit - s.base; }
-	void base(T3 _base) {
+	T_in base(void) { return s.base; }
+	T_in limit(void) { return s.base + s.len; }
+	void limit(T_in _limit) { s.len = _limit - s.base; }
+	void base(T_in _base) {
 	    auto delta = _base - s.base;
 	    s.ptr += delta;
 	    s.len -= delta;
@@ -120,13 +141,14 @@ namespace extmap {
 	}
     };
 
-    typedef _extent<_lba2buf,sector_ptr,int64_t> lba2buf; // T2 = sector_ptr
-    typedef _extent<_obj2lba,int64_t,obj_offset> obj2lba; // T2 = unint64_t
-    typedef _extent<_lba2obj,obj_offset,int64_t> lba2obj; // T2 = obj_offset
+    // template <class T, class T_in, class T_out> 
+    typedef _extent<_lba2buf,int64_t,sector_ptr> lba2buf;
+    typedef _extent<_obj2lba,obj_offset,int64_t> obj2lba;
+    typedef _extent<_lba2obj,int64_t,obj_offset> lba2obj;
 
-    template <class T, class T2>
+    template <class T, class T_in>
     struct x_pair {
-	mutable T2 max;
+	mutable T_in max;
 	std::vector<T> *list;
     public:
 	bool operator<(const x_pair &other) const {
@@ -134,19 +156,22 @@ namespace extmap {
 	}
     };
 
-    template <class T, class T2, class T3>
+    template <class T, class T_in, class T_out>
     struct extmap {
 	static const int _load = 256;
 
-	typedef          std::set<x_pair<T,T2>> l1_map;
-	typedef typename l1_map::iterator       l1_iter;
-	typedef          std::vector<T>         l2_map;
-	typedef typename l2_map::iterator       l2_iter;
+	typedef          x_pair<T,T_in>        local_xpair;
+	typedef          std::set<local_xpair> l1_map;
+	typedef typename l1_map::iterator      l1_iter;
+	typedef          std::vector<T>        l2_map;
+	typedef typename l2_map::iterator      l2_iter;
 	
 	l1_map the_map;
 	//std::set<x_pair<T>> the_map;
 
-	static std::vector<T> *_trim(std::vector<T> *A, int len) {
+	// slices off [len]..[end] and returns it
+	//
+	static std::vector<T> *slice(std::vector<T> *A, int len) {
 	    auto half = new std::vector<T>();
 	    half->reserve(_load);
 	    for (auto it = A->begin()+len; it != A->end(); it++)
@@ -175,9 +200,54 @@ namespace extmap {
 	    return it;
 	}
 
+	class iterator {
+	public:
+	    extmap *m;
+	    l1_iter l1;
+	    l2_iter l2;
+	    using iterator_category = std::random_access_iterator_tag;
+	    using value_type = T;
+	    using difference_type = std::ptrdiff_t;
+	    using pointer = T*;
+	    using reference = T&;
+
+	    iterator() {}
+	    bool  operator==(const iterator &other) const {
+		return m == other.m && l1 == other.l1 && l2 == other.l2;
+	    }
+
+	    bool operator!=(const iterator &other) const {
+		return m != other.m || l1 != other.l1 || l2 != other.l2;
+	    }
+	    iterator(extmap *m, l1_iter _l1, l2_iter _l2) {
+		this->m = m;
+		this->l1 = l1;
+		this->l2 = l2;
+	    }
+	    reference operator*() const {
+		return *l2;
+	    }
+	    pointer operator->() {
+		return &(*l2);
+	    }
+	    iterator& operator++(int) {
+		int i = l1 - m->the_map->begin();
+		assert(l2 < m->lists[i]->end());
+		it++;
+		if (it == m->lists[i]->end()) {
+		    if (i + 1 <  m->lists.size()) {
+			i++;
+			it = m->lists[i]->begin();
+		    }
+		}
+		return *this;
+	    }
+	    
+	};
+	
 	// never call this when empty
-	std::pair<l1_iter,l2_iter> lower_bound(int64_t base) {
-	    x_pair<T,T2> key = {.max = base, .list = nullptr};
+	std::pair<l1_iter,l2_iter> lower_bound(T_in base) {
+	    local_xpair key = {.max = base, .list = nullptr};
 	    auto iter1 = std::lower_bound(the_map.begin(), the_map.end(), key);
 	    if (iter1 == the_map.end()) {
 		iter1--;
@@ -197,15 +267,14 @@ namespace extmap {
 	    return std::make_pair(iter1, list_iter);
 	}
 	
-	std::pair<l1_iter, l2_iter>
-	_expand(l1_iter i, l2_iter it) {
+	std::pair<l1_iter, l2_iter> _expand(l1_iter i, l2_iter it) {
 	    if (i->list->size() >= _load * 2) {
 		int j = it - i->list->begin();
-		auto half = _trim(i->list, _load);
+		auto half = slice(i->list, _load);
 		i->max = i->list->back().limit();
 		//lists.insert(&lists[i+1], half);
-		the_map.insert((x_pair<T,T2>){.max = half->back().limit(),
-					   .list = half});
+		the_map.insert((local_xpair){.max = half->back().limit(),
+			    .list = half});
 		if (j >= _load) {
 		    j -= _load;
 		    i++;
@@ -293,7 +362,7 @@ namespace extmap {
 	    return std::make_pair(i, it+1);
 	}
 	
-	std::pair<l1_iter,l2_iter> fix_it(int64_t base, l1_iter i, l2_iter it) {
+	std::pair<l1_iter,l2_iter> fix_it(T_in base, l1_iter i, l2_iter it) {
 	    if (!is_begin(i, it)) {
 		auto [prev_i, prev] = decr(i, it);
 		if (prev->base() <= base && prev->limit() > base)
@@ -307,7 +376,7 @@ namespace extmap {
 		left.s.ptr + (left.limit() - left.base()) == right.s.ptr;
 	}
 
-	void _update(T3 base, T3 limit, T2 e, bool trim) {
+	void _update(T_in base, T_in limit, T_out e, bool trim, std::vector<T> *del) {
 	    //= {.base = base, .limit = limit, .ext = e};
 	    T _e(base, limit-base, e);
 
@@ -317,7 +386,7 @@ namespace extmap {
 		auto vec = new l2_map();
 		vec->reserve(_load);
 		vec->push_back(_e);
-		the_map.insert((x_pair<T,T2>){.max = limit, .list = vec});
+		the_map.insert((local_xpair){.max = limit, .list = vec});
 		return;
 	    }
 
@@ -334,6 +403,12 @@ namespace extmap {
 		    //   [-----------------]       *it          _new
 		    //          [+++++]       -> [-----][+++++][----]
 		    //
+		    if (del != nullptr) {
+			T _old(base,		    // base
+			       limit - base,	    // len
+			       it->s.ptr + (base - it->base())); // ptr
+			del->push_back(_old);
+		    }
 		    T _new(limit, /* base */
 			   it->limit() - limit, /* len */
 			   it->s.ptr + (limit - it->base()));
@@ -344,12 +419,19 @@ namespace extmap {
 		    std::tie(i, it) = insert(i, it, _new);
 		    assert(is_end(i, it) || it != i->list->end());
 		    verify_max();
+
 		}
 		// left-hand overlap
 		//   [---------]
 		//       [++++++++++]  ->  [----][++++++++++]
 		//
 		else if (it->base() < base && it->limit() > base) {
+		    if (del != nullptr) {
+			T _old(base,		    // base
+			       it->limit() - base,  // len
+			       it->s.ptr + (base - it->base())); // ptr
+			del->push_back(_old);
+		    }
 		    it->limit(base);
 		    i->max = i->list->back().limit();
 		    std::tie(i, it) = incr(i, it);
@@ -364,6 +446,8 @@ namespace extmap {
 		while (!is_end(i,it)) {
 		    assert(it != i->list->end());
 		    if (it->base() >= base && it->limit() <= limit) {
+			if (del != nullptr) 
+			    del->push_back(*it);
 			std::tie(i,it) = _erase(i, it);
 			assert(is_end(i, it) || it != i->list->end());
 			verify_max();
@@ -376,6 +460,12 @@ namespace extmap {
 		//   [++++++++++]        -> [++++++++++][----]
 		//
 		if (!is_end(i, it) && limit > it->base()) {
+		    if (del != nullptr) {
+			T _old(it->base(),	   // base
+			       limit - it->base(),  // len
+			       it->s.ptr);
+			del->push_back(_old);
+		    }
 		    it->s.ptr += (limit - it->base());
 		    it->base(limit);
 		    verify_max();
@@ -411,7 +501,7 @@ namespace extmap {
 	// - extent containing @base
 	// - lowest extent with base > @base
 	// - end()
-	std::pair<l1_iter,l2_iter> _lookup(int64_t base) {
+	std::pair<l1_iter,l2_iter> _lookup(T_in base) {
 	    auto [i, it] = lower_bound(base);
 	    if (is_end(i, it)) 
 		return std::pair(i, it);
@@ -446,17 +536,20 @@ namespace extmap {
 	    return sum;
 	}
 
-	void update(T3 base, T3 limit, T2 e) {
-	    _update(base, limit, e, false);
+	void update(T_in base, T_in limit, T_out e) {
+	    _update(base, limit, e, false, nullptr);
 	}
 
-	void trim(T3 base, T3 limit, T2 e) {
-	    _update(base, limit, e, true);
+	void trim(T_in base, T_in limit, T_out e) {
+	    _update(base, limit, e, true, nullptr);
 	}
+
+	
     };
 
-    typedef extmap<lba2obj,obj_offset,int64_t> objmap;
-    typedef extmap<obj2lba,int64_t,obj_offset> cachemap;
-    typedef extmap<lba2buf,sector_ptr,int64_t> bufmap;
+    // template <class T, class T_in, class T_out>
+    typedef extmap<lba2obj,int64_t,obj_offset> objmap;
+    typedef extmap<obj2lba,obj_offset,int64_t> cachemap;
+    typedef extmap<lba2buf,int64_t,sector_ptr> bufmap;
 }
 
