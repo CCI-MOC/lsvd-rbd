@@ -124,7 +124,7 @@ void test_3_seq_merge(void)
 // various infrastructure for random tests
 //
 #include <random>
-std::mt19937 gen(17);
+std::mt19937 *gen;
 
 // create a random vector of @n extents in [0..max)
 //
@@ -135,15 +135,15 @@ std::vector<extmap::lba2obj> *rnd_extents(int64_t max, int n, bool rnd_obj, bool
     auto v = new std::vector<extmap::lba2obj>;
 
     for (int i = 0; i < n; i++) {
-	int64_t base = unif(gen);
-	int64_t len = geo(gen) + 1;
+	int64_t base = unif(*gen);
+	int64_t len = geo(*gen) + 1;
 	int64_t limit = std::min(base+len, max-1);
 
 	int64_t obj = 0, offset = base;
 	if (rnd_obj) 
-	    obj = unif(gen);
+	    obj = unif(*gen);
 	if (rnd_offset)
-	    offset = unif(gen);
+	    offset = unif(*gen);
 	extmap::obj_offset oo = {obj, offset};
 	extmap::lba2obj l2o(base, limit-base, oo);
 	v->push_back(l2o);
@@ -177,7 +177,7 @@ std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
 //
 std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 {
-    int64_t base = -1, limit = -1;
+    int64_t base = 0, limit = -1;
     auto v = new std::vector<extmap::lba2obj>;
     int i = 0;
     while (i < writes->size()) {
@@ -388,17 +388,25 @@ void test_9_delete(void)
 }
 
 
-// only thing left to 
+int primes[] = { 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59,
+		 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131,
+		 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197,
+		 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271,
+		 277, 281, 283, 293};
 
 int main()
 {
-    test_1_seq();
-    test_2_mod17();
-    test_3_seq_merge();
-    test_4_rand();
-    test_5_rand();
-    test_6_rand();
-    test_7_lookup();
-    test_8_rand();
-    test_9_delete();
+	test_1_seq();
+	test_2_mod17();
+	test_3_seq_merge();
+	test_7_lookup();
+
+    for (auto n : primes) {
+	gen = new std::mt19937(n);
+	test_4_rand();
+	test_5_rand();
+	test_6_rand();
+	test_8_rand();
+	test_9_delete();
+    }
 }
