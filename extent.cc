@@ -15,6 +15,11 @@
 // Update/trim takes a pointer to a vector for discarded extents, so
 // we don't have to search the map twice, and we can use read-only
 // iterators for lookup
+//
+// extents have A and D bits:
+//   set - access() / dirty() - set
+//   get - a() / d()
+// note that D bit is set internally, while A bit is set by the user
 
 #include <cstddef>
 #include <stdint.h>
@@ -96,25 +101,34 @@ namespace extmap {
     // these are the actual structures stored in the map
     //
     struct _lba2buf {
-	int64_t    base : 40;
+	int64_t    a    : 1;
+	int64_t    d    : 1;
+	int64_t    base : 38;
 	int64_t    len  : 24;
 	sector_ptr ptr;
     };
 	
     struct _obj2lba {
+	int64_t    a    : 1;
+	int64_t    d    : 1;
 	obj_offset base;
 	int64_t    len : 24;
 	int64_t    ptr : 40;	// LBA
     };
 
     struct _lba2obj {
-	int64_t    base : 40;
+	int64_t    a    : 1;
+	int64_t    d    : 1;
+	int64_t    base : 40;	// 128TB max
 	int64_t    len  : 24;
 	obj_offset ptr;
     };
 
     // Here's the wrapper around those types, so that we can use the same
     // map logic for all three of them
+    //
+    // Note that new extents are created with D=1, and rebase/relimit set D=1, so
+    // the update logic never has to worry about dirty bits.
     //
     template <class T, class T_in, class T_out> 
     struct _extent {
@@ -124,6 +138,8 @@ namespace extmap {
 	    s.base = _base;
 	    s.len = _len;
 	    s.ptr = _ptr;
+	    s.a = 0;
+	    s.d = 1;		// new extents are dirty
 	}
 	_extent(T_in _base) {
 	    s.base = _base;
@@ -135,7 +151,10 @@ namespace extmap {
 	// 
 	T_in base(void) { return s.base; }
 	T_in limit(void) { return s.base + s.len; }
-	void relimit(T_in _limit) { s.len = _limit - s.base; }
+	void relimit(T_in _limit) {
+	    s.len = _limit - s.base;
+	    s.d = 1;		// dirty
+	}
 
 	// if we change the base, we need to update the pointer by the same amount
 	//
@@ -144,6 +163,7 @@ namespace extmap {
 	    s.ptr += delta;
 	    s.len -= delta;
 	    s.base = _base;
+	    s.d = 1;		// dirty
 	}
 	
 	_extent operator+=(int val) {
@@ -167,6 +187,19 @@ namespace extmap {
 		_base = s.base;
 	    _limit = std::min(limit(), _limit);
 	    return std::make_tuple(_base, _limit, _ptr);
+	}
+
+	void access(bool val) {
+	    s.a = (val ? 1 : 0);
+	}
+	void dirty(bool val) {
+	    s.d = (val ? 1 : 0);
+	}
+	bool a(void) {
+	    return s.a != 0;
+	}
+	bool d(void) {
+	    return s.d != 0;
 	}
     };
 
