@@ -101,26 +101,26 @@ namespace extmap {
     // these are the actual structures stored in the map
     //
     struct _lba2buf {
-	int64_t    a    : 1;
-	int64_t    d    : 1;
-	int64_t    base : 38;
-	int64_t    len  : 24;
+	uint64_t    a    : 1;
+	uint64_t    d    : 1;
+	uint64_t    base : 38;
+	uint64_t    len  : 24;
 	sector_ptr ptr;
     };
 	
     struct _obj2lba {
-	int64_t    a    : 1;
-	int64_t    d    : 1;
 	obj_offset base;
-	int64_t    len : 24;
-	int64_t    ptr : 40;	// LBA
+	uint64_t   a   : 1;
+	uint64_t   d   : 1;
+	uint64_t   len : 24;
+	int64_t    ptr : 38;	// LBA
     };
 
     struct _lba2obj {
-	int64_t    a    : 1;
-	int64_t    d    : 1;
-	int64_t    base : 40;	// 128TB max
-	int64_t    len  : 24;
+	uint64_t    a    : 1;
+	uint64_t    d    : 1;
+	uint64_t    base : 38;	// 128TB max
+	uint64_t    len  : 24;
 	obj_offset ptr;
     };
 
