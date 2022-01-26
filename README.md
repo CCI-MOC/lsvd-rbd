@@ -124,3 +124,95 @@ Step 3 will lock the backend map for a while, since we have to re-check all the 
 
 Note that the data written to NVMe might be quite cold, so once the writeback in step 4 is finished we may want to prioritize it for eviction.
 
+### Cache replacement
+
+The extent map implements A and D bits; D is set implicitly by update operations, while A is set explicitly by the application.
+
+This allows us to do rolling checkpoints for the object map, as long as we don't support discard. Discard is tricker - we could probably implement it by mapping to a sentinel value, e.g. object = MAX, offset = LBA. Not sure if we should ever remove these from the map - with 24 bits for the length field, max extent size = 2GB so it won't add many extra extents. 
+
+A single A  bit restricts us in the replacement algorithms we can use. One possibility is 2Q/CLOCK, maintaining 2 maps:
+
+- CLOCK on first map moves cold extents to 2nd map
+- CLOCK on 2nd map chooses extents for eviction
+- update trims from 2nd map and inserts into first map
+- lookup has to check both maps and merge the results. 
+
+### lazy GC writes
+
+Data objects need to have pointer to last "real" data object, so we can ignore missing GC writes
+
+### object headers
+
+Standard header
+```
+magic
+version
+volume UUID
+object type: superblock / data / checkpoint
+header len (sectors?)
+data len (sectors?)
+```
+
+Superblock
+```
+<standard header>
+volume size
+number of objects?
+total storage?
+checkpoints: list of obj#
+clone info - list of {name, UUID, seq#}
+snapshots - list of {UUID, seq#}
+pad to 4KB ???
+```
+Do we want a list of all the outstanding checkpoints? or just the last one?
+
+Data object
+```
+<standard header>
+active checkpoints: list of seq#
+last real data object (see GC comment)
+objects cleaned: list of {seq#, deleted?)
+extents: list of {LBA, len, ?offset?}
+pad to sector or 4KB
+<data>
+```
+
+Checkpoint
+```
+<standard header>
+active checkpoints: list of seq#
+map: list of {LBA, len, seq#, offset}
+objects: list of {seq#, data_sectors, live_sectors}
+deferred deletes: list of {seq#, delete time}
+```
+
+## Possible problems
+
+`int64_t` vs `uint64_t` - we're losing a bit of precision in a bunch of places because of this. I think we need to move to unsigned integers for the bitfields, but I'm worried about signed/unsigned problems.
+
+- **DONE** changed to unsigned. In particular, signed bitfields of length 1 don't work very well...
+
+extent length - what happens if we try to merge two adjacent extents that overflow the length field?
+TODO - need to check for this; maybe modify the `adjacent` test so it fails on overflow.
+
+extent length -  what happens if we try to insert a range that's too large? This should only happen if we're implementing discard with a tombstone sentinel, as we're not going to create objects large enough or allocate memory or NVMe space large enough. In that case we have to loop and insert multiple.
+
+## Schedule
+
+1. finish extent map, unit tests
+1. basic non-GC device, using librbd? BDUS?. Need simple "mkdisk" utility. File backend?
+1. superblock 
+1. startup / recovery code
+1. simple (full) checkpoints
+1. simple GC
+1. incremental checkpoints
+1. clone
+1. snapshots
+1. backends: S3 / file / RADOS
+1. better GC
+
+How to set up unit/integration tests?
+- read tests with prefab data
+- write tests
+- python tools for generating / parsing object data
+- python driver script? Or use libcheck?
