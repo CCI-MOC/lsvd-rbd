@@ -238,6 +238,8 @@ So maybe:
 
 Allocate storage and write all the data for bitmap and map before writing the superblock. Keep 2 copies of the superblock, write the first synchronously before writing the 2nd. On restart take the one with the most recent timestamp.
 
+Keep superblocks in blocks 0 and 1?
+
 Block allocator needs to return the block number for the next one that will be allocated, so we can do forward linking for log replay.
 
 SEQUENCE NUMBER. That's what the timestamp is - it's a counter that's incremented with every write. We need that in the journal header.
