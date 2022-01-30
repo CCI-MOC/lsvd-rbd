@@ -186,6 +186,64 @@ objects: list of {seq#, data_sectors, live_sectors}
 deferred deletes: list of {seq#, delete time}
 ```
 
+### random thoughts
+
+GC - fetch live data object-at-a-time and store it in local SSD. Note that we have to flag those locations as being temporary allocations, so they don't get marked as "allocated" in a checkpoint.
+
+If we allocate blocks of size X (8KB, 16KB etc) then we free blocks of that size. With X>=8KB we don't need to worry about bookkeeping for headers. Freeing is complicated, because we have to check that the adjacent map entry isn't still pointing to part of the block, but at least we don't need to keep counters for each block. For now stick with 4KB, as it's probably small compared to the extent map.
+
+(hmm, if we allocated 64KB blocks and kept 4-bit counters of the number of live 4K blocks in each 64KB, we could reduce the bitmap size by 4. Then again, just going to 16KB would do that, and we could still use bitmap ops and other good stuff)
+
+1TB / 16KB mean extent size would be 128M extents, or 2GB RAM. Note that we can probably structure the code to merge a lot of writes going to NVMe - post the write to a list, each worker thread grabs all the writes currently on the list.
+
+objects.cc - need an object that takes a memory buffer and can return pointers to header, other parts, and iterators for the various structures.
+It should also be able to serialize a set of vectors etc. Probably need std::string versions of the data structures that have names in them.
+
+Need a convention for how to handle buckets. I think including them in the name - "bucket/key" - is fine. Remember that this is going to also have to work for files and RADOS.
+
+How do we structure the local storage?
+
+superblock has
+- timestamp
+- remote volume UUID
+- pointer to last chunk written
+- <bitmap info>
+- <map info>
+
+note that temporary allocations are going to need some sort of journal header. Actually, can just flag them as such, and they get freed on replay.
+
+Bitmap and map are stored in the same way - a count (of bits or map entries) and a list of block numbers containing the data. (if we use 4KB block numbers we can use 32 bits for everything and still handle 16TB local SSDs)
+
+actual format in the superblock is probably
+- int64 count
+- int32 block count
+- int32 data block 
+- int32 indirect block 
+- int32 double indirect block
+- int32 triple indirect
+
+Use convention that only one of data / indirect / double indirect are used. 
+
+- data block: 4KB of data
+- indirect: 1K 4KB blocks
+- double: 1M 4KB blocks = 4GB
+- triple: 4TB, i.e. more than enough
+
+So maybe:
+
+- int32 count
+- int32 tree level (1, 2, 3 or 4 for direct / single..triple indirect)
+- int32 block count
+- int32 block
+
+Allocate storage and write all the data for bitmap and map before writing the superblock. Keep 2 copies of the superblock, write the first synchronously before writing the 2nd. On restart take the one with the most recent timestamp.
+
+Block allocator needs to return the block number for the next one that will be allocated, so we can do forward linking for log replay.
+
+SEQUENCE NUMBER. That's what the timestamp is - it's a counter that's incremented with every write. We need that in the journal header.
+
+Keep the CRC in the journal header, note that we only have to check it on log replay.
+
 ## Possible problems
 
 `int64_t` vs `uint64_t` - we're losing a bit of precision in a bunch of places because of this. I think we need to move to unsigned integers for the bitfields, but I'm worried about signed/unsigned problems.
