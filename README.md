@@ -246,6 +246,61 @@ SEQUENCE NUMBER. That's what the timestamp is - it's a counter that's incremente
 
 Keep the CRC in the journal header, note that we only have to check it on log replay.
 
+Should there be a "clean" flag, or just recover every time we remount? Also should we store pointer to last chunk written, or pointer to next chunk? (which initializes the allocator if we're in the clean state)
+
+Need a reader for the tree-structured data, so that we can iterate through it.
+
+### actual journal format
+
+old format, from `dm-disbd.c`
+```
+struct _disheader {
+        uint32_t magic;
+        uint32_t seq;
+        uint32_t crc32;
+        uint16_t n_extents;
+        uint16_t n_sectors;
+} __attribute__((packed));
+
+struct _ext_local {
+        uint64_t lba : 47;
+        uint64_t len : 16;
+        uint64_t dirty : 1;
+} __attribute__((packed));
+
+#define HDR_EXTS ((DIS_HDR_SIZE - sizeof(struct _disheader)) / sizeof(struct _ext_local))
+
+struct dis_header {
+        struct _disheader h;
+        struct _ext_local extents[HDR_EXTS];
+};
+```
+
+NOTE - how much performance does the CRC cost? Would a checksum be better?
+
+Header needs to have:
+- magic number
+- sequence number
+- (block number? verify written in the right place)
+- list of blocks - need to mark as allocated on replay
+- pointer to next block
+- checksum / CRC. probably.
+- flag for whether it contains data or not.  [more complicated...]
+- list of extents
+
+On replay we put the data into the map and flag the header blocks as free. If it's a non-data entry, it's one of several things:
+
+- superblock-related data. if the sequence number
+    - precedes the current superblock, it stays allocated and we free the header
+    - is after the current superblock, we free the whole thing
+- temporary storage for GC. free unconditionally
+- checkpoint-related data. we wouldn't be reading it if the checkpoint were complete - free it
+
+Need to keep track of the header blocks for data writes and checkpoint data (bitmap, map) - when the checkpoint is complete we free them. Or rather, free them in the in-memory bitmap before writing it to disk.
+
+wait a minute, the superblock *is* the checkpoint. So any committed checkpoint will have a write frontier that is after any of its data. 
+
+
 ## Possible problems
 
 `int64_t` vs `uint64_t` - we're losing a bit of precision in a bunch of places because of this. I think we need to move to unsigned integers for the bitfields, but I'm worried about signed/unsigned problems.
