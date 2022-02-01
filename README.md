@@ -300,6 +300,8 @@ Need to keep track of the header blocks for data writes and checkpoint data (bit
 
 wait a minute, the superblock *is* the checkpoint. So any committed checkpoint will have a write frontier that is after any of its data. 
 
+progress:
+- wrote simple bitmap allocator
 
 ## Possible problems
 
