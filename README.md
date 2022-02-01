@@ -333,3 +333,11 @@ How to set up unit/integration tests?
 - write tests
 - python tools for generating / parsing object data
 - python driver script? Or use libcheck?
+
+```
+Local Variables:
+mode: Markdown
+eval: (auto-fill-mode -1)
+eval: (visual-line-mode 1)
+End:
+```
