@@ -334,6 +334,16 @@ How to set up unit/integration tests?
 - python tools for generating / parsing object data
 - python driver script? Or use libcheck?
 
+### status
+
+**Mon Jan 31 23:48:00 2022** object headers seem to be mostly done. Journal headers for writes are done, but need to figure out the superblock. Steps from here:
+1. get read/write working with librbd interface and null operations
+2. add journal writes to NVMe, with allocator and map
+3. add checkpoint code
+4. test recovery
+
+After that I can start writing backend objects
+
 ```
 Local Variables:
 mode: Markdown

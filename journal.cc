@@ -13,7 +13,7 @@ struct j_extent {
 
 struct journal_hdr {
     uint32_t magic;
-    uint32_t sequence;
+    uint64_t sequence;		// TODO - FIX REST OF CODE
     uint32_t this_blk;
     uint32_t next_blk;
     uint32_t block_count;
