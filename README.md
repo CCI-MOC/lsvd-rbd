@@ -302,6 +302,29 @@ wait a minute, the superblock *is* the checkpoint. So any committed checkpoint w
 
 progress:
 - wrote simple bitmap allocator
+maybe we need a sequence number class? for journal and backend
+
+parts of the whole thing:
+- (1) queue Q1 for writes
+- (2) thread pool reading from Q1 and writing to NVMe
+- (3) NVMe complete posts to queue Q2
+- (4) thread pool takes batch
+
+Easiest way to do batching is after (3), NVMe completion. We haven't replied to the write yet, so it's OK for reads to return older information. This means the NVMe writer:
+1. writes to NVMe
+2. on write completion, copy to batch buffer and map
+3. send write completion
+
+Probably better to have write threads to NVMe rather than async I/O, as it's more likely to use multiple CPUs? It's easier, anyway.
+
+items at the first queue:
+- LBA, len
+- iovec, count
+- async callback info
+
+thread takes a list of these, crafts a single NVMe write, sends it out. Maybe max I/O size? Use blktrace to see where they get split, probably 256K is OK.
+
+block-to-LBA and block-to-offset macros.
 
 ## Possible problems
 
