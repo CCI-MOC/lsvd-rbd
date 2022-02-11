@@ -334,6 +334,17 @@ How to set up unit/integration tests?
 - python tools for generating / parsing object data
 - python driver script? Or use libcheck?
 
+### notes on recovery algorithm
+
+- after a crash we have to (a) recover the cache, (b) recover the back end, and then (c) find any writes in the cache which aren't present in the back end and replay them. To deal with that, the object header should include the sequence number of the newest write reflected in it, so we can rewind the cache log to that point and replay it.
+- after cache recovery, there might be writes that completed somewhere beyond the end of the log. (e.g. writes to locations 1, 2, and 4 completed, we detect end of log after 2) There's a tiny chance that we could write to location 3, then crash, and then come back up and think that 4 was part of the log. There are a few ways to deal with this, but it's not very likely so think about it later. (and maybe look up what ext4/jbd does?)
+
+### notes on GC
+
+We need to be able to perform GC without blocking incoming reads.
+- strategy 1: incoming writes check the list of LBA ranges being copied by a running GC cycle, and block if they interfere
+- strategy 2: keep a list of writes during the GC copy process. When it's done, subtract those ranges from the GC map updates.
+
 ### status
 
 **Mon Jan 31 23:48:00 2022** object headers seem to be mostly done. Journal headers for writes are done, but need to figure out the superblock. Steps from here:
