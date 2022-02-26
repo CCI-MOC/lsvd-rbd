@@ -37,8 +37,8 @@ namespace extmap {
     // sector_ptr - points into a memory buffer. ptr increments by 512
     //
     struct obj_offset {
-	int64_t obj    : 36;
-	int64_t offset : 28;	// 128GB
+	uint64_t obj    : 36;
+	uint64_t offset : 28;	// 128GB
     public:
 	obj_offset operator+=(int val) {
 	    offset += val;
@@ -60,7 +60,7 @@ namespace extmap {
 	    return (obj == other.obj) ? (offset <= other.offset) : (obj <= other.obj);
 	}
 	obj_offset operator+(int val) {
-	    return (obj_offset){.obj = obj, .offset = offset + val};
+	    return (obj_offset){.obj = obj, .offset = (uint64_t)(offset + val)};
 	}
 	int operator-(const obj_offset other) {
 	    return offset - other.offset; // meaningless if obj != other.obj
@@ -113,7 +113,7 @@ namespace extmap {
 	uint64_t   a   : 1;
 	uint64_t   d   : 1;
 	uint64_t   len : 24;
-	int64_t    ptr : 38;	// LBA
+	uint64_t   ptr : 38;	// LBA
     };
 
     struct _lba2obj {
@@ -134,7 +134,7 @@ namespace extmap {
     struct _extent {
 	T s;
     public:
-	_extent(T_in _base, int64_t _len, T_out _ptr) {
+	_extent(T_in _base, uint64_t _len, T_out _ptr) {
 	    s.base = _base;
 	    s.len = _len;
 	    s.ptr = _ptr;
@@ -204,9 +204,9 @@ namespace extmap {
     };
 
     // template <class T, class T_in, class T_out> 
-    typedef _extent<_lba2buf,int64_t,sector_ptr> lba2buf;
-    typedef _extent<_obj2lba,obj_offset,int64_t> obj2lba;
-    typedef _extent<_lba2obj,int64_t,obj_offset> lba2obj;
+    typedef _extent<_lba2buf,uint64_t,sector_ptr> lba2buf;
+    typedef _extent<_obj2lba,obj_offset,uint64_t> obj2lba;
+    typedef _extent<_lba2obj,uint64_t,obj_offset> lba2obj;
 
     // an extent map with entries of type T, which map from T_in to T_out
     //
@@ -233,7 +233,7 @@ namespace extmap {
 	class iterator {
 	public:
 	    extmap *m;
-	    int     i;
+	    size_t  i;		// std::vector::size_type
 	    typename extent_vector::iterator it;
 	    
 	    using iterator_category = std::random_access_iterator_tag;
@@ -362,7 +362,7 @@ namespace extmap {
 
 	    // this shouldn't happen??? because we searched max
 	    //
-	    if (i < (lists.size()-1) && list_iter == lists[i]->end())
+	    if (i < (int)(lists.size()-1) && list_iter == lists[i]->end())
 		return iterator(this, i+1, lists[i+1]->begin());
 
 	    return iterator(this, i, list_iter);
@@ -422,8 +422,8 @@ namespace extmap {
 		;
 	    else if (lists.size() > 1) {
 		int j = it.it - lists[it.i]->begin();
-		int pos = (it.i > 0) ? it.i : it.i+1;
-		int prev = pos-1;
+		size_t pos = (it.i > 0) ? it.i : it.i+1;
+		size_t prev = pos-1;
 		if (pos == it.i)
 		    j += lists[prev]->size();
 
@@ -627,8 +627,8 @@ namespace extmap {
     };
 
     // template <class T, class T_in, class T_out>
-    typedef extmap<lba2obj,int64_t,obj_offset> objmap;
-    typedef extmap<obj2lba,obj_offset,int64_t> cachemap;
-    typedef extmap<lba2buf,int64_t,sector_ptr> bufmap;
+    typedef extmap<lba2obj,uint64_t,obj_offset> objmap;
+    typedef extmap<obj2lba,obj_offset,uint64_t> cachemap;
+    typedef extmap<lba2buf,uint64_t,sector_ptr> bufmap;
 }
 
