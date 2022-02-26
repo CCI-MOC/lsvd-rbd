@@ -19,18 +19,27 @@ def write(offset, data):
 
 def read(offset, nbytes):
     assert (nbytes % 512) == 0 and (offset % 512) == 0
-    buf = (c_char * len)()
+    buf = (c_char * nbytes)()
     val = lsvd_lib.c_read(buf, c_ulong(offset), c_uint(nbytes), c_ulong(0))
-    return val
+    return buf[0:nbytes]
 
 def getmap(base, limit):
     n_tuples = 128
     tuples = (tuple * n_tuples)()
     n = lsvd_lib.dbg_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
-    return n, tuples[0:n]
+    return map(lambda x: [x.base, x.limit, x.obj, x.offset], tuples[0:n])
 
 def inmem():
     n_objs = 32
     objs = (c_int * n_objs)()
     n = lsvd_lib.dbg_inmem(c_int(n_objs), byref(objs))
-    return map(lambda x: [x.base, x.limit, x.obj, x.offset], objs)
+    return objs[0:n]
+
+def flush():
+    return lsvd_lib.c_flush(c_ulong(0))
+
+def init(n):
+    lsvd_lib.c_init(c_int(n))
+
+def size():
+    return lsvd_lib.c_size()
