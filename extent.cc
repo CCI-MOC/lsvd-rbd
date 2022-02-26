@@ -473,6 +473,7 @@ namespace extmap {
 		vec->push_back(_e);
 		lists.push_back(vec);
 		maxes.push_back(limit);
+		count = 1;
 		return;
 	    }
 
