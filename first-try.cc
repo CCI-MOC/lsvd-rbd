@@ -246,7 +246,7 @@ int c_write(const char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx 
     return val < 0 ? -1 : 0;
 }
 
-extern "C" int dbg_inmem(int *list);
+extern "C" int dbg_inmem(int max, int *list);
 
 int dbg_inmem(int max, int *list)
 {
@@ -263,7 +263,8 @@ struct tuple {
     int offset;
 };
 
-int c_getmap(int base, int limit, int max, struct tuple *t)
+extern "C" int dbg_getmap(int, int, int, struct tuple*);
+int dbg_getmap(int base, int limit, int max, struct tuple *t)
 {
     int i = 0;
     for (auto it = object_map.lookup(base);
