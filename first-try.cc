@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <stack>
 #include <map>
+#include <thread>
 
 #include <unistd.h>
 #include <sys/uio.h>
@@ -115,17 +116,24 @@ size_t read_object(int seq, char *buf, size_t offset, size_t len)
     int fd = open(name, O_RDONLY);
     if (fd < 0)
 	perror("open_read"), exit(1);
-    return pread(fd, buf, len, offset + object_hdrsz[seq]*512);
+    auto val = pread(fd, buf, len, offset + object_hdrsz[seq]*512);
+    close(fd);
+    return val;
 }
 
-void *worker_thread(void* tmp)
+std::vector<std::thread> pool;
+bool shutdown;
+
+void worker_thread(void)
 {
     while (true) {
 	batch *b;
 	std::unique_lock<std::mutex> lock(m);
 
-	while (work_queue.empty())
+	while (work_queue.empty() && !shutdown)
 	    cv.wait(lock);
+	if (shutdown)
+	    return;
 	b = work_queue.front();
 	work_queue.pop();
 
@@ -145,7 +153,23 @@ void *worker_thread(void* tmp)
 	batches.push(b);
 	lock2.unlock();
     }
-    return NULL;
+}
+
+void init(int nthreads)
+{
+    for (int i = 0; i < nthreads; i++) 
+	pool.push_back(std::thread(worker_thread));
+}
+
+void lsvd_shutdown(void)
+{
+    shutdown = true;
+    std::unique_lock<std::mutex> lk(m);
+    cv.notify_all();
+    lk.unlock();
+
+    for (auto it = pool.begin(); it != pool.end(); it++)
+	it->join(); 
 }
 
 ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
@@ -179,6 +203,27 @@ ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
     memcpy(ptr, buf, len);
 
     return len;
+}
+
+int lsvd_flush(void)
+{
+    const std::unique_lock<std::mutex> lock(m);
+    int val = 0;
+    if (current_batch && current_batch->len > 0) {
+	val = current_batch->seq;
+	work_queue.push(current_batch);
+	current_batch = NULL;
+	cv.notify_one();
+	if (batches.empty())
+	    current_batch = new batch(BATCH_SIZE);
+	else {
+	    current_batch = batches.top();
+	    batches.pop();	// f-ing C++ stacks
+	}
+	current_batch->reset();
+	in_mem_objects[current_batch->seq] = current_batch->buf;
+    }
+    return val;
 }
 
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)
@@ -233,6 +278,30 @@ ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 
 extern "C" int c_read(char*, uint64_t, uint32_t, struct bdus_ctx*);
 extern "C" int c_write(const char*, uint64_t, uint32_t, struct bdus_ctx*);
+extern "C" int c_flush(struct bdus_ctx*);
+extern "C" void c_init(int);
+extern "C" int c_size(void);
+extern "C" void c_shutdown(void);
+
+void c_shutdown(void)
+{
+    lsvd_shutdown();
+}
+
+int c_flush(struct bdus_ctx* ctx)
+{
+    return lsvd_flush();
+}
+
+void c_init(int n)
+{
+    init(n);
+}
+
+int c_size(void)
+{
+    return object_map.size();
+}
 
 int c_read(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
 {
