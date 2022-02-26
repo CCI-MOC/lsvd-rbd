@@ -20,6 +20,22 @@ void test_ptr(extmap::objmap *map)
     }
 }
 
+// test 0 - count extents properly
+//
+void test_0_count(void)
+{
+    extmap::objmap map;
+    assert(map.size() == 0);
+    extmap::obj_offset p1 = {0, 0};
+    map.update(0, 10, p1);
+    assert(map.size() == 1);
+    map.update(20, 30, p1);
+    assert(map.size() == 2);
+    map.update(0, 30, p1);
+    assert(map.size() == 1);
+    printf("%s: OK\n", __func__);
+}
+
 // test 1 - insert sequentially, verify
 //
 void test_1_seq(void)
@@ -161,7 +177,7 @@ std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
 	max = (w.limit() > max) ? w.limit() : max;
     auto v = new std::vector<extmap::obj_offset>;
     for (int i = 0; i < max+2; i++)
-	v->push_back((extmap::obj_offset){-1, 0});
+	v->push_back((extmap::obj_offset){(uint64_t)-1, 0});
 
     for (auto w : *writes) {
 	int64_t i, j, obj = w.s.ptr.obj;
@@ -396,10 +412,11 @@ int primes[] = { 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59,
 
 int main()
 {
-	test_1_seq();
-	test_2_mod17();
-	test_3_seq_merge();
-	test_7_lookup();
+    test_0_count();
+    test_1_seq();
+    test_2_mod17();
+    test_3_seq_merge();
+    test_7_lookup();
 
     for (auto n : primes) {
 	gen = new std::mt19937(n);
