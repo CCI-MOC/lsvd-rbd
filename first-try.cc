@@ -225,3 +225,37 @@ ssize_t lsvd_read(size_t offset, size_t len, char *buf)
     return ptr - buf;
 }
 
+extern "C" int c_read(char*, uint64_t, uint32_t, struct bdus_ctx*);
+extern "C" int c_write(const char*, uint64_t, uint32_t, struct bdus_ctx*);
+
+int c_read(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
+{
+    return lsvd_read(offset, size, buffer)    
+}
+
+int device_write(const char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
+{
+    return lsvd_write(offset, size, buffer);
+}
+
+static const struct bdus_ops device_ops =
+{
+    .read  = c_read,
+    .write = c_write,
+};
+
+static const struct bdus_attrs device_attrs =
+{
+    .size               = 1 << 30, // 1 GiB
+    .logical_block_size = 512,
+};
+
+#include <bdus.h>
+
+int main(void)
+{
+    bool success = bdus_run(&device_ops, &device_attrs, NULL);
+    if (!success)
+        fprintf(stderr, "Error: %s\n", bdus_get_error_message());
+    return success ? 0 : 1;
+}
