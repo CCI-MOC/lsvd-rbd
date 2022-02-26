@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <sys/uio.h>
 #include <fcntl.h>
+#include <string.h>
 
 /* make this atomic? */
 int batch_seq = 1;
@@ -147,10 +148,10 @@ void *worker_thread(void* tmp)
     return NULL;
 }
 
-ssize_t lsvd_write(size_t offset, size_t len, char *buf)
+ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
 {
     const std::unique_lock<std::mutex> lock(m);
-    if (current_batch->len + len > current_batch->max) {
+    if (current_batch && current_batch->len + len > current_batch->max) {
 	work_queue.push(current_batch);
 	current_batch = NULL;
 	cv.notify_one();
@@ -166,10 +167,10 @@ ssize_t lsvd_write(size_t offset, size_t len, char *buf)
 	in_mem_objects[current_batch->seq] = current_batch->buf;
     }
 
-    int64_t sector_offset = current_batch->len / 512,
+    uint64_t sector_offset = current_batch->len / 512,
 	lba = offset/512, limit = (offset+len)/512;
     object_map.update(lba, limit,
-		      (extmap::obj_offset){.obj = (int64_t) current_batch->seq, .offset = sector_offset});
+		      (extmap::obj_offset){.obj = (uint64_t) current_batch->seq, .offset = sector_offset});
     char *ptr = current_batch->buf + current_batch->len;
     current_batch->len += len;
     current_batch->entries.push_back((data_map){.lba = offset/512, .len = len/512});
@@ -182,9 +183,14 @@ ssize_t lsvd_write(size_t offset, size_t len, char *buf)
 
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 {
-    int64_t base = offset / 512;
-    int64_t sectors = len / 512, limit = base + sectors;
+    uint64_t base = offset / 512;
+    uint64_t sectors = len / 512, limit = base + sectors;
 
+    if (object_map.size() == 0) {
+	memset(buf, 0, len);
+	return len;
+    }
+    
     /* object number, offset (bytes), length (bytes) */
     std::vector<std::tuple<int, size_t, size_t>> regions;
     std::unique_lock<std::mutex> lock(m);
@@ -230,32 +236,41 @@ extern "C" int c_write(const char*, uint64_t, uint32_t, struct bdus_ctx*);
 
 int c_read(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
 {
-    return lsvd_read(offset, size, buffer)    
+    size_t val = lsvd_read(offset, size, buffer);
+    return val < 0 ? -1 : 0;
 }
 
-int device_write(const char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
+int c_write(const char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
 {
-    return lsvd_write(offset, size, buffer);
+    size_t val = lsvd_write(offset, size, buffer);
+    return val < 0 ? -1 : 0;
 }
 
-static const struct bdus_ops device_ops =
+extern "C" int dbg_inmem(int *list);
+
+int dbg_inmem(int max, int *list)
 {
-    .read  = c_read,
-    .write = c_write,
+    int i = 0;
+    for (auto it = in_mem_objects.begin(); i < max && it != in_mem_objects.end(); it++)
+	list[i++] = it->first;
+    return i;
+}
+
+struct tuple {
+    int base;
+    int limit;
+    int obj;
+    int offset;
 };
 
-static const struct bdus_attrs device_attrs =
+int c_getmap(int base, int limit, int max, struct tuple *t)
 {
-    .size               = 1 << 30, // 1 GiB
-    .logical_block_size = 512,
-};
-
-#include <bdus.h>
-
-int main(void)
-{
-    bool success = bdus_run(&device_ops, &device_attrs, NULL);
-    if (!success)
-        fprintf(stderr, "Error: %s\n", bdus_get_error_message());
-    return success ? 0 : 1;
+    int i = 0;
+    for (auto it = object_map.lookup(base);
+	 i < max && it != object_map.end() && it->base() < (uint64_t)limit; it++) {
+        auto [_base, _limit, oo] = it->vals(base, limit);
+	t[i++] = (struct tuple){.base = (int)_base, .limit = (int)_limit,
+				.obj = (int)oo.obj, .offset = (int)oo.offset};
+    }
+    return i;
 }
