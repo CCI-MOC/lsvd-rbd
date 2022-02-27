@@ -40,9 +40,10 @@ struct hdr {
  */
 struct super_hdr {
     uint64_t vol_size;
-    uint64_t num_objs;
     uint64_t total_sectors;
     uint64_t live_sectors;
+//    uint32_t num_objs;
+    uint32_t next_obj;    	// next sequence number
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
     uint32_t clones_offset;	// array of struct clone
