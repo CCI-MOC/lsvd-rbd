@@ -22,7 +22,7 @@
 /* make this atomic? */
 int batch_seq = 1;
 const int BATCH_SIZE = 8 * 1024 * 1024;
-
+uuid_t my_uuid;
 
 static int div_round_up(int n, int m)
 {
@@ -80,7 +80,7 @@ void make_hdr(char *buf, batch *b)
     hdr *h = (hdr*)buf;
     h->magic = LSVD_MAGIC;
     h->version = 1;
-    // h->vol_uuid
+    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
     h->type = LSVD_DATA;
     h->seq = b->seq;
     h->hdr_sectors = 8;
@@ -97,6 +97,8 @@ void make_hdr(char *buf, batch *b)
 }
 
 char *prefix = (char*)"/tmp/bkt/obj";
+char *super;
+size_t super_len;
 
 void write_object(int seq, iovec *iov, int iovcnt)
 {
@@ -155,10 +157,38 @@ void worker_thread(void)
     }
 }
 
-void init(int nthreads)
+ssize_t read_super(char *name)
 {
-    for (int i = 0; i < nthreads; i++) 
-	pool.push_back(std::thread(worker_thread));
+    prefix = name;
+    int fd = open(name, O_RDONLY);
+    if (fd < 0)
+	return -1;
+
+    size_t len = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    super = (char*)calloc(len, 1);
+    read(fd, super, len);
+    super_len = len;
+
+    hdr *h = (hdr*)super;
+    if (h->magic != LSVD_MAGIC || h->version != 1 || h->type != LSVD_SUPER)
+	return -1;
+    memcpy(my_uuid, h->vol_uuid, sizeof(uuid_t));
+
+    super_hdr *sh = (super_hdr*)(h+1);
+    batch_seq = sh->next_obj;
+    return sh->vol_size * 512;
+}
+    
+
+ssize_t init(char *name, int nthreads)
+{
+    ssize_t bytes = read_super(name);
+    if (bytes > 0) {
+	for (int i = 0; i < nthreads; i++) 
+	    pool.push_back(std::thread(worker_thread));
+    }
+    return bytes;
 }
 
 void lsvd_shutdown(void)
@@ -279,7 +309,7 @@ ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 extern "C" int c_read(char*, uint64_t, uint32_t, struct bdus_ctx*);
 extern "C" int c_write(const char*, uint64_t, uint32_t, struct bdus_ctx*);
 extern "C" int c_flush(struct bdus_ctx*);
-extern "C" void c_init(int);
+extern "C" ssize_t c_init(char*, int);
 extern "C" int c_size(void);
 extern "C" void c_shutdown(void);
 
@@ -293,9 +323,9 @@ int c_flush(struct bdus_ctx* ctx)
     return lsvd_flush();
 }
 
-void c_init(int n)
+ssize_t c_init(char *name, int n)
 {
-    init(n);
+    return init(name, n);
 }
 
 int c_size(void)
