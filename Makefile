@@ -7,3 +7,6 @@ liblsvd.so: first-try.cc extent.cc
 
 bdus: bdus.o first-try.o
 	g++ first-try.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread
+
+mkdisk: mkdisk.cc objects.cc
+	g++ mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
