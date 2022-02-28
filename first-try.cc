@@ -157,14 +157,66 @@ size_t read_object(int seq, char *buf, size_t offset, size_t len)
     return val;
 }
 
-void roll_forward(uint32_t seq)
+/* read data map from data object header
+ * for now ignores checkpoints, objects_cleaned
+ */
+void read_data_map(char *buf, size_t len)
+{
+    hdr *h = (hdr*)buf;
+    assert(h->type == LSVD_DATA);
+    assert(h->hdr_sectors*512 <= len);
+    
+    data_hdr *dh = (data_hdr*)(h+1);
+    data_map *m = (data_map*)(buf + dh->map_offset),
+	*map_end = (data_map*)(buf + dh->map_offset + dh->map_len);
+    uint64_t offset = 0;
+    
+    for (; m < map_end; m++) {
+	object_map.update(m->lba, m->lba+m->len,
+			  (extmap::obj_offset){.obj = (uint64_t) h->seq,
+			      .offset = offset});
+	offset += m->len;
+    }
+}
+
+/* ignores checkpoint list, object/size list, deferred deletes
+ * just loads the map for now
+ */
+void read_checkpoint(char *buf, size_t len)
+{
+    hdr *h = (hdr*)buf;
+    assert(h->type == LSVD_CKPT);
+    assert(h->hdr_sectors*512 <= len);
+
+    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
+    ckpt_mapentry *m = (ckpt_mapentry*)(buf + ch->map_offset),
+	*map_end = (ckpt_mapentry*)(buf + ch->map_offset + ch->map_len);
+
+    for (; m < map_end; m++)
+	object_map.update(m->lba, m->lba+m->len,
+			  (extmap::obj_offset){.obj = (uint64_t) m->obj,
+			      .offset = (uint64_t)m->offset});
+}
+
+// returns next sequence number
+uint32_t roll_forward(uint32_t seq)
 {
     char buf[64*1024];
-    for (int i = seq; ; i++) {
+    for (uint32_t i = seq; ; i++) {
 	auto name = std::string(prefix) + "." + hex(i);
 	if (read_object(i, buf, 0, 64*1024) <= 0)
-	    break;
+	    return i;
+	hdr *h = (hdr*)buf;
+	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
+	    return i;
+	if (h->type == LSVD_DATA)
+	    read_data_map(buf, sizeof(buf));
+	else if (h->type == LSVD_CKPT)
+	    read_checkpoint(buf, sizeof(buf));
+	else
+	    return i;
     }
+    return 0;
 }
 
 std::vector<std::thread> pool;
