@@ -38,8 +38,106 @@ def inmem():
 def flush():
     return lsvd_lib.c_flush(c_ulong(0))
 
-def init(n):
-    lsvd_lib.c_init(c_int(n))
+def init(name, n):
+    return lsvd_lib.c_init(bytes(name), c_int(n))
 
 def size():
     return lsvd_lib.c_size()
+
+def shutdown():
+    lsvd_lib.c_shutdown()
+
+LSVD_SUPER = 1
+LSVD_DATA = 2
+LSVD_CKPT = 3
+LSVD_MAGIC = 0x4456534c
+
+# these match version 453d93 of objects.cc
+
+class hdr(Structure):
+    _fields_ = [("magic",               c_uint),
+                ("version",             c_uint),
+                ("vol_uuid",            c_ubyte*16),
+                ("type",                c_uint),
+                ("seq",                 c_uint),
+                ("hdr_sectors",         c_uint),
+                ("data_sectors",        c_uint)]
+sizeof_hdr = sizeof(hdr) # 40
+
+class super_hdr(Structure):
+    _fields_ = [("vol_size",            c_ulong),
+                ("total_sectors",       c_ulong),
+                ("live_sectors",        c_ulong),
+                ("next_obj",            c_uint),
+                ("ckpts_offset",        c_uint),
+                ("ckpts_len",           c_uint),
+                ("clones_offset",       c_uint),
+                ("clones_len",          c_uint),
+                ("snaps_offset",        c_uint),
+                ("snaps_len",           c_uint)]
+sizeof_super_hdr = sizeof(super_hdr) # 56
+
+# ckpts is array of uint32
+
+class clone(Structure):
+    _pack_ = 1
+    _fields_ = [("vol_uuid",            c_ubyte*16),
+                ("sequence",            c_uint),
+                ("name_len",            c_ubyte)]   # 21 bytes
+        # followed by 'name_len' bytes of name, use string_at
+sizeof_clone = sizeof(clone) # 21
+
+class snap(Structure):
+    _fields_ = [("snap_uuid",           c_ubyte*16),
+                ("seq",                 c_uint)]
+sizeof_snap = sizeof(snap) # 20
+
+class data_hdr(Structure):
+    _fields_ = [("last_data_obj",       c_uint),
+                ("ckpts_offset",        c_uint),
+                ("ckpts_len",           c_uint),
+                ("objs_cleaned_offset", c_uint),
+                ("objs_cleaned_len",    c_uint),
+                ("map_offset",          c_uint),
+                ("map_len",             c_uint)]
+sizeof_data_hdr = sizeof(data_hdr) # 28
+
+class obj_cleaned(Structure):
+    _fields_ = [("seq",                 c_uint),
+                ("was_deleted",         c_uint)]
+sizeof_obj_cleaned = sizeof(obj_cleaned) # 8
+
+class data_map(LittleEndianStructure):
+    _fields_ = [("lba",                 c_ulong, 36),
+                ("len",                 c_ulong, 28)]
+sizeof_data_map = sizeof(data_map) # 8
+
+class ckpt_hdr(Structure):
+    _fields_ = [("ckpts_offset",        c_uint),
+                ("ckpts_len",           c_uint),
+                ("objs_offset",         c_uint),
+                ("objs_len",            c_uint),
+                ("deletes_offset",      c_uint),
+                ("deletes_len",         c_uint),
+                ("map_offset",          c_uint),
+                ("map_len",             c_uint)]
+sizeof_ckpt_hdr = sizeof(ckpt_hdr) # 32
+
+class ckpt_obj(Structure):
+    _fields_ = [("seq",                 c_uint),
+                ("hdr_sectors",         c_uint),
+                ("data_sectors",        c_uint),
+                ("live_sectors",        c_uint)]
+sizeof_ckpt_obj = sizeof(ckpt_obj) # 16
+
+class deferred_delete(Structure):
+    _fields_ = [("seq",                 c_uint),
+                ("time",                c_uint)]
+
+class ckpt_mapentry(LittleEndianStructure):
+    _fields_ = [("lba",                 c_ulong, 36),
+                ("len",                 c_ulong, 28),
+                ("obj",                 c_uint),
+                ("offset",              c_uint)]
+sizeof_ckpt_mapentry = sizeof(ckpt_mapentry) # 16
+

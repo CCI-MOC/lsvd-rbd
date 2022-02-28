@@ -60,7 +60,7 @@ struct clone {
     uint32_t sequence;
     uint8_t  name_len;
     char     name[0];
-};
+} __attribute__((packed));
 
 struct snap {
     uuid_t   snap_uuid;

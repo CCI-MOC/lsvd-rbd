@@ -368,7 +368,42 @@ We need to be able to perform GC without blocking incoming reads.
 - strategy 1: incoming writes check the list of LBA ranges being copied by a running GC cycle, and block if they interfere
 - strategy 2: keep a list of writes during the GC copy process. When it's done, subtract those ranges from the GC map updates.
 
+### Cache sharing
+
+In theory multiple virtual disks based on the same clone image ought to be able to share locally cached blocks from the base image. In practice it's a bit tricky because each virtual disk is in a separate QEMU process.
+
+Proposal - separate cache daemon for caching clone base images. Use shared memory to communicate with individual virtual disks:
+- communicate via unix socket
+- pass read-only file descriptor for cache partition
+- cache map in shared memory - see shm\_overview(7)
+- sequence number in shared memory
+- clients send usage information over socket
+
+Sequence number is even when map is valid, odd when it's being updated. To use the cache:
+- check that map is valid, sequence number S
+- translate with local copy of map
+- fetch from cache
+- check that map sequence is still S. If not, bail and fetch directly
+
+The shared cache should update the map infrequently, and take a decent amount of time in doing so. (1 second?)
+
 ### status
+
+**Sun Feb 27 23:55:50 2022**
+- init from superblock (sort of)
+- started some unit tests using python unittest framework and ctypes
+
+**Sun Feb 27 10:03:23 2022** Basic functionality seems to be working under BDUS.
+- file only, no objects yet
+- starts up with empty disk - no map recovery
+- no cache
+
+Things to do now:
+1. basic python unit tests
+2. write coalescing, in-memory map
+3. map recovery on startup
+4. cache writes, change in-memory map to cache map
+5. object backend
 
 **Mon Jan 31 23:48:00 2022** object headers seem to be mostly done. Journal headers for writes are done, but need to figure out the superblock. Steps from here:
 1. get read/write working with librbd interface and null operations

@@ -124,7 +124,7 @@ size_t read_object(int seq, char *buf, size_t offset, size_t len)
 }
 
 std::vector<std::thread> pool;
-bool shutdown;
+static bool running;
 
 void worker_thread(void)
 {
@@ -132,9 +132,9 @@ void worker_thread(void)
 	batch *b;
 	std::unique_lock<std::mutex> lock(m);
 
-	while (work_queue.empty() && !shutdown)
+	while (work_queue.empty() && running)
 	    cv.wait(lock);
-	if (shutdown)
+	if (!running)
 	    return;
 	b = work_queue.front();
 	work_queue.pop();
@@ -193,7 +193,7 @@ ssize_t init(char *name, int nthreads)
 
 void lsvd_shutdown(void)
 {
-    shutdown = true;
+    running = false;
     std::unique_lock<std::mutex> lk(m);
     cv.notify_all();
     lk.unlock();
