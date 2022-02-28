@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 #
 # basic unit tests 
 #
@@ -12,10 +14,11 @@ val = os.system("./mkdisk --size 10m %s" % img)
 assert val == 0
 
 _size = lsvd.init(img, 1)
+assert _size == 10*1024*1024
 
 class tests(unittest.TestCase):
     def assertZero(self, data, _msg):
-        self.assertTrue(data == ('\0' * len(data)), msg=_msg)
+        self.assertTrue(data == (b'\0' * len(data)), msg=_msg)
 
     def test_1_size(self):
         self.assertTrue(_size == 10*1024*1024)

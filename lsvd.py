@@ -12,9 +12,11 @@ lsvd_lib = CDLL(dir + "/liblsvd.so")
 assert lsvd_lib
 
 def write(offset, data):
+    if type(data) != bytes:
+        data = bytes(data, 'utf-8')
     nbytes = len(data)
     assert (nbytes % 512) == 0 and (offset % 512) == 0
-    val = lsvd_lib.c_write(bytes(data), c_ulong(offset), c_uint(nbytes), c_ulong(0))
+    val = lsvd_lib.c_write(data, c_ulong(offset), c_uint(nbytes), c_ulong(0))
     return val
 
 def read(offset, nbytes):
@@ -27,7 +29,7 @@ def getmap(base, limit):
     n_tuples = 128
     tuples = (tuple * n_tuples)()
     n = lsvd_lib.dbg_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
-    return map(lambda x: [x.base, x.limit, x.obj, x.offset], tuples[0:n])
+    return [_ for _ in map(lambda x: [x.base, x.limit, x.obj, x.offset], tuples[0:n])]
 
 def inmem():
     n_objs = 32
@@ -39,13 +41,21 @@ def flush():
     return lsvd_lib.c_flush(c_ulong(0))
 
 def init(name, n):
-    return lsvd_lib.c_init(bytes(name), c_int(n))
+    if type(name) != bytes:
+        name = bytes(name, 'utf-8')
+    return lsvd_lib.c_init(name, c_int(n))
 
 def size():
     return lsvd_lib.c_size()
 
 def shutdown():
     lsvd_lib.c_shutdown()
+
+def batch_seq():
+    return c_int.in_dll(lsvd_lib, 'batch_seq').value
+
+def checkpoint():
+    lsvd_lib.dbg_checkpoint()
 
 LSVD_SUPER = 1
 LSVD_DATA = 2

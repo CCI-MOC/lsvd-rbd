@@ -34,13 +34,7 @@ static int div_round_up(int n, int m)
 
 static int round_up(int n, int m)
 {
-#if 0
-    n += (m - 1);
-    n -= (n % m);
-    return n;
-#else
     return div_round_up(n, m) * m;
-#endif
 }
 
 	
@@ -99,7 +93,7 @@ void make_hdr(char *buf, batch *b)
 	*dm++ = e;
 }
 
-char *prefix = (char*)"/tmp/bkt/obj";
+char      *prefix;
 char      *super;
 hdr       *super_h;
 super_hdr *super_sh;
@@ -114,7 +108,7 @@ std::string hex(uint32_t n)
 
 ssize_t read_super(char *name)
 {
-    prefix = name;
+    prefix = strdup(name);
     int fd = open(name, O_RDONLY);
     if (fd < 0)
 	return -1;
@@ -126,7 +120,8 @@ ssize_t read_super(char *name)
     super_len = len;
 
     super_h = (hdr*)super;
-    if (super_h->magic != LSVD_MAGIC || super_h->version != 1 || super_h->type != LSVD_SUPER)
+    if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
+	super_h->type != LSVD_SUPER)
 	return -1;
     memcpy(my_uuid, super_h->vol_uuid, sizeof(uuid_t));
 
@@ -134,7 +129,6 @@ ssize_t read_super(char *name)
     batch_seq = super_sh->next_obj;
     return super_sh->vol_size * 512;
 }
-
 
 void write_object(int seq, iovec *iov, int iovcnt)
 {
@@ -198,6 +192,63 @@ void read_checkpoint(char *buf, size_t len)
 			      .offset = (uint64_t)m->offset});
 }
 
+/* TODO: object list
+ */
+void write_checkpoint(void)
+{
+    std::vector<ckpt_mapentry> entries;
+
+    std::unique_lock<std::mutex> lk(m);
+    for (auto it = object_map.begin(); it != object_map.end(); it++) {
+	auto [base, limit, ptr] = it->vals();
+	entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
+		    .obj = (uint32_t)ptr.obj, .offset = (uint32_t)ptr.offset});
+    }
+    uint32_t seq = batch_seq++;
+    size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
+    size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
+    uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes, 512);
+    object_hdrsz[seq] = sectors;
+    lk.unlock();
+
+    char *buf = (char*)calloc(hdr_bytes, 1);
+
+    hdr *h = (hdr*)buf;
+    *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
+	       .type = LSVD_CKPT, .seq = seq, .hdr_sectors = sectors,
+	       .data_sectors = 0};
+    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
+    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
+    *ch = (ckpt_hdr){.ckpts_offset = sizeof(hdr)+sizeof(ckpt_hdr),
+		     .ckpts_len = sizeof(seq),
+		     .objs_offset = 0, .objs_len = 0,
+		     .deletes_offset = 0, .deletes_len = 0,
+		     .map_offset = sizeof(hdr)+sizeof(ckpt_hdr)+sizeof(seq),
+		     .map_len = (uint32_t)map_bytes};
+
+    iovec iov[] = {{.iov_base = buf, .iov_len = hdr_bytes},
+		   {.iov_base = (char*)&seq, .iov_len = sizeof(seq)},
+		   {.iov_base = (char*)entries.data(), map_bytes}};
+    write_object(seq, iov, 3);
+}
+
+// returns 1 beyond the last object found
+//
+uint32_t find_most_recent(uint32_t seq)
+{
+    char buf[4096];
+    for (uint32_t i = seq; ; i++) {
+	auto name = std::string(prefix) + "." + hex(i);
+	if (read_object(i, buf, 0, sizeof(buf)) <= 0)
+	    return i;
+	hdr *h = (hdr*)buf;
+	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
+	    return i;
+	object_hdrsz[i] = h->hdr_sectors;
+    }
+    return seq;
+}
+    
 // returns next sequence number
 uint32_t roll_forward(uint32_t seq)
 {
@@ -209,6 +260,8 @@ uint32_t roll_forward(uint32_t seq)
 	hdr *h = (hdr*)buf;
 	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
 	    return i;
+	object_hdrsz[i] = h->hdr_sectors;
+	
 	if (h->type == LSVD_DATA)
 	    read_data_map(buf, sizeof(buf));
 	else if (h->type == LSVD_CKPT)
@@ -219,7 +272,7 @@ uint32_t roll_forward(uint32_t seq)
     return 0;
 }
 
-std::vector<std::thread> pool;
+std::queue<std::thread> pool;
 static bool running;
 
 void worker_thread(void)
@@ -257,10 +310,14 @@ void worker_thread(void)
 ssize_t init(char *name, int nthreads)
 {
     ssize_t bytes = read_super(name);
-    if (bytes > 0) {
-	for (int i = 0; i < nthreads; i++) 
-	    pool.push_back(std::thread(worker_thread));
-    }
+    if (bytes < 0)
+      return bytes;
+    // todo: ignore checkpoints for now
+    batch_seq = roll_forward(batch_seq);
+    running = true;
+    
+    for (int i = 0; i < nthreads; i++) 
+      pool.push(std::thread(worker_thread));
     return bytes;
 }
 
@@ -271,8 +328,10 @@ void lsvd_shutdown(void)
     cv.notify_all();
     lk.unlock();
 
-    for (auto it = pool.begin(); it != pool.end(); it++)
-	it->join(); 
+    while (!pool.empty()) {
+	pool.front().join();
+	pool.pop();
+    }
 }
 
 ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
@@ -447,3 +506,10 @@ int dbg_getmap(int base, int limit, int max, struct tuple *t)
     }
     return i;
 }
+
+extern "C" void dbg_checkpoint(void);
+void dbg_checkpoint(void)
+{
+    write_checkpoint();
+}
+
