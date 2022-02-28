@@ -1,5 +1,5 @@
-CFLAGS = -ggdb3 -Wall
-CXXFLAGS = -std=c++17 -ggdb3 -Wall
+CFLAGS = -ggdb3 -Wall -Wno-psabi
+CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi
 SOFLAGS = -shared -fPIC 
 
 liblsvd.so: first-try.cc extent.cc
@@ -10,3 +10,6 @@ bdus: bdus.o first-try.o
 
 mkdisk: mkdisk.cc objects.cc
 	g++ mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
+
+clean:
+	rm -f liblsvd.so bdus mkdisk
