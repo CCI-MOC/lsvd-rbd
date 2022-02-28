@@ -13,6 +13,9 @@
 #include <stack>
 #include <map>
 #include <thread>
+#include <ios>
+#include <sstream>
+#include <iomanip>
 
 #include <unistd.h>
 #include <sys/uio.h>
@@ -97,14 +100,46 @@ void make_hdr(char *buf, batch *b)
 }
 
 char *prefix = (char*)"/tmp/bkt/obj";
-char *super;
-size_t super_len;
+char      *super;
+hdr       *super_h;
+super_hdr *super_sh;
+size_t     super_len;
+
+std::string hex(uint32_t n)
+{
+    std::stringstream stream;
+    stream << std::setfill ('0') << std::setw(8) << std::hex << n;
+    return stream.str();
+}
+
+ssize_t read_super(char *name)
+{
+    prefix = name;
+    int fd = open(name, O_RDONLY);
+    if (fd < 0)
+	return -1;
+
+    size_t len = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    super = (char*)calloc(len, 1);
+    read(fd, super, len);
+    super_len = len;
+
+    super_h = (hdr*)super;
+    if (super_h->magic != LSVD_MAGIC || super_h->version != 1 || super_h->type != LSVD_SUPER)
+	return -1;
+    memcpy(my_uuid, super_h->vol_uuid, sizeof(uuid_t));
+
+    super_sh = (super_hdr*)(super_h+1);
+    batch_seq = super_sh->next_obj;
+    return super_sh->vol_size * 512;
+}
+
 
 void write_object(int seq, iovec *iov, int iovcnt)
 {
-    char name[128];
-    sprintf(name, "%s.%05x", prefix, seq);
-    int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0777);
+    auto name = std::string(prefix) + "." + hex(seq);
+    int fd = open(name.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
     if (fd < 0)
 	perror("create"), exit(1);
     writev(fd, iov, iovcnt);
@@ -113,14 +148,23 @@ void write_object(int seq, iovec *iov, int iovcnt)
 
 size_t read_object(int seq, char *buf, size_t offset, size_t len)
 {
-    char name[128];
-    sprintf(name, "%s.%05x", prefix, seq);
-    int fd = open(name, O_RDONLY);
+    auto name = std::string(prefix) + "." + hex(seq);
+    int fd = open(name.c_str(), O_RDONLY);
     if (fd < 0)
-	perror("open_read"), exit(1);
-    auto val = pread(fd, buf, len, offset + object_hdrsz[seq]*512);
+	return -1;
+    auto val = pread(fd, buf, len, offset);
     close(fd);
     return val;
+}
+
+void roll_forward(uint32_t seq)
+{
+    char buf[64*1024];
+    for (int i = seq; ; i++) {
+	auto name = std::string(prefix) + "." + hex(i);
+	if (read_object(i, buf, 0, 64*1024) <= 0)
+	    break;
+    }
 }
 
 std::vector<std::thread> pool;
@@ -157,29 +201,6 @@ void worker_thread(void)
     }
 }
 
-ssize_t read_super(char *name)
-{
-    prefix = name;
-    int fd = open(name, O_RDONLY);
-    if (fd < 0)
-	return -1;
-
-    size_t len = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    super = (char*)calloc(len, 1);
-    read(fd, super, len);
-    super_len = len;
-
-    hdr *h = (hdr*)super;
-    if (h->magic != LSVD_MAGIC || h->version != 1 || h->type != LSVD_SUPER)
-	return -1;
-    memcpy(my_uuid, h->vol_uuid, sizeof(uuid_t));
-
-    super_hdr *sh = (super_hdr*)(h+1);
-    batch_seq = sh->next_obj;
-    return sh->vol_size * 512;
-}
-    
 
 ssize_t init(char *name, int nthreads)
 {
@@ -299,7 +320,7 @@ ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 	else if (obj == -2)
 	    /* skip */;
 	else
-	    read_object(obj, ptr, _offset, _len);
+	    read_object(obj, ptr, _offset + object_hdrsz[obj]*512, _len);
 	ptr += _len;
     }
     
