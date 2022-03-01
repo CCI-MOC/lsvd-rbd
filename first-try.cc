@@ -171,6 +171,14 @@ size_t     super_len;
  * object classes that serialize and de-serialize themselves. Sometime, maybe.
  */
 
+template <class T>
+void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals)
+{
+    T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
+    for (; p < end; p++)
+	vals.push_back(*p);
+}
+
 /* clone_info is variable-length, so we need to pass back pointers 
  * rather than values. That's OK because we allocate superblock permanently
  */
@@ -189,20 +197,14 @@ ssize_t read_super(char *name, std::vector<uint32_t> &ckpts,
 
     super_sh = (super_hdr*)(super_h+1);
 
-    uint32_t *p_ckpt = (uint32_t*)(super + super_sh->ckpts_offset),
-	*end_ckpt = (uint32_t*)(super + super_sh->ckpts_offset + super_sh->ckpts_len);
-    for (; p_ckpt < end_ckpt; p_ckpt++)
-	ckpts.push_back(*p_ckpt);
+    decode_offset_len<uint32_t>(super, super_sh->ckpts_offset, super_sh->ckpts_len, ckpts);
+    decode_offset_len<snap_info>(super, super_sh->snaps_offset, super_sh->snaps_len, snaps);
 
+    // this one stores pointers, not values...
     clone_info *p_clone = (clone_info*)(super + super_sh->clones_offset),
 	*end_clone = (clone_info*)(super + super_sh->clones_offset + super_sh->clones_len);
     for (; p_clone < end_clone; p_clone++)
 	clones.push_back(p_clone);
-
-    snap_info *p_snap = (snap_info*)(super + super_sh->snaps_offset),
-	*end_snap = (snap_info*)(super + super_sh->snaps_offset + super_sh->snaps_len);
-    for (; p_snap < end_snap; p_snap++)
-	snaps.push_back(*p_snap);
     
     return super_sh->vol_size * 512;
 }
@@ -224,20 +226,9 @@ ssize_t read_data_hdr(int seq, hdr &h, data_hdr &dh, std::vector<uint32_t> &ckpt
     h = *tmp_h;
     dh = *tmp_dh;
 
-    uint32_t *p_ckpt = (uint32_t*)(buf + tmp_dh->ckpts_offset),
-	*end_ckpt = (uint32_t*)(buf + tmp_dh->ckpts_offset + tmp_dh->ckpts_len);
-    for (; p_ckpt < end_ckpt; p_ckpt++)
-	ckpts.push_back(*p_ckpt);
-
-    obj_cleaned *p_cleaned = (obj_cleaned*)(buf + tmp_dh->objs_cleaned_offset),
-	*end_cleaned = (obj_cleaned*)(buf + tmp_dh->objs_cleaned_offset + tmp_dh->objs_cleaned_len);
-    for (; p_cleaned < end_cleaned; p_cleaned++)
-	cleaned.push_back(*p_cleaned);
-
-    data_map *p_map = (data_map*)(buf + tmp_dh->map_offset),
-	*end_map = (data_map*)(buf + tmp_dh->map_offset + tmp_dh->map_len);
-    for (; p_map < end_map; p_map++)
-	dmap.push_back(*p_map);
+    decode_offset_len<uint32_t>(buf, tmp_dh->ckpts_offset, tmp_dh->ckpts_len, ckpts);
+    decode_offset_len<obj_cleaned>(buf, tmp_dh->objs_cleaned_offset, tmp_dh->objs_cleaned_len, cleaned);
+    decode_offset_len<data_map>(buf, tmp_dh->map_offset, tmp_dh->map_len, dmap);
 
     free(buf);
     return 0;
@@ -257,25 +248,10 @@ ssize_t read_checkpoint(int seq, std::vector<uint32_t> &ckpts, std::vector<ckpt_
 	return -1;
     }
 
-    uint32_t *p_ckpt = (uint32_t*)(buf + ch->ckpts_offset),
-	*end_ckpt = (uint32_t*)(buf + ch->ckpts_offset + ch->ckpts_len);
-    for (; p_ckpt < end_ckpt; p_ckpt++)
-	ckpts.push_back(*p_ckpt);
-
-    ckpt_obj *p_obj = (ckpt_obj*)(buf + ch->objs_offset),
-	*end_obj = (ckpt_obj*)(buf + ch->objs_offset + ch->objs_len);
-    for (; p_obj < end_obj; p_obj++)
-	objects.push_back(*p_obj);
-
-    deferred_delete *p_del = (deferred_delete*)(buf + ch->deletes_offset),
-	*end_del = (deferred_delete*)(buf + ch->deletes_offset + ch->deletes_len);
-    for (; p_del < end_del; p_del++)
-	deletes.push_back(*p_del);
-
-    ckpt_mapentry *p_map = (ckpt_mapentry*)(buf + ch->map_offset),
-	*end_map = (ckpt_mapentry*)(buf + ch->map_offset + ch->map_len);
-    for (; p_map < end_map; p_map++)
-	dmap.push_back(*p_map);
+    decode_offset_len<uint32_t>(buf, ch->ckpts_offset, ch->ckpts_len, ckpts);
+    decode_offset_len<ckpt_obj>(buf, ch->objs_offset, ch->objs_len, objects);
+    decode_offset_len<deferred_delete>(buf, ch->deletes_offset, ch->deletes_len, deletes);
+    decode_offset_len<ckpt_mapentry>(buf, ch->map_offset, ch->map_len, dmap);
 
     free(buf);
     return 0;
