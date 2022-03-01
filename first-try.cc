@@ -35,12 +35,6 @@ static int div_round_up(int n, int m)
     return (n + m - 1) / m;
 }
 
-static int round_up(int n, int m)
-{
-    return div_round_up(n, m) * m;
-}
-
-	
 struct batch {
     char  *buf;
     size_t max;
@@ -258,50 +252,9 @@ ssize_t read_checkpoint(int seq, std::vector<uint32_t> &ckpts, std::vector<ckpt_
     return 0;
 }
 
-/* read data map from data object header
- * for now ignores checkpoints, objects_cleaned
- */
-void read_data_map(char *buf, size_t len)
-{
-    hdr *h = (hdr*)buf;
-    assert(h->type == LSVD_DATA);
-    assert(h->hdr_sectors*512 <= len);
-    
-    data_hdr *dh = (data_hdr*)(h+1);
-    data_map *m = (data_map*)(buf + dh->map_offset),
-	*map_end = (data_map*)(buf + dh->map_offset + dh->map_len);
-    uint64_t offset = 0;
-    
-    for (; m < map_end; m++) {
-	object_map.update(m->lba, m->lba+m->len,
-			  (extmap::obj_offset){.obj = (uint64_t) h->seq,
-			      .offset = offset});
-	offset += m->len;
-    }
-}
-
-/* ignores checkpoint list, object/size list, deferred deletes
- * just loads the map for now
- */
-void read_checkpoint(char *buf, size_t len)
-{
-    hdr *h = (hdr*)buf;
-    assert(h->type == LSVD_CKPT);
-    assert(h->hdr_sectors*512 <= len);
-
-    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
-    ckpt_mapentry *m = (ckpt_mapentry*)(buf + ch->map_offset),
-	*map_end = (ckpt_mapentry*)(buf + ch->map_offset + ch->map_len);
-
-    for (; m < map_end; m++)
-	object_map.update(m->lba, m->lba+m->len,
-			  (extmap::obj_offset){.obj = (uint64_t) m->obj,
-			      .offset = (uint64_t)m->offset});
-}
-
 /* TODO: object list
  */
-int write_checkpoint(int seq)
+static int write_checkpoint(int seq)
 {
     std::vector<ckpt_mapentry> entries;
     std::unique_lock<std::mutex> lk(m);
@@ -343,7 +296,7 @@ int write_checkpoint(int seq)
 std::queue<std::thread> pool;
 static bool running;
 
-int make_hdr(char *buf, batch *b)
+static int make_hdr(char *buf, batch *b)
 {
     hdr *h = (hdr*)buf;
     *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0}, .type = LSVD_DATA,
@@ -367,7 +320,7 @@ int make_hdr(char *buf, batch *b)
     return (char*)dm - (char*)buf;
 }
 
-void worker_thread(void)
+static void worker_thread(void)
 {
     while (true) {
 	batch *b;
@@ -398,49 +351,7 @@ void worker_thread(void)
     }
 }
 
-/* returns sequence number of last consecutive object found
- */
-uint32_t find_most_recent(uint32_t seq)
-{
-    char buf[4096];
-    int val = 0;
-    for (uint32_t i = seq; ; i++) {
-	if (io->read_numbered_object(i, buf, 0, sizeof(buf)) <= 0)
-	    break;
-	hdr *h = (hdr*)buf;
-	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
-	    break;
-	object_info[i] = (struct obj_info){.hdr = h->hdr_sectors, .data = h->data_sectors,
-					   .live = h->data_sectors, .type = (int)h->type};
-	val = i;
-    }
-    return val;
-}
-    
-// returns next sequence number
-int roll_forward(uint32_t seq)
-{
-    char buf[64*1024];
-    for (uint32_t i = seq; ; i++) {
-	if (io->read_numbered_object(i, buf, 0, 64*1024) <= 0)
-	    return i;
-	hdr *h = (hdr*)buf;
-	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
-	    return i;
-	object_info[i] = (obj_info){.hdr = h->hdr_sectors, .data = h->data_sectors,
-				    .live = h->data_sectors, .type = (int)h->type};
-
-	if (h->type == LSVD_DATA)
-	    read_data_map(buf, sizeof(buf));
-	else if (h->type == LSVD_CKPT)
-	    read_checkpoint(buf, sizeof(buf));
-	else
-	    return i;
-    }
-    return 0;
-}
-
-void reset_all(void)
+static void reset_all(void)
 {
     /* For testing we want to get the in-memory state back to the beginning.
      * TODO: these should be class fields, not globals
@@ -490,10 +401,25 @@ ssize_t init(char *name, int nthreads)
 	}
 	_ckpt = ck;
     }
-    
-    int last = find_most_recent(_ckpt);
-    // todo: ignore checkpoints for now
-    batch_seq = roll_forward(batch_seq);
+
+    for (int i = _ckpt; ; i++) {
+	std::vector<uint32_t>    ckpts;
+	std::vector<obj_cleaned> cleaned;
+	std::vector<data_map>    map;
+	hdr h; data_hdr dh;
+	batch_seq = i;
+	if (read_data_hdr(i, h, dh, ckpts, cleaned, map) < 0)
+	    break;
+	object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
+				    .live = h.data_sectors, .type = LSVD_DATA};
+	uint64_t offset = 0;
+	for (auto m : map) {
+	    object_map.update(m.lba, m.lba + m.len,
+			      (extmap::obj_offset){.obj = (uint64_t) i,
+				      .offset = offset});
+	    offset += m.len;
+	}
+    }
     running = true;
     
     for (int i = 0; i < nthreads; i++) 
