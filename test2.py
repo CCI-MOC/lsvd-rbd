@@ -92,6 +92,7 @@ def start():
 
 def finish():
     lsvd.shutdown()
+    time.sleep(0.1)
 
 def read_ckpt(img):
     f = os.open(img, os.O_RDONLY)
@@ -114,6 +115,7 @@ class tests(unittest.TestCase):
     #def tearDown(self):
 
     def test_1_size(self):
+        #print('Test 1')
         start()
         write_super(img, 0, 1)
         _size = lsvd.init(img, 1)
@@ -121,6 +123,7 @@ class tests(unittest.TestCase):
         finish()
         
     def test_2_recover(self):
+        #print('Test 2')
         start()
         write_super(img, 0, 1)
         write_data_1(img + '.00000001', 0, 1)
@@ -137,6 +140,7 @@ class tests(unittest.TestCase):
         finish()
 
     def test_3_persist(self):
+        #print('Test 3')
         start()
         write_super(img, 0, 1)
         _size = lsvd.init(img, 1)
@@ -152,20 +156,19 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'X' * 4096)
         finish()
 
-    # TODO - checkpoint **REALLY** should be sequence # 2
     def test_4_checkpoint(self):
+        #print('Test 4')
         start()
+        os.system('ls -l /tmp/bkt')
         write_super(img, 0, 1)
         lsvd.init(img, 1)
         d = b'X' * 4096
         lsvd.write(0, d)
         lsvd.write(8192,d)
         lsvd.write(4096,d)
-        lsvd.flush()
         n = lsvd.checkpoint()
-        print('n:', n)
         hdr, ckpt_hdr, ckpts, exts = read_ckpt(img + ('.%08x' % n))
-        self.assertEqual([_ for _ in ckpts], [n])
+        self.assertEqual([_ for _ in ckpts], [2])
         self.assertEqual(exts, [[0,8,1,0],[8,8,1,16],[16,8,1,8]])
         finish()
 
