@@ -406,6 +406,8 @@ For the simple map, type-specific data would only be the count of entries. (or e
 
 For write cache, journal needs entry types for checkpoint and pad
 
+Note that we can add the write cache first and test it, then add the read cache.
+
 ### status
 
 **Sun Feb 27 23:55:50 2022**

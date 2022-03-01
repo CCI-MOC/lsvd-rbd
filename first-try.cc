@@ -5,6 +5,7 @@
 
 #include "extent.cc"
 #include "objects.cc"
+#include "journal2.cc"
 
 #include <vector>
 #include <queue>
