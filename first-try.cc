@@ -140,6 +140,7 @@ struct obj_info {
     uint32_t hdr;
     uint32_t data;
     uint32_t live;
+    int      type;
 };
 std::map<int,obj_info> object_info;
 
@@ -271,7 +272,7 @@ int write_checkpoint(void)
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
     size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
     uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes, 512);
-    object_info[seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0};
+    object_info[seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0, .type = LSVD_CKPT};
     lk.unlock();
 
     char *buf = (char*)calloc(hdr_bytes, 1);
@@ -296,49 +297,6 @@ int write_checkpoint(void)
     return seq;
 }
 
-// returns 1 beyond the last object found
-//
-uint32_t find_most_recent(uint32_t seq)
-{
-    char buf[4096];
-    for (uint32_t i = seq; ; i++) {
-	if (io->read_numbered_object(i, buf, 0, sizeof(buf)) <= 0)
-	    return i;
-	hdr *h = (hdr*)buf;
-	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
-	    return i;
-#if 0
-	object_info[i] = (struct obj_info){.hdr = h->hdr_sectors,
-					   .data = h->data_sectors,
-					   .live = h->data_sectors};
-#endif
-    }
-    return seq;
-}
-    
-// returns next sequence number
-int roll_forward(uint32_t seq)
-{
-    char buf[64*1024];
-    for (uint32_t i = seq; ; i++) {
-	if (io->read_numbered_object(i, buf, 0, 64*1024) <= 0)
-	    return i;
-	hdr *h = (hdr*)buf;
-	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
-	    return i;
-	object_info[i] = (obj_info){.hdr = h->hdr_sectors,
-				    .data = h->data_sectors,
-				    .live = h->data_sectors};
-
-	if (h->type == LSVD_DATA)
-	    read_data_map(buf, sizeof(buf));
-	else if (h->type == LSVD_CKPT)
-	    read_checkpoint(buf, sizeof(buf));
-	else
-	    return i;
-    }
-    return 0;
-}
 
 std::queue<std::thread> pool;
 static bool running;
@@ -357,9 +315,8 @@ void worker_thread(void)
 	work_queue.pop();
 
 	uint32_t sectors = div_round_up(b->hdrlen(), 512);
-	object_info[b->seq] = (obj_info){.hdr = sectors,
-					 .data = (uint32_t)(b->len / 512),
-					 .live = (uint32_t)(b->len / 512)};
+	object_info[b->seq] = (obj_info){.hdr = sectors, .data = (uint32_t)(b->len / 512),
+					 .live = (uint32_t)(b->len / 512), .type = LSVD_DATA};
 	lock.unlock();
 
 	char *hdr = (char*)calloc(sectors*512, 1);
@@ -373,6 +330,46 @@ void worker_thread(void)
 	batches.push(b);
 	lock2.unlock();
     }
+}
+
+// returns 1 beyond the last object found
+//
+uint32_t find_most_recent(uint32_t seq)
+{
+    char buf[4096];
+    for (uint32_t i = seq; ; i++) {
+	if (io->read_numbered_object(i, buf, 0, sizeof(buf)) <= 0)
+	    return i;
+	hdr *h = (hdr*)buf;
+	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
+	    return i;
+	object_info[i] = (struct obj_info){.hdr = h->hdr_sectors, .data = h->data_sectors,
+					   .live = h->data_sectors, .type = (int)h->type};
+    }
+    return seq;
+}
+    
+// returns next sequence number
+int roll_forward(uint32_t seq)
+{
+    char buf[64*1024];
+    for (uint32_t i = seq; ; i++) {
+	if (io->read_numbered_object(i, buf, 0, 64*1024) <= 0)
+	    return i;
+	hdr *h = (hdr*)buf;
+	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
+	    return i;
+	object_info[i] = (obj_info){.hdr = h->hdr_sectors, .data = h->data_sectors,
+				    .live = h->data_sectors, .type = (int)h->type};
+
+	if (h->type == LSVD_DATA)
+	    read_data_map(buf, sizeof(buf));
+	else if (h->type == LSVD_CKPT)
+	    read_checkpoint(buf, sizeof(buf));
+	else
+	    return i;
+    }
+    return 0;
 }
 
 
