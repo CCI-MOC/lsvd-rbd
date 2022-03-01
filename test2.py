@@ -152,6 +152,7 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'X' * 4096)
         finish()
 
+    # TODO - checkpoint **REALLY** should be sequence # 2
     def test_4_checkpoint(self):
         start()
         write_super(img, 0, 1)
