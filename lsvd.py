@@ -55,7 +55,7 @@ def batch_seq():
     return c_int.in_dll(lsvd_lib, 'batch_seq').value
 
 def checkpoint():
-    lsvd_lib.dbg_checkpoint()
+    return lsvd_lib.dbg_checkpoint()
 
 LSVD_SUPER = 1
 LSVD_DATA = 2

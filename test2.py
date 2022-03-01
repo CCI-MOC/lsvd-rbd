@@ -6,8 +6,9 @@ import unittest
 import lsvd
 import os
 import ctypes
+import time
 
-img = '/tmp/blk/obj'
+img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
 
 def blank_uuid():
@@ -91,7 +92,23 @@ def start():
 
 def finish():
     lsvd.shutdown()
-    
+
+def read_ckpt(img):
+    f = os.open(img, os.O_RDONLY)
+    data = os.read(f, 10000000)
+    i1 = lsvd.sizeof_hdr
+    i2 = i1 + lsvd.sizeof_ckpt_hdr
+    hdr = lsvd.hdr.from_buffer(bytearray(data[0:i1]))
+    ckpt_hdr = lsvd.ckpt_hdr.from_buffer(bytearray(data[i1:i2]))
+    nckpts = ckpt_hdr.ckpts_len // 4
+    c = bytearray(data[ckpt_hdr.ckpts_offset:ckpt_hdr.ckpts_offset+ckpt_hdr.ckpts_len])
+    ckpts = (ctypes.c_uint*nckpts).from_buffer(c)
+    nexts = ckpt_hdr.map_len // lsvd.sizeof_ckpt_mapentry
+    e = bytearray(data[ckpt_hdr.map_offset:ckpt_hdr.map_offset+ckpt_hdr.map_len])
+    exts = (lsvd.ckpt_mapentry*nexts).from_buffer(e)
+    exts = [_ for _ in map(lambda x: [x.lba,x.len,x.obj,x.offset], exts)]
+    return (hdr, ckpt_hdr, ckpts, exts)
+
 class tests(unittest.TestCase):
     #def setUp(self):
     #def tearDown(self):
@@ -109,11 +126,46 @@ class tests(unittest.TestCase):
         write_data_1(img + '.00000001', 0, 1)
         _size = lsvd.init(img, 1)
         self.assertEqual(lsvd.batch_seq(), 2)
-        d1 = lsvd.read(0, 512)
-        self.assertEqual(d1, b'A' * 512)
-        if False:
-            d2 = lsvd.read(1, 512)
-            self.assertEqual(d1, b'\0' * 512)
+        d = lsvd.read(0, 512)
+        self.assertEqual(d, b'A' * 512)
+        d = lsvd.read(512, 512)
+        self.assertEqual(d, b'\0' * 512)
+        d = lsvd.read(512*2*20, 512)
+        self.assertEqual(d, b'U' * 512)
+        d = lsvd.read(512*2*20+512, 512)
+        self.assertEqual(d, b'\0' * 512)
+        finish()
+
+    def test_3_persist(self):
+        start()
+        write_super(img, 0, 1)
+        _size = lsvd.init(img, 1)
+        d = b'X' * 4096
+        lsvd.write(0, d)
+        lsvd.write(8192,d)
+        lsvd.flush()
+        time.sleep(0.1)
+        lsvd.shutdown()
+
+        lsvd.init(img, 1)
+        d = lsvd.read(0, 4096)
+        self.assertEqual(d, b'X' * 4096)
+        finish()
+
+    def test_4_checkpoint(self):
+        start()
+        write_super(img, 0, 1)
+        lsvd.init(img, 1)
+        d = b'X' * 4096
+        lsvd.write(0, d)
+        lsvd.write(8192,d)
+        lsvd.write(4096,d)
+        lsvd.flush()
+        n = lsvd.checkpoint()
+        print('n:', n)
+        hdr, ckpt_hdr, ckpts, exts = read_ckpt(img + ('.%08x' % n))
+        self.assertEqual([_ for _ in ckpts], [n])
+        self.assertEqual(exts, [[0,8,1,0],[8,8,1,16],[16,8,1,8]])
         finish()
 
 from time import sleep

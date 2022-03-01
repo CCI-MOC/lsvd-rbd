@@ -68,9 +68,17 @@ std::queue<batch*>      work_queue;
 batch              *current_batch;
 std::stack<batch*>  batches;
 extmap::objmap      object_map;
-std::map<int,int>   object_size;  // in sectors
-std::map<int,int>   object_hdrsz; // in sectors
 std::map<int,char*> in_mem_objects;
+
+/* info on all live objects - all sizes in sectors
+ */
+struct obj_info {
+    uint32_t hdr;
+    uint32_t data;
+    uint32_t live;
+};
+std::map<int,obj_info> object_info;
+
 
 void make_hdr(char *buf, batch *b)
 {
@@ -194,21 +202,21 @@ void read_checkpoint(char *buf, size_t len)
 
 /* TODO: object list
  */
-void write_checkpoint(void)
+int write_checkpoint(void)
 {
     std::vector<ckpt_mapentry> entries;
 
     std::unique_lock<std::mutex> lk(m);
+    uint32_t seq = batch_seq++;
     for (auto it = object_map.begin(); it != object_map.end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
 		    .obj = (uint32_t)ptr.obj, .offset = (uint32_t)ptr.offset});
     }
-    uint32_t seq = batch_seq++;
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
     size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
     uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes, 512);
-    object_hdrsz[seq] = sectors;
+    object_info[seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0};
     lk.unlock();
 
     char *buf = (char*)calloc(hdr_bytes, 1);
@@ -230,6 +238,7 @@ void write_checkpoint(void)
 		   {.iov_base = (char*)&seq, .iov_len = sizeof(seq)},
 		   {.iov_base = (char*)entries.data(), map_bytes}};
     write_object(seq, iov, 3);
+    return seq;
 }
 
 // returns 1 beyond the last object found
@@ -244,7 +253,11 @@ uint32_t find_most_recent(uint32_t seq)
 	hdr *h = (hdr*)buf;
 	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
 	    return i;
-	object_hdrsz[i] = h->hdr_sectors;
+#if 0
+	object_info[i] = (struct obj_info){.hdr = h->hdr_sectors,
+					   .data = h->data_sectors,
+					   .live = h->data_sectors};
+#endif
     }
     return seq;
 }
@@ -260,8 +273,10 @@ uint32_t roll_forward(uint32_t seq)
 	hdr *h = (hdr*)buf;
 	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
 	    return i;
-	object_hdrsz[i] = h->hdr_sectors;
-	
+	object_info[i] = (obj_info){.hdr = h->hdr_sectors,
+				    .data = h->data_sectors,
+				    .live = h->data_sectors};
+
 	if (h->type == LSVD_DATA)
 	    read_data_map(buf, sizeof(buf));
 	else if (h->type == LSVD_CKPT)
@@ -288,9 +303,10 @@ void worker_thread(void)
 	b = work_queue.front();
 	work_queue.pop();
 
-	int sectors = div_round_up(b->hdrlen(), 512);
-	object_hdrsz[b->seq] = sectors;
-	object_size[b->seq] = b->len / 512;
+	uint32_t sectors = div_round_up(b->hdrlen(), 512);
+	object_info[b->seq] = (obj_info){.hdr = sectors,
+					 .data = (uint32_t)(b->len / 512),
+					 .live = (uint32_t)(b->len / 512)};
 	lock.unlock();
 
 	char *hdr = (char*)calloc(sectors*512, 1);
@@ -388,6 +404,21 @@ int lsvd_flush(void)
     return val;
 }
 
+/* TODO: this is kind of horrible
+ * returns sequence number of ckpt
+ */
+int lsvd_checkpoint(void)
+{
+    std::unique_lock<std::mutex> lk(m);
+    if (current_batch && current_batch->len > 0) {
+	work_queue.push(current_batch);
+	current_batch = NULL;
+	cv.notify_one();
+    }
+    lk.unlock();
+    return write_checkpoint();
+}
+
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 {
     uint64_t base = offset / 512;
@@ -431,7 +462,7 @@ ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 	else if (obj == -2)
 	    /* skip */;
 	else
-	    read_object(obj, ptr, _offset + object_hdrsz[obj]*512, _len);
+	    read_object(obj, ptr, _offset + object_info[obj].hdr*512, _len);
 	ptr += _len;
     }
     
@@ -507,9 +538,9 @@ int dbg_getmap(int base, int limit, int max, struct tuple *t)
     return i;
 }
 
-extern "C" void dbg_checkpoint(void);
-void dbg_checkpoint(void)
+extern "C" int dbg_checkpoint(void);
+int dbg_checkpoint(void)
 {
-    write_checkpoint();
+    return write_checkpoint();
 }
 
