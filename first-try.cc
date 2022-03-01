@@ -25,6 +25,7 @@
 
 /* make this atomic? */
 int batch_seq;
+int last_ckpt;
 const int BATCH_SIZE = 8 * 1024 * 1024;
 uuid_t my_uuid;
 
@@ -144,28 +145,6 @@ struct obj_info {
 };
 std::map<int,obj_info> object_info;
 
-
-void make_hdr(char *buf, batch *b)
-{
-    hdr *h = (hdr*)buf;
-    h->magic = LSVD_MAGIC;
-    h->version = 1;
-    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
-    h->type = LSVD_DATA;
-    h->seq = b->seq;
-    h->hdr_sectors = 8;
-    h->data_sectors = b->len / 512;
-
-    data_hdr *dh = (data_hdr*)(h+1);
-    dh->last_data_obj = b->seq;
-    dh->map_offset = sizeof(*h) + sizeof(*dh);
-    dh->map_len = b->entries.size() * sizeof(data_map);
-
-    data_map *dm = (data_map*)(dh+1);
-    for (auto e : b->entries)
-	*dm++ = e;
-}
-
 char      *super;
 hdr       *super_h;
 super_hdr *super_sh;
@@ -258,12 +237,11 @@ void read_checkpoint(char *buf, size_t len)
 
 /* TODO: object list
  */
-int write_checkpoint(void)
+int write_checkpoint(int seq)
 {
     std::vector<ckpt_mapentry> entries;
-
     std::unique_lock<std::mutex> lk(m);
-    uint32_t seq = batch_seq++;
+    last_ckpt = seq;
     for (auto it = object_map.begin(); it != object_map.end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
@@ -279,7 +257,7 @@ int write_checkpoint(void)
 
     hdr *h = (hdr*)buf;
     *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
-	       .type = LSVD_CKPT, .seq = seq, .hdr_sectors = sectors,
+	       .type = LSVD_CKPT, .seq = (uint32_t)seq, .hdr_sectors = sectors,
 	       .data_sectors = 0};
     memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
     ckpt_hdr *ch = (ckpt_hdr*)(h+1);
@@ -300,6 +278,34 @@ int write_checkpoint(void)
 
 std::queue<std::thread> pool;
 static bool running;
+
+int make_hdr(char *buf, batch *b)
+{
+    hdr *h = (hdr*)buf;
+    h->magic = LSVD_MAGIC;
+    h->version = 1;
+    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
+    h->type = LSVD_DATA;
+    h->seq = b->seq;
+    h->hdr_sectors = 8;
+    h->data_sectors = b->len / 512;
+
+    data_hdr *dh = (data_hdr*)(h+1);
+    dh->last_data_obj = b->seq;
+    dh->ckpts_offset = sizeof(*h) + sizeof(*dh);
+    dh->ckpts_len = sizeof(uint32_t);
+    dh->map_offset = sizeof(*h) + sizeof(*dh) + sizeof(uint32_t);
+    dh->map_len = b->entries.size() * sizeof(data_map);
+
+    uint32_t *p_ckpt = (uint32_t*)(dh+1);
+    *p_ckpt = last_ckpt;
+    
+    data_map *dm = (data_map*)(p_ckpt+1);
+    for (auto e : b->entries)
+	*dm++ = e;
+
+    return (char*)dm - (char*)buf;
+}
 
 void worker_thread(void)
 {
@@ -475,8 +481,7 @@ int lsvd_flush(void)
     return val;
 }
 
-/* TODO: this is kind of horrible
- * returns sequence number of ckpt
+/* returns sequence number of ckpt
  */
 int lsvd_checkpoint(void)
 {
@@ -486,8 +491,9 @@ int lsvd_checkpoint(void)
 	current_batch = NULL;
 	cv.notify_one();
     }
+    int seq = batch_seq++;
     lk.unlock();
-    return write_checkpoint();
+    return write_checkpoint(seq);
 }
 
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)
@@ -612,6 +618,6 @@ int dbg_getmap(int base, int limit, int max, struct tuple *t)
 extern "C" int dbg_checkpoint(void);
 int dbg_checkpoint(void)
 {
-    return write_checkpoint();
+    return lsvd_checkpoint();
 }
 
