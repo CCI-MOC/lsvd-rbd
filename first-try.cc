@@ -346,20 +346,16 @@ static bool running;
 int make_hdr(char *buf, batch *b)
 {
     hdr *h = (hdr*)buf;
-    h->magic = LSVD_MAGIC;
-    h->version = 1;
+    *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0}, .type = LSVD_DATA,
+	       .seq = (uint32_t)b->seq, .hdr_sectors = 8, .data_sectors = (uint32_t)(b->len / 512)};
     memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
-    h->type = LSVD_DATA;
-    h->seq = b->seq;
-    h->hdr_sectors = 8;
-    h->data_sectors = b->len / 512;
 
     data_hdr *dh = (data_hdr*)(h+1);
-    dh->last_data_obj = b->seq;
-    dh->ckpts_offset = sizeof(*h) + sizeof(*dh);
-    dh->ckpts_len = sizeof(uint32_t);
-    dh->map_offset = sizeof(*h) + sizeof(*dh) + sizeof(uint32_t);
-    dh->map_len = b->entries.size() * sizeof(data_map);
+    uint32_t o1 = sizeof(*h) + sizeof(*h), l1 = sizeof(uint32_t), o2 = o1 + l1,
+	l2 = b->entries.size() * sizeof(data_map);
+    *dh = (data_hdr){.last_data_obj = (uint32_t)b->seq, .ckpts_offset = o1, .ckpts_len = l1,
+		     .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
+		     .map_offset = o2, .map_len = l2};
 
     uint32_t *p_ckpt = (uint32_t*)(dh+1);
     *p_ckpt = last_ckpt;
@@ -402,21 +398,23 @@ void worker_thread(void)
     }
 }
 
-// returns 1 beyond the last object found
-//
+/* returns sequence number of last consecutive object found
+ */
 uint32_t find_most_recent(uint32_t seq)
 {
     char buf[4096];
+    int val = 0;
     for (uint32_t i = seq; ; i++) {
 	if (io->read_numbered_object(i, buf, 0, sizeof(buf)) <= 0)
-	    return i;
+	    break;
 	hdr *h = (hdr*)buf;
 	if (h->magic != LSVD_MAGIC || h->version != 1 || h->seq != i)
-	    return i;
+	    break;
 	object_info[i] = (struct obj_info){.hdr = h->hdr_sectors, .data = h->data_sectors,
 					   .live = h->data_sectors, .type = (int)h->type};
+	val = i;
     }
-    return seq;
+    return val;
 }
     
 // returns next sequence number
@@ -442,11 +440,8 @@ int roll_forward(uint32_t seq)
     return 0;
 }
 
-
-ssize_t init(char *name, int nthreads)
+void reset_all(void)
 {
-    io = new file_backend(name);
-    
     /* For testing we want to get the in-memory state back to the beginning.
      * TODO: these should be class fields, not globals
      */
@@ -460,6 +455,12 @@ ssize_t init(char *name, int nthreads)
     object_map.reset();
     in_mem_objects.erase(in_mem_objects.begin(), in_mem_objects.end());
     object_info.erase(object_info.begin(), object_info.end());
+}
+
+ssize_t init(char *name, int nthreads)
+{
+    reset_all();
+    io = new file_backend(name);
 
     std::vector<uint32_t>  ckpts;
     std::vector<clone_p>   clones;
@@ -468,7 +469,29 @@ ssize_t init(char *name, int nthreads)
     if (bytes < 0)
       return bytes;
     batch_seq = super_sh->next_obj;
+
+    int _ckpt = 1;
+    for (auto ck : ckpts) {
+	ckpts.resize(0);
+	std::vector<ckpt_obj> objects;
+	std::vector<deferred_delete> deletes;
+	std::vector<ckpt_mapentry> map;
+	if (read_checkpoint(ck, ckpts, objects, deletes, map) < 0)
+	    return -1;
+	for (auto o : objects) {
+	    object_info[o.seq] = (obj_info){.hdr = o.hdr_sectors, .data = o.data_sectors,
+				    .live = o.live_sectors, .type = LSVD_DATA};
+
+	}
+	for (auto m : map) {
+	    object_map.update(m.lba, m.lba + m.len,
+			      (extmap::obj_offset){.obj = (uint64_t) m.obj,
+				      .offset = (uint64_t)m.offset});
+	}
+	_ckpt = ck;
+    }
     
+    int last = find_most_recent(_ckpt);
     // todo: ignore checkpoints for now
     batch_seq = roll_forward(batch_seq);
     running = true;
