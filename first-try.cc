@@ -101,13 +101,11 @@ public:
 	close(fd);
 	return val;
     }
-    ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt)
-    {
+    ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) {
 	auto name = std::string(prefix) + "." + hex(seq);
 	return write_object(name.c_str(), iov, iovcnt);
     }
-    ssize_t read_object(const char *name, char *buf, size_t offset, size_t len)
-    {
+    ssize_t read_object(const char *name, char *buf, size_t offset, size_t len) {
 	int fd = open(name, O_RDONLY);
 	if (fd < 0)
 	    return -1;
@@ -115,13 +113,28 @@ public:
 	close(fd);
 	return val;
     }
-
-    ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len)
-    {
+    ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
 	auto name = std::string(prefix) + "." + hex(seq);
 	return read_object(name.c_str(), buf, offset, len);
     }
 };    
+
+char *read_object_hdr(const char *name, bool fast) {
+    hdr *h = (hdr*)malloc(4096);
+    if (io->read_object(name, (char*)h, 0, 4096) < 0)
+	goto fail;
+    if (fast)
+	return (char*)h;
+    if (h->hdr_sectors > 8) {
+	h = (hdr*)realloc(h, h->hdr_sectors * 512);
+	if (io->read_object(name, (char*)h, 0, h->hdr_sectors*512) < 0)
+	    goto fail;
+    }
+    return (char*)h;
+fail:
+    free((char*)h);
+    return NULL;
+}
 
 
 // merge buffer and free list are protected by merge_lock
@@ -150,24 +163,17 @@ hdr       *super_h;
 super_hdr *super_sh;
 size_t     super_len;
 
+/* clone_info is variable-length, so we need to pass back pointers 
+ * rather than values. That's OK because we allocate superblock permanently
+ */
 typedef clone_info *clone_p;
-typedef snap_info *snap_p;
-
 ssize_t read_super(char *name, std::vector<uint32_t> &ckpts,
-		   std::vector<clone_p> &clones, std::vector<snap_p> &snaps)
+		   std::vector<clone_p> &clones, std::vector<snap_info> &snaps)
 {
-    // TODO: clean this up so we can switch to objects easier
-    int fd = open(name, O_RDONLY);
-    if (fd < 0)
-	return -1;
-
-    size_t len = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    super = (char*)calloc(len, 1);
-    read(fd, super, len);
-    super_len = len;
-
+    super = read_object_hdr(name, false);
     super_h = (hdr*)super;
+    super_len = super_h->hdr_sectors * 512;
+
     if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
 	super_h->type != LSVD_SUPER)
 	return -1;
@@ -188,11 +194,45 @@ ssize_t read_super(char *name, std::vector<uint32_t> &ckpts,
     snap_info *p_snap = (snap_info*)(super + super_sh->snaps_offset),
 	*end_snap = (snap_info*)(super + super_sh->snaps_offset + super_sh->snaps_len);
     for (; p_snap < end_snap; p_snap++)
-	snaps.push_back(p_snap);
+	snaps.push_back(*p_snap);
     
     return super_sh->vol_size * 512;
 }
 
+ssize_t read_data_hdr(const char *name, hdr &h, data_hdr &dh, std::vector<uint32_t> &ckpts,
+		   std::vector<obj_cleaned> &cleaned, std::vector<data_map> &dmap)
+{
+    char *buf = read_object_hdr(name, false);
+    if (buf == NULL)
+	return -1;
+    hdr      *tmp_h = (hdr*)buf;
+    data_hdr *tmp_dh = (data_hdr*)(tmp_h+1);
+    if (tmp_h->type != LSVD_DATA) {
+	free(buf);
+	return -1;
+    }
+    
+    h = *tmp_h;
+    dh = *tmp_dh;
+
+    uint32_t *p_ckpt = (uint32_t*)(buf + tmp_dh->ckpts_offset),
+	*end_ckpt = (uint32_t*)(buf + tmp_dh->ckpts_offset + tmp_dh->ckpts_len);
+    for (; p_ckpt < end_ckpt; p_ckpt++)
+	ckpts.push_back(*p_ckpt);
+
+    obj_cleaned *p_cleaned = (obj_cleaned*)(buf + tmp_dh->objs_cleaned_offset),
+	*end_cleaned = (obj_cleaned*)(super + tmp_dh->objs_cleaned_offset + tmp_dh->objs_cleaned_len);
+    for (; p_cleaned < end_cleaned; p_cleaned++)
+	cleaned.push_back(*p_cleaned);
+
+    data_map *p_map = (data_map*)(buf + tmp_dh->map_offset),
+	*end_map = (data_map*)(buf + tmp_dh->map_offset + tmp_dh->map_len);
+    for (; p_map < end_map; p_map++)
+	dmap.push_back(*p_map);
+
+    free(buf);
+    return 0;
+}
 
 /* read data map from data object header
  * for now ignores checkpoints, objects_cleaned
@@ -397,9 +437,9 @@ ssize_t init(char *name, int nthreads)
     in_mem_objects.erase(in_mem_objects.begin(), in_mem_objects.end());
     object_info.erase(object_info.begin(), object_info.end());
 
-    std::vector<uint32_t> ckpts;
-    std::vector<clone_p>  clones;
-    std::vector<snap_p>   snaps;
+    std::vector<uint32_t>  ckpts;
+    std::vector<clone_p>   clones;
+    std::vector<snap_info> snaps;
     ssize_t bytes = read_super(name, ckpts, clones, snaps);
     if (bytes < 0)
       return bytes;
