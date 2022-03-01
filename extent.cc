@@ -625,6 +625,14 @@ namespace extmap {
 	void trim(T_in base, T_in limit, T_out e) {
 	    _update(base, limit, e, true, nullptr);
 	}
+
+	void reset(void) {
+	    for (auto l : lists)
+		delete l;
+	    lists.resize(0);
+	    maxes.resize(0);
+	    count = 0;
+	}
     };
 
     // template <class T, class T_in, class T_out>
