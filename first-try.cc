@@ -77,6 +77,7 @@ public:
     virtual ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) = 0;
     virtual ssize_t read_object(const char *name, char *buf, size_t offset, size_t len) = 0;
     virtual ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) = 0;
+    virtual std::string object_name(int seq) = 0;
 };
 
 backend *io;
@@ -116,6 +117,9 @@ public:
     ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
 	auto name = std::string(prefix) + "." + hex(seq);
 	return read_object(name.c_str(), buf, offset, len);
+    }
+    std::string object_name(int seq) {
+	return std::string(prefix) + "." + hex(seq);
     }
 };    
 
@@ -163,6 +167,10 @@ hdr       *super_h;
 super_hdr *super_sh;
 size_t     super_len;
 
+/* these all should probably be combined with the stuff in objects.cc to create
+ * object classes that serialize and de-serialize themselves. Sometime, maybe.
+ */
+
 /* clone_info is variable-length, so we need to pass back pointers 
  * rather than values. That's OK because we allocate superblock permanently
  */
@@ -199,10 +207,11 @@ ssize_t read_super(char *name, std::vector<uint32_t> &ckpts,
     return super_sh->vol_size * 512;
 }
 
-ssize_t read_data_hdr(const char *name, hdr &h, data_hdr &dh, std::vector<uint32_t> &ckpts,
+ssize_t read_data_hdr(int seq, hdr &h, data_hdr &dh, std::vector<uint32_t> &ckpts,
 		   std::vector<obj_cleaned> &cleaned, std::vector<data_map> &dmap)
 {
-    char *buf = read_object_hdr(name, false);
+    auto name = io->object_name(seq);
+    char *buf = read_object_hdr(name.c_str(), false);
     if (buf == NULL)
 	return -1;
     hdr      *tmp_h = (hdr*)buf;
@@ -221,12 +230,50 @@ ssize_t read_data_hdr(const char *name, hdr &h, data_hdr &dh, std::vector<uint32
 	ckpts.push_back(*p_ckpt);
 
     obj_cleaned *p_cleaned = (obj_cleaned*)(buf + tmp_dh->objs_cleaned_offset),
-	*end_cleaned = (obj_cleaned*)(super + tmp_dh->objs_cleaned_offset + tmp_dh->objs_cleaned_len);
+	*end_cleaned = (obj_cleaned*)(buf + tmp_dh->objs_cleaned_offset + tmp_dh->objs_cleaned_len);
     for (; p_cleaned < end_cleaned; p_cleaned++)
 	cleaned.push_back(*p_cleaned);
 
     data_map *p_map = (data_map*)(buf + tmp_dh->map_offset),
 	*end_map = (data_map*)(buf + tmp_dh->map_offset + tmp_dh->map_len);
+    for (; p_map < end_map; p_map++)
+	dmap.push_back(*p_map);
+
+    free(buf);
+    return 0;
+}
+
+ssize_t read_checkpoint(int seq, std::vector<uint32_t> &ckpts, std::vector<ckpt_obj> &objects, 
+			std::vector<deferred_delete> &deletes, std::vector<ckpt_mapentry> &dmap)
+{
+    auto name = io->object_name(seq);
+    char *buf = read_object_hdr(name.c_str(), false);
+    if (buf == NULL)
+	return -1;
+    hdr      *h = (hdr*)buf;
+    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
+    if (h->type != LSVD_CKPT) {
+	free(buf);
+	return -1;
+    }
+
+    uint32_t *p_ckpt = (uint32_t*)(buf + ch->ckpts_offset),
+	*end_ckpt = (uint32_t*)(buf + ch->ckpts_offset + ch->ckpts_len);
+    for (; p_ckpt < end_ckpt; p_ckpt++)
+	ckpts.push_back(*p_ckpt);
+
+    ckpt_obj *p_obj = (ckpt_obj*)(buf + ch->objs_offset),
+	*end_obj = (ckpt_obj*)(buf + ch->objs_offset + ch->objs_len);
+    for (; p_obj < end_obj; p_obj++)
+	objects.push_back(*p_obj);
+
+    deferred_delete *p_del = (deferred_delete*)(buf + ch->deletes_offset),
+	*end_del = (deferred_delete*)(buf + ch->deletes_offset + ch->deletes_len);
+    for (; p_del < end_del; p_del++)
+	deletes.push_back(*p_del);
+
+    ckpt_mapentry *p_map = (ckpt_mapentry*)(buf + ch->map_offset),
+	*end_map = (ckpt_mapentry*)(buf + ch->map_offset + ch->map_len);
     for (; p_map < end_map; p_map++)
 	dmap.push_back(*p_map);
 
