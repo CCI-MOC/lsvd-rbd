@@ -387,6 +387,25 @@ Sequence number is even when map is valid, odd when it's being updated. To use t
 
 The shared cache should update the map infrequently, and take a decent amount of time in doing so. (1 second?)
 
+### Write and read cache
+
+If the read cache uses 64K chunks, then 1TB/64k = 16M entries, or 64MB at 4 bytes each.
+32+16 = 48 = 256TB max volume size for 4 byte entries. Note that current extent.cc has 128TB limit, although it could get bigger if I reduced the max extent length, which is currently 24 bits (= 2^33 bytes).
+
+It wouldn't be a big deal to serialize 5-byte entries, which would give a max size of 64PB or something. If we drop the max extent length to 1GB (21 bit sector number) then we would be able to get 1PB into the object map, or 8PB if we move to 4KB block addressing. (with 8GB max chunk again - 64PB if we drop extent length to 18 bits) Of course at that point the memory usage for the object map is kind of crazy - 1PB with 1M extents is a billion entries. Actually, 24GB for the map isn't horribly excessive - that's about $100, and 1PB of bare disks costs maybe $15K.
+
+How do we do LRU ordering or whatever? Assign order to each entry, truncate it to 8 bits, store it. Or if we're using saturating LFU or something like that, just store those values.
+
+**Important:** need version number for map, replacement state info because it's going to change. It's probably useful to provide a small region for version-specific metadata, too. E.g.:
+- length in blocks
+- type
+- type-specific data (32B? 64B?)
+- start block <- assumes sequential allocation
+
+For the simple map, type-specific data would only be the count of entries. (or equivalently the total length in bytes)
+
+For write cache, journal needs entry types for checkpoint and pad
+
 ### status
 
 **Sun Feb 27 23:55:50 2022**
