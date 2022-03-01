@@ -55,14 +55,14 @@ struct super_hdr {
 /* ckpts: list of active checkpoints: array of uint32_t */
 
 /* variable-length structure */
-struct clone {
+struct clone_info {
     uuid_t   vol_uuid;
     uint32_t sequence;
     uint8_t  name_len;
     char     name[0];
 } __attribute__((packed));
 
-struct snap {
+struct snap_info {
     uuid_t   snap_uuid;
     uint32_t seq;
 };
