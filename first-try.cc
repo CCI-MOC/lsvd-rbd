@@ -19,6 +19,8 @@
 #include <iomanip>
 #include <stdexcept>
 #include <chrono>
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
 
 #include <unistd.h>
 #include <sys/uio.h>
@@ -448,14 +450,15 @@ static void flush_thread(void)
     }
 }
 
+/* each write queues up one of these for a worker thread
+ */
 struct wcache_work {
     uint64_t                lba;
     std::vector<iovec>      iov;
-    std::condition_variable cv;
+    void                  (*callback)(void*);
+    void                   *ptr;
 };
 
-#include <experimental/filesystem>
-namespace filesystem = std::experimental::filesystem;
 
 /* all addresses are in units of 4KB blocks
  */
@@ -471,7 +474,8 @@ class write_cache {
     uint32_t       next;
     uint32_t       oldest;
 
-    bool           running;
+    bool                     running;
+    std::mutex               m;
     std::condition_variable  cv;
     std::queue<wcache_work*> q;
     std::queue<std::thread>  threads;
@@ -481,15 +485,31 @@ class write_cache {
     
 public:
     void writer(void) {
+	while (running) {
+	    std::unique_lock<std::mutex> lk(m);
+	    while (running && q.empty())
+		cv.wait(lk);
+	    if (running) {
+		auto work = q.front();
+		q.pop();
+		lk.unlock();
+		work->callback(work->ptr);
+	    }
+	}
+    }
+    ~write_cache() {
+	running = false;
+	cv.notify_all();
     }
     write_cache(uint32_t blkno, int _fd) {
 	super_blkno = blkno;
 	fd = _fd;
 	char *buf = (char*)malloc(4096);
-	if (read(fd, buf, 4096) < 4096)
-	    throw filesystem::filesystem_error("cache", std::error_code());
+	if (pread(fd, buf, 4096, 0) < 4096)
+	    throw fs::filesystem_error("cache", std::error_code());
 	super = (j_write_super*)buf;
 
+	running = true;
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    threads.push(std::thread(&write_cache::writer, this));
