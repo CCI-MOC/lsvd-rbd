@@ -18,6 +18,7 @@
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
+#include <chrono>
 
 #include <unistd.h>
 #include <sys/uio.h>
@@ -140,6 +141,7 @@ fail:
 //
 std::mutex              m;
 std::condition_variable cv;
+std::condition_variable cv2;	// misc sleeping threads, notify_all on quit
 std::queue<batch*>      work_queue;
 
 batch              *current_batch;
@@ -304,7 +306,7 @@ static int make_hdr(char *buf, batch *b)
     memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
 
     data_hdr *dh = (data_hdr*)(h+1);
-    uint32_t o1 = sizeof(*h) + sizeof(*h), l1 = sizeof(uint32_t), o2 = o1 + l1,
+    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t), o2 = o1 + l1,
 	l2 = b->entries.size() * sizeof(data_map);
     *dh = (data_hdr){.last_data_obj = (uint32_t)b->seq, .ckpts_offset = o1, .ckpts_len = l1,
 		     .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
@@ -368,6 +370,135 @@ static void reset_all(void)
     object_info.erase(object_info.begin(), object_info.end());
 }
 
+/* returns sequence number of ckpt
+ */
+int lsvd_checkpoint(void)
+{
+    std::unique_lock<std::mutex> lk(m);
+    if (current_batch && current_batch->len > 0) {
+	work_queue.push(current_batch);
+	current_batch = NULL;
+	cv.notify_one();
+    }
+    int seq = batch_seq++;
+    lk.unlock();
+    return write_checkpoint(seq);
+}
+
+static void ckpt_thread(void)
+{
+    auto one_second = std::chrono::seconds(1);
+    auto seq0 = batch_seq;
+    const int ckpt_interval = 100;
+    
+    while (running) {
+	std::unique_lock<std::mutex> lk(m);
+	cv2.wait_for(lk, one_second);
+	if (running && batch_seq - seq0 > ckpt_interval) {
+	    seq0 = batch_seq;
+	    lk.unlock();
+	    lsvd_checkpoint();
+	}
+    }
+}
+
+int lsvd_flush(void)
+{
+    const std::unique_lock<std::mutex> lock(m);
+    int val = 0;
+    if (current_batch && current_batch->len > 0) {
+	val = current_batch->seq;
+	work_queue.push(current_batch);
+	current_batch = NULL;
+	cv.notify_one();
+#if 0
+	if (batches.empty())
+	    current_batch = new batch(BATCH_SIZE);
+	else {
+	    current_batch = batches.top();
+	    batches.pop();	// f-ing C++ stacks
+	}
+	current_batch->reset();
+	in_mem_objects[current_batch->seq] = current_batch->buf;
+#endif
+    }
+    return val;
+}
+
+static void flush_thread(void)
+{
+    auto one_sec = std::chrono::seconds(1);
+    auto timeout = std::chrono::seconds(2);
+    auto t0 = std::chrono::system_clock::now();
+    auto seq0 = batch_seq;
+
+    while (running) {
+	std::unique_lock<std::mutex> lk(m);
+	cv2.wait_for(lk, one_sec);
+	if (running && seq0 == batch_seq && current_batch->len > 0) {
+	    if (std::chrono::system_clock::now() - t0 > timeout) {
+		lk.unlock();
+		lsvd_flush();
+	    }
+	}
+	else {
+	    seq0 = batch_seq;
+	    t0 = std::chrono::system_clock::now();
+	}
+    }
+}
+
+struct wcache_work {
+    uint64_t                lba;
+    std::vector<iovec>      iov;
+    std::condition_variable cv;
+};
+
+#include <experimental/filesystem>
+namespace filesystem = std::experimental::filesystem;
+
+/* all addresses are in units of 4KB blocks
+ */
+class write_cache {
+    int            fd;
+    uint32_t       super_blkno;
+    j_write_super *super;	// 4KB
+
+    extmap::cachemap map;
+
+    uint32_t       base;
+    uint32_t       limit;
+    uint32_t       next;
+    uint32_t       oldest;
+
+    bool           running;
+    std::condition_variable  cv;
+    std::queue<wcache_work*> q;
+    std::queue<std::thread>  threads;
+
+
+    static const int n_threads = 4;
+    
+public:
+    void writer(void) {
+    }
+    write_cache(uint32_t blkno, int _fd) {
+	super_blkno = blkno;
+	fd = _fd;
+	char *buf = (char*)malloc(4096);
+	if (read(fd, buf, 4096) < 4096)
+	    throw filesystem::filesystem_error("cache", std::error_code());
+	super = (j_write_super*)buf;
+
+	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
+	for (auto i = 0; i < n_threads; i++)
+	    threads.push(std::thread(&write_cache::writer, this));
+    }
+    ssize_t write(size_t offset, iovec *iov, int iovcnt) {
+	return 0;
+    }
+};
+    
 ssize_t init(char *name, int nthreads)
 {
     reset_all();
@@ -424,6 +555,9 @@ ssize_t init(char *name, int nthreads)
     
     for (int i = 0; i < nthreads; i++) 
       pool.push(std::thread(worker_thread));
+    pool.push(std::thread(ckpt_thread));
+    pool.push(std::thread(flush_thread));
+
     return bytes;
 }
 
@@ -432,6 +566,7 @@ void lsvd_shutdown(void)
     running = false;
     std::unique_lock<std::mutex> lk(m);
     cv.notify_all();
+    cv2.notify_all();
     lk.unlock();
 
     while (!pool.empty()) {
@@ -471,42 +606,6 @@ ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
     memcpy(ptr, buf, len);
 
     return len;
-}
-
-int lsvd_flush(void)
-{
-    const std::unique_lock<std::mutex> lock(m);
-    int val = 0;
-    if (current_batch && current_batch->len > 0) {
-	val = current_batch->seq;
-	work_queue.push(current_batch);
-	current_batch = NULL;
-	cv.notify_one();
-	if (batches.empty())
-	    current_batch = new batch(BATCH_SIZE);
-	else {
-	    current_batch = batches.top();
-	    batches.pop();	// f-ing C++ stacks
-	}
-	current_batch->reset();
-	in_mem_objects[current_batch->seq] = current_batch->buf;
-    }
-    return val;
-}
-
-/* returns sequence number of ckpt
- */
-int lsvd_checkpoint(void)
-{
-    std::unique_lock<std::mutex> lk(m);
-    if (current_batch && current_batch->len > 0) {
-	work_queue.push(current_batch);
-	current_batch = NULL;
-	cv.notify_one();
-    }
-    int seq = batch_seq++;
-    lk.unlock();
-    return write_checkpoint(seq);
 }
 
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)

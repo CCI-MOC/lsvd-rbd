@@ -83,6 +83,7 @@ struct j_read_super {
      */
 };
 
+      
 /* this goes in the first 4KB block in the cache partition, and never
  * gets modified
  */
@@ -90,13 +91,49 @@ struct j_super {
     uint32_t magic;
     uint32_t type;		// LSVD_J_SUPER
     uint32_t version;		// 1
-    uuid_t   vol_uuid;
 
     /* both are single blocks, so we only need a block number
      */
     uint32_t write_super;
     uint32_t read_super;
+
+    uuid_t   vol_uuid;
+    uint32_t backend_type;
 };
+
+/* backend follows superblock
+ */
+enum {LSVD_BE_FILE  = 100,
+      LSVD_BE_S3    = 101,
+      LSVD_BE_RADOS = 102};
+
+struct j_be_file {
+    uint16_t len;
+    char    prefix[0];
+};
+
+struct offset_len {
+    uint16_t offset;
+    uint16_t len;
+};
+
+struct j_be_s3 {
+    uint16_t use_https;
+    struct offset_len access_key;
+    struct offset_len secret_key;
+    struct offset_len hostname;
+    struct offset_len bucket;
+    struct offset_len prefix;
+};
+
+/* based on C example at https://docs.ceph.com/en/latest/rados/api/librados-intro/
+ */
+struct j_be_rados {
+    struct offset_len cluster_name;
+    struct offset_len user_name;
+    struct offset_len config_file;
+};
+
 
 /* TODO: 
  * - superblock

@@ -51,9 +51,9 @@ elif h.type == lsvd.LSVD_DATA:
     print('n_data:   ', h.data_sectors)
 
     print('last_data:', dh.last_data_obj)
-    print('ckpts:    ', ', '.join(fmt_ckpt(ckpts)))
-    print('cleaned:  ', ', '.join(fmt_obj_cleaned(objs)))
-    print('map:      ', ', '.join(fmt_data_map(maps)))
+    print('ckpts:    ', dh.ckpts_offset, ':', ', '.join(fmt_ckpt(ckpts)))
+    print('cleaned:  ', dh.objs_cleaned_offset, ':', ', '.join(fmt_obj_cleaned(objs)))
+    print('map:      ', dh.map_offset, ':', ', '.join(fmt_data_map(maps)))
     
 elif h.type == lsvd.LSVD_CKPT:
     o3 = o2+lsvd.sizeof_ckpt_hdr
