@@ -237,6 +237,15 @@ namespace extmap {
 	void verify_max(void) {
 	}
 
+	void first(T _e) {
+	    auto vec = new extent_vector();
+	    vec->reserve(_load);
+	    vec->push_back(_e);
+	    lists.push_back(vec);
+	    maxes.push_back(_e.limit());
+	    count = 1;
+	}
+
 	// iterator gets used both internally and externally
 	// (returned by lookup function)
 	//
@@ -336,8 +345,8 @@ namespace extmap {
 
 	iterator end() {
 	    if (lists.size() == 0) {
-		iterator it;
-		return it;
+		typename extent_vector::iterator it;		
+		return iterator(this, 0, it);
 	    }
 	    int n = lists.size()-1;
 	    return iterator(this, n, lists[n]->end());
@@ -415,6 +424,10 @@ namespace extmap {
 	// insert just before iterator 'it', return pointer to inserted value
 	//
 	iterator _insert(iterator it, T _e) {
+	    if (count == 0) {
+		first(_e);
+		return begin();
+	    }
 	    it.it = lists[it.i]->insert(it.it, _e);
 	    maxes[it.i] = lists[it.i]->back().limit();
 	    count++;
@@ -425,8 +438,18 @@ namespace extmap {
 	//
 	iterator _erase(iterator it) {
 	    it.it = lists[it.i]->erase(it.it);
-	    maxes[it.i] = lists[it.i]->back().limit();
+
+	    // if there's only one list, this might delete it down to zero
+	    if (lists[it.i]->size() > 0) 
+		maxes[it.i] = lists[it.i]->back().limit();
+	    else {
+		delete lists[it.i];
+		lists.erase(lists.begin()+it.i);
+		maxes.erase(maxes.begin()+it.i);
+	    }
 	    count--;
+	    if (lists.size() == 0)
+		return end();
 	    
 	    if (lists[it.i]->size() > _load / 2)
 		;
@@ -478,12 +501,7 @@ namespace extmap {
 	    // special case inserting the first entry
 	    //
 	    if (maxes.size() == 0) {
-		auto vec = new extent_vector();
-		vec->reserve(_load);
-		vec->push_back(_e);
-		lists.push_back(vec);
-		maxes.push_back(limit);
-		count = 1;
+		first(_e);
 		return;
 	    }
 
@@ -564,6 +582,10 @@ namespace extmap {
 
 	    // insert before 'it'
 	    if (!trim) {
+		if (count == 0) { // avoid valgrind error on (it-1)
+		    _insert(it, _e);
+		    return;
+		}
 		auto prev = it-1;
 		if (it != begin() && adjacent(*prev, _e)) {
 		    // we can merge with the previous extent

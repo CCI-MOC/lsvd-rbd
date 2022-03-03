@@ -408,6 +408,19 @@ For write cache, journal needs entry types for checkpoint and pad
 
 Note that we can add the write cache first and test it, then add the read cache.
 
+**Direct I/O** - I really think we should be using direct i/o to the cache device, as otherwise we don't have any guarantees about when data goes to the NVMe drive. This means we're going to have to copy everything into aligned buffers, probably. Which in turn means that we probably don't have to copy in the translation layer, but we need some way of notifying the cache that we're done with a specific buffer.
+
+### valgrind
+To run Gdb with `valgrind`:
+```
+valgrind --vgdb-error=1 --vgdb=full --vgdb-stop-at=all ./unit-test
+```
+
+Example of running Python-based tests under `valgrind` with Gdb:
+```
+valgrind --vgdb-error=1 --vgdb=full --vgdb-stop-at=all --suppressions=valgrind-python.supp python3 test1.py
+```
+
 ### status
 
 **Sun Feb 27 23:55:50 2022**

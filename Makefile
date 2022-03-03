@@ -13,3 +13,6 @@ mkdisk: mkdisk.cc objects.cc
 
 clean:
 	rm -f liblsvd.so bdus mkdisk
+
+unit-test: unit-test.cc extent.cc
+	g++ $(CXXFLAGS) -o unit-test unit-test.cc
