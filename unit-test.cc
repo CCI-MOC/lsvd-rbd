@@ -17,6 +17,7 @@ void test_ptr(extmap::objmap *map)
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	assert(base == ptr.offset);
+	assert(limit > base);	// get rid of unused var warning
     }
 }
 
@@ -41,23 +42,23 @@ void test_0_count(void)
 void test_1_seq(void)
 {
     extmap::objmap map;
-    int max = 800;
+    uint64_t max = 800;
     
-    for (int i = 0; i < max; i++) {
+    for (uint64_t i = 0; i < max; i++) {
 	uint64_t base = i*10, limit = base + 5;
 	extmap::obj_offset ptr = {0, base};
 	map.update(base, limit, ptr);
 	test_ptr(&map);
     }
     
-    int i = 0;
+    uint64_t i = 0;
     for (auto it = map.begin(); it != map.end(); it++, i++) {
 	auto [base, limit, ptr] = it->vals();
 	assert(base == i*10 && limit == i*10 + 5 && ptr.obj == 0 && ptr.offset == base);
     }
 
     for (i = 0; i < max; i++) {
-	int base = i*10 + 2, limit = base + 6;
+	uint64_t base = i*10 + 2, limit = base + 6;
 	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, _ptr] = it->vals(base, limit);
 	    assert(_base == base && _limit == base+3 && _ptr.offset == base);
@@ -71,16 +72,16 @@ void test_1_seq(void)
 void test_2_mod17(void)
 {
     extmap::objmap map;
-    int max = 800;
+    uint64_t max = 800;
     
-    for (int i = 0, j = 0; i < max; i++, j = (j+17) % max) {
+    for (uint64_t i = 0, j = 0; i < max; i++, j = (j+17) % max) {
 	uint64_t base = j*10, limit = base + 5;
 	extmap::obj_offset ptr = {0, base};
 	map.update(base, limit, ptr);
 	test_ptr(&map);
     }
     
-    int i = 0;
+    uint64_t i = 0;
     for (auto it = map.begin(); it != map.end(); it++, i++) {
 	auto [base, limit, ptr] = it->vals();
 	assert(base == i*10);
@@ -96,18 +97,18 @@ void test_2_mod17(void)
 //
 void test_3_seq_merge(void)
 {
-    int max = 800, merge_min = 2, merge_max = max-5;
+    uint64_t max = 800, merge_min = 2, merge_max = max-5;
     
-    for (int k = merge_min; k < merge_max; k++) {
+    for (uint64_t k = merge_min; k < merge_max; k++) {
 	extmap::objmap map;
-	for (int i = 0; i < max; i++) {
+	for (uint64_t i = 0; i < max; i++) {
 	    uint64_t base = i*10, limit = base + 5;
 	    extmap::obj_offset ptr = {0, base};
 	    map.update(base, limit, ptr);
 	    test_ptr(&map);
 	}
 	    
-	int i = 0;
+	uint64_t i = 0;
 	for (auto it = map.begin(); it != map.end(); it++, i++) {
 	    auto [base, limit, ptr] = it->vals();
 	    assert(base == i*10 && limit == i*10+5 && ptr.offset == base);
@@ -173,11 +174,11 @@ std::vector<extmap::lba2obj> *rnd_extents(uint64_t max, int n, bool rnd_obj, boo
 //
 std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
 {
-    int64_t max = 0;
+    uint64_t max = 0;
     for (auto w : *writes) 
 	max = (w.limit() > max) ? w.limit() : max;
     auto v = new std::vector<extmap::obj_offset>;
-    for (int i = 0; i < max+2; i++)
+    for (uint64_t i = 0; i < max+2; i++)
 	v->push_back((extmap::obj_offset){(uint32_t)-1, 0});
 
     for (auto w : *writes) {
@@ -194,17 +195,17 @@ std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
 //
 std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 {
-    int64_t base = 0, limit = -1;
+    uint64_t base = 0, limit = -1;
     auto v = new std::vector<extmap::lba2obj>;
-    int i = 0;
+    uint64_t i = 0;
     while (i < writes->size()) {
-	while (i < writes->size() && (*writes)[i].obj == -1) {
+	while (i < writes->size() && (*writes)[i].obj == (uint64_t)-1) {
 	    base = i+1;
 	    i++;
 	}
 	auto obj = (*writes)[i].obj;
 	auto offset = (*writes)[i].offset;
-	while (i < writes->size() && (*writes)[i].obj != -1 && (*writes)[i].obj == obj) {
+	while (i < writes->size() && (*writes)[i].obj != (uint64_t)-1 && (*writes)[i].obj == obj) {
 	    limit = i+1;
 	    i++;
 	}
@@ -219,7 +220,7 @@ std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 
 void test_4_rand(void)
 {
-    int max = 8000, n = 2000;
+    uint64_t max = 8000, n = 2000;
     auto writes = rnd_extents(max, n, false, false);
 
     extmap::objmap map;
@@ -304,11 +305,11 @@ void test_6_rand(void)
 //
 void test_7_lookup(void)
 {
-    int max = 800;
+    uint64_t max = 800;
 
-    for (int k = 5; k < max-5; k++) {
+    for (uint64_t k = 5; k < max-5; k++) {
       extmap::objmap map;
-      for (int i = 0; i < max; i++) {
+      for (uint64_t i = 0; i < max; i++) {
 	uint64_t base = i*10, limit = base + 5;
 	extmap::obj_offset ptr = {0, base};
 	map.update(base, limit, ptr);
@@ -325,7 +326,7 @@ void test_7_lookup(void)
 // like the previous random test, except that we knock out a whole bunch 
 void test_8_rand(void)
 {
-    int max = 2000000, n = 200000;
+    uint64_t max = 2000000, n = 200000;
     auto writes = rnd_extents(max, n, true, true);
 
     uint64_t base = max/10, limit = max - base;
@@ -360,9 +361,9 @@ void test_8_rand(void)
 void test_9_delete(void)
 {
     extmap::objmap map;
-    int max = 800;
+    uint64_t max = 800;
     
-    for (int i = 0; i < max; i++) {
+    for (uint64_t i = 0; i < max; i++) {
 	uint64_t base = i*10, limit = base + 5;
 	extmap::obj_offset ptr = {0, base};
 	map.update(base, limit, ptr);
@@ -375,7 +376,7 @@ void test_9_delete(void)
     map.update(252, 328, ptr, &v);
 
     // should knock out 252-255, 260-265, ... 320..325
-    int i = 0;
+    uint64_t i = 0;
     for (auto it = map.begin(); it != map.end(); it++, i++) {
 	auto [base, limit, ptr] = it->vals();
 	if (i < 25) 
@@ -396,7 +397,7 @@ void test_9_delete(void)
     assert(_base == 252 && _limit == 255 && _ptr.offset == 252);
     it++;
     
-    for (int i = 0; it != v.end(); it++, i++) {
+    for (uint64_t i = 0; it != v.end(); it++, i++) {
 	auto [base, limit, ptr] = it->vals();
 	assert(base == 260 + i*10 && limit == base+5 && ptr.offset == base);
     }

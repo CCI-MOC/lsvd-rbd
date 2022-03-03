@@ -16,3 +16,6 @@ clean:
 
 unit-test: unit-test.cc extent.cc
 	g++ $(CXXFLAGS) -o unit-test unit-test.cc
+
+unit-test-O3: unit-test.cc extent.cc
+	g++ $(CXXFLAGS) -O3 -o unit-test unit-test.cc
