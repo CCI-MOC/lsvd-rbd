@@ -38,6 +38,14 @@ static int div_round_up(int n, int m)
     return (n + m - 1) / m;
 }
 
+size_t iov_sum(iovec *iov, int iovcnt)
+{
+    size_t sum = 0;
+    for (int i = 0; i < iovcnt; i++)
+	sum += iov[i].iov_len;
+    return sum;
+}
+
 struct batch {
     char  *buf;
     size_t max;
@@ -47,15 +55,26 @@ struct batch {
 public:
     batch(size_t _max) {
 	buf = (char*)malloc(_max);
+	printf("new %p = %p\n", this, buf);
 	max = _max;
     }
     ~batch(){
+	printf("destroy %p = %p\n", this, buf);
 	free((void*)buf);
     }
     void reset(void) {
 	len = 0;
 	entries.resize(0);
 	seq = batch_seq++;
+    }
+    void append_iov(uint64_t lba, iovec *iov, int iovcnt) {
+	for (int i = 0; i < iovcnt; i++) {
+	    memcpy(buf, iov[i].iov_base, iov[i].iov_len);
+	    entries.push_back((data_map){lba, iov[i].iov_len / 512});
+	    buf += iov[i].iov_len;
+	    len += iov[i].iov_len;
+	    lba += iov[i].iov_len / 512;
+	}
     }
     int hdrlen(void) {
 	return sizeof(hdr) + sizeof(data_hdr) + entries.size() * sizeof(data_map);
@@ -460,22 +479,12 @@ struct wcache_work {
     void     *ptr;
 };
 
-size_t iov_sum(iovec *iov, int iovcnt)
-{
-    size_t sum = 0;
-    for (int i = 0; i < iovcnt; i++)
-	sum += iov[i].iov_len;
-    return sum;
-}
-
-ssize_t lsvd_writev(size_t offset, iovec *iov, int iovcnt)
-{
-    return 0;
-}
+ssize_t lsvd_writev(size_t offset, iovec *iov, int iovcnt);
 
 char pad_4k[4096];
 
 /* all addresses are in units of 4KB blocks
+ * TODO: should this use direct I/O? 
  */
 class write_cache {
     int            fd;
@@ -693,9 +702,12 @@ void lsvd_shutdown(void)
     }
 }
 
-ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
+
+ssize_t lsvd_writev(size_t offset, iovec *iov, int iovcnt)
 {
     const std::unique_lock<std::mutex> lock(m);
+    size_t len = iov_sum(iov, iovcnt);
+    
     if (current_batch && current_batch->len + len > current_batch->max) {
 	work_queue.push(current_batch);
 	current_batch = NULL;
@@ -706,7 +718,7 @@ ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
 	    current_batch = new batch(BATCH_SIZE);
 	else {
 	    current_batch = batches.top();
-	    batches.pop();	// f-ing C++ stacks
+	    batches.pop();
 	}
 	current_batch->reset();
 	in_mem_objects[current_batch->seq] = current_batch->buf;
@@ -716,14 +728,15 @@ ssize_t lsvd_write(size_t offset, size_t len, const char *buf)
 	lba = offset/512, limit = (offset+len)/512;
     object_map.update(lba, limit,
 		      (extmap::obj_offset){.obj = (uint64_t) current_batch->seq, .offset = sector_offset});
-    char *ptr = current_batch->buf + current_batch->len;
-    current_batch->len += len;
-    current_batch->entries.push_back((data_map){.lba = offset/512, .len = len/512});
-    // should I unlock here???
+    current_batch->append_iov(offset / 512, iov, iovcnt);
     
-    memcpy(ptr, buf, len);
-
     return len;
+}
+
+ssize_t lsvd_write(size_t offset, size_t len, char *buf)
+{
+    iovec iov = {buf, len};
+    return lsvd_writev(offset, &iov, 1);
 }
 
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)
@@ -777,7 +790,7 @@ ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 }
 
 extern "C" int c_read(char*, uint64_t, uint32_t, struct bdus_ctx*);
-extern "C" int c_write(const char*, uint64_t, uint32_t, struct bdus_ctx*);
+extern "C" int c_write(char*, uint64_t, uint32_t, struct bdus_ctx*);
 extern "C" int c_flush(struct bdus_ctx*);
 extern "C" ssize_t c_init(char*, int);
 extern "C" int c_size(void);
@@ -809,7 +822,7 @@ int c_read(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
     return val < 0 ? -1 : 0;
 }
 
-int c_write(const char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
+int c_write(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
 {
     size_t val = lsvd_write(offset, size, buffer);
     return val < 0 ? -1 : 0;
