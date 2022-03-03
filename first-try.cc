@@ -453,12 +453,27 @@ static void flush_thread(void)
 /* each write queues up one of these for a worker thread
  */
 struct wcache_work {
-    uint64_t                lba;
-    std::vector<iovec>      iov;
-    void                  (*callback)(void*);
-    void                   *ptr;
+    uint64_t  lba;
+    iovec    *iov;
+    int       iovcnt;
+    void    (*callback)(void*);
+    void     *ptr;
 };
 
+size_t iov_sum(iovec *iov, int iovcnt)
+{
+    size_t sum = 0;
+    for (int i = 0; i < iovcnt; i++)
+	sum += iov[i].iov_len;
+    return sum;
+}
+
+ssize_t lsvd_writev(size_t offset, iovec *iov, int iovcnt)
+{
+    return 0;
+}
+
+char pad_4k[4096];
 
 /* all addresses are in units of 4KB blocks
  */
@@ -467,40 +482,119 @@ class write_cache {
     uint32_t       super_blkno;
     j_write_super *super;	// 4KB
 
-    extmap::cachemap map;
+    extmap::cachemap2 map;
 
     uint32_t       base;
     uint32_t       limit;
     uint32_t       next;
     uint32_t       oldest;
 
-    bool                     running;
-    std::mutex               m;
-    std::condition_variable  cv;
-    std::queue<wcache_work*> q;
-    std::queue<std::thread>  threads;
+    bool                    running;
+    std::mutex              m;
+    std::condition_variable cv;
+    std::queue<wcache_work> q;
+    std::queue<std::thread> threads;
 
+    uint64_t sequence;
 
     static const int n_threads = 4;
     
 public:
+    ~write_cache() {
+	running = false;
+	cv.notify_all();
+    }
+
+    /* lock must be held before calling
+     */
+    uint32_t allocate(uint32_t n, uint32_t &pad) {
+	pad = 0;
+	if (limit - next < n) {
+	    pad = next;
+	    next = 0;
+	}
+	auto val = next;
+	next += n;
+	return val;
+    }
+
+    j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, uint32_t blks) {
+	j_hdr *h = (j_hdr*)buf;
+	*h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1, .vol_uuid = {0},
+		     .seq = sequence++, .len = blks, .crc32 = 0, .extent_offset = 0, .extent_len = 0};
+	memcpy(h->vol_uuid, uuid, sizeof(uuid));
+	return h;
+    }
+        
     void writer(void) {
 	while (running) {
 	    std::unique_lock<std::mutex> lk(m);
 	    while (running && q.empty())
 		cv.wait(lk);
 	    if (running) {
-		auto work = q.front();
-		q.pop();
+		std::vector<wcache_work> work;
+		std::vector<int> lengths;
+		int sectors = 0;
+		while (!q.empty()) {
+		    auto w = q.front(); q.pop();
+		    auto l = iov_sum(w.iov, w.iovcnt) / 512;
+		    sectors += l;
+		    lengths.push_back(l);
+		    work.push_back(w);
+		}
+		int blocks = div_round_up(sectors, 8);
+		// allocate blocks + 1
+		uint32_t pad, blockno = allocate(blocks+1, pad);
 		lk.unlock();
-		work->callback(work->ptr);
+
+		char buf[4096];
+		if (pad != 0) {
+		    mk_header(buf, LSVD_J_PAD, my_uuid, (limit - pad));
+		    if (pwrite(fd, buf, 4096, pad*4096) < 0)
+			/* TODO: do something */;
+		}
+
+		std::vector<j_extent> extents;
+		for (auto w : work) 
+		    extents.push_back((j_extent){w.lba, iov_sum(w.iov, w.iovcnt)/512});
+
+		j_hdr *j = mk_header(buf, LSVD_J_DATA, my_uuid, 1+blocks);
+		j->extent_offset = sizeof(*j);
+		size_t e_bytes = extents.size() * sizeof(j_extent);
+		j->extent_len = e_bytes;
+		
+		std::vector<iovec> iovs;
+		iovs.push_back((iovec){buf, 4096});
+		iovs.push_back((iovec){(char*)extents.data(), e_bytes});
+		size_t pad_bytes = 4096 - e_bytes - sizeof(j_hdr);
+		iovs.push_back((iovec){pad_4k, pad_bytes});
+
+		for (auto w : work)
+		    for (int i = 0; i < w.iovcnt; i++)
+			iovs.push_back(w.iov[i]);
+		    
+		size_t pad_sectors = blocks*8 - sectors;
+		if (pad_sectors > 0)
+		    iovs.push_back((iovec){pad_4k, pad_sectors*512});
+
+		if (pwritev(fd, iovs.data(), iovs.size(), blockno*512) < 0)
+		    /* TODO: do something */;
+
+		uint64_t lba = (blockno+1) * 8;
+		for (auto w : work) {
+		    lsvd_writev(w.lba, w.iov, w.iovcnt);
+		    auto sectors = iov_sum(w.iov, w.iovcnt) / 512;
+		    {
+			std::unique_lock<std::mutex> lk(m);
+			map.update(w.lba, w.lba + sectors, lba);
+		    }
+		    lba += sectors;
+		    w.callback(w.ptr);
+		}
 	    }
 	}
     }
-    ~write_cache() {
-	running = false;
-	cv.notify_all();
-    }
+
     write_cache(uint32_t blkno, int _fd) {
 	super_blkno = blkno;
 	fd = _fd;
@@ -514,9 +608,13 @@ public:
 	for (auto i = 0; i < n_threads; i++)
 	    threads.push(std::thread(&write_cache::writer, this));
     }
-    ssize_t write(size_t offset, iovec *iov, int iovcnt) {
-	return 0;
-    }
+
+    void write(size_t offset, iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
+	std::unique_lock<std::mutex> lk(m);
+	q.push((wcache_work){offset/512, iov, iovcnt, callback, ptr});
+	lk.unlock();
+	cv.notify_one();
+    }    
 };
     
 ssize_t init(char *name, int nthreads)

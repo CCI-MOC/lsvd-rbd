@@ -116,6 +116,15 @@ namespace extmap {
 	uint64_t   ptr : 38;	// LBA
     };
 
+    struct _lba2lba {		// TODO: any way to do this in 12 bytes?
+	uint64_t  a    : 1;
+	uint64_t  d    : 1;
+	uint64_t  base : 38;	// LBA
+	uint64_t  len  : 24;
+	uint64_t  ptr  : 40;	// LBA
+	uint64_t  pad  : 24;
+    };
+	
     struct _lba2obj {
 	uint64_t    a    : 1;
 	uint64_t    d    : 1;
@@ -206,6 +215,7 @@ namespace extmap {
     // template <class T, class T_in, class T_out> 
     typedef _extent<_lba2buf,uint64_t,sector_ptr> lba2buf;
     typedef _extent<_obj2lba,obj_offset,uint64_t> obj2lba;
+    typedef _extent<_lba2lba,uint64_t,uint64_t>   lba2lba;
     typedef _extent<_lba2obj,uint64_t,obj_offset> lba2obj;
 
     // an extent map with entries of type T, which map from T_in to T_out
@@ -638,6 +648,7 @@ namespace extmap {
     // template <class T, class T_in, class T_out>
     typedef extmap<lba2obj,uint64_t,obj_offset> objmap;
     typedef extmap<obj2lba,obj_offset,uint64_t> cachemap;
+    typedef extmap<lba2lba,uint64_t,uint64_t>   cachemap2;
     typedef extmap<lba2buf,uint64_t,sector_ptr> bufmap;
 }
 
