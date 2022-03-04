@@ -48,13 +48,16 @@ void test_1_seq(void)
 	uint64_t base = i*10, limit = base + 5;
 	extmap::obj_offset ptr = {0, base};
 	map.update(base, limit, ptr);
-	test_ptr(&map);
+	//test_ptr(&map);
     }
-    
+    printf("foo\n");
     uint64_t i = 0;
     for (auto it = map.begin(); it != map.end(); it++, i++) {
 	auto [base, limit, ptr] = it->vals();
-	assert(base == i*10 && limit == i*10 + 5 && ptr.obj == 0 && ptr.offset == base);
+	assert(base == i*10);
+	assert(limit == i*10 + 5);
+	assert(ptr.obj == 0);
+	assert(ptr.offset == base);
     }
 
     for (i = 0; i < max; i++) {
@@ -186,7 +189,7 @@ std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
 	for (i = w.base(), j = w.s.ptr.offset; i < w.limit(); i++, j++) 
 	    (*v)[i] = (extmap::obj_offset){obj, j};
     }
-    
+     
     return v;
 }
 
@@ -195,17 +198,17 @@ std::vector<extmap::obj_offset> *flatten(std::vector<extmap::lba2obj> *writes)
 //
 std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 {
-    uint64_t base = 0, limit = -1;
+    uint64_t base = 0, limit = 0;
     auto v = new std::vector<extmap::lba2obj>;
     uint64_t i = 0;
     while (i < writes->size()) {
-	while (i < writes->size() && (*writes)[i].obj == (uint64_t)-1) {
+	while (i < writes->size() && (*writes)[i].obj == (uint32_t)-1) {
 	    base = i+1;
 	    i++;
 	}
 	auto obj = (*writes)[i].obj;
 	auto offset = (*writes)[i].offset;
-	while (i < writes->size() && (*writes)[i].obj != (uint64_t)-1 && (*writes)[i].obj == obj) {
+	while (i < writes->size() && (*writes)[i].obj != (uint32_t)-1 && (*writes)[i].obj == obj) {
 	    limit = i+1;
 	    i++;
 	}
