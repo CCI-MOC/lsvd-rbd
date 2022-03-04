@@ -37,8 +37,8 @@ namespace extmap {
     // sector_ptr - points into a memory buffer. ptr increments by 512
     //
     struct obj_offset {
-	uint64_t obj    : 36;
-	uint64_t offset : 28;	// 128GB
+	int64_t obj    : 36;
+	int64_t offset : 28;	// 128GB
     public:
 	obj_offset operator+=(int val) {
 	    offset += val;
@@ -60,7 +60,7 @@ namespace extmap {
 	    return (obj == other.obj) ? (offset <= other.offset) : (obj <= other.obj);
 	}
 	obj_offset operator+(int val) {
-	    return (obj_offset){.obj = obj, .offset = (uint64_t)(offset + val)};
+	    return (obj_offset){.obj = obj, .offset = offset + val};
 	}
 	int operator-(const obj_offset other) {
 	    return offset - other.offset; // meaningless if obj != other.obj
@@ -113,7 +113,7 @@ namespace extmap {
 	uint64_t   a   : 1;
 	uint64_t   d   : 1;
 	uint64_t   len : 24;
-	uint64_t   ptr : 38;	// LBA
+	int64_t    ptr : 38;	// LBA
     };
 
     struct _lba2lba {		// TODO: any way to do this in 12 bytes?
@@ -143,7 +143,7 @@ namespace extmap {
     struct _extent {
 	T s;
     public:
-	_extent(T_in _base, uint64_t _len, T_out _ptr) {
+	_extent(T_in _base, int64_t _len, T_out _ptr) {
 	    s.base = _base;
 	    s.len = _len;
 	    s.ptr = _ptr;
@@ -213,10 +213,10 @@ namespace extmap {
     };
 
     // template <class T, class T_in, class T_out> 
-    typedef _extent<_lba2buf,uint64_t,sector_ptr> lba2buf;
-    typedef _extent<_obj2lba,obj_offset,uint64_t> obj2lba;
-    typedef _extent<_lba2lba,uint64_t,uint64_t>   lba2lba;
-    typedef _extent<_lba2obj,uint64_t,obj_offset> lba2obj;
+    typedef _extent<_lba2buf,int64_t,sector_ptr> lba2buf;
+    typedef _extent<_obj2lba,obj_offset,int64_t> obj2lba;
+    typedef _extent<_lba2obj,int64_t,obj_offset> lba2obj;
+    typedef _extent<_lba2lba,int64_t,int64_t>    lba2lba;
 
     // an extent map with entries of type T, which map from T_in to T_out
     //
@@ -231,6 +231,10 @@ namespace extmap {
 	int                         count;
 
 	extmap(){ count = 0; }
+	~extmap(){
+	    for (auto l : lists)
+		delete l;
+	}
 	
 	// debug code
 	//
@@ -250,9 +254,10 @@ namespace extmap {
 	// (returned by lookup function)
 	//
 	class iterator {
+	    
 	public:
 	    extmap *m;
-	    ssize_t i;		// std::vector::size_type
+	    int     i;
 	    typename extent_vector::iterator it;
 	    
 	    using iterator_category = std::random_access_iterator_tag;
@@ -284,33 +289,25 @@ namespace extmap {
 	    pointer operator->() {
 		return &(*it);
 	    }
-
-	    // went to a lot of trouble to make sure (begin()--)++ works correctly
-	    // not sure it was worth it
 	    iterator& operator++(int) {
 		assert(it < m->lists[i]->end());
-		if (i == -1) {
-		    i = 0;
-		    if (m->count > 0)
-			it = m->lists[0]->begin();
-		}
-		else {
-		    it++;
-		    if (it == m->lists[i]->end()) {
-			if (i+1 <  (ssize_t)m->lists.size()) {
-			    i++;
-			    it = m->lists[i]->begin();
-			}
+		it++;
+		if (it == m->lists[i]->end()) {
+		    if (i + 1 <  m->lists.size()) {
+			i++;
+			it = m->lists[i]->begin();
 		    }
 		}
 		return *this;
 	    }
 	    
+	    // TODO: (begin()--)++ doesn't work correctly
 	    iterator& operator--(int) {
 		if (it == m->lists[i]->begin()) {
-		    if (i > 0) 
+		    if (i > 0) {
+			i--;
 			it = m->lists[i]->end() - 1;
-		    i--;
+		    }
 		}
 		else
 		    it--;
@@ -334,7 +331,7 @@ namespace extmap {
 		if (n > 1)
 		   return (*this + 1) + (n-1);
 		if (it+1 == m->lists[i]->end()) {
-		    if (i+1 == (ssize_t)m->lists.size())
+		    if (i+1 == m->lists.size())
 			return m->end();
 		    else
 			return iterator(m, i+1, m->lists[i+1]->begin());
@@ -351,11 +348,10 @@ namespace extmap {
 	    return iterator(this, 0, lists[0]->begin());
 	}
 
+	extent_vector _tmp; // HACK! HACK!
 	iterator end() {
-	    if (lists.size() == 0) {
-		typename extent_vector::iterator it;		
-		return iterator(this, 0, it);
-	    }
+	    if (lists.size() == 0) 
+		return iterator(this, 0, _tmp.end());
 	    int n = lists.size()-1;
 	    return iterator(this, n, lists[n]->end());
 	}
@@ -389,7 +385,7 @@ namespace extmap {
 
 	    // this shouldn't happen??? because we searched max
 	    //
-	    if (i < (int)(lists.size()-1) && list_iter == lists[i]->end())
+	    if (i < (lists.size()-1) && list_iter == lists[i]->end())
 		return iterator(this, i+1, lists[i+1]->begin());
 
 	    return iterator(this, i, list_iter);
@@ -463,8 +459,8 @@ namespace extmap {
 		;
 	    else if (lists.size() > 1) {
 		int j = it.it - lists[it.i]->begin();
-		ssize_t pos = (it.i > 0) ? it.i : it.i+1;
-		ssize_t prev = pos-1;
+		int pos = (it.i > 0) ? it.i : it.i+1;
+		int prev = pos-1;
 		if (pos == it.i)
 		    j += lists[prev]->size();
 
@@ -481,7 +477,7 @@ namespace extmap {
 	    else if (lists[it.i]->size() > 0)
 		maxes[it.i] = lists[it.i]->back().limit();
 
-	    if (it.it == lists[it.i]->end() && it.i != (ssize_t)lists.size()-1) {
+	    if (it.it == lists[it.i]->end() && it.i != lists.size()-1) {
 		it.i++;
 		it.it = lists[it.i]->begin();
 	    }
@@ -659,13 +655,14 @@ namespace extmap {
 	    _update(base, limit, e, false, nullptr);
 	}
 
-	void trim(T_in base, T_in limit, T_out e, std::vector<lba2obj> *del) {
-	    _update(base, limit, e, true, del);
+	void trim(T_in base, T_in limit, std::vector<lba2obj> *del) {
+	    T_out unused;
+	    _update(base, limit, unused, true, del);
 	}
-	void trim(T_in base, T_in limit, T_out e) {
-	    _update(base, limit, e, true, nullptr);
+	void trim(T_in base, T_in limit) {
+	    T_out unused;
+	    _update(base, limit, unused, true, nullptr);
 	}
-
 	void reset(void) {
 	    for (auto l : lists)
 		delete l;
@@ -676,9 +673,9 @@ namespace extmap {
     };
 
     // template <class T, class T_in, class T_out>
-    typedef extmap<lba2obj,uint64_t,obj_offset> objmap;
-    typedef extmap<obj2lba,obj_offset,uint64_t> cachemap;
-    typedef extmap<lba2lba,uint64_t,uint64_t>   cachemap2;
-    typedef extmap<lba2buf,uint64_t,sector_ptr> bufmap;
+    typedef extmap<lba2obj,int64_t,obj_offset> objmap;
+    typedef extmap<obj2lba,obj_offset,int64_t> cachemap;
+    typedef extmap<lba2buf,int64_t,sector_ptr> bufmap;
+    typedef extmap<lba2lba,int64_t,int64_t>    cachemap2;
 }
 
