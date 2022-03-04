@@ -117,19 +117,19 @@ namespace extmap {
     };
 
     struct _lba2lba {		// TODO: any way to do this in 12 bytes?
-	uint64_t  a    : 1;
-	uint64_t  d    : 1;
-	uint64_t  base : 38;	// LBA
-	uint64_t  len  : 24;
-	uint64_t  ptr  : 40;	// LBA
-	uint64_t  pad  : 24;
+	int64_t  a    : 1;
+	int64_t  d    : 1;
+	int64_t  base : 38;	// LBA
+	int64_t  len  : 24;
+	int64_t  ptr  : 40;	// LBA
+	int64_t  pad  : 24;
     };
 	
     struct _lba2obj {
-	uint64_t    a    : 1;
-	uint64_t    d    : 1;
-	uint64_t    base : 38;	// 128TB max
-	uint64_t    len  : 24;
+	int64_t    a    : 1;
+	int64_t    d    : 1;
+	int64_t    base : 38;	// 128TB max
+	int64_t    len  : 24;
 	obj_offset ptr;
     };
 
@@ -293,7 +293,7 @@ namespace extmap {
 		assert(it < m->lists[i]->end());
 		it++;
 		if (it == m->lists[i]->end()) {
-		    if (i + 1 <  m->lists.size()) {
+		    if (i+1 <  (int)m->lists.size()) {
 			i++;
 			it = m->lists[i]->begin();
 		    }
@@ -331,7 +331,7 @@ namespace extmap {
 		if (n > 1)
 		   return (*this + 1) + (n-1);
 		if (it+1 == m->lists[i]->end()) {
-		    if (i+1 == m->lists.size())
+		    if (i+1 == (int)m->lists.size())
 			return m->end();
 		    else
 			return iterator(m, i+1, m->lists[i+1]->begin());
@@ -385,7 +385,7 @@ namespace extmap {
 
 	    // this shouldn't happen??? because we searched max
 	    //
-	    if (i < (lists.size()-1) && list_iter == lists[i]->end())
+	    if (i < (int)(lists.size()-1) && list_iter == lists[i]->end())
 		return iterator(this, i+1, lists[i+1]->begin());
 
 	    return iterator(this, i, list_iter);
@@ -477,7 +477,7 @@ namespace extmap {
 	    else if (lists[it.i]->size() > 0)
 		maxes[it.i] = lists[it.i]->back().limit();
 
-	    if (it.it == lists[it.i]->end() && it.i != lists.size()-1) {
+	    if (it.it == lists[it.i]->end() && it.i != (int)lists.size()-1) {
 		it.i++;
 		it.it = lists[it.i]->begin();
 	    }
