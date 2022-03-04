@@ -648,14 +648,14 @@ namespace extmap {
 
 	// various ways of calling _update...
 	//
-	void update(T_in base, T_in limit, T_out e, std::vector<lba2obj> *del) {
+	void update(T_in base, T_in limit, T_out e, std::vector<T> *del) {
 	    _update(base, limit, e, false, del);
 	}
 	void update(T_in base, T_in limit, T_out e) {
 	    _update(base, limit, e, false, nullptr);
 	}
 
-	void trim(T_in base, T_in limit, std::vector<lba2obj> *del) {
+	void trim(T_in base, T_in limit, std::vector<T> *del) {
 	    T_out unused;
 	    _update(base, limit, unused, true, del);
 	}

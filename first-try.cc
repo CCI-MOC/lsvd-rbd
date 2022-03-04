@@ -505,10 +505,17 @@ public:
 
 	int64_t sector_offset = current_batch->len / 512,
 	    lba = offset/512, limit = (offset+len)/512;
-	object_map.update(lba, limit,
-			  (extmap::obj_offset){.obj = current_batch->seq, .offset = sector_offset});
 	current_batch->append_iov(offset / 512, iov, iovcnt);
 
+	std::vector<extmap::lba2obj> deleted;
+	extmap::obj_offset oo = {current_batch->seq, sector_offset};
+	object_map.update(lba, limit, oo, &deleted);
+
+	for (auto d : deleted) {
+	    auto [base, limit, ptr] = d.vals();
+	    object_info[ptr.obj].live -= (limit - base);
+	}
+	
 	return len;
     }
 

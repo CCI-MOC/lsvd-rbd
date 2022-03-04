@@ -190,8 +190,8 @@ class tests(unittest.TestCase):
         lsvd.write(0, d)
         lsvd.write(8192, d)
         self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
-        time.sleep(2.2)
-        #self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
+        time.sleep(3)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
         lsvd.shutdown()
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
 
@@ -219,9 +219,45 @@ class tests(unittest.TestCase):
         self.assertTrue(os.access('/tmp/bkt/obj.00000002', os.R_OK))
 
         hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
-        print("FINISH TEST 6!!!")
+        self.assertEqual(len(objs), 1)
+        o = objs[0]
+        self.assertEqual(o.seq, 1)
+        self.assertEqual(o.data_sectors, 8)
+        self.assertEqual(o.live_sectors, 8)
         finish()
 
+    def test_7_objects(self):
+        #printf('Test 6')
+        start()
+        write_super(img, 0, 1)
+        _size = lsvd.init(img, 1)
+        d = b'Z' * 4096
+        lsvd.write(4096, d)
+        lsvd.flush()
+        time.sleep(0.1)
+        n = lsvd.checkpoint()
+        self.assertEqual(n, 2)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000002', os.R_OK))
+
+        d = b'Q' * 4096
+        lsvd.write(4096, d)
+        lsvd.flush()
+        time.sleep(0.1)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000003', os.R_OK))
+        self.assertFalse(os.access('/tmp/bkt/obj.00000004', os.R_OK))
+        n = lsvd.checkpoint()
+        self.assertEqual(n, 4)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000004', os.R_OK))
+
+        hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
+        self.assertEqual(len(objs), 2)
+        self.assertEqual([1, 3], [_.seq for _ in objs])
+        self.assertEqual(objs[0].data_sectors, 8)
+        self.assertEqual(objs[0].live_sectors, 0)
+        self.assertEqual(objs[1].data_sectors, 8)
+        self.assertEqual(objs[1].live_sectors, 8)
+
+        finish()
 
 from time import sleep
 if __name__ == '__main__':
