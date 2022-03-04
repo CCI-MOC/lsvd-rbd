@@ -252,7 +252,7 @@ namespace extmap {
 	class iterator {
 	public:
 	    extmap *m;
-	    size_t  i;		// std::vector::size_type
+	    ssize_t i;		// std::vector::size_type
 	    typename extent_vector::iterator it;
 	    
 	    using iterator_category = std::random_access_iterator_tag;
@@ -284,25 +284,33 @@ namespace extmap {
 	    pointer operator->() {
 		return &(*it);
 	    }
+
+	    // went to a lot of trouble to make sure (begin()--)++ works correctly
+	    // not sure it was worth it
 	    iterator& operator++(int) {
 		assert(it < m->lists[i]->end());
-		it++;
-		if (it == m->lists[i]->end()) {
-		    if (i + 1 <  m->lists.size()) {
-			i++;
-			it = m->lists[i]->begin();
+		if (i == -1) {
+		    i = 0;
+		    if (m->count > 0)
+			it = m->lists[0]->begin();
+		}
+		else {
+		    it++;
+		    if (it == m->lists[i]->end()) {
+			if (i+1 <  (ssize_t)m->lists.size()) {
+			    i++;
+			    it = m->lists[i]->begin();
+			}
 		    }
 		}
 		return *this;
 	    }
 	    
-	    // TODO: (begin()--)++ doesn't work correctly
 	    iterator& operator--(int) {
 		if (it == m->lists[i]->begin()) {
-		    if (i > 0) {
-			i--;
+		    if (i > 0) 
 			it = m->lists[i]->end() - 1;
-		    }
+		    i--;
 		}
 		else
 		    it--;
@@ -326,7 +334,7 @@ namespace extmap {
 		if (n > 1)
 		   return (*this + 1) + (n-1);
 		if (it+1 == m->lists[i]->end()) {
-		    if (i+1 == m->lists.size())
+		    if (i+1 == (ssize_t)m->lists.size())
 			return m->end();
 		    else
 			return iterator(m, i+1, m->lists[i+1]->begin());
@@ -455,8 +463,8 @@ namespace extmap {
 		;
 	    else if (lists.size() > 1) {
 		int j = it.it - lists[it.i]->begin();
-		size_t pos = (it.i > 0) ? it.i : it.i+1;
-		size_t prev = pos-1;
+		ssize_t pos = (it.i > 0) ? it.i : it.i+1;
+		ssize_t prev = pos-1;
 		if (pos == it.i)
 		    j += lists[prev]->size();
 
@@ -473,7 +481,7 @@ namespace extmap {
 	    else if (lists[it.i]->size() > 0)
 		maxes[it.i] = lists[it.i]->back().limit();
 
-	    if (it.it == lists[it.i]->end() && it.i != lists.size()-1) {
+	    if (it.it == lists[it.i]->end() && it.i != (ssize_t)lists.size()-1) {
 		it.i++;
 		it.it = lists[it.i]->begin();
 	    }
