@@ -104,11 +104,16 @@ def read_ckpt(img):
     nckpts = ckpt_hdr.ckpts_len // 4
     c = bytearray(data[ckpt_hdr.ckpts_offset:ckpt_hdr.ckpts_offset+ckpt_hdr.ckpts_len])
     ckpts = (ctypes.c_uint*nckpts).from_buffer(c)
+
     nexts = ckpt_hdr.map_len // lsvd.sizeof_ckpt_mapentry
     e = bytearray(data[ckpt_hdr.map_offset:ckpt_hdr.map_offset+ckpt_hdr.map_len])
     exts = (lsvd.ckpt_mapentry*nexts).from_buffer(e)
-    exts = [_ for _ in map(lambda x: [x.lba,x.len,x.obj,x.offset], exts)]
-    return (hdr, ckpt_hdr, ckpts, exts)
+
+    nobjs = ckpt_hdr.objs_len // lsvd.sizeof_ckpt_obj
+    o = bytearray(data[ckpt_hdr.objs_offset:ckpt_hdr.objs_offset+ckpt_hdr.objs_len])
+    objs = (lsvd.ckpt_obj*nobjs).from_buffer(o)
+
+    return (hdr, ckpt_hdr, ckpts, objs, exts)
 
 class tests(unittest.TestCase):
     #def setUp(self):
@@ -169,8 +174,9 @@ class tests(unittest.TestCase):
         lsvd.write(4096,d)
         n = lsvd.checkpoint()
         print('checkpoint', n)
-        hdr, ckpt_hdr, ckpts, exts = read_ckpt(img + ('.%08x' % n))
+        hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
         self.assertEqual([_ for _ in ckpts], [2])
+        exts = [_ for _ in map(lambda x: [x.lba,x.len,x.obj,x.offset], exts)]
         self.assertEqual(exts, [[0,8,1,0],[8,8,1,16],[16,8,1,8]])
         finish()
 
@@ -193,8 +199,30 @@ class tests(unittest.TestCase):
         d = lsvd.read(0, 4096)
         self.assertEqual(d, b'Y' * 4096)
         finish()
-        
-        
+
+    # object list persisted correctly in checkpoint
+    def test_6_objects(self):
+        #printf('Test 6')
+        start()
+        write_super(img, 0, 1)
+        _size = lsvd.init(img, 1)
+        d = b'Z' * 4096
+        lsvd.write(4096, d)
+        self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))
+        lsvd.flush()
+        time.sleep(0.1)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
+        self.assertFalse(os.access('/tmp/bkt/obj.00000002', os.R_OK))
+        n = lsvd.checkpoint()
+
+        self.assertEqual(n, 2)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000002', os.R_OK))
+
+        hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
+        print("FINISH TEST 6!!!")
+        finish()
+
+
 from time import sleep
 if __name__ == '__main__':
     unittest.main(exit=False)

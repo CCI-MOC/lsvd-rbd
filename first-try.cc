@@ -249,6 +249,8 @@ public:
      */
     int write_checkpoint(int seq) {
 	std::vector<ckpt_mapentry> entries;
+	std::vector<ckpt_obj> objects;
+	
 	std::unique_lock<std::mutex> lk(m);
 	last_ckpt = seq;
 	for (auto it = object_map.begin(); it != object_map.end(); it++) {
@@ -257,30 +259,40 @@ public:
 			.obj = (int32_t)ptr.obj, .offset = (int32_t)ptr.offset});
 	}
 	size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
+
+	for (auto it = object_info.begin(); it != object_info.end(); it++) {
+	    auto obj_num = it->first;
+	    auto [hdr, data, live, type] = it->second;
+	    if (type == LSVD_DATA)
+		objects.push_back((ckpt_obj){.seq = (uint32_t)obj_num, .hdr_sectors = hdr,
+			    .data_sectors = data, .live_sectors = live});
+	}
+
+	size_t objs_bytes = objects.size() * sizeof(ckpt_obj);
 	size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
-	uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes, 512);
+	uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes + objs_bytes, 512);
 	object_info[seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0, .type = LSVD_CKPT};
 	lk.unlock();
 
 	char *buf = (char*)calloc(hdr_bytes, 1);
-
 	hdr *h = (hdr*)buf;
 	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_CKPT, .seq = (uint32_t)seq, .hdr_sectors = sectors,
 		   .data_sectors = 0};
 	memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
 	ckpt_hdr *ch = (ckpt_hdr*)(h+1);
-	*ch = (ckpt_hdr){.ckpts_offset = sizeof(hdr)+sizeof(ckpt_hdr),
-			 .ckpts_len = sizeof(seq),
-			 .objs_offset = 0, .objs_len = 0,
+
+	uint32_t o1 = sizeof(hdr)+sizeof(ckpt_hdr), o2 = o1 + sizeof(seq), o3 = o2 + objs_bytes;
+	*ch = (ckpt_hdr){.ckpts_offset = o1, .ckpts_len = sizeof(seq),
+			 .objs_offset = o2, .objs_len = o3-o2,
 			 .deletes_offset = 0, .deletes_len = 0,
-			 .map_offset = sizeof(hdr)+sizeof(ckpt_hdr)+sizeof(seq),
-			 .map_len = (uint32_t)map_bytes};
+			 .map_offset = o3, .map_len = (uint32_t)map_bytes};
 
 	iovec iov[] = {{.iov_base = buf, .iov_len = hdr_bytes},
 		       {.iov_base = (char*)&seq, .iov_len = sizeof(seq)},
+		       {.iov_base = (char*)objects.data(), objs_bytes},
 		       {.iov_base = (char*)entries.data(), map_bytes}};
-	io->write_numbered_object(seq, iov, 3);
+	io->write_numbered_object(seq, iov, 4);
 	return seq;
     }
     
@@ -337,23 +349,6 @@ public:
 	}
     }
 
-    void reset_all(void) {
-	/* For testing we want to get the in-memory state back to the beginning.
-	 * TODO: these should be class fields, not globals
-	 */
-	batch_seq = 1;
-	while (!batches.empty()) {
-	    auto b = batches.top();
-	    batches.pop();
-	    delete b;
-	}
-	delete current_batch;
-	current_batch = NULL;
-	object_map.reset();
-	in_mem_objects.erase(in_mem_objects.begin(), in_mem_objects.end());
-	object_info.erase(object_info.begin(), object_info.end());
-    }
-
     /* returns sequence number of ckpt
      */
     int checkpoint(void) {
@@ -392,16 +387,6 @@ public:
 	    work_queue.push(current_batch);
 	    current_batch = NULL;
 	    cv.notify_one();
-    #if 0
-	    if (batches.empty())
-		current_batch = new batch(BATCH_SIZE);
-	    else {
-		current_batch = batches.top();
-		batches.pop();	// f-ing C++ stacks
-	    }
-	    current_batch->reset();
-	    in_mem_objects[current_batch->seq] = current_batch->buf;
-    #endif
 	}
 	return val;
     }
@@ -811,6 +796,7 @@ translate *lsvd;
 void c_shutdown(void)
 {
     lsvd->shutdown();
+    delete lsvd;
 }
 
 int c_flush(struct bdus_ctx* ctx)

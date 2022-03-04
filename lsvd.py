@@ -143,6 +143,7 @@ sizeof_ckpt_obj = sizeof(ckpt_obj) # 16
 class deferred_delete(Structure):
     _fields_ = [("seq",                 c_uint),
                 ("time",                c_uint)]
+sizeof_deferred_delete = sizeof(deferred_delete)
 
 class ckpt_mapentry(LittleEndianStructure):
     _fields_ = [("lba",                 c_ulong, 36),
