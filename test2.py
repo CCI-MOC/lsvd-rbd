@@ -149,6 +149,7 @@ class tests(unittest.TestCase):
         lsvd.write(8192,d)
         lsvd.flush()
         time.sleep(0.1)
+        self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
         lsvd.shutdown()
 
         lsvd.init(img, 1)
@@ -167,11 +168,33 @@ class tests(unittest.TestCase):
         lsvd.write(8192,d)
         lsvd.write(4096,d)
         n = lsvd.checkpoint()
+        print('checkpoint', n)
         hdr, ckpt_hdr, ckpts, exts = read_ckpt(img + ('.%08x' % n))
         self.assertEqual([_ for _ in ckpts], [2])
         self.assertEqual(exts, [[0,8,1,0],[8,8,1,16],[16,8,1,8]])
         finish()
 
+    def test_5_flushthread(self):
+        #print('Test 5')
+        start()
+        write_super(img, 0, 1)
+        _size = lsvd.init(img, 1)
+        self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
+        d = b'Y' * 4096
+        lsvd.write(0, d)
+        lsvd.write(8192, d)
+        self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
+        time.sleep(2.2)
+        #self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
+        lsvd.shutdown()
+        self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
+
+        lsvd.init(img, 1)
+        d = lsvd.read(0, 4096)
+        self.assertEqual(d, b'Y' * 4096)
+        finish()
+        
+        
 from time import sleep
 if __name__ == '__main__':
     unittest.main(exit=False)

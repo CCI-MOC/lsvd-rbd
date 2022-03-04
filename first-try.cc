@@ -55,11 +55,9 @@ struct batch {
 public:
     batch(size_t _max) {
 	buf = (char*)malloc(_max);
-	printf("new %p = %p\n", this, buf);
 	max = _max;
     }
     ~batch(){
-	printf("destroy %p = %p\n", this, buf);
 	free((void*)buf);
     }
     void reset(void) {
@@ -68,10 +66,11 @@ public:
 	seq = batch_seq++;
     }
     void append_iov(uint64_t lba, iovec *iov, int iovcnt) {
+	char *ptr = buf + len;
 	for (int i = 0; i < iovcnt; i++) {
-	    memcpy(buf, iov[i].iov_base, iov[i].iov_len);
+	    memcpy(ptr, iov[i].iov_base, iov[i].iov_len);
 	    entries.push_back((data_map){lba, iov[i].iov_len / 512});
-	    buf += iov[i].iov_len;
+	    ptr += iov[i].iov_len;
 	    len += iov[i].iov_len;
 	    lba += iov[i].iov_len / 512;
 	}
@@ -381,8 +380,9 @@ static void reset_all(void)
      */
     batch_seq = 1;
     while (!batches.empty()) {
-	delete batches.top();
+	auto b = batches.top();
 	batches.pop();
+	delete b;
     }
     delete current_batch;
     current_batch = NULL;
@@ -448,15 +448,15 @@ int lsvd_flush(void)
 
 static void flush_thread(void)
 {
-    auto one_sec = std::chrono::seconds(1);
+    auto wait_time = std::chrono::milliseconds(500);
     auto timeout = std::chrono::seconds(2);
     auto t0 = std::chrono::system_clock::now();
     auto seq0 = batch_seq;
 
     while (running) {
 	std::unique_lock<std::mutex> lk(m);
-	cv2.wait_for(lk, one_sec);
-	if (running && seq0 == batch_seq && current_batch->len > 0) {
+	cv2.wait_for(lk, wait_time);
+	if (running && current_batch && seq0 == batch_seq && current_batch->len > 0) {
 	    if (std::chrono::system_clock::now() - t0 > timeout) {
 		lk.unlock();
 		lsvd_flush();
