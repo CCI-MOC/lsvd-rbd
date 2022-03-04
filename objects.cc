@@ -113,8 +113,8 @@ struct deferred_delete {
 };
 
 struct ckpt_mapentry {
-    uint64_t lba : 36;
-    uint64_t len : 28;
-    uint32_t obj;
-    uint32_t offset;
+    int64_t lba : 36;
+    int64_t len : 28;
+    int32_t obj;
+    int32_t offset;
 };

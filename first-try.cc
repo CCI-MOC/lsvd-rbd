@@ -284,7 +284,7 @@ static int write_checkpoint(int seq)
     for (auto it = object_map.begin(); it != object_map.end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
-		    .obj = (uint32_t)ptr.obj, .offset = (uint32_t)ptr.offset});
+		    .obj = (int32_t)ptr.obj, .offset = (int32_t)ptr.offset});
     }
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
     size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
@@ -654,8 +654,8 @@ ssize_t init(char *name, int nthreads)
 	}
 	for (auto m : map) {
 	    object_map.update(m.lba, m.lba + m.len,
-			      (extmap::obj_offset){.obj = (uint64_t) m.obj,
-				      .offset = (uint64_t)m.offset});
+			      (extmap::obj_offset){.obj = m.obj,
+				      .offset = m.offset});
 	}
 	_ckpt = ck;
     }
@@ -670,11 +670,10 @@ ssize_t init(char *name, int nthreads)
 	    break;
 	object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
 				    .live = h.data_sectors, .type = LSVD_DATA};
-	uint64_t offset = 0;
+	int offset = 0;
 	for (auto m : map) {
 	    object_map.update(m.lba, m.lba + m.len,
-			      (extmap::obj_offset){.obj = (uint64_t) i,
-				      .offset = offset});
+			      (extmap::obj_offset){.obj = i, .offset = offset});
 	    offset += m.len;
 	}
     }
@@ -724,10 +723,10 @@ ssize_t lsvd_writev(size_t offset, iovec *iov, int iovcnt)
 	in_mem_objects[current_batch->seq] = current_batch->buf;
     }
 
-    uint64_t sector_offset = current_batch->len / 512,
+    int64_t sector_offset = current_batch->len / 512,
 	lba = offset/512, limit = (offset+len)/512;
     object_map.update(lba, limit,
-		      (extmap::obj_offset){.obj = (uint64_t) current_batch->seq, .offset = sector_offset});
+		      (extmap::obj_offset){.obj = current_batch->seq, .offset = sector_offset});
     current_batch->append_iov(offset / 512, iov, iovcnt);
     
     return len;
@@ -741,8 +740,8 @@ ssize_t lsvd_write(size_t offset, size_t len, char *buf)
 
 ssize_t lsvd_read(size_t offset, size_t len, char *buf)
 {
-    uint64_t base = offset / 512;
-    uint64_t sectors = len / 512, limit = base + sectors;
+    int64_t base = offset / 512;
+    int64_t sectors = len / 512, limit = base + sectors;
 
     if (object_map.size() == 0) {
 	memset(buf, 0, len);
@@ -850,7 +849,7 @@ int dbg_getmap(int base, int limit, int max, struct tuple *t)
 {
     int i = 0;
     for (auto it = object_map.lookup(base);
-	 i < max && it != object_map.end() && it->base() < (uint64_t)limit; it++) {
+	 i < max && it != object_map.end() && it->base() < limit; it++) {
         auto [_base, _limit, oo] = it->vals(base, limit);
 	t[i++] = (struct tuple){.base = (int)_base, .limit = (int)_limit,
 				.obj = (int)oo.obj, .offset = (int)oo.offset};
