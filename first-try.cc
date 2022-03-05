@@ -98,8 +98,18 @@ public:
     }
 };
 
-class translate {
+class translator {
 public:
+    int checkpoint(void) {return 0;}
+    int flush(void) {return 0;}
+    ssize_t init(char *name, int nthreads) { return 0;}
+    void shutdown(void) {}
+    ssize_t writev(size_t offset, iovec *iov, int iovcnt) { return 0;}
+    ssize_t write(size_t offset, size_t len, char *buf) { return 0;}
+    ssize_t read(size_t offset, size_t len, char *buf) { return 0;}
+};
+
+class translate : public translator {
     backend *io;
     // merge buffer and free list are protected by merge_lock
     //
@@ -129,19 +139,6 @@ public:
 
     std::queue<std::thread> pool;
     bool running;
-    
-    translate(backend *_io) {
-	io = _io;
-	current_batch = NULL;
-	running = false;
-    }
-    ~translate() {
-	while (!batches.empty()) {
-	    auto b = batches.top();
-	    batches.pop();
-	    delete b;
-	}
-    }
     
     char *read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
@@ -349,20 +346,6 @@ public:
 	}
     }
 
-    /* returns sequence number of ckpt
-     */
-    int checkpoint(void) {
-	std::unique_lock<std::mutex> lk(m);
-	if (current_batch && current_batch->len > 0) {
-	    work_queue.push(current_batch);
-	    current_batch = NULL;
-	    cv.notify_one();
-	}
-	int seq = batch_seq++;
-	lk.unlock();
-	return write_checkpoint(seq);
-    }
-
     void ckpt_thread(void) {
 	auto one_second = std::chrono::seconds(1);
 	auto seq0 = batch_seq;
@@ -377,18 +360,6 @@ public:
 		checkpoint();
 	    }
 	}
-    }
-
-    int flush(void) {
-	const std::unique_lock<std::mutex> lock(m);
-	int val = 0;
-	if (current_batch && current_batch->len > 0) {
-	    val = current_batch->seq;
-	    work_queue.push(current_batch);
-	    current_batch = NULL;
-	    cv.notify_one();
-	}
-	return val;
     }
 
     void flush_thread(void) {
@@ -411,6 +382,47 @@ public:
 		t0 = std::chrono::system_clock::now();
 	    }
 	}
+    }
+
+    
+public:
+    translate(backend *_io) {
+	io = _io;
+	current_batch = NULL;
+	running = false;
+    }
+    ~translate() {
+	while (!batches.empty()) {
+	    auto b = batches.top();
+	    batches.pop();
+	    delete b;
+	}
+    }
+    
+    /* returns sequence number of ckpt
+     */
+    int checkpoint(void) {
+	std::unique_lock<std::mutex> lk(m);
+	if (current_batch && current_batch->len > 0) {
+	    work_queue.push(current_batch);
+	    current_batch = NULL;
+	    cv.notify_one();
+	}
+	int seq = batch_seq++;
+	lk.unlock();
+	return write_checkpoint(seq);
+    }
+
+    int flush(void) {
+	const std::unique_lock<std::mutex> lock(m);
+	int val = 0;
+	if (current_batch && current_batch->len > 0) {
+	    val = current_batch->seq;
+	    work_queue.push(current_batch);
+	    current_batch = NULL;
+	    cv.notify_one();
+	}
+	return val;
     }
 
     ssize_t init(char *name, int nthreads) {
@@ -519,14 +531,12 @@ public:
 	return len;
     }
 
-    ssize_t write(size_t offset, size_t len, char *buf)
-    {
+    ssize_t write(size_t offset, size_t len, char *buf) {
 	iovec iov = {buf, len};
 	return this->writev(offset, &iov, 1);
     }
 
-    ssize_t read(size_t offset, size_t len, char *buf)
-    {
+    ssize_t read(size_t offset, size_t len, char *buf) {
 	int64_t base = offset / 512;
 	int64_t sectors = len / 512, limit = base + sectors;
 
@@ -589,7 +599,11 @@ public:
 		break;
 	}
     }
+    int mapsize(void) {
+	return object_map.size();
+    }
 };
+
 
 /* simple backend that uses files in a directory. 
  * good for debugging and testing
@@ -790,7 +804,7 @@ public:
 	cv.notify_one();
     }    
 };
-    
+
 extern "C" int c_read(char*, uint64_t, uint32_t, struct bdus_ctx*);
 extern "C" int c_write(char*, uint64_t, uint32_t, struct bdus_ctx*);
 extern "C" int c_flush(struct bdus_ctx*);
@@ -820,7 +834,7 @@ ssize_t c_init(char *name, int n)
 
 int c_size(void)
 {
-    return lsvd->object_map.size();
+    return lsvd->mapsize();
 }
 
 int c_read(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)

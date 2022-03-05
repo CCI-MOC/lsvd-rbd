@@ -165,7 +165,6 @@ class tests(unittest.TestCase):
     def test_4_checkpoint(self):
         #print('Test 4')
         start()
-        os.system('ls -l /tmp/bkt')
         write_super(img, 0, 1)
         lsvd.init(img, 1)
         d = b'X' * 4096
@@ -173,7 +172,6 @@ class tests(unittest.TestCase):
         lsvd.write(8192,d)
         lsvd.write(4096,d)
         n = lsvd.checkpoint()
-        print('checkpoint', n)
         hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
         self.assertEqual([_ for _ in ckpts], [2])
         exts = [_ for _ in map(lambda x: [x.lba,x.len,x.obj,x.offset], exts)]
