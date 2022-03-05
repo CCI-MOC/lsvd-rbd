@@ -255,6 +255,8 @@ class tests(unittest.TestCase):
         self.assertEqual(objs[1].data_sectors, 8)
         self.assertEqual(objs[1].live_sectors, 8)
 
+        data = lsvd.read(4096,4096)
+        self.assertEqual(data, b'Q' * 4096)
         finish()
 
 from time import sleep
