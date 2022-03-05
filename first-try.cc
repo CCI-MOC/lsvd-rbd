@@ -98,24 +98,54 @@ public:
     }
 };
 
-class translator {
+template <class T>
+class thread_pool {
 public:
-    int checkpoint(void) {return 0;}
-    int flush(void) {return 0;}
-    ssize_t init(char *name, int nthreads) { return 0;}
-    void shutdown(void) {}
-    ssize_t writev(size_t offset, iovec *iov, int iovcnt) { return 0;}
-    ssize_t write(size_t offset, size_t len, char *buf) { return 0;}
-    ssize_t read(size_t offset, size_t len, char *buf) { return 0;}
+    std::queue<T> q;
+    bool         running;
+    std::mutex  *m;
+    std::condition_variable cv;
+    std::queue<std::thread> pool;
+    
+    thread_pool(std::mutex *_m) {
+	running = true;
+	m = _m;
+    }
+    ~thread_pool() {
+	running = false;
+	cv.notify_all();
+	while (!pool.empty()) {
+	    pool.front().join();
+	    pool.pop();
+	}
+    }	
+    T get_locked(std::unique_lock<std::mutex> &lk) {
+	while (running && q.empty())
+	    cv.wait(lk);
+	auto val = q.front();
+	q.pop();
+	return val;
+    }
+    T get(void) {
+	std::unique_lock<std::mutex> lk(*m);
+	return get_locked();
+    }
+    void put_locked(T work, std::unique_lock<std::mutex> &lk) {
+	q.push(work);
+	cv.notify_one();
+    }
+    void put(T work) {
+	std::unique_lock<std::mutex> lk(*m);
+	put_locked(work, lk);
+    }
 };
 
-class translate : public translator {
+class translate {
     backend *io;
-    // merge buffer and free list are protected by merge_lock
-    //
+    
+    std::mutex              m;
     std::condition_variable cv;
     std::condition_variable cv2;	// misc sleeping threads, notify_all on quit
-    std::queue<batch*>      work_queue;
 
     batch              *current_batch;
     std::stack<batch*>  batches;
@@ -137,8 +167,8 @@ class translate : public translator {
     super_hdr *super_sh;
     size_t     super_len;
 
-    std::queue<std::thread> pool;
-    bool running;
+    thread_pool<batch*> workers;
+    thread_pool<int>    misc_threads;
     
     char *read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
@@ -316,22 +346,18 @@ class translate : public translator {
 	return (char*)dm - (char*)buf;
     }
 
-    void worker_thread(void) {
-	while (true) {
-	    batch *b;
-	    std::unique_lock<std::mutex> lock(m);
-
-	    while (work_queue.empty() && running)
-		cv.wait(lock);
-	    if (!running)
+    void worker_thread(thread_pool<batch*> *p) {
+	while (p->running) {
+	    std::unique_lock<std::mutex> lk(*p->m);
+	    auto b = p->get_locked(lk);
+	    if (!p->running)
 		return;
-	    b = work_queue.front();
-	    work_queue.pop();
+
 
 	    uint32_t sectors = div_round_up(b->hdrlen(), 512);
 	    object_info[b->seq] = (obj_info){.hdr = sectors, .data = (uint32_t)(b->len / 512),
 					     .live = (uint32_t)(b->len / 512), .type = LSVD_DATA};
-	    lock.unlock();
+	    lk.unlock();
 
 	    char *hdr = (char*)calloc(sectors*512, 1);
 	    make_hdr(hdr, b);
@@ -339,22 +365,22 @@ class translate : public translator {
 	    io->write_numbered_object(b->seq, iov, 2);
 	    free(hdr);
 
-	    std::unique_lock<std::mutex> lock2(m);
+	    lk.lock();
 	    in_mem_objects.erase(b->seq);
 	    batches.push(b);
-	    lock2.unlock();
+	    lk.unlock();
 	}
     }
 
-    void ckpt_thread(void) {
+    void ckpt_thread(thread_pool<int> *p) {
 	auto one_second = std::chrono::seconds(1);
 	auto seq0 = batch_seq;
 	const int ckpt_interval = 100;
 
-	while (running) {
-	    std::unique_lock<std::mutex> lk(m);
-	    cv2.wait_for(lk, one_second);
-	    if (running && batch_seq - seq0 > ckpt_interval) {
+	while (p->running) {
+	    std::unique_lock<std::mutex> lk(*p->m);
+	    p->cv.wait_for(lk, one_second);
+	    if (p->running && batch_seq - seq0 > ckpt_interval) {
 		seq0 = batch_seq;
 		lk.unlock();
 		checkpoint();
@@ -362,16 +388,16 @@ class translate : public translator {
 	}
     }
 
-    void flush_thread(void) {
+    void flush_thread(thread_pool<int> *p) {
 	auto wait_time = std::chrono::milliseconds(500);
 	auto timeout = std::chrono::seconds(2);
 	auto t0 = std::chrono::system_clock::now();
 	auto seq0 = batch_seq;
 
-	while (running) {
-	    std::unique_lock<std::mutex> lk(m);
-	    cv2.wait_for(lk, wait_time);
-	    if (running && current_batch && seq0 == batch_seq && current_batch->len > 0) {
+	while (p->running) {
+	    std::unique_lock<std::mutex> lk(*p->m);
+	    p->cv.wait_for(lk, wait_time);
+	    if (p->running && current_batch && seq0 == batch_seq && current_batch->len > 0) {
 		if (std::chrono::system_clock::now() - t0 > timeout) {
 		    lk.unlock();
 		    flush();
@@ -384,12 +410,10 @@ class translate : public translator {
 	}
     }
 
-    
 public:
-    translate(backend *_io) {
+    translate(backend *_io) : workers(&m), misc_threads(&m) {
 	io = _io;
 	current_batch = NULL;
-	running = false;
     }
     ~translate() {
 	while (!batches.empty()) {
@@ -404,7 +428,7 @@ public:
     int checkpoint(void) {
 	std::unique_lock<std::mutex> lk(m);
 	if (current_batch && current_batch->len > 0) {
-	    work_queue.push(current_batch);
+	    workers.put_locked(current_batch, lk);
 	    current_batch = NULL;
 	    cv.notify_one();
 	}
@@ -414,11 +438,11 @@ public:
     }
 
     int flush(void) {
-	const std::unique_lock<std::mutex> lock(m);
+	std::unique_lock<std::mutex> lock(m);
 	int val = 0;
 	if (current_batch && current_batch->len > 0) {
 	    val = current_batch->seq;
-	    work_queue.push(current_batch);
+	    workers.put_locked(current_batch, lock);
 	    current_batch = NULL;
 	    cv.notify_one();
 	}
@@ -472,35 +496,24 @@ public:
 		offset += m.len;
 	    }
 	}
-	running = true;
 
 	for (int i = 0; i < nthreads; i++) 
-	    pool.push(std::thread(&translate::worker_thread, this));
-	pool.push(std::thread(&translate::ckpt_thread, this));
-	pool.push(std::thread(&translate::flush_thread, this));
+	    workers.pool.push(std::thread(&translate::worker_thread, this, &workers));
+	misc_threads.pool.push(std::thread(&translate::ckpt_thread, this, &misc_threads));
+	misc_threads.pool.push(std::thread(&translate::flush_thread, this, &misc_threads));
 
 	return bytes;
     }
 
     void shutdown(void) {
-	running = false;
-	std::unique_lock<std::mutex> lk(m);
-	cv.notify_all();
-	cv2.notify_all();
-	lk.unlock();
-
-	while (!pool.empty()) {
-	    pool.front().join();
-	    pool.pop();
-	}
     }
 
     ssize_t writev(size_t offset, iovec *iov, int iovcnt) {
-	const std::unique_lock<std::mutex> lock(m);
+	std::unique_lock<std::mutex> lock(m);
 	size_t len = iov_sum(iov, iovcnt);
 
 	if (current_batch && current_batch->len + len > current_batch->max) {
-	    work_queue.push(current_batch);
+	    workers.put_locked(current_batch, lock);
 	    current_batch = NULL;
 	    cv.notify_one();
 	}
