@@ -420,13 +420,42 @@ int primes[] = { 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59,
 		 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271,
 		 277, 281, 283, 293};
 
-int main()
+#include <ctype.h>
+
+unsigned test_mask(char *p)
 {
+    unsigned mask = 0;
+    while (*p) {
+	int i = strtol(p, &p, 0);
+	mask |= (1 << i);
+	while (*p && !isdigit(*p))
+	    p++;
+    }
+    return mask;
+}
+
+bool in_mask(unsigned mask, int i)
+{
+    return (mask & (1 << i)) != 0;
+}
+
+int main(int argc, char **argv)
+{
+    unsigned mask = 0xffffff;
+    if (argc > 1)
+	mask = test_mask(argv[1]);
+
+    if (in_mask(mask, 1))
 	test_1_seq();
+    if (in_mask(mask, 2))
 	test_2_mod17();
+    if (in_mask(mask, 3))
 	test_3_seq_merge();
+    if (in_mask(mask, 7))
 	test_7_lookup();
 
+    if (argc > 2)
+	return 0;
     for (auto n : primes) {
 	gen = new std::mt19937(n);
 	test_4_rand();
