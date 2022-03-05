@@ -410,6 +410,27 @@ Note that we can add the write cache first and test it, then add the read cache.
 
 **Direct I/O** - I really think we should be using direct i/o to the cache device, as otherwise we don't have any guarantees about when data goes to the NVMe drive. This means we're going to have to copy everything into aligned buffers, probably. Which in turn means that we probably don't have to copy in the translation layer, but we need some way of notifying the cache that we're done with a specific buffer.
 
+### notes on migrating data from write cache to read cache
+
+1. same logic as garbage collection - read journal headers and double-check against map to filter out stale data
+2. how to handle sending random chunks of data to read cache indexed by object ID / offset?
+
+Tag each block in read cache with a bitmap indicating which blocks are valid. Assume 4KB blocks, don't store any finer granularity in read cache -> 16 bits per 64KB block. Send LBA/data to read cache, which looks up obj/offset mapping and either allocates new 64K block or overwrites contents of an existing one.
+
+Start out by using random replacement in the read cache, fix it later.
+
+How do we tie together read cache and backend? There's something of a locking and mapping problem if we encapsulate the write cache, read cache, and translation layer separately.
+- write cache - this can have its own lock, maybe a reader/write lock
+- translation layer lock - again maybe a reader/writer lock?
+- read cache - reader/writer?
+
+The read cache needs read-only access to the translation layer object map. Or do we connect the read cache to the translation layer? Write cache has interface for garbage collection, returns list of LBA extents and block pointers, plus a token to pass back when the data has been copied. write cache GC sends this info to read cache, 
+
+Solution:
+- read cache and write cache each have their own mutex and map
+- object map + shared\_mutex are separate and shared by read cache and translation layer.
+so 4 mutexes in total.
+
 ### valgrind
 To run Gdb with `valgrind`:
 ```
