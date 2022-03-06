@@ -26,6 +26,9 @@ namespace fs = std::experimental::filesystem;
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <string.h>
+#include <errno.h>
+
+typedef int64_t lba_t;
 
 /* make this atomic? */
 int batch_seq;
@@ -461,7 +464,7 @@ public:
 	return val;
     }
 
-    ssize_t init(char *name, int nthreads) {
+    ssize_t init(char *name, int nthreads, bool timedflush) {
 	std::vector<uint32_t>  ckpts;
 	std::vector<clone_p>   clones;
 	std::vector<snap_info> snaps;
@@ -512,7 +515,8 @@ public:
 	for (int i = 0; i < nthreads; i++) 
 	    workers.pool.push(std::thread(&translate::worker_thread, this, &workers));
 	misc_threads.pool.push(std::thread(&translate::ckpt_thread, this, &misc_threads));
-	misc_threads.pool.push(std::thread(&translate::flush_thread, this, &misc_threads));
+	if (timedflush)
+	    misc_threads.pool.push(std::thread(&translate::flush_thread, this, &misc_threads));
 
 	return bytes;
     }
@@ -627,6 +631,14 @@ public:
     int mapsize(void) {
 	return object_map.size();
     }
+    void reset(void) {
+	object_map.reset();
+    }
+    int frontier(void) {
+	if (current_batch)
+	    return current_batch->len / 512;
+	return 0;
+    }
 };
 
 
@@ -682,10 +694,43 @@ struct wcache_work {
     void     *ptr;
 };
 
-bool aligned(void *ptr, int a)
+static bool aligned(void *ptr, int a)
 {
     return 0 == ((long)ptr & (a-1));
 }
+
+static void iov_consume(iovec *iov, int iovcnt, size_t nbytes)
+{
+    for (int i = 0; i < iovcnt && nbytes > 0; i++) {
+	if (iov[i].iov_len < nbytes) {
+	    nbytes -= iov[i].iov_len;
+	    iov[i].iov_len = 0;
+	}
+	else {
+	    iov[i].iov_len -= nbytes;
+	    iov[i].iov_base = (char*)iov[i].iov_base + nbytes;
+	    nbytes = 0;
+	}
+    }
+}
+
+static void iov_zero(iovec *iov, int iovcnt, size_t nbytes)
+{
+    for (int i = 0; i < iovcnt && nbytes > 0; i++) {
+	if (iov[i].iov_len < nbytes) {
+	    memset(iov[i].iov_base, 0, iov[i].iov_len);
+	    nbytes -= iov[i].iov_len;
+	    iov[i].iov_len = 0;
+	}
+	else {
+	    memset(iov[i].iov_base, 0, iov[i].iov_len);
+	    iov[i].iov_len -= nbytes;
+	    iov[i].iov_base = (char*)iov[i].iov_base + nbytes;
+	    nbytes = 0;
+	}
+    }
+}
+
 
 /* all addresses are in units of 4KB blocks
  * TODO: should this use direct I/O? 
@@ -781,12 +826,10 @@ class write_cache {
 	    j->extent_offset = sizeof(*j);
 	    size_t e_bytes = extents.size() * sizeof(j_extent);
 	    j->extent_len = e_bytes;
+	    memcpy((void*)(buf + sizeof(*j)), (void*)extents.data(), e_bytes);
 		
 	    std::vector<iovec> iovs;
 	    iovs.push_back((iovec){buf, 4096});
-	    iovs.push_back((iovec){(char*)extents.data(), e_bytes});
-	    size_t pad_bytes = 4096 - e_bytes - sizeof(j_hdr);
-	    iovs.push_back((iovec){pad_page, pad_bytes});
 
 	    for (auto w : work)
 		for (int i = 0; i < w.iovcnt; i++)
@@ -796,10 +839,12 @@ class write_cache {
 	    if (pad_sectors > 0)
 		iovs.push_back((iovec){pad_page, pad_sectors*512});
 
-	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*512) < 0)
+	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096) < 0)
 		/* TODO: do something */;
 
-	    /* update map first under lock */
+	    /* update map first under lock. 
+	     * Note that map is in units of *sectors*, not blocks 
+	     */
 	    lk.lock();
 	    uint64_t lba = (blockno+1) * 8;
 	    for (auto w : work) {
@@ -828,12 +873,17 @@ public:
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
-	char *buf = (char*)malloc(4096);
-	if (pread(fd, buf, 4096, 0) < 4096)
-	    throw fs::filesystem_error("cache", std::error_code());
+	char *buf = (char*)aligned_alloc(512, 4096);
+	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
+	    throw fs::filesystem_error("wcache", std::error_code(errno, std::system_category()));
 	super = (j_write_super*)buf;
 	pad_page = (char*)aligned_alloc(512, 4096);
 	memset(pad_page, 0, 4096);
+
+	base = super->base;
+	limit = super->limit;
+	next = super->next;
+	oldest = super->oldest;
 	
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
@@ -845,18 +895,65 @@ public:
 
     void write(size_t offset, iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
 	workers.put((wcache_work){offset/512, iov, iovcnt, callback, ptr});
-    }    
+    }
+
+    // TODO: how the hell to handle fragments?
+    void readv(size_t offset, iovec *iov, int iovcnt) {
+	auto bytes = iov_sum(iov, iovcnt);
+	lba_t base = offset/512, limit = base + bytes/512, prev = base;
+	std::unique_lock<std::mutex> lk(m);
+	
+	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
+	    auto [_base, _limit, plba] = it->vals(base, limit);
+	    if (_base > prev) {
+		size_t bytes = 512 * (_base - prev);
+		iov_zero(iov, iovcnt, bytes);
+		offset += bytes;
+	    }
+	    size_t bytes = 512 * (_limit - _base),
+		nvme_offset = 512 * plba;
+	    lk.unlock();
+	    if (preadv(fd, iov, iovcnt, nvme_offset) < 0)
+		throw fs::filesystem_error("wcache_read",
+					   std::error_code(errno, std::system_category()));
+	    lk.lock();
+	    iov_consume(iov, iovcnt, bytes);
+	    prev = _limit;
+	}
+	if (prev < limit) 
+	    iov_zero(iov, iovcnt, 512 * (limit - prev));
+
+    }
+    
+    // debugging
+    void getmap(int base, int limit, int (*cb)(void*, int, int, int), void *ptr) {
+	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
+	    auto [_base, _limit, plba] = it->vals(base, limit);
+	    if (!cb(ptr, (int)_base, (int)_limit, (int)plba))
+		break;
+	}
+    }
+    void reset(void) {
+	map.reset();
+    }
 };
 
-extern "C" int c_read(char*, uint64_t, uint32_t, struct bdus_ctx*);
-extern "C" int c_write(char*, uint64_t, uint32_t, struct bdus_ctx*);
-extern "C" int c_flush(struct bdus_ctx*);
-extern "C" ssize_t c_init(char*, int);
-extern "C" int c_size(void);
-extern "C" void c_shutdown(void);
 
 translate   *lsvd;
 write_cache *wcache;
+
+struct tuple {
+    int base;
+    int limit;
+    int obj;			// object map
+    int offset;
+    int plba;			// write cache map
+};
+struct getmap_s {
+    int i;
+    int max;
+    struct tuple *t;
+};
 
 extern "C" void wcache_init(uint32_t blkno, int fd);
 void wcache_init(uint32_t blkno, int fd)
@@ -870,7 +967,7 @@ void wcache_shutdown(void)
     delete wcache;
 }
 
-extern "C" void wcache_write(char*, uint64_t offset, uint64_t len, char *buf);
+extern "C" void wcache_write(char* buf, uint64_t offset, uint64_t len);
 struct do_write {
 public:
     std::mutex m;
@@ -895,36 +992,73 @@ void wcache_write(char *buf, uint64_t offset, uint64_t len)
 	dw.cv.wait(lk);
 }
 
+extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len);
+void wcache_read(char *buf, uint64_t offset, uint64_t len)
+{
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    iovec iov = {buf2, len};
+    wcache->readv(offset, &iov, 1);
+    memcpy(buf, buf2, len);
+    free(buf2);
+}
+
+extern "C" int wcache_getmap(int, int, int, struct tuple*);
+int wc_getmap_cb(void *ptr, int base, int limit, int plba)
+{
+    getmap_s *s = (getmap_s*)ptr;
+    if (s->i < s->max)
+	s->t[s->i++] = (tuple){base, limit, 0, 0, plba};
+    return s->i < s->max;
+}
+int wcache_getmap(int base, int limit, int max, struct tuple *t)
+{
+    getmap_s s = {0, max, t};
+    wcache->getmap(base, limit, wc_getmap_cb, (void*)&s);
+    return s.i;
+}
+
+extern "C" void wcache_reset(void);
+void wcache_reset(void)
+{
+    wcache->reset();
+}
+
+extern "C" void c_shutdown(void);
 void c_shutdown(void)
 {
     lsvd->shutdown();
     delete lsvd;
 }
 
-int c_flush(struct bdus_ctx* ctx)
+extern "C" int c_flush(void);
+int c_flush(void)
 {
     return lsvd->flush();
 }
 
-ssize_t c_init(char *name, int n)
+extern "C" ssize_t c_init(char* name, int n, bool flushthread);
+ssize_t c_init(char *name, int n, bool flushthread)
 {
     auto io = new file_backend(name);
     lsvd = new translate(io);
-    return lsvd->init(name, n);
+    return lsvd->init(name, n, flushthread);
 }
 
+extern "C" int c_size(void);
 int c_size(void)
 {
     return lsvd->mapsize();
 }
 
-int c_read(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
+extern "C" int c_read(char*, uint64_t, uint32_t);
+int c_read(char *buffer, uint64_t offset, uint32_t size)
 {
     size_t val = lsvd->read(offset, size, buffer);
     return val < 0 ? -1 : 0;
 }
 
-int c_write(char *buffer, uint64_t offset, uint32_t size, struct bdus_ctx *ctx)
+extern "C" int c_write(char*, uint64_t, uint32_t);
+int c_write(char *buffer, uint64_t offset, uint32_t size)
 {
     size_t val = lsvd->write(offset, size, buffer);
     return val < 0 ? -1 : 0;
@@ -937,22 +1071,11 @@ int dbg_inmem(int max, int *list)
     return lsvd->inmem(max, list);
 }
 
-struct tuple {
-    int base;
-    int limit;
-    int obj;
-    int offset;
-};
-struct getmap_s {
-    int i;
-    int max;
-    struct tuple *t;
-};
 int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
 {
     getmap_s *s = (getmap_s*)ptr;
     if (s->i < s->max) 
-	s->t[s->i++] = (tuple){base, limit, obj, offset};
+	s->t[s->i++] = (tuple){base, limit, obj, offset, 0};
     return s->i < s->max;
 }
    
@@ -970,3 +1093,14 @@ int dbg_checkpoint(void)
     return lsvd->checkpoint();
 }
 
+extern "C" void dbg_reset(void);
+void dbg_reset(void)
+{
+    lsvd->reset();
+}
+
+extern "C" int dbg_frontier(void);
+int dbg_frontier(void)
+{
+    return lsvd->frontier();
+}

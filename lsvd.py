@@ -2,10 +2,11 @@ from ctypes import *
 import os
 
 class tuple(Structure):
-    _fields_ = [("base", c_int),
-                ("limit", c_int),
-                ("obj", c_int),
-                ("offset", c_int)]
+    _fields_ = [("base",   c_int),
+                ("limit",  c_int),
+                ("obj",    c_int),
+                ("offset", c_int),
+                ("plba",   c_int)]
 
 dir = os.getcwd()
 lsvd_lib = CDLL(dir + "/liblsvd.so")
@@ -31,6 +32,9 @@ def getmap(base, limit):
     n = lsvd_lib.dbg_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
     return [_ for _ in map(lambda x: [x.base, x.limit, x.obj, x.offset], tuples[0:n])]
 
+def frontier():
+    return lsvd_lib.dbg_frontier()
+
 def inmem():
     n_objs = 32
     objs = (c_int * n_objs)()
@@ -40,10 +44,10 @@ def inmem():
 def flush():
     return lsvd_lib.c_flush()
 
-def init(name, n):
+def init(name, n, flush):
     if type(name) != bytes:
         name = bytes(name, 'utf-8')
-    return lsvd_lib.c_init(name, c_int(n))
+    return lsvd_lib.c_init(name, c_int(n), c_bool(flush))
 
 def size():
     return lsvd_lib.c_size()
@@ -56,6 +60,9 @@ def batch_seq():
 
 def checkpoint():
     return lsvd_lib.dbg_checkpoint()
+
+def reset():
+    lsvd_lib.dbg_reset()
 
 LSVD_SUPER = 1
 LSVD_DATA = 2
@@ -157,12 +164,12 @@ sizeof_ckpt_mapentry = sizeof(ckpt_mapentry) # 16
 _fd = -1
 def cache_init(blkno, file):
     global _fd
-    _fd = os.open(file, os.O_RDWR)
+    _fd = os.open(file, os.O_RDWR | os.O_DIRECT)
     lsvd_lib.wcache_init(blkno, _fd)
 
 def cache_shutdown():
     lsvd_lib.wcache_shutdown()
-    close(_fd)
+    os.close(_fd)
 
 def cache_write(offset, data):
     if type(data) != bytes:
@@ -170,6 +177,21 @@ def cache_write(offset, data):
     nbytes = len(data)
     assert (nbytes % 512) == 0 and (offset % 512) == 0
     val = lsvd_lib.wcache_write(data, c_ulong(offset), c_uint(nbytes))
+
+def cache_read(offset, nbytes):
+    assert (nbytes % 512) == 0 and (offset % 512) == 0
+    buf = (c_char * nbytes)()
+    lsvd_lib.wcache_read(buf, c_ulong(offset), c_uint(nbytes))
+    return buf[0:nbytes]
+    
+def cache_reset():
+    lsvd_lib.wcache_reset()
+
+def cache_getmap(base, limit):
+    n_tuples = 128
+    tuples = (tuple * n_tuples)()
+    n = lsvd_lib.wcache_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
+    return [_ for _ in map(lambda x: [x.base, x.limit, x.plba], tuples[0:n])]
 
 class j_extent(Structure):
     _fields_ = [("lba", c_ulong, 40),

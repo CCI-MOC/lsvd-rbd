@@ -123,7 +123,7 @@ class tests(unittest.TestCase):
         #print('Test 1')
         start()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1)
+        _size = lsvd.init(img, 1, True)
         self.assertEqual(_size, 10*1024*1024)
         finish()
         
@@ -132,7 +132,7 @@ class tests(unittest.TestCase):
         start()
         write_super(img, 0, 1)
         write_data_1(img + '.00000001', 0, 1)
-        _size = lsvd.init(img, 1)
+        _size = lsvd.init(img, 1, True)
         self.assertEqual(lsvd.batch_seq(), 2)
         d = lsvd.read(0, 512)
         self.assertEqual(d, b'A' * 512)
@@ -148,7 +148,7 @@ class tests(unittest.TestCase):
         #print('Test 3')
         start()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1)
+        _size = lsvd.init(img, 1, True)
         d = b'X' * 4096
         lsvd.write(0, d)
         lsvd.write(8192,d)
@@ -157,7 +157,7 @@ class tests(unittest.TestCase):
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
         lsvd.shutdown()
 
-        lsvd.init(img, 1)
+        lsvd.init(img, 1, True)
         d = lsvd.read(0, 4096)
         self.assertEqual(d, b'X' * 4096)
         finish()
@@ -166,7 +166,7 @@ class tests(unittest.TestCase):
         #print('Test 4')
         start()
         write_super(img, 0, 1)
-        lsvd.init(img, 1)
+        lsvd.init(img, 1, True)
         d = b'X' * 4096
         lsvd.write(0, d)
         lsvd.write(8192,d)
@@ -182,7 +182,7 @@ class tests(unittest.TestCase):
         #print('Test 5')
         start()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1)
+        _size = lsvd.init(img, 1, True)
         self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
         d = b'Y' * 4096
         lsvd.write(0, d)
@@ -193,7 +193,7 @@ class tests(unittest.TestCase):
         lsvd.shutdown()
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
 
-        lsvd.init(img, 1)
+        lsvd.init(img, 1, True)
         d = lsvd.read(0, 4096)
         self.assertEqual(d, b'Y' * 4096)
         finish()
@@ -203,7 +203,7 @@ class tests(unittest.TestCase):
         #printf('Test 6')
         start()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1)
+        _size = lsvd.init(img, 1, True)
         d = b'Z' * 4096
         lsvd.write(4096, d)
         self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))
@@ -228,7 +228,7 @@ class tests(unittest.TestCase):
         #printf('Test 6')
         start()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1)
+        _size = lsvd.init(img, 1, True)
         d = b'Z' * 4096
         lsvd.write(4096, d)
         lsvd.flush()
@@ -259,8 +259,7 @@ class tests(unittest.TestCase):
         self.assertEqual(data, b'Q' * 4096)
         finish()
 
-from time import sleep
 if __name__ == '__main__':
     unittest.main(exit=False)
-    sleep(1)
+    time.sleep(1)
     
