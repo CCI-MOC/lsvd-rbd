@@ -126,6 +126,18 @@ public:
 	q.pop();
 	return val;
     }
+    bool wait_locked(std::unique_lock<std::mutex> &lk) {
+	while (running && q.empty())
+	    cv.wait(lk);
+	return running;
+    }
+    bool get_nowait(T &val) {
+	if (!running || q.empty())
+	    return false;
+	val = q.front();
+	q.pop();
+	return true;
+    }
     T get(void) {
 	std::unique_lock<std::mutex> lk(*m);
 	return get_locked();
@@ -670,7 +682,10 @@ struct wcache_work {
     void     *ptr;
 };
 
-char pad_4k[4096];
+bool aligned(void *ptr, int a)
+{
+    return 0 == ((long)ptr & (a-1));
+}
 
 /* all addresses are in units of 4KB blocks
  * TODO: should this use direct I/O? 
@@ -688,23 +703,13 @@ class write_cache {
     uint32_t       next;
     uint32_t       oldest;
 
-    bool                    running;
-    std::condition_variable cv;
-    std::queue<wcache_work> q;
-    std::queue<std::thread> threads;
+    thread_pool<wcache_work> workers;
+    std::mutex               m;
 
     uint64_t sequence;
-
-    static const int n_threads = 4;
+    char *pad_page;
     
-public:
-    write_cache(translate *_be) {
-	be = _be;
-    }
-    ~write_cache() {
-	running = false;
-	cv.notify_all();
-    }
+    static const int n_threads = 4;
 
     /* lock must be held before calling
      */
@@ -726,95 +731,120 @@ public:
 	memcpy(h->vol_uuid, uuid, sizeof(uuid));
 	return h;
     }
-        
-    void writer(void) {
-	while (running) {
+
+    void writer(thread_pool<wcache_work> *p) {
+	char *buf = (char*)aligned_alloc(512, 4096); // for direct I/O
+	while (p->running) {
+	    std::vector<char*> bounce_bufs;
 	    std::unique_lock<std::mutex> lk(m);
-	    while (running && q.empty())
-		cv.wait(lk);
-	    if (running) {
-		std::vector<wcache_work> work;
-		std::vector<int> lengths;
-		int sectors = 0;
-		while (!q.empty()) {
-		    auto w = q.front(); q.pop();
-		    auto l = iov_sum(w.iov, w.iovcnt) / 512;
-		    sectors += l;
-		    lengths.push_back(l);
-		    work.push_back(w);
-		}
-		int blocks = div_round_up(sectors, 8);
-		// allocate blocks + 1
-		uint32_t pad, blockno = allocate(blocks+1, pad);
-		lk.unlock();
+	    if (!p->wait_locked(lk))
+		return;
 
-		char buf[4096];
-		if (pad != 0) {
-		    mk_header(buf, LSVD_J_PAD, my_uuid, (limit - pad));
-		    if (pwrite(fd, buf, 4096, pad*4096) < 0)
-			/* TODO: do something */;
-		}
+	    std::vector<wcache_work> work;
+	    std::vector<int> lengths;
+	    int sectors = 0;
+	    while (p->running) {
+		wcache_work w;
+		if (!p->get_nowait(w))
+		    break;
+		auto l = iov_sum(w.iov, w.iovcnt) / 512;		
+		sectors += l;
+		lengths.push_back(l);
+		work.push_back(w);
+	    }
+	    
+	    int blocks = div_round_up(sectors, 8);
+	    // allocate blocks + 1
+	    uint32_t pad, blockno = allocate(blocks+1, pad);
+	    lk.unlock();
 
-		std::vector<j_extent> extents;
-		for (auto w : work) 
-		    extents.push_back((j_extent){w.lba, iov_sum(w.iov, w.iovcnt)/512});
-
-		j_hdr *j = mk_header(buf, LSVD_J_DATA, my_uuid, 1+blocks);
-		j->extent_offset = sizeof(*j);
-		size_t e_bytes = extents.size() * sizeof(j_extent);
-		j->extent_len = e_bytes;
-		
-		std::vector<iovec> iovs;
-		iovs.push_back((iovec){buf, 4096});
-		iovs.push_back((iovec){(char*)extents.data(), e_bytes});
-		size_t pad_bytes = 4096 - e_bytes - sizeof(j_hdr);
-		iovs.push_back((iovec){pad_4k, pad_bytes});
-
-		for (auto w : work)
-		    for (int i = 0; i < w.iovcnt; i++)
-			iovs.push_back(w.iov[i]);
-		    
-		size_t pad_sectors = blocks*8 - sectors;
-		if (pad_sectors > 0)
-		    iovs.push_back((iovec){pad_4k, pad_sectors*512});
-
-		if (pwritev(fd, iovs.data(), iovs.size(), blockno*512) < 0)
+	    if (pad != 0) {
+		mk_header(buf, LSVD_J_PAD, my_uuid, (limit - pad));
+		if (pwrite(fd, buf, 4096, pad*4096) < 0)
 		    /* TODO: do something */;
+	    }
 
-		uint64_t lba = (blockno+1) * 8;
-		for (auto w : work) {
-		    be->writev(w.lba, w.iov, w.iovcnt);
-		    auto sectors = iov_sum(w.iov, w.iovcnt) / 512;
-		    {
-			std::unique_lock<std::mutex> lk(m);
-			map.update(w.lba, w.lba + sectors, lba);
-		    }
-		    lba += sectors;
-		    w.callback(w.ptr);
+	    std::vector<j_extent> extents;
+	    for (auto w : work) {
+		for (int i = 0; i < w.iovcnt; i++) {
+		    if (aligned(w.iov[i].iov_base, 512))
+			continue;
+		    char *p = (char*)aligned_alloc(512, w.iov[i].iov_len);
+		    memcpy(p, w.iov[i].iov_base, w.iov[i].iov_len);
+		    w.iov[i].iov_base = p;
+		    bounce_bufs.push_back(p);
 		}
+		extents.push_back((j_extent){w.lba, iov_sum(w.iov, w.iovcnt)/512});
+	    }
+
+	    j_hdr *j = mk_header(buf, LSVD_J_DATA, my_uuid, 1+blocks);
+	    j->extent_offset = sizeof(*j);
+	    size_t e_bytes = extents.size() * sizeof(j_extent);
+	    j->extent_len = e_bytes;
+		
+	    std::vector<iovec> iovs;
+	    iovs.push_back((iovec){buf, 4096});
+	    iovs.push_back((iovec){(char*)extents.data(), e_bytes});
+	    size_t pad_bytes = 4096 - e_bytes - sizeof(j_hdr);
+	    iovs.push_back((iovec){pad_page, pad_bytes});
+
+	    for (auto w : work)
+		for (int i = 0; i < w.iovcnt; i++)
+		    iovs.push_back(w.iov[i]);
+		    
+	    size_t pad_sectors = blocks*8 - sectors;
+	    if (pad_sectors > 0)
+		iovs.push_back((iovec){pad_page, pad_sectors*512});
+
+	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*512) < 0)
+		/* TODO: do something */;
+
+	    /* update map first under lock */
+	    lk.lock();
+	    uint64_t lba = (blockno+1) * 8;
+	    for (auto w : work) {
+		auto sectors = iov_sum(w.iov, w.iovcnt) / 512;
+		map.update(w.lba, w.lba + sectors, lba);
+		lba += sectors;
+	    }
+	    
+	    /* then send to backend */
+	    lk.unlock();
+	    for (auto w : work) {
+		be->writev(w.lba, w.iov, w.iovcnt);
+		w.callback(w.ptr);
+	    }
+
+	    while (!bounce_bufs.empty()) {
+		free(bounce_bufs.back());
+		bounce_bufs.pop_back();
 	    }
 	}
+	free(buf);
     }
-
-    write_cache(uint32_t blkno, int _fd) {
+    
+public:
+    write_cache(uint32_t blkno, int _fd, translate *_be) : workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
+	be = _be;
 	char *buf = (char*)malloc(4096);
 	if (pread(fd, buf, 4096, 0) < 4096)
 	    throw fs::filesystem_error("cache", std::error_code());
 	super = (j_write_super*)buf;
-
-	running = true;
+	pad_page = (char*)aligned_alloc(512, 4096);
+	memset(pad_page, 0, 4096);
+	
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
-	    threads.push(std::thread(&write_cache::writer, this));
+	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
+    }
+    ~write_cache() {
+	free(pad_page);
     }
 
     void write(size_t offset, iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
-	std::unique_lock<std::mutex> lk(m);
-	q.push((wcache_work){offset/512, iov, iovcnt, callback, ptr});
-	lk.unlock();
-	cv.notify_one();
+	workers.put((wcache_work){offset/512, iov, iovcnt, callback, ptr});
     }    
 };
 
@@ -825,7 +855,45 @@ extern "C" ssize_t c_init(char*, int);
 extern "C" int c_size(void);
 extern "C" void c_shutdown(void);
 
-translate *lsvd;
+translate   *lsvd;
+write_cache *wcache;
+
+extern "C" void wcache_init(uint32_t blkno, int fd);
+void wcache_init(uint32_t blkno, int fd)
+{
+    wcache = new write_cache(blkno, fd, lsvd);
+}
+
+extern "C" void wcache_shutdown(void);
+void wcache_shutdown(void)
+{
+    delete wcache;
+}
+
+extern "C" void wcache_write(char*, uint64_t offset, uint64_t len, char *buf);
+struct do_write {
+public:
+    std::mutex m;
+    std::condition_variable cv;
+    bool done;
+    do_write(){done = false;}
+};
+static void cb(void *ptr)
+{
+    do_write *d = (do_write*)ptr;
+    std::unique_lock<std::mutex> lk(d->m);
+    d->done = true;
+    d->cv.notify_all();
+}
+void wcache_write(char *buf, uint64_t offset, uint64_t len)
+{
+    do_write dw;
+    iovec iov = {buf, len};
+    std::unique_lock<std::mutex> lk(dw.m);
+    wcache->write(offset, &iov, 1, cb, (void*)&dw);
+    while (!dw.done)
+	dw.cv.wait(lk);
+}
 
 void c_shutdown(void)
 {

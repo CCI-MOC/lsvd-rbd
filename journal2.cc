@@ -4,17 +4,16 @@
 //enum { LSVD_MAGIC = 0x4456534c };
 
 struct j_extent {
-    uint64_t blk : 36;		// SSD block (LBA/8)
-    uint64_t len : 28;
-    uint64_t lba;		// volume LBA (in sectors)
+    uint64_t lba : 40;		// volume LBA (in sectors)
+    uint64_t len : 24;		// length (sectors)
 } __attribute__((packed));
 
-enum {LSVD_J_DATA,
-      LSVD_J_CKPT,
-      LSVD_J_PAD,
-      LSVD_J_SUPER,
-      LSVD_J_W_SUPER,
-      LSVD_J_R_SUPER};
+enum {LSVD_J_DATA    = 10,
+      LSVD_J_CKPT    = 11,
+      LSVD_J_PAD     = 12,
+      LSVD_J_SUPER   = 13,
+      LSVD_J_W_SUPER = 14,
+      LSVD_J_R_SUPER = 15};
 
 /* for now we'll assume that all entries are contiguous
  */
@@ -103,9 +102,9 @@ struct j_super {
 
 /* backend follows superblock
  */
-enum {LSVD_BE_FILE  = 100,
-      LSVD_BE_S3    = 101,
-      LSVD_BE_RADOS = 102};
+enum {LSVD_BE_FILE  = 20,
+      LSVD_BE_S3    = 21,
+      LSVD_BE_RADOS = 22};
 
 struct j_be_file {
     uint16_t len;

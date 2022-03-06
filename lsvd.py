@@ -16,13 +16,13 @@ def write(offset, data):
         data = bytes(data, 'utf-8')
     nbytes = len(data)
     assert (nbytes % 512) == 0 and (offset % 512) == 0
-    val = lsvd_lib.c_write(data, c_ulong(offset), c_uint(nbytes), c_ulong(0))
+    val = lsvd_lib.c_write(data, c_ulong(offset), c_uint(nbytes))
     return val
 
 def read(offset, nbytes):
     assert (nbytes % 512) == 0 and (offset % 512) == 0
     buf = (c_char * nbytes)()
-    val = lsvd_lib.c_read(buf, c_ulong(offset), c_uint(nbytes), c_ulong(0))
+    val = lsvd_lib.c_read(buf, c_ulong(offset), c_uint(nbytes))
     return buf[0:nbytes]
 
 def getmap(base, limit):
@@ -38,7 +38,7 @@ def inmem():
     return objs[0:n]
 
 def flush():
-    return lsvd_lib.c_flush(c_ulong(0))
+    return lsvd_lib.c_flush()
 
 def init(name, n):
     if type(name) != bytes:
@@ -151,4 +151,91 @@ class ckpt_mapentry(LittleEndianStructure):
                 ("obj",                 c_uint),
                 ("offset",              c_uint)]
 sizeof_ckpt_mapentry = sizeof(ckpt_mapentry) # 16
+
+###############
+
+_fd = -1
+def cache_init(blkno, file):
+    global _fd
+    _fd = os.open(file, os.O_RDWR)
+    lsvd_lib.wcache_init(blkno, _fd)
+
+def cache_shutdown():
+    lsvd_lib.wcache_shutdown()
+    close(_fd)
+
+def cache_write(offset, data):
+    if type(data) != bytes:
+        data = bytes(data, 'utf-8')
+    nbytes = len(data)
+    assert (nbytes % 512) == 0 and (offset % 512) == 0
+    val = lsvd_lib.wcache_write(data, c_ulong(offset), c_uint(nbytes))
+
+class j_extent(Structure):
+    _fields_ = [("lba", c_ulong, 40),
+                ("len", c_ulong, 24)]
+sizeof_j_extent = sizeof(j_extent)
+
+LSVD_J_DATA    = 10
+LSVD_J_CKPT    = 11
+LSVD_J_PAD     = 12
+LSVD_J_SUPER   = 13
+LSVD_J_W_SUPER = 14
+LSVD_J_R_SUPER = 15
+
+class j_hdr(Structure):
+    _fields_ = [("magic",         c_uint),
+                ("type",          c_uint),
+                ("version",       c_uint),
+                ("vol_uuid",      c_ubyte*16),
+                ("seq",           c_ulong),
+                ("len",           c_uint),
+                ("crc32",         c_uint),
+                ("extent_offset", c_uint),
+                ("extent_len",    c_uint)]
+sizeof_j_hdr = sizeof(j_hdr)
+
+class j_write_super(Structure):
+    _fields_ = [("magic",       c_uint),
+                ("type",        c_uint),
+                ("version",     c_uint),
+                ("vol_uuid",    c_ubyte*16),
+                ("seq",         c_ulong),
+                ("base",        c_uint),
+                ("limit",       c_uint),
+                ("next",        c_uint),
+                ("oldest",      c_uint),
+                ("map_start",   c_uint),
+                ("map_blocks",  c_uint),
+                ("map_entries", c_uint)]
+sizeof_j_write_super = sizeof(j_write_super)
+
+class j_read_super(Structure):
+    _fields_ = [("magic",       c_uint),
+                ("type",        c_uint),
+                ("version",     c_uint),
+                ("vol_uuid",    c_ubyte*16),
+                ("map_start",   c_uint),
+                ("map_blocks",  c_uint),
+                ("map_entries", c_uint)]
+sizeof_j_read_super = sizeof(j_read_super)
+
+class j_super(Structure):
+    _fields_ = [("magic",        c_uint),
+                ("type",         c_uint),
+                ("version",      c_uint),
+                ("write_super",  c_uint),
+                ("read_super",   c_uint),
+                ("vol_uuid",     c_ubyte*16),
+                ("backend_type", c_uint)]
+sizeof_j_super = sizeof(j_super)
+
+LSVD_BE_FILE  = 20
+LSVD_BE_S3    = 21
+LSVD_BE_RADOS = 22
+
+class j_be_file(Structure):
+    _fields_ = [("len", c_ushort),
+                ("prefix", c_char*24)]      # hack. max of 24 bytes
+
 
