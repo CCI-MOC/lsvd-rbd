@@ -27,7 +27,8 @@ def mkcache(name):
     data = bytearray(b'\0'*4096)
     for i in range(2,128):
         fp.write(data)
-
+    fp.close()
+    
 if __name__ == '__main__':
     mkcache(sys.argv[1])
 

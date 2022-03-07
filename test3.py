@@ -6,6 +6,7 @@ import os
 import ctypes
 import time
 import mkcache
+import test2 as t2
 
 nvme = '/tmp/nvme'
 img = '/tmp/bkt/obj'
@@ -61,6 +62,55 @@ class tests(unittest.TestCase):
         lsvd.cache_write(offset+1024, b'B'*512)
         d = lsvd.cache_read(offset, 2048)
         self.assertEqual(d, b'A'*512+b'\0'*512+b'B'*512+b'\0'*512)
+
+    def test_3_extents(self):
+        lsvd.cache_shutdown()
+        mkcache.mkcache(nvme)
+        lsvd.cache_init(1, nvme)
+        
+        wsup = c_w_super(fd2, 1)
+        n = wsup.next
+        lsvd.cache_write(0, b'X'*8192)
+        m = lsvd.cache_getmap(0, 1000)
+
+        h,e = c_hdr(fd2, n)
+        ee = [[_.lba, _.len] for _ in e]
+        self.assertEqual(h.seq, 1)
+        self.assertEqual(ee, [[0,16]])
+        
+        lsvd.cache_write(1024, b'A'*512)
+        n += h.len
+        h,e = c_hdr(fd2, n)
+        ee = [[_.lba, _.len] for _ in e]
+        self.assertEqual(h.seq, 2)
+        self.assertEqual(ee, [[2,1]])
+
+        lsvd.cache_write(2048, b'B'*512)
+        n += h.len
+        h,e = c_hdr(fd2, n)
+        ee = [[_.lba, _.len] for _ in e]
+        self.assertEqual(h.seq, 3)
+        self.assertEqual(ee, [[4,1]])
+
+    def test_4_backend(self):
+        lsvd.cache_shutdown()
+        lsvd.shutdown()
+        for f in os.listdir(dir):
+            os.unlink(dir + "/" + f)
+        t2.write_super(img, 0, 1)
+        mkcache.mkcache(nvme)
+        lsvd.init(img, 1, True)
+        lsvd.cache_init(1, nvme)
+
+        d = lsvd.read(0, 4096*3)
+        self.assertEqual(d, b'\0'*3*4096)
+
+        lsvd.cache_write(0, b'W'*4096)
+        lsvd.cache_write(4096, b'X'*4096)
+        lsvd.cache_write(8192, b'Y'*4096)
+        time.sleep(0.1)
+        d = lsvd.read(0, 4096*3)
+        self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
 if __name__ == '__main__':
     startup()

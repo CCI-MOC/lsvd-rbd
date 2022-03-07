@@ -10,6 +10,7 @@
 #include <vector>
 #include <queue>
 #include <mutex>
+#include <shared_mutex>
 #include <condition_variable>
 #include <stack>
 #include <map>
@@ -65,6 +66,7 @@ public:
     virtual ssize_t read_object(const char *name, char *buf, size_t offset, size_t len) = 0;
     virtual ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) = 0;
     virtual std::string object_name(int seq) = 0;
+    virtual ~backend(){}
 };
 
 struct batch {
@@ -155,16 +157,17 @@ public:
     }
 };
 
+class objmap {
+    std::shared_mutex  sm;
+    extmap::objmap      object_map;
+};
+
 class translate {
-    backend *io;
-    
-    std::mutex              m;
-    std::condition_variable cv;
-    std::condition_variable cv2;	// misc sleeping threads, notify_all on quit
+    std::mutex          m;
+    extmap::objmap      object_map;
 
     batch              *current_batch;
     std::stack<batch*>  batches;
-    extmap::objmap      object_map;
     std::map<int,char*> in_mem_objects;
 
     /* info on all live objects - all sizes in sectors
@@ -426,6 +429,8 @@ class translate {
     }
 
 public:
+    backend *io;
+
     translate(backend *_io) : workers(&m), misc_threads(&m) {
 	io = _io;
 	current_batch = NULL;
@@ -436,6 +441,10 @@ public:
 	    batches.pop();
 	    delete b;
 	}
+	if (current_batch)
+	    delete current_batch;
+	free(super);
+	delete io;
     }
     
     /* returns sequence number of ckpt
@@ -445,7 +454,6 @@ public:
 	if (current_batch && current_batch->len > 0) {
 	    workers.put_locked(current_batch, lk);
 	    current_batch = NULL;
-	    cv.notify_one();
 	}
 	int seq = batch_seq++;
 	lk.unlock();
@@ -459,7 +467,6 @@ public:
 	    val = current_batch->seq;
 	    workers.put_locked(current_batch, lock);
 	    current_batch = NULL;
-	    cv.notify_one();
 	}
 	return val;
     }
@@ -531,7 +538,6 @@ public:
 	if (current_batch && current_batch->len + len > current_batch->max) {
 	    workers.put_locked(current_batch, lock);
 	    current_batch = NULL;
-	    cv.notify_one();
 	}
 	if (current_batch == NULL) {
 	    if (batches.empty())
@@ -754,7 +760,7 @@ class write_cache {
     uint64_t sequence;
     char *pad_page;
     
-    static const int n_threads = 4;
+    static const int n_threads = 1;
 
     /* lock must be held before calling
      */
@@ -770,6 +776,7 @@ class write_cache {
     }
 
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, uint32_t blks) {
+	memset(buf, 0, 4096);
 	j_hdr *h = (j_hdr*)buf;
 	*h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1, .vol_uuid = {0},
 		     .seq = sequence++, .len = blks, .crc32 = 0, .extent_offset = 0, .extent_len = 0};
@@ -779,11 +786,12 @@ class write_cache {
 
     void writer(thread_pool<wcache_work> *p) {
 	char *buf = (char*)aligned_alloc(512, 4096); // for direct I/O
+	
 	while (p->running) {
 	    std::vector<char*> bounce_bufs;
 	    std::unique_lock<std::mutex> lk(m);
 	    if (!p->wait_locked(lk))
-		return;
+		break;
 
 	    std::vector<wcache_work> work;
 	    std::vector<int> lengths;
@@ -856,7 +864,7 @@ class write_cache {
 	    /* then send to backend */
 	    lk.unlock();
 	    for (auto w : work) {
-		be->writev(w.lba, w.iov, w.iovcnt);
+		be->writev(w.lba*512, w.iov, w.iovcnt);
 		w.callback(w.ptr);
 	    }
 
@@ -884,6 +892,7 @@ public:
 	limit = super->limit;
 	next = super->next;
 	oldest = super->oldest;
+	sequence = super->seq;
 	
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
@@ -891,6 +900,7 @@ public:
     }
     ~write_cache() {
 	free(pad_page);
+	free(super);
     }
 
     void write(size_t offset, iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
@@ -965,6 +975,7 @@ extern "C" void wcache_shutdown(void);
 void wcache_shutdown(void)
 {
     delete wcache;
+    wcache = NULL;
 }
 
 extern "C" void wcache_write(char* buf, uint64_t offset, uint64_t len);
