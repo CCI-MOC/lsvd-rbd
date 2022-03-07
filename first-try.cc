@@ -147,24 +147,27 @@ public:
 	std::unique_lock<std::mutex> lk(*m);
 	return get_locked();
     }
-    void put_locked(T work, std::unique_lock<std::mutex> &lk) {
+    void put_locked(T work) {
 	q.push(work);
 	cv.notify_one();
     }
     void put(T work) {
 	std::unique_lock<std::mutex> lk(*m);
-	put_locked(work, lk);
+	put_locked(work);
     }
 };
 
 class objmap {
-    std::shared_mutex  sm;
-    extmap::objmap      object_map;
+public:
+    std::shared_mutex m;
+    extmap::objmap    map;
 };
 
 class translate {
-    std::mutex          m;
-    extmap::objmap      object_map;
+    // mutex protects batch, thread pools, object_info, in_mem_objects
+    std::mutex   m;
+    objmap      *map;
+//    extmap::objmap      object_map;
 
     batch              *current_batch;
     std::stack<batch*>  batches;
@@ -296,15 +299,17 @@ class translate {
 	std::vector<ckpt_mapentry> entries;
 	std::vector<ckpt_obj> objects;
 	
-	std::unique_lock<std::mutex> lk(m);
+	std::unique_lock lk(map->m);
 	last_ckpt = seq;
-	for (auto it = object_map.begin(); it != object_map.end(); it++) {
+	for (auto it = map->map.begin(); it != map->map.end(); it++) {
 	    auto [base, limit, ptr] = it->vals();
 	    entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
 			.obj = (int32_t)ptr.obj, .offset = (int32_t)ptr.offset});
 	}
+	lk.unlock();
 	size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
 
+	std::unique_lock lk2(m);
 	for (auto it = object_info.begin(); it != object_info.end(); it++) {
 	    auto obj_num = it->first;
 	    auto [hdr, data, live, type] = it->second;
@@ -317,7 +322,7 @@ class translate {
 	size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
 	uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes + objs_bytes, 512);
 	object_info[seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0, .type = LSVD_CKPT};
-	lk.unlock();
+	lk2.unlock();
 
 	char *buf = (char*)calloc(hdr_bytes, 1);
 	hdr *h = (hdr*)buf;
@@ -366,15 +371,13 @@ class translate {
 
     void worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
-	    std::unique_lock<std::mutex> lk(*p->m);
+	    std::unique_lock<std::mutex> lk(m);
 	    auto b = p->get_locked(lk);
 	    if (!p->running)
 		return;
-
-
 	    uint32_t sectors = div_round_up(b->hdrlen(), 512);
 	    object_info[b->seq] = (obj_info){.hdr = sectors, .data = (uint32_t)(b->len / 512),
-					     .live = (uint32_t)(b->len / 512), .type = LSVD_DATA};
+					     .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
 	    lk.unlock();
 
 	    char *hdr = (char*)calloc(sectors*512, 1);
@@ -396,7 +399,7 @@ class translate {
 	const int ckpt_interval = 100;
 
 	while (p->running) {
-	    std::unique_lock<std::mutex> lk(*p->m);
+	    std::unique_lock<std::mutex> lk(m);
 	    p->cv.wait_for(lk, one_second);
 	    if (p->running && batch_seq - seq0 > ckpt_interval) {
 		seq0 = batch_seq;
@@ -431,8 +434,9 @@ class translate {
 public:
     backend *io;
 
-    translate(backend *_io) : workers(&m), misc_threads(&m) {
+    translate(backend *_io, objmap *omap) : workers(&m), misc_threads(&m) {
 	io = _io;
+	map = omap;
 	current_batch = NULL;
     }
     ~translate() {
@@ -452,7 +456,7 @@ public:
     int checkpoint(void) {
 	std::unique_lock<std::mutex> lk(m);
 	if (current_batch && current_batch->len > 0) {
-	    workers.put_locked(current_batch, lk);
+	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
 	int seq = batch_seq++;
@@ -461,11 +465,11 @@ public:
     }
 
     int flush(void) {
-	std::unique_lock<std::mutex> lock(m);
+	std::unique_lock<std::mutex> lk(m);
 	int val = 0;
 	if (current_batch && current_batch->len > 0) {
 	    val = current_batch->seq;
-	    workers.put_locked(current_batch, lock);
+	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
 	return val;
@@ -485,18 +489,17 @@ public:
 	    ckpts.resize(0);
 	    std::vector<ckpt_obj> objects;
 	    std::vector<deferred_delete> deletes;
-	    std::vector<ckpt_mapentry> map;
-	    if (read_checkpoint(ck, ckpts, objects, deletes, map) < 0)
+	    std::vector<ckpt_mapentry> entries;
+	    if (read_checkpoint(ck, ckpts, objects, deletes, entries) < 0)
 		return -1;
 	    for (auto o : objects) {
 		object_info[o.seq] = (obj_info){.hdr = o.hdr_sectors, .data = o.data_sectors,
 					.live = o.live_sectors, .type = LSVD_DATA};
 
 	    }
-	    for (auto m : map) {
-		object_map.update(m.lba, m.lba + m.len,
-				  (extmap::obj_offset){.obj = m.obj,
-					  .offset = m.offset});
+	    for (auto m : entries) {
+		map->map.update(m.lba, m.lba + m.len,
+				(extmap::obj_offset){.obj = m.obj, .offset = m.offset});
 	    }
 	    _ckpt = ck;
 	}
@@ -504,17 +507,17 @@ public:
 	for (int i = _ckpt; ; i++) {
 	    std::vector<uint32_t>    ckpts;
 	    std::vector<obj_cleaned> cleaned;
-	    std::vector<data_map>    map;
+	    std::vector<data_map>    entries;
 	    hdr h; data_hdr dh;
 	    batch_seq = i;
-	    if (read_data_hdr(i, h, dh, ckpts, cleaned, map) < 0)
+	    if (read_data_hdr(i, h, dh, ckpts, cleaned, entries) < 0)
 		break;
 	    object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
 					.live = h.data_sectors, .type = LSVD_DATA};
 	    int offset = 0;
-	    for (auto m : map) {
-		object_map.update(m.lba, m.lba + m.len,
-				  (extmap::obj_offset){.obj = i, .offset = offset});
+	    for (auto m : entries) {
+		map->map.update(m.lba, m.lba + m.len,
+				(extmap::obj_offset){.obj = i, .offset = offset});
 		offset += m.len;
 	    }
 	}
@@ -532,11 +535,11 @@ public:
     }
 
     ssize_t writev(size_t offset, iovec *iov, int iovcnt) {
-	std::unique_lock<std::mutex> lock(m);
+	std::unique_lock<std::mutex> lk(m);
 	size_t len = iov_sum(iov, iovcnt);
 
 	if (current_batch && current_batch->len + len > current_batch->max) {
-	    workers.put_locked(current_batch, lock);
+	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
 	if (current_batch == NULL) {
@@ -556,8 +559,11 @@ public:
 
 	std::vector<extmap::lba2obj> deleted;
 	extmap::obj_offset oo = {current_batch->seq, sector_offset};
-	object_map.update(lba, limit, oo, &deleted);
-
+	{
+	    std::unique_lock objlock(map->m);
+	    map->map.update(lba, limit, oo, &deleted);
+	}
+	
 	for (auto d : deleted) {
 	    auto [base, limit, ptr] = d.vals();
 	    object_info[ptr.obj].live -= (limit - base);
@@ -575,18 +581,20 @@ public:
 	int64_t base = offset / 512;
 	int64_t sectors = len / 512, limit = base + sectors;
 
-	if (object_map.size() == 0) {
+	if (map->map.size() == 0) {
 	    memset(buf, 0, len);
 	    return len;
 	}
 
 	/* object number, offset (bytes), length (bytes) */
 	std::vector<std::tuple<int, size_t, size_t>> regions;
-	std::unique_lock<std::mutex> lock(m);
 
+	std::unique_lock lk(m);
+	std::shared_lock slk(map->m);
+	
 	auto prev = base;
 	char *ptr = buf;
-	for (auto it = object_map.lookup(base); it != object_map.end() && it->base() < limit; it++) {
+	for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, oo] = it->vals(base, limit);
 	    if (_base > prev) {	// unmapped
 		size_t _len = (_base - prev)*512;
@@ -604,7 +612,8 @@ public:
 	    ptr += _len;
 	    prev = _limit;
 	}
-	lock.unlock();
+	slk.unlock();
+	lk.unlock();
 
 	ptr = buf;
 	for (auto [obj, _offset, _len] : regions) {
@@ -628,17 +637,17 @@ public:
 	return i;
     }
     void getmap(int base, int limit, int (*cb)(void *ptr,int,int,int,int), void *ptr) {
-	for (auto it = object_map.lookup(base); it != object_map.end() && it->base() < limit; it++) {
+	for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, oo] = it->vals(base, limit);
 	    if (!cb(ptr, (int)_base, (int)_limit, (int)oo.obj, (int)oo.offset))
 		break;
 	}
     }
     int mapsize(void) {
-	return object_map.size();
+	return map->map.size();
     }
     void reset(void) {
-	object_map.reset();
+	map->map.reset();
     }
     int frontier(void) {
 	if (current_batch)
@@ -951,6 +960,7 @@ public:
 
 translate   *lsvd;
 write_cache *wcache;
+objmap      *omap;
 
 struct tuple {
     int base;
@@ -1051,7 +1061,8 @@ extern "C" ssize_t c_init(char* name, int n, bool flushthread);
 ssize_t c_init(char *name, int n, bool flushthread)
 {
     auto io = new file_backend(name);
-    lsvd = new translate(io);
+    omap = new objmap();
+    lsvd = new translate(io, omap);
     return lsvd->init(name, n, flushthread);
 }
 
