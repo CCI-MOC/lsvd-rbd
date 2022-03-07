@@ -658,11 +658,13 @@ public:
 };
 
 /* the read cache is:
- * 1. indexed by obj/offset, not LBA
+ * 1. indexed by obj/offset[*], not LBA
  * 2. stores aligned 64KB blocks 
  * 3. tolerates 4KB-aligned "holes" using a per-entry bitmap (64KB = 16 bits)
+ * [*] offset is in units of 64KB blocks
  */
 class read_cache {
+    std::mutex m;
     std::map<extmap::obj_offset,int> map;
 
     j_read_super       *super;
@@ -671,7 +673,73 @@ class read_cache {
     objmap             *omap;
     translate          *be;
     int                 fd;
+    
+    int               blk_sectors;
+    std::vector<int>  free_blks;
+    // cache block is busy when being written - mask can change, but not
+    // its mapping.
+    std::vector<bool> busy;
+    std::condition_variable cv;
+    
 public:
+    // TODO: iovec version
+    void read(size_t offset, size_t len, char *buf) {
+	
+    }
+
+    void add(extmap::obj_offset oo, int sectors, char *buf) {
+	// must be 4KB aligned
+	assert(!(oo.offset & 7)); 
+	
+	while (sectors > 0) {
+	    std::unique_lock lk(m);
+
+	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / blk_sectors};
+	    int cache_blk = -1;
+	    auto it = map.find(obj_blk);
+	    if (it != map.end())
+		cache_blk = it->second;
+	    else if (free_blks.size() > 0) {
+		cache_blk = free_blks.back();
+		free_blks.pop_back();
+	    }
+	    else
+		return;
+	    while (busy[cache_blk])
+		cv.wait(lk);
+	    busy[cache_blk] = true;
+	    auto mask = bitmap[cache_blk];
+	    lk.unlock();
+
+	    assert(cache_blk >= 0);
+	    
+	    auto obj_page = oo.offset / 8;
+	    auto pages_in_blk = blk_sectors / 8;
+	    auto blk_page = obj_blk.offset * pages_in_blk;
+	    std::vector<iovec> iov;
+	    
+	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
+		mask |= (1 << i);
+		iov.push_back((iovec){buf, 4096});
+		buf += 4096;
+		sectors -= 8;
+		oo.offset += 8;
+	    }
+
+	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096;
+	    blk_offset += (obj_page - blk_page) * 4096;
+	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
+		throw fs::filesystem_error("rcache", std::error_code(errno, std::system_category()));
+
+	    lk.lock();
+	    map[obj_blk] = cache_blk;
+	    bitmap[cache_blk] = mask;
+	    busy[cache_blk] = false;
+	    cv.notify_one();
+	    lk.unlock();
+	}
+    }
+
     read_cache(uint32_t blkno, int _fd, translate *_be, objmap *_om) {
 	omap = _om;
 	be = _be;
@@ -682,19 +750,32 @@ public:
 	    throw fs::filesystem_error("rcache", std::error_code(errno, std::system_category()));
 	super = (j_read_super*)buf;
 
-	assert(super->block_size == 128); // 64KB
+	assert(super->block_size == 128); // 64KB, in sectors
+	
+	auto nblks = (super->limit - super->base) / (super->block_size / 8);
+	
 	int divisor = 4096 / sizeof(extmap::obj_offset);
 	assert(div_round_up(super->map_entries, divisor) == super->map_blocks);
+	assert(super->map_entries == nblks);
 	assert(div_round_up(super->bitmap_entries, 2048) == super->bitmap_blocks);
-	
+	assert(super->bitmap_entries == nblks);
+
 	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
 	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096) < 0)
 	    throw fs::filesystem_error("rcache2", std::error_code(errno, std::system_category()));	    
 	bitmap = (uint16_t*)aligned_alloc(512, super->bitmap_blocks*4096);
 	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096) < 0)
 	    throw fs::filesystem_error("rcache3", std::error_code(errno, std::system_category()));	    
+
 	for (int i = 0; i < super->map_entries; i++)
-	    map[flat_map[i]] = super->base + i;
+	    if (flat_map[i].obj != 0)
+		map[flat_map[i]] = i;
+	    else {
+		free_blks.push_back(i);
+		bitmap[i] = 0;
+	    }
+	busy.reserve(nblks);
+	std::fill(busy.begin(), busy.end(), false);
     }
     ~read_cache() {
 	free((void*)flat_map);

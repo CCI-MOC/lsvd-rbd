@@ -442,6 +442,10 @@ Example of running Python-based tests under `valgrind` with Gdb:
 valgrind --vgdb-error=1 --vgdb=full --vgdb-stop-at=all --suppressions=valgrind-python.supp python3 test1.py
 ```
 
+### more gc, as I'm writing the read cache
+
+need a flag to rcache->add to indicate that it's low priority, also another call to check whether something's already in cache. (and to maybe lock it?) Use that for GC - after getting the list of candidate objects, go through the list (not holding map lock) and fetch any data not already in cache. 
+
 ### status
 
 **Sun Feb 27 23:55:50 2022**
