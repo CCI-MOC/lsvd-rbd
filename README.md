@@ -452,6 +452,24 @@ valgrind --vgdb-error=1 --vgdb=full --vgdb-stop-at=all --suppressions=valgrind-p
 
 need a flag to rcache->add to indicate that it's low priority, also another call to check whether something's already in cache. (and to maybe lock it?) Use that for GC - after getting the list of candidate objects, go through the list (not holding map lock) and fetch any data not already in cache. 
 
+### left to do (Mon Mar 7)
+
+- tests for the read cache
+- log cleaner for the write cache
+- garbage collector, some sort of priority/depriority for GC blocks
+- librbd interface
+
+- `io_uring` implementation (wait until everything else works)
+- proper eviction algorithm for read cache (maybe d-choices w/ sequence #s)
+- progressive checkpoints
+- snapshot
+- clone
+
+Note that we can keep a read sequence number, save its value for each cache block, and do pseudo-LRU by choosing d random blocks and taking the oldest sequence number. For now 32 bits should work - 4G / 10K IOPS = 400K seconds, close to a week. 
+Later we may want to use 64 bits per block, which lets us do either a sequence number or LFUDA. (possibly a d-choices version)
+
+TODO: add sequencing, d-choices LRU, persist the eviction status. **add fields to superblock**
+
 ### status
 
 **Mon Mar 7 13:50:00 2022**
