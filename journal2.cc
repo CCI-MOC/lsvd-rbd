@@ -60,9 +60,9 @@ struct j_write_super {
 };
 
 /* probably in the third 4KB block, never gets overwritten (overwrite map in place)
- * uses a fixed map with 1 entry per 64KB block, stored as 32-bit value (LBA/128)
+ * uses a fixed map with 1 entry per 64KB block
  * to update atomically:
- * - reclaim batch of blocks, then write map. (free entries = UINT_MAX)
+ * - reclaim batch of blocks, then write map. (free entries: obj=0)
  * - allocate blocks, then write map
  * - recover free list to memory on startup
  */
@@ -72,10 +72,19 @@ struct j_read_super {
     uint32_t version;		// 1
     uuid_t   vol_uuid;
 
-    uint32_t map_start;
-    uint32_t map_blocks;
-    uint32_t map_entries;	// entry is uint32_t = LBA/128
+    int32_t block_size;		// cache block size, in sectors
 
+    int32_t base;		// the cache itself
+    int32_t limit;
+    
+    int32_t map_start;		// extmap::obj_offset
+    int32_t map_blocks;
+    int32_t map_entries;
+
+    int32_t bitmap_start;	// uint16_t
+    int32_t bitmap_blocks;
+    int32_t bitmap_entries;
+    
     /* need to persist status of cache replacement algorithm
      * for now it's just in memory. 
      * Note that with 64KB blocks, LFUDA would take 128MB per TB of SSD

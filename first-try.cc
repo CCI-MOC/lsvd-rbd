@@ -163,6 +163,7 @@ public:
     extmap::objmap    map;
 };
 
+
 class translate {
     // mutex protects batch, thread pools, object_info, in_mem_objects
     std::mutex   m;
@@ -656,6 +657,51 @@ public:
     }
 };
 
+/* the read cache is:
+ * 1. indexed by obj/offset, not LBA
+ * 2. stores aligned 64KB blocks 
+ * 3. tolerates 4KB-aligned "holes" using a per-entry bitmap (64KB = 16 bits)
+ */
+class read_cache {
+    std::map<extmap::obj_offset,int> map;
+
+    j_read_super       *super;
+    extmap::obj_offset *flat_map;
+    uint16_t           *bitmap;
+    objmap             *omap;
+    translate          *be;
+    int                 fd;
+public:
+    read_cache(uint32_t blkno, int _fd, translate *_be, objmap *_om) {
+	omap = _om;
+	be = _be;
+	fd = _fd;
+	
+	char *buf = (char*)aligned_alloc(512, 4096);
+	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
+	    throw fs::filesystem_error("rcache", std::error_code(errno, std::system_category()));
+	super = (j_read_super*)buf;
+
+	assert(super->block_size == 128); // 64KB
+	int divisor = 4096 / sizeof(extmap::obj_offset);
+	assert(div_round_up(super->map_entries, divisor) == super->map_blocks);
+	assert(div_round_up(super->bitmap_entries, 2048) == super->bitmap_blocks);
+	
+	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
+	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096) < 0)
+	    throw fs::filesystem_error("rcache2", std::error_code(errno, std::system_category()));	    
+	bitmap = (uint16_t*)aligned_alloc(512, super->bitmap_blocks*4096);
+	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096) < 0)
+	    throw fs::filesystem_error("rcache3", std::error_code(errno, std::system_category()));	    
+	for (int i = 0; i < super->map_entries; i++)
+	    map[flat_map[i]] = super->base + i;
+    }
+    ~read_cache() {
+	free((void*)flat_map);
+	free((void*)bitmap);
+	free((void*)super);
+    }
+};
 
 /* simple backend that uses files in a directory. 
  * good for debugging and testing
