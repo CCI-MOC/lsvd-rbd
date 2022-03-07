@@ -3,6 +3,7 @@
 import os
 import lsvd
 import sys
+import uuid
 from ctypes import *
 
 f = open(sys.argv[1], 'rb')
@@ -41,6 +42,24 @@ def fmt_ckpt_map(maps):
 h = lsvd.hdr.from_buffer(bytearray(obj[0:l1]))
 if h.type == lsvd.LSVD_SUPER:
     o3 = o2+lsvd.sizeof_super_hdr
+    sh = lsvd.super_hdr.from_buffer(bytearray(obj[o2:o3]))
+    uu = uuid.UUID(bytes=bytes(h.vol_uuid))
+    print('name:     ', sys.argv[1])
+    print('magic:    ', 'OK' if h.magic == lsvd.LSVD_MAGIC else '**BAD**')
+    print('UUID:     ', str(uu))
+    print('version:  ', h.version)
+    print('type:     ', 'SUPER')
+    print('seq:      ', h.seq)
+    print('n_hdr:    ', h.hdr_sectors)
+    print('n_data:   ', h.data_sectors)
+
+    print('vol_size:      ', sh.vol_size)
+    print('total_sectors: ', sh.total_sectors)
+    print('live_sectors:  ', sh.live_sectors)
+    print('ckpts:         ', '[tbd]')
+    print('clones:        ', '[tbd]')
+    print('snaps:         ', '[tbd]')
+    
 elif h.type == lsvd.LSVD_DATA:
     o3 = o2+lsvd.sizeof_data_hdr
     dh = lsvd.data_hdr.from_buffer(bytearray(obj[o2:o3]))
