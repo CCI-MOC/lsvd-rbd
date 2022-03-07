@@ -431,6 +431,12 @@ Solution:
 - object map + shared\_mutex are separate and shared by read cache and translation layer.
 so 4 mutexes in total.
 
+### Read cache
+
+The read cache keeps a bitmap of the valid pages in each block. This is basically only used when we recycle data from the write cache to the read cache - this way we can just accept the data without worrying if it makes up a full block. If we try to read from the cache block and come across an invalid page, we just fetch the whole damn block.
+
+Note that we just check the pages that are being referenced, so it's ok if the surrounding pages in the object are garbage - we'll never check the corresponding bits, so we'll never fetch the garbage
+
 ### valgrind
 To run Gdb with `valgrind`:
 ```
@@ -447,6 +453,12 @@ valgrind --vgdb-error=1 --vgdb=full --vgdb-stop-at=all --suppressions=valgrind-p
 need a flag to rcache->add to indicate that it's low priority, also another call to check whether something's already in cache. (and to maybe lock it?) Use that for GC - after getting the list of candidate objects, go through the list (not holding map lock) and fetch any data not already in cache. 
 
 ### status
+
+**Mon Mar 7 13:50:00 2022**
+- write cache write logic is done
+- TODO: tail cleaning for write cache
+- read cache is started
+- TODO: fix nomenclature - sector=512 / page=4K / unit=64K (or cache "line"?)
 
 **Sun Feb 27 23:55:50 2022**
 - init from superblock (sort of)

@@ -22,12 +22,18 @@
 #include <chrono>
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
+#include <random>
 
 #include <unistd.h>
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <string.h>
 #include <errno.h>
+
+// https://stackoverflow.com/questions/5008804/generating-random-integer-from-a-range
+std::random_device rd;     // only used once to initialise (seed) engine
+//std::mt19937 rng(rd());  // random-number engine used (Mersenne-Twister in this case)
+std::mt19937 rng(17);      // for deterministic testing
 
 typedef int64_t lba_t;
 
@@ -40,6 +46,10 @@ uuid_t my_uuid;
 static int div_round_up(int n, int m)
 {
     return (n + m - 1) / m;
+}
+static int round_up(int n, int m)
+{
+    return m * div_round_up(n, m);
 }
 
 size_t iov_sum(iovec *iov, int iovcnt)
@@ -673,20 +683,71 @@ class read_cache {
     objmap             *omap;
     translate          *be;
     int                 fd;
+    backend            *io;
     
-    int               blk_sectors;
+    int               unit_sectors;
     std::vector<int>  free_blks;
+    bool              map_dirty;
+    
+    thread_pool<int> misc_threads; // eviction thread, for now
+
     // cache block is busy when being written - mask can change, but not
     // its mapping.
     std::vector<bool> busy;
     std::condition_variable cv;
+
+    /* this is kind of crazy. return a bitmap corresponding to the 4KB pages
+     * in [base%unit, limit%unit), where base, limit, and unit are in sectors
+     */
+    typedef uint16_t mask_t;
+    mask_t page_mask(int base, int limit, int unit) {
+	int top = round_up(base+1, unit);
+	limit = (limit < top) ? limit : top;
+	int base_page = base/8, limit_page = div_round_up(limit, 8),
+	    unit_page = unit / 8;
+	mask_t val = 0;
+	for (int i = base_page % unit_page; base_page < limit_page; base_page++, i++)
+	    val |= (1 << i);
+	return val;
+    }
+
+    void evict_thread(thread_pool<int> *p) {
+	std::uniform_int_distribution<int> uni(0,super->units - 1);
+	auto wait_time = std::chrono::seconds(2);
+
+	while (p->running) {
+	    std::unique_lock<std::mutex> lk(m);
+	    p->cv.wait_for(lk, wait_time);
+	    if (!p->running)
+		return;
+
+	    if (!map_dirty)	// free list didn't change
+		continue;
+
+	    if ((int)free_blks.size() < super->units / 16) {
+		int n = super->units / 4 - free_blks.size();
+		for (int i = 0; i < n; i++) {
+		    int j = uni(rng);
+		    bitmap[j] = 0;
+		    auto oo = flat_map[j];
+		    flat_map[j] = (extmap::obj_offset){0, 0};
+		    map.erase(oo);
+		}
+
+	    }
+
+	    /* write out the map, whether just dirty or because we evicted
+	     */
+	    lk.unlock();
+	    pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
+	    pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+	}
+    }
+    
+    typedef int64_t sector_t;
     
 public:
     // TODO: iovec version
-    void read(size_t offset, size_t len, char *buf) {
-	
-    }
-
     void add(extmap::obj_offset oo, int sectors, char *buf) {
 	// must be 4KB aligned
 	assert(!(oo.offset & 7)); 
@@ -694,7 +755,7 @@ public:
 	while (sectors > 0) {
 	    std::unique_lock lk(m);
 
-	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / blk_sectors};
+	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / unit_sectors};
 	    int cache_blk = -1;
 	    auto it = map.find(obj_blk);
 	    if (it != map.end())
@@ -714,7 +775,7 @@ public:
 	    assert(cache_blk >= 0);
 	    
 	    auto obj_page = oo.offset / 8;
-	    auto pages_in_blk = blk_sectors / 8;
+	    auto pages_in_blk = unit_sectors / 8;
 	    auto blk_page = obj_blk.offset * pages_in_blk;
 	    std::vector<iovec> iov;
 	    
@@ -734,49 +795,132 @@ public:
 	    lk.lock();
 	    map[obj_blk] = cache_blk;
 	    bitmap[cache_blk] = mask;
+	    flat_map[cache_blk] = obj_blk;
 	    busy[cache_blk] = false;
+	    map_dirty = true;
 	    cv.notify_one();
 	    lk.unlock();
 	}
     }
 
-    read_cache(uint32_t blkno, int _fd, translate *_be, objmap *_om) {
-	omap = _om;
-	be = _be;
-	fd = _fd;
+    /* eventual implementation (full async):
+     * - cache device uses io_uring, fire writes from here
+     * - worker threads for backend reads
+     * - some sort of reference count structure for completion
+     */
+    void read(size_t offset, size_t len, char *buf) {
+	lba_t lba = offset/8, sectors = len/8;
+	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
+	std::shared_lock lk(omap->m);
+	for (auto it = omap->map.lookup(lba);
+	     it != omap->map.end() && it->base() < lba+sectors; it++) 
+	    extents.push_back(it->vals(lba, lba+len));
+	lk.unlock();
+
+	std::vector<std::tuple<extmap::obj_offset,sector_t,char*>> to_add;
 	
+	for (auto e : extents) {
+	    assert(len > 0);
+	    
+	    auto [base, limit, ptr] = e;
+	    if (base > lba) {
+		auto bytes = (base-lba)*512;
+		memset(buf, 0, bytes);
+		buf += bytes;
+		len -= bytes;
+	    }
+	    while (base < limit) {
+		extmap::obj_offset unit = {ptr.obj, ptr.offset / unit_sectors};
+		bool in_cache = false;
+		int n = -1;
+		auto it = map.find(unit);
+		if (it != map.end()) {
+		    n = it->second;
+		    mask_t access_mask = page_mask(base, limit, unit_sectors);
+		    if ((access_mask & bitmap[n]) == access_mask)
+			in_cache = true;
+		}
+
+		sector_t top = std::min(limit, (sector_t)round_up(base+1, unit_sectors));
+		
+		if (in_cache) {
+		    sector_t block_base = super->base*8 + n*unit_sectors,
+			start = block_base + base % unit_sectors,
+			finish = start + (top - base);
+
+		    if (pread(fd, buf, 512*(finish-start), 512*start) < 0)
+			throw fs::filesystem_error("rcache",
+						   std::error_code(errno, std::system_category()));
+		    base = top;
+		    buf += 512*(finish-start);
+		    len -= 512*(finish-start);
+		}
+		else {
+		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
+		    auto offset_sectors = unit.offset * unit_sectors;
+		    auto bytes = io->read_numbered_object(unit.obj, cache_line, offset_sectors,
+							  unit_sectors * 512);
+		    size_t start = 512 * (base % unit_sectors),
+			finish = 512 * (top - base);
+		    assert((int)finish >= bytes);
+		    memcpy(buf, cache_line+start, (finish-start));
+
+		    base = top;
+		    buf += (finish-start);
+		    len -= (finish-start);
+		    extmap::obj_offset ox = {unit.obj, offset_sectors};
+		    to_add.push_back(std::tuple(ox, bytes/512, cache_line));
+		}
+	    }
+	    lba = limit;
+	}
+	if (len > 0)
+	    memset(buf, 0, len);
+
+	// now read is finished, and we can add shit to the cache
+	for (auto [oo, n, cache_line] : to_add) {
+	    add(oo, n, cache_line);
+	    free(cache_line);
+	}
+    }
+
+    read_cache(uint32_t blkno, int _fd, translate *_be, objmap *_om, backend *_io) :
+	omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m)
+    {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
 	    throw fs::filesystem_error("rcache", std::error_code(errno, std::system_category()));
 	super = (j_read_super*)buf;
 
-	assert(super->block_size == 128); // 64KB, in sectors
+	assert(super->unit_size == 128); // 64KB, in sectors
+	unit_sectors = super->unit_size; // todo: fixme
 	
-	auto nblks = (super->limit - super->base) / (super->block_size / 8);
-	
-	int divisor = 4096 / sizeof(extmap::obj_offset);
-	assert(div_round_up(super->map_entries, divisor) == super->map_blocks);
-	assert(super->map_entries == nblks);
-	assert(div_round_up(super->bitmap_entries, 2048) == super->bitmap_blocks);
-	assert(super->bitmap_entries == nblks);
+	int oos_per_pg = 4096 / sizeof(extmap::obj_offset);
+	assert(div_round_up(super->units, oos_per_pg) == super->map_blocks);
+	assert(div_round_up(super->units, 2048) == super->bitmap_blocks);
 
 	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
 	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096) < 0)
 	    throw fs::filesystem_error("rcache2", std::error_code(errno, std::system_category()));	    
 	bitmap = (uint16_t*)aligned_alloc(512, super->bitmap_blocks*4096);
 	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096) < 0)
-	    throw fs::filesystem_error("rcache3", std::error_code(errno, std::system_category()));	    
+	    throw fs::filesystem_error("rcache3", std::error_code(errno, std::system_category()));
 
-	for (int i = 0; i < super->map_entries; i++)
+	for (int i = 0; i < super->units; i++)
 	    if (flat_map[i].obj != 0)
 		map[flat_map[i]] = i;
 	    else {
 		free_blks.push_back(i);
 		bitmap[i] = 0;
 	    }
-	busy.reserve(nblks);
+
+	busy.reserve(super->units);
 	std::fill(busy.begin(), busy.end(), false);
+	map_dirty = false;
+
+	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));    
     }
+    
     ~read_cache() {
 	free((void*)flat_map);
 	free((void*)bitmap);

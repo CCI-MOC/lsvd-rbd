@@ -72,18 +72,20 @@ struct j_read_super {
     uint32_t version;		// 1
     uuid_t   vol_uuid;
 
-    int32_t block_size;		// cache block size, in sectors
+    int32_t unit_size;		// cache unit size, in sectors
 
+    /* note that the cache is not necessarily unit-aligned
+     */
     int32_t base;		// the cache itself
-    int32_t limit;
-    
+    int32_t units;		// length, in @unit_size segments
+
+    /* each has @cache_segments entries
+     */
     int32_t map_start;		// extmap::obj_offset
     int32_t map_blocks;
-    int32_t map_entries;
 
     int32_t bitmap_start;	// uint16_t
     int32_t bitmap_blocks;
-    int32_t bitmap_entries;
     
     /* need to persist status of cache replacement algorithm
      * for now it's just in memory. 

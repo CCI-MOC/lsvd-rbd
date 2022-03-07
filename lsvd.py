@@ -237,16 +237,13 @@ class j_read_super(Structure):
                 ("type",        c_uint),
                 ("version",     c_uint),
                 ("vol_uuid",    c_ubyte*16),
-                ("block_size",  c_int),
+                ("unit_size",   c_int),
                 ("base",        c_int),
-                ("limit",       c_int),
+                ("units",       c_int),
                 ("map_start",   c_int),
                 ("map_blocks",  c_int),
-                ("map_entries", c_int),
                 ("bitmap_start", c_int),
-                ("bitmap_blocks", c_int),
-                ("bitmap_entries", c_int)]
-        
+                ("bitmap_blocks", c_int)]
 sizeof_j_read_super = sizeof(j_read_super)
 
 class j_super(Structure):
