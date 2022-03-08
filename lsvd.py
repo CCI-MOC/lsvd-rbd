@@ -243,9 +243,9 @@ def rcache_flatmap():
     return [[_.obj,_.offset] for _ in vals[0:n]]
 
 def rcache_bitmap():
-    n = rsuper.units()
+    n = rsuper.units
     vals = (c_ushort * n)()
-    n = lsvd_lib.rcache_get_bitmap(byref(vals), c_int(n))
+    n = lsvd_lib.rcache_get_masks(byref(vals), c_int(n))
     return vals[0:n]
 
 def rcache_reset():

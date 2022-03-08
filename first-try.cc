@@ -128,8 +128,10 @@ public:
 	m = _m;
     }
     ~thread_pool() {
+	std::unique_lock lk(*m);
 	running = false;
 	cv.notify_all();
+	lk.unlock();
 	while (!pool.empty()) {
 	    pool.front().join();
 	    pool.pop();
@@ -473,7 +475,6 @@ public:
 	if (current_batch)
 	    delete current_batch;
 	free(super);
-	delete io;
     }
     
     /* returns sequence number of ckpt
@@ -730,10 +731,11 @@ class read_cache {
     void evict_thread(thread_pool<int> *p) {
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	auto wait_time = std::chrono::seconds(2);
+	std::unique_lock<std::mutex> lk(m);
 
 	while (p->running) {
-	    std::unique_lock<std::mutex> lk(m);
-	    p->cv.wait_for(lk, wait_time);
+	    while (p->running)
+		p->cv.wait_for(lk, wait_time);
 	    if (!p->running)
 		return;
 
@@ -757,6 +759,7 @@ class read_cache {
 	    lk.unlock();
 	    pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
 	    pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+	    lk.lock();
 	}
     }
     
@@ -825,7 +828,7 @@ public:
      * - some sort of reference count structure for completion
      */
     void read(size_t offset, size_t len, char *buf) {
-	lba_t lba = offset/8, sectors = len/512;
+	lba_t lba = offset/512, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
 	std::shared_lock lk(omap->m);
 	for (auto it = omap->map.lookup(lba);
@@ -858,39 +861,40 @@ public:
 		}
 
                 // TODO: unit_sectors -> unit_nsectors
-		sector_t blk_base = unit.offset * unit_sectors;
+		sector_t blk_base_lba = unit.offset * unit_sectors;
                 sector_t blk_offset = ptr.offset % unit_sectors;
-                sector_t blk_top = std::min({(int)(blk_offset+sectors),
+                sector_t blk_top_offset = std::min({(int)(blk_offset+sectors),
 			    round_up(blk_offset+1,unit_sectors),
 			    (int)(blk_offset + (limit-base))});
 		
 		if (in_cache) {
 		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 			start = blk_in_ssd + blk_offset,
-			finish = start + (blk_top - blk_offset);
+			finish = start + (blk_top_offset - blk_offset);
 
 		    if (pread(fd, buf, 512*(finish-start), 512*start) < 0)
 			throw fs::filesystem_error("rcache",
 						   std::error_code(errno, std::system_category()));
 		    base += (finish - start);
+		    ptr.offset += (finish - start); // HACK
 		    buf += 512*(finish-start);
 		    len -= 512*(finish-start);
 		}
 		else {
 		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
-		    auto offset_sectors = unit.offset * unit_sectors;
 		    auto bytes = io->read_numbered_object(unit.obj, cache_line,
-							  512*blk_base, 512*unit_sectors);
+							  512*blk_base_lba, 512*unit_sectors);
                     size_t start = 512 * blk_offset,
-			finish = 512 * (blk_top - blk_base);
+			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
 
 		    memcpy(buf, cache_line+start, (finish-start));
 
-		    base += (blk_top - blk_base);
+		    base += (blk_top_offset - blk_offset);
+		    ptr.offset += (blk_top_offset - blk_offset); // HACK
 		    buf += (finish-start);
 		    len -= (finish-start);
-		    extmap::obj_offset ox = {unit.obj, offset_sectors};
+		    extmap::obj_offset ox = {unit.obj, unit.offset * unit_sectors};
 		    to_add.push_back(std::tuple(ox, bytes/512, cache_line));
 		}
 	    }
@@ -1365,6 +1369,8 @@ void c_shutdown(void)
 {
     lsvd->shutdown();
     delete lsvd;
+    delete omap;
+    delete io;
 }
 
 extern "C" int c_flush(void);
