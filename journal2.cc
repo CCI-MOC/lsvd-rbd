@@ -86,11 +86,10 @@ struct j_read_super {
 
     int32_t bitmap_start;	// uint16_t
     int32_t bitmap_blocks;
-    
-    /* need to persist status of cache replacement algorithm
-     * for now it's just in memory. 
-     * Note that with 64KB blocks, LFUDA would take 128MB per TB of SSD
-     */
+
+    int32_t evict_type;		// eviction algorithm - TBD
+    int32_t evict_start;	// eviction state - TBD
+    int32_t evict_blocks;
 };
 
       

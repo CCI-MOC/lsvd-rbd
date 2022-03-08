@@ -300,17 +300,20 @@ class j_write_super(Structure):
 sizeof_j_write_super = sizeof(j_write_super)
 
 class j_read_super(Structure):
-    _fields_ = [("magic",       c_uint),
-                ("type",        c_uint),
-                ("version",     c_uint),
-                ("vol_uuid",    c_ubyte*16),
-                ("unit_size",   c_int),
-                ("base",        c_int),
-                ("units",       c_int),
-                ("map_start",   c_int),
-                ("map_blocks",  c_int),
+    _fields_ = [("magic",        c_uint),
+                ("type",         c_uint),
+                ("version",      c_uint),
+                ("vol_uuid",     c_ubyte*16),
+                ("unit_size",    c_int),
+                ("base",         c_int),
+                ("units",        c_int),
+                ("map_start",    c_int),
+                ("map_blocks",   c_int),
                 ("bitmap_start", c_int),
-                ("bitmap_blocks", c_int)]
+                ("bitmap_blocks", c_int),
+                ("evict_type",   c_int),
+                ("evict_start",  c_int),
+                ("evict_blocks", c_int)]
 sizeof_j_read_super = sizeof(j_read_super)
 
 class j_super(Structure):

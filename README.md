@@ -454,10 +454,12 @@ need a flag to rcache->add to indicate that it's low priority, also another call
 
 ### left to do (Mon Mar 7)
 
-- fix header length issues
+- fix header length issues **DONE**
 - tests for the read cache
+    - refactor eviction for easier testing?
 - log cleaner for the write cache
-- garbage collector, some sort of priority/depriority for GC blocks
+- garbage collector
+    - some sort of priority/depriority for GC blocks?
 - librbd interface
 
 - `io_uring` implementation (wait until everything else works)
@@ -469,9 +471,9 @@ need a flag to rcache->add to indicate that it's low priority, also another call
 Note that we can keep a read sequence number, save its value for each cache block, and do pseudo-LRU by choosing d random blocks and taking the oldest sequence number. For now 32 bits should work - 4G / 10K IOPS = 400K seconds, close to a week. 
 Later we may want to use 64 bits per block, which lets us do either a sequence number or LFUDA. (possibly a d-choices version)
 
-TODO: add sequencing, d-choices LRU, persist the eviction status. **add fields to superblock**
+TODO: add sequencing, d-choices LRU, persist the eviction status. **add fields to superblock [DONE]**
 
-### OH NO, OBJECT OFFSETS ARE BROKEN
+### Oh No, object offsets are broken [nvm, fixed]
 
 If the read cache is going to use the object map directly, it either needs access to header lengths, or offsets in the map entries need to include the object headers. The problem is that I'd like to keep the in-memory access to batches in the translation layer, so that current unit tests continue to work. Maybe it can be optional based on a runtime parameter?
 
