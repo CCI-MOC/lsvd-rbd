@@ -23,6 +23,7 @@
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 #include <random>
+#include <algorithm>
 
 #include <unistd.h>
 #include <sys/uio.h>
@@ -856,32 +857,37 @@ public:
 			in_cache = true;
 		}
 
-		sector_t top = std::min(limit, (sector_t)round_up(base+1, unit_sectors));
+                // TODO: unit_sectors -> unit_nsectors
+		sector_t blk_base = unit.offset * unit_sectors;
+                sector_t blk_offset = ptr.offset % unit_sectors;
+                sector_t blk_top = std::min({(int)(blk_offset+sectors),
+			    round_up(blk_offset+1,unit_sectors),
+			    (int)(blk_offset + (limit-base))});
 		
 		if (in_cache) {
-		    sector_t block_base = super->base*8 + n*unit_sectors,
-			start = block_base + base % unit_sectors,
-			finish = start + (top - base);
+		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
+			start = blk_in_ssd + blk_offset,
+			finish = start + (blk_top - blk_offset);
 
 		    if (pread(fd, buf, 512*(finish-start), 512*start) < 0)
 			throw fs::filesystem_error("rcache",
 						   std::error_code(errno, std::system_category()));
-		    base = top;
+		    base += (finish - start);
 		    buf += 512*(finish-start);
 		    len -= 512*(finish-start);
 		}
 		else {
 		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
 		    auto offset_sectors = unit.offset * unit_sectors;
-		    auto bytes = io->read_numbered_object(unit.obj, cache_line, offset_sectors,
-							  unit_sectors * 512);
-                    size_t start = 512 * (base % unit_sectors),
-			finish = 512 * (top - base);
+		    auto bytes = io->read_numbered_object(unit.obj, cache_line,
+							  512*blk_base, 512*unit_sectors);
+                    size_t start = 512 * blk_offset,
+			finish = 512 * (blk_top - blk_base);
 		    assert((int)finish <= bytes);
 
 		    memcpy(buf, cache_line+start, (finish-start));
 
-		    base = top;
+		    base += (blk_top - blk_base);
 		    buf += (finish-start);
 		    len -= (finish-start);
 		    extmap::obj_offset ox = {unit.obj, offset_sectors};

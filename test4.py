@@ -44,10 +44,11 @@ class tests(unittest.TestCase):
         startup()
         t2.write_data_1(img + '.00000001', 0, 1)
         lsvd.fakemap_update(0, 8*32, 1, 33)
+        expected = b''.join([_ * 512 for _ in [b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H']])
         d = lsvd.rcache_read(0, 4096)
-        f = open('foo', 'wb')
-        f.write(d)
-        f.close()
+        self.assertEqual(d, expected)
+        d = lsvd.rcache_read(0, 4096)
+        self.assertEqual(d, expected)
         
 if __name__ == '__main__':
     unittest.main(exit=False)
