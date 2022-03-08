@@ -19,7 +19,8 @@ def startup():
     assert val == 0
     lsvd.init(img, 1, False)
     mkcache.mkcache(nvme)
-    lsvd.cache_init(1, nvme)
+    lsvd.cache_open(nvme)
+    lsvd.wcache_init(1)
     fd2 = os.open(nvme, os.O_RDONLY)
 
 def c_super(fd):
@@ -47,45 +48,45 @@ class tests(unittest.TestCase):
     #def tearDown(self):
 
     def test_1_readwrite(self):
-        lsvd.cache_write(0, b'X'*4096)
-        m = lsvd.cache_getmap(0, 1000)
+        lsvd.wcache_write(0, b'X'*4096)
+        m = lsvd.wcache_getmap(0, 1000)
         # header is block 3, data starts on 4
         self.assertEqual(m, [[0,8,(4*8)]])
-        d = lsvd.cache_read(0, 4096)
+        d = lsvd.wcache_read(0, 4096)
         self.assertEqual(d, b'X'*4096)
-        d = lsvd.cache_read(4096, 4096)
+        d = lsvd.wcache_read(4096, 4096)
         self.assertEqual(d, b'\0'*4096)
 
     def test_2_readwrite(self):
         offset = 8192
-        lsvd.cache_write(offset, b'A'*512)
-        lsvd.cache_write(offset+1024, b'B'*512)
-        d = lsvd.cache_read(offset, 2048)
+        lsvd.wcache_write(offset, b'A'*512)
+        lsvd.wcache_write(offset+1024, b'B'*512)
+        d = lsvd.wcache_read(offset, 2048)
         self.assertEqual(d, b'A'*512+b'\0'*512+b'B'*512+b'\0'*512)
 
     def test_3_extents(self):
-        lsvd.cache_shutdown()
+        lsvd.wcache_shutdown()
         mkcache.mkcache(nvme)
-        lsvd.cache_init(1, nvme)
+        lsvd.wcache_init(1)
         
         wsup = c_w_super(fd2, 1)
         n = wsup.next
-        lsvd.cache_write(0, b'X'*8192)
-        m = lsvd.cache_getmap(0, 1000)
+        lsvd.wcache_write(0, b'X'*8192)
+        m = lsvd.wcache_getmap(0, 1000)
 
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 1)
         self.assertEqual(ee, [[0,16]])
         
-        lsvd.cache_write(1024, b'A'*512)
+        lsvd.wcache_write(1024, b'A'*512)
         n += h.len
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 2)
         self.assertEqual(ee, [[2,1]])
 
-        lsvd.cache_write(2048, b'B'*512)
+        lsvd.wcache_write(2048, b'B'*512)
         n += h.len
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
@@ -93,21 +94,21 @@ class tests(unittest.TestCase):
         self.assertEqual(ee, [[4,1]])
 
     def test_4_backend(self):
-        lsvd.cache_shutdown()
+        lsvd.wcache_shutdown()
         lsvd.shutdown()
         for f in os.listdir(dir):
             os.unlink(dir + "/" + f)
         t2.write_super(img, 0, 1)
         mkcache.mkcache(nvme)
         lsvd.init(img, 1, True)
-        lsvd.cache_init(1, nvme)
+        lsvd.wcache_init(1)
 
         d = lsvd.read(0, 4096*3)
         self.assertEqual(d, b'\0'*3*4096)
 
-        lsvd.cache_write(0, b'W'*4096)
-        lsvd.cache_write(4096, b'X'*4096)
-        lsvd.cache_write(8192, b'Y'*4096)
+        lsvd.wcache_write(0, b'W'*4096)
+        lsvd.wcache_write(4096, b'X'*4096)
+        lsvd.wcache_write(8192, b'Y'*4096)
         time.sleep(0.1)
         d = lsvd.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
@@ -115,7 +116,7 @@ class tests(unittest.TestCase):
 if __name__ == '__main__':
     startup()
     unittest.main(exit=False)
-    lsvd.cache_shutdown()
+    lsvd.wcache_shutdown()
     lsvd.shutdown()
     time.sleep(1)
 

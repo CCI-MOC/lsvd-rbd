@@ -161,37 +161,96 @@ sizeof_ckpt_mapentry = sizeof(ckpt_mapentry) # 16
 
 ###############
 
-_fd = -1
-def cache_init(blkno, file):
-    global _fd
+_fd, fd = -1, -1
+super = None
+
+def cache_open(file):
+    global _fd, fd, super
     _fd = os.open(file, os.O_RDWR | os.O_DIRECT)
+    fd = os.open(file, os.O_RDONLY)
+    data = os.pread(fd, 4096, 0)
+    super = j_super.from_buffer(bytearray(data[0:sizeof(j_super)]))
+
+def cache_close():
+    os.close(_fd)
+    os.close(fd)
+    
+def wcache_init(blkno):
+    assert _fd != -1
     lsvd_lib.wcache_init(blkno, _fd)
 
-def cache_shutdown():
+def wcache_shutdown():
     lsvd_lib.wcache_shutdown()
-    os.close(_fd)
 
-def cache_write(offset, data):
+def wcache_write(offset, data):
     if type(data) != bytes:
         data = bytes(data, 'utf-8')
     nbytes = len(data)
     assert (nbytes % 512) == 0 and (offset % 512) == 0
     val = lsvd_lib.wcache_write(data, c_ulong(offset), c_uint(nbytes))
 
-def cache_read(offset, nbytes):
+def wcache_read(offset, nbytes):
     assert (nbytes % 512) == 0 and (offset % 512) == 0
     buf = (c_char * nbytes)()
     lsvd_lib.wcache_read(buf, c_ulong(offset), c_uint(nbytes))
     return buf[0:nbytes]
     
-def cache_reset():
+def wcache_reset():
     lsvd_lib.wcache_reset()
 
-def cache_getmap(base, limit):
+def wcache_getmap(base, limit):
     n_tuples = 128
     tuples = (tuple * n_tuples)()
     n = lsvd_lib.wcache_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
     return [_ for _ in map(lambda x: [x.base, x.limit, x.plba], tuples[0:n])]
+
+
+#----------------
+class obj_offset(LittleEndianStructure):
+    _fields_ = [("obj", c_ulong, 36),
+                ("offset", c_ulong, 28)]
+
+rsuper = None
+def rcache_init(blkno):
+    global rsuper
+    assert _fd != -1
+    lsvd_lib.rcache_init(c_uint(blkno), c_int(_fd))
+    rsuper = j_read_super()
+    lsvd_lib.rcache_getsuper(byref(rsuper))
+
+def rcache_shutdown():
+    lsvd_lib.rcache_shutdown()
+
+def rcache_read(offset, nbytes):
+    assert (nbytes % 512) == 0 and (offset % 512) == 0
+    buf = (c_char * nbytes)()
+    lsvd_lib.rcache_read(buf, c_ulong(offset), c_ulong(nbytes))
+    return buf[0:nbytes]
+
+def rcache_getmap():
+    n = rsuper.units
+    k = (obj_offset * n)()
+    v = (c_int * n)()
+    m = lsvd_lib.rcache_getmap(byref(k), byref(v), n)
+    keys = [[_.obj, _.offset] for _ in k[0:m]]
+    vals = v[:]
+    return list(zip(keys, vals))
+    
+def rcache_flatmap():
+    n = rsuper.units
+    vals = (obj_offset * n)()
+    n = lsvd_lib.rcache_get_flat(byref(vals), c_int(n))
+    return [[_.obj,_.offset] for _ in vals[0:n]]
+
+def rcache_bitmap():
+    n = rsuper.units()
+    vals = (c_ushort * n)()
+    n = lsvd_lib.rcache_get_bitmap(byref(vals), c_int(n))
+    return vals[0:n]
+
+def rcache_reset():
+    lsvd_lib.rcache_reset()
+
 
 class j_extent(Structure):
     _fields_ = [("lba", c_ulong, 40),

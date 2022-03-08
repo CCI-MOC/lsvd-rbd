@@ -920,12 +920,32 @@ public:
 
 	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));    
     }
-    
+
     ~read_cache() {
 	free((void*)flat_map);
 	free((void*)bitmap);
 	free((void*)super);
     }
+
+    /* debugging
+     */
+    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, uint16_t **p_bitmap,
+		  std::vector<int> **p_free_blks, std::map<extmap::obj_offset,int> **p_map) {
+	if (p_super != NULL)
+	    *p_super = super;
+	if (p_flat != NULL)
+	    *p_flat = flat_map;
+	if (p_bitmap != NULL)
+	    *p_bitmap = bitmap;
+	if (p_free_blks != NULL)
+	    *p_free_blks = &free_blks;
+	if (p_map != NULL)
+	    *p_map = &map;
+    }
+
+    void reset(void) {
+    }
+    
 };
 
 /* simple backend that uses files in a directory. 
@@ -1232,6 +1252,8 @@ public:
 translate   *lsvd;
 write_cache *wcache;
 objmap      *omap;
+read_cache  *rcache;
+backend     *io;
 
 struct tuple {
     int base;
@@ -1331,7 +1353,7 @@ int c_flush(void)
 extern "C" ssize_t c_init(char* name, int n, bool flushthread);
 ssize_t c_init(char *name, int n, bool flushthread)
 {
-    auto io = new file_backend(name);
+    io = new file_backend(name);
     omap = new objmap();
     lsvd = new translate(io, omap);
     return lsvd->init(name, n, flushthread);
@@ -1396,4 +1418,89 @@ extern "C" int dbg_frontier(void);
 int dbg_frontier(void)
 {
     return lsvd->frontier();
+}
+
+extern "C" void rcache_init(uint32_t blkno, int fd);
+void rcache_init(uint32_t blkno, int fd)
+{
+    rcache = new read_cache(blkno, fd, lsvd, omap, io);
+}
+
+extern "C" void rcache_shutdown(void);
+void rcache_shutdown(void)
+{
+    delete rcache;
+    rcache = NULL;
+}
+
+extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len);
+void rcache_add(int object, int sector_offset, char* buf, size_t len)
+{
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    memcpy(buf2, buf, len);
+    extmap::obj_offset oo = {object, sector_offset};
+    rcache->add(oo, len/512, buf2);
+    free(buf2);
+}
+
+extern "C" void rcache_read(char *buf, uint64_t offset, uint64_t len);
+void rcache_read(char *buf, uint64_t offset, uint64_t len)
+{
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    rcache->read(offset, len, buf2);
+    memcpy(buf, buf2, len);
+    free(buf2);
+}
+
+extern "C" void rcache_getsuper(j_read_super *p_super)
+{
+    j_read_super *p;
+    rcache->get_info(&p, NULL, NULL, NULL, NULL);
+    *p_super = *p;
+}
+
+extern "C" int rcache_getmap(extmap::obj_offset *keys, int *vals, int n);
+int rcache_getmap(extmap::obj_offset *keys, int *vals, int n)
+{
+    int i = 0;
+    std::map<extmap::obj_offset,int> *p_map;
+    rcache->get_info(NULL, NULL, NULL, NULL, &p_map);
+    for (auto it = p_map->begin(); it != p_map->end() && i < n; it++, i++) {
+	auto [key, val] = *it;
+	keys[i] = key;
+	vals[i] = val;
+    }
+    return i;
+}
+
+extern "C" int rcache_get_flat(extmap::obj_offset *vals, int n);
+int rcache_get_flat(extmap::obj_offset *vals, int n)
+{
+    extmap::obj_offset *p;
+    j_read_super *p_super;
+    rcache->get_info(&p_super, &p, NULL, NULL, NULL);
+    n = std::min(n, p_super->units);
+    memcpy(vals, p, n*sizeof(extmap::obj_offset));
+    return n;
+}
+
+extern "C" int rcache_get_masks(uint16_t *vals, int n);
+int rcache_get_masks(uint16_t *vals, int n)
+{
+    j_read_super *p_super;
+    uint16_t *masks;
+    rcache->get_info(&p_super, NULL, &masks, NULL, NULL);
+    n = std::min(n, p_super->units);
+    memcpy(vals, masks, n*sizeof(uint16_t));
+    return n;
+}
+
+/*
+    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, uint16_t **p_bitmap,
+		  std::vector<int> **p_free_blks) {
+*/
+
+extern "C" void rcache_reset(void);
+void rcache_reset(void)
+{
 }
