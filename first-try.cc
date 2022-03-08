@@ -824,12 +824,12 @@ public:
      * - some sort of reference count structure for completion
      */
     void read(size_t offset, size_t len, char *buf) {
-	lba_t lba = offset/8, sectors = len/8;
+	lba_t lba = offset/8, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
 	std::shared_lock lk(omap->m);
 	for (auto it = omap->map.lookup(lba);
 	     it != omap->map.end() && it->base() < lba+sectors; it++) 
-	    extents.push_back(it->vals(lba, lba+len));
+	    extents.push_back(it->vals(lba, lba+sectors));
 	lk.unlock();
 
 	std::vector<std::tuple<extmap::obj_offset,sector_t,char*>> to_add;
@@ -875,9 +875,10 @@ public:
 		    auto offset_sectors = unit.offset * unit_sectors;
 		    auto bytes = io->read_numbered_object(unit.obj, cache_line, offset_sectors,
 							  unit_sectors * 512);
-		    size_t start = 512 * (base % unit_sectors),
+                    size_t start = 512 * (base % unit_sectors),
 			finish = 512 * (top - base);
-		    assert((int)finish >= bytes);
+		    assert((int)finish <= bytes);
+
 		    memcpy(buf, cache_line+start, (finish-start));
 
 		    base = top;
@@ -930,7 +931,8 @@ public:
 	    }
 
 	busy.reserve(super->units);
-	std::fill(busy.begin(), busy.end(), false);
+	for (int i = 0; i < super->units; i++)
+	    busy.push_back(false);
 	map_dirty = false;
 
 	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));    

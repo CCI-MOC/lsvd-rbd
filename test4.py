@@ -33,14 +33,23 @@ def finish():
 class tests(unittest.TestCase):
 
     def test_1_read_zeros(self):
+        startup()
         d = lsvd.rcache_read(0, 4096)
         self.assertEqual(d, b'\0'*4096)
         d = lsvd.rcache_read(13*512, 3*512)
         self.assertEqual(d, b'\0'*(3*512))
+        finish()
 
+    def test_2_read_fake(self):
+        startup()
+        t2.write_data_1(img + '.00000001', 0, 1)
+        lsvd.fakemap_update(0, 8*32, 1, 33)
+        d = lsvd.rcache_read(0, 4096)
+        f = open('foo', 'wb')
+        f.write(d)
+        f.close()
+        
 if __name__ == '__main__':
-    startup()
     unittest.main(exit=False)
-    finish()
     time.sleep(0.1)
 
