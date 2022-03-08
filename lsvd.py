@@ -47,7 +47,7 @@ def flush():
 def init(name, n, flush):
     if type(name) != bytes:
         name = bytes(name, 'utf-8')
-    return lsvd_lib.c_init(name, c_int(n), c_bool(flush))
+    return lsvd_lib.c_init(name, c_int(n), c_bool(flush), c_bool(True)) # nocache=T
 
 def size():
     return lsvd_lib.c_size()
@@ -250,6 +250,14 @@ def rcache_bitmap():
 
 def rcache_reset():
     lsvd_lib.rcache_reset()
+
+# these manipulate the objmap directly, without going through the translation layer
+#
+def fakemap_update(base, limit, obj, offset):
+    lsvd_lib.fakemap_update(c_int(base), c_int(limit), c_int(obj), c_int(offset))
+
+def fakemap_reset():
+    lsvd_lib.fakemap_reset()
 
 
 class j_extent(Structure):

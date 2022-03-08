@@ -454,6 +454,7 @@ need a flag to rcache->add to indicate that it's low priority, also another call
 
 ### left to do (Mon Mar 7)
 
+- fix header length issues
 - tests for the read cache
 - log cleaner for the write cache
 - garbage collector, some sort of priority/depriority for GC blocks
@@ -469,6 +470,28 @@ Note that we can keep a read sequence number, save its value for each cache bloc
 Later we may want to use 64 bits per block, which lets us do either a sequence number or LFUDA. (possibly a d-choices version)
 
 TODO: add sequencing, d-choices LRU, persist the eviction status. **add fields to superblock**
+
+### OH NO, OBJECT OFFSETS ARE BROKEN
+
+If the read cache is going to use the object map directly, it either needs access to header lengths, or offsets in the map entries need to include the object headers. The problem is that I'd like to keep the in-memory access to batches in the translation layer, so that current unit tests continue to work. Maybe it can be optional based on a runtime parameter?
+
+I think the best approach is:
+- if in-memory is enabled, keep `in_mem_objects` and update the objmap immediately on write; offsets will not include header length, as the header doesn't exist yet
+- otherwise just leave the extents in the batch. (write cache will have them anyway)
+- when a batch is complete, (a) coalesce writes, (b) write the object, and (c) update the map, with offsets inclusive of header length
+
+specific changes:
+
+`translate.writev`
+- add cache/nocache mode on init
+- in nocache mode, add batches to `in_mem_objects`, add extents to objmap immediately. (with 0 hdrlen)
+
+`translate.worker_thread`
+- coalesce writes in batch
+- update objmap, including hdrlen
+
+`translate.read`
+- don't add in hdrlen
 
 ### status
 

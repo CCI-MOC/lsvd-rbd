@@ -178,8 +178,7 @@ class translate {
     // mutex protects batch, thread pools, object_info, in_mem_objects
     std::mutex   m;
     objmap      *map;
-//    extmap::objmap      object_map;
-
+    
     batch              *current_batch;
     std::stack<batch*>  batches;
     std::map<int,char*> in_mem_objects;
@@ -386,20 +385,33 @@ class translate {
 	    auto b = p->get_locked(lk);
 	    if (!p->running)
 		return;
-	    uint32_t sectors = div_round_up(b->hdrlen(), 512);
-	    object_info[b->seq] = (obj_info){.hdr = sectors, .data = (uint32_t)(b->len / 512),
+	    uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
+	    object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
 					     .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
 	    lk.unlock();
 
-	    char *hdr = (char*)calloc(sectors*512, 1);
+	    char *hdr = (char*)calloc(hdr_sectors*512, 1);
 	    make_hdr(hdr, b);
-	    iovec iov[2] = {{hdr, (size_t)(sectors*512)}, {b->buf, b->len}};
+	    iovec iov[2] = {{hdr, (size_t)(hdr_sectors*512)}, {b->buf, b->len}};
 	    io->write_numbered_object(b->seq, iov, 2);
 	    free(hdr);
 
 	    lk.lock();
+	    std::unique_lock objlock(map->m);
+	    auto offset = hdr_sectors;
+	    for (auto e : b->entries) {
+		std::vector<extmap::lba2obj> deleted;
+		extmap::obj_offset oo = {b->seq, offset};
+		map->map.update(e.lba, e.lba+e.len, oo, &deleted);
+		for (auto d : deleted) {
+		    auto [base, limit, ptr] = d.vals();
+		    if (ptr.obj != b->seq)
+			object_info[ptr.obj].live -= (limit - base);
+		}
+	    }
 	    in_mem_objects.erase(b->seq);
 	    batches.push(b);
+	    objlock.unlock();
 	    lk.unlock();
 	}
     }
@@ -444,7 +456,8 @@ class translate {
 
 public:
     backend *io;
-
+    bool     nocache;
+    
     translate(backend *_io, objmap *omap) : workers(&m), misc_threads(&m) {
 	io = _io;
 	map = omap;
@@ -525,10 +538,10 @@ public:
 		break;
 	    object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
 					.live = h.data_sectors, .type = LSVD_DATA};
-	    int offset = 0;
+	    int offset = 0, hdr_len = h.hdr_sectors;
 	    for (auto m : entries) {
 		map->map.update(m.lba, m.lba + m.len,
-				(extmap::obj_offset){.obj = i, .offset = offset});
+				(extmap::obj_offset){.obj = i, .offset = offset + hdr_len});
 		offset += m.len;
 	    }
 	}
@@ -561,24 +574,26 @@ public:
 		batches.pop();
 	    }
 	    current_batch->reset();
-	    in_mem_objects[current_batch->seq] = current_batch->buf;
+	    if (nocache)
+		in_mem_objects[current_batch->seq] = current_batch->buf;
 	}
 
 	int64_t sector_offset = current_batch->len / 512,
 	    lba = offset/512, limit = (offset+len)/512;
 	current_batch->append_iov(offset / 512, iov, iovcnt);
 
-	std::vector<extmap::lba2obj> deleted;
-	extmap::obj_offset oo = {current_batch->seq, sector_offset};
-	{
+	if (nocache) {
+	    std::vector<extmap::lba2obj> deleted;
+	    extmap::obj_offset oo = {current_batch->seq, sector_offset};
 	    std::unique_lock objlock(map->m);
+
 	    map->map.update(lba, limit, oo, &deleted);
+	    for (auto d : deleted) {
+		auto [base, limit, ptr] = d.vals();
+		object_info[ptr.obj].live -= (limit - base);
+	    }
 	}
 	
-	for (auto d : deleted) {
-	    auto [base, limit, ptr] = d.vals();
-	    object_info[ptr.obj].live -= (limit - base);
-	}
 	
 	return len;
     }
@@ -633,7 +648,7 @@ public:
 	    else if (obj == -2)
 		/* skip */;
 	    else
-		io->read_numbered_object(obj, ptr, _offset + object_info[obj].hdr*512, _len);
+		io->read_numbered_object(obj, ptr, _offset, _len);
 	    ptr += _len;
 	}
 
@@ -1350,12 +1365,13 @@ int c_flush(void)
     return lsvd->flush();
 }
 
-extern "C" ssize_t c_init(char* name, int n, bool flushthread);
-ssize_t c_init(char *name, int n, bool flushthread)
+extern "C" ssize_t c_init(char* name, int n, bool flushthread, bool nocache);
+ssize_t c_init(char *name, int n, bool flushthread, bool nocache)
 {
     io = new file_backend(name);
     omap = new objmap();
     lsvd = new translate(io, omap);
+    lsvd->nocache = nocache;
     return lsvd->init(name, n, flushthread);
 }
 
@@ -1495,12 +1511,20 @@ int rcache_get_masks(uint16_t *vals, int n)
     return n;
 }
 
-/*
-    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, uint16_t **p_bitmap,
-		  std::vector<int> **p_free_blks) {
-*/
-
 extern "C" void rcache_reset(void);
 void rcache_reset(void)
 {
+}
+
+extern "C" void fakemap_update(int base, int limit, int obj, int offset);
+void fakemap_update(int base, int limit, int obj, int offset)
+{
+    extmap::obj_offset oo = {obj,offset};
+    omap->map.update(base, limit, oo);
+}
+
+extern "C" void fakemap_reset(void);
+void fakemap_reset(void)
+{
+    omap->map.reset();
 }
