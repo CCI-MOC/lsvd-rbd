@@ -37,6 +37,7 @@ std::random_device rd;     // only used once to initialise (seed) engine
 std::mt19937 rng(17);      // for deterministic testing
 
 typedef int64_t lba_t;
+typedef int64_t sector_t;
 
 /* make this atomic? */
 int batch_seq;
@@ -170,6 +171,17 @@ public:
     }
 };
 
+/* these all should probably be combined with the stuff in objects.cc to create
+ * object classes that serialize and de-serialize themselves. Sometime, maybe.
+ */
+template <class T>
+void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals) {
+    T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
+    for (; p < end; p++)
+	vals.push_back(*p);
+}
+
+
 class objmap {
 public:
     std::shared_mutex m;
@@ -219,16 +231,6 @@ class translate {
     fail:
 	free((char*)h);
 	return NULL;
-    }
-
-    /* these all should probably be combined with the stuff in objects.cc to create
-     * object classes that serialize and de-serialize themselves. Sometime, maybe.
-     */
-    template <class T>
-    void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals) {
-	T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
-	for (; p < end; p++)
-	    vals.push_back(*p);
     }
 
     /* clone_info is variable-length, so we need to pass back pointers 
@@ -707,7 +709,8 @@ class read_cache {
     bool              map_dirty;
     
     thread_pool<int> misc_threads; // eviction thread, for now
-
+    bool             nothreads;	   // for debug
+    
     // cache block is busy when being written - mask can change, but not
     // its mapping.
     std::vector<bool> busy;
@@ -729,8 +732,10 @@ class read_cache {
     }
 
     void evict_thread(thread_pool<int> *p) {
-	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	auto wait_time = std::chrono::seconds(2);
+	auto t0 = std::chrono::system_clock::now();
+	auto timeout = std::chrono::seconds(15);
+
 	std::unique_lock<std::mutex> lk(m);
 
 	while (p->running) {
@@ -742,30 +747,41 @@ class read_cache {
 	    if (!map_dirty)	// free list didn't change
 		continue;
 
-	    if ((int)free_blks.size() < super->units / 16) {
-		int n = super->units / 4 - free_blks.size();
-		for (int i = 0; i < n; i++) {
-		    int j = uni(rng);
-		    bitmap[j] = 0;
-		    auto oo = flat_map[j];
-		    flat_map[j] = (extmap::obj_offset){0, 0};
-		    map.erase(oo);
-		}
-
+	    /* write the map if (a) we evict something, or (b) occasionally as
+	     * we dirty the map.
+	     */
+	    auto t = std::chrono::system_clock::now();
+	    if (do_evict() || t - t0 > timeout) {
+		lk.unlock();
+		pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
+		pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+		lk.lock();
 	    }
 
-	    /* write out the map, whether just dirty or because we evicted
-	     */
-	    lk.unlock();
-	    pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
-	    pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
-	    lk.lock();
 	}
     }
     
-    typedef int64_t sector_t;
-    
 public:
+    /* requires: 'm' locked
+     */
+    bool do_evict(void) {
+	std::uniform_int_distribution<int> uni(0,super->units - 1);
+	if ((int)free_blks.size() < super->units / 16) {
+	    int n = super->units / 4 - free_blks.size();
+	    for (int i = 0; i < n; i++) {
+		int j = uni(rng);
+		bitmap[j] = 0;
+		auto oo = flat_map[j];
+		flat_map[j] = (extmap::obj_offset){0, 0};
+		map.erase(oo);
+		free_blks.push_back(j);
+	    }
+	    return true;
+	}
+	return false;
+    }
+    
+    
     // TODO: iovec version
     void add(extmap::obj_offset oo, int sectors, char *buf) {
 	// must be 4KB aligned
@@ -850,15 +866,6 @@ public:
 	    }
 	    while (base < limit) {
 		extmap::obj_offset unit = {ptr.obj, ptr.offset / unit_sectors};
-		bool in_cache = false;
-		int n = -1;
-		auto it = map.find(unit);
-		if (it != map.end()) {
-		    n = it->second;
-		    mask_t access_mask = page_mask(base, limit, unit_sectors);
-		    if ((access_mask & bitmap[n]) == access_mask)
-			in_cache = true;
-		}
 
                 // TODO: unit_sectors -> unit_nsectors
 		sector_t blk_base_lba = unit.offset * unit_sectors;
@@ -866,6 +873,17 @@ public:
                 sector_t blk_top_offset = std::min({(int)(blk_offset+sectors),
 			    round_up(blk_offset+1,unit_sectors),
 			    (int)(blk_offset + (limit-base))});
+		
+		bool in_cache = false;
+		int n = -1;
+		auto it = map.find(unit);
+		if (it != map.end()) {
+		    n = it->second;
+		    mask_t access_mask = page_mask(blk_offset, blk_top_offset, unit_sectors);
+		    if ((access_mask & bitmap[n]) == access_mask)
+			in_cache = true;
+		}
+
 		
 		if (in_cache) {
 		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
@@ -910,8 +928,8 @@ public:
 	}
     }
 
-    read_cache(uint32_t blkno, int _fd, translate *_be, objmap *_om, backend *_io) :
-	omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m)
+    read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
+	omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m), nothreads(nt)
     {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
@@ -945,7 +963,8 @@ public:
 	    busy.push_back(false);
 	map_dirty = false;
 
-	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));    
+	if (!nothreads)
+	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
     }
 
     ~read_cache() {
@@ -1102,6 +1121,9 @@ class write_cache {
 	return val;
     }
 
+    typedef int page_t;
+    
+    
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, uint32_t blks) {
 	memset(buf, 0, 4096);
 	j_hdr *h = (j_hdr*)buf;
@@ -1204,6 +1226,31 @@ class write_cache {
     }
     
 public:
+
+    
+    /* cache eviction - get info from oldest entry in cache. [should be private]
+     *  @blk - header to read
+     *  @data_blk - first data page
+     *  @extents - data to move. empty if J_PAD or J_CKPT
+     *  return value - next page
+     */
+    page_t get_oldest(page_t blk, page_t &data_blk, std::vector<j_extent> extents) {
+	char *buf = (char*)aligned_alloc(512, 4096);
+	j_hdr *h = (j_hdr*)buf;
+	
+	if (pread(fd, buf, 4096, oldest*4096) < 0)
+	    throw fs::filesystem_error("wcache", std::error_code(errno, std::system_category()));
+	assert(h->magic == LSVD_MAGIC && h->version == 1);
+
+	auto next_blk = oldest + h->len;
+	if (next_blk >= limit)
+	    next_blk = base;
+	if (h->type == LSVD_J_DATA)
+	    decode_offset_len<j_extent>(buf, h->extent_offset, h->extent_len, extents);
+
+	return next_blk;
+    }
+    
     write_cache(uint32_t blkno, int _fd, translate *_be) : workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
@@ -1358,6 +1405,19 @@ int wcache_getmap(int base, int limit, int max, struct tuple *t)
     return s.i;
 }
 
+extern "C" int wcache_oldest(int blk, int *dblk, j_extent *extents, int max, int *n);
+int wcache_oldest(int blk, int *dblk, j_extent *extents, int max, int *p_n)
+{
+    std::vector<j_extent> exts;
+    int data_blk = 0;
+    int next_blk = wcache->get_oldest(blk, data_blk, exts);
+    int n = std::min(max, (int)exts.size());
+    memcpy((void*)extents, exts.data(), n*sizeof(j_extent));
+    *p_n = n;
+    *dblk = data_blk;
+    return next_blk;
+}
+
 extern "C" void wcache_reset(void);
 void wcache_reset(void)
 {
@@ -1453,7 +1513,7 @@ int dbg_frontier(void)
 extern "C" void rcache_init(uint32_t blkno, int fd);
 void rcache_init(uint32_t blkno, int fd)
 {
-    rcache = new read_cache(blkno, fd, lsvd, omap, io);
+    rcache = new read_cache(blkno, fd, false, lsvd, omap, io);
 }
 
 extern "C" void rcache_shutdown(void);
@@ -1461,6 +1521,12 @@ void rcache_shutdown(void)
 {
     delete rcache;
     rcache = NULL;
+}
+
+extern "C" bool rcache_evict(void);
+bool rcache_evict(void)
+{
+    return rcache->do_evict();
 }
 
 extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len);

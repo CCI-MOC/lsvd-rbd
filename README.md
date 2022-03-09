@@ -456,6 +456,8 @@ need a flag to rcache->add to indicate that it's low priority, also another call
 
 - fix header length issues **DONE**
 - tests for the read cache
+    - test basic add and read **DONE**
+    - test eviction
     - refactor eviction for easier testing?
 - log cleaner for the write cache
 - garbage collector

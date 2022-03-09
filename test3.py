@@ -24,6 +24,7 @@ def startup():
     fd2 = os.open(nvme, os.O_RDONLY)
 
 def c_super(fd):
+    print('fd', fd)
     b = bytearray(os.pread(fd, 4096, 0))   # always first block
     return lsvd.j_super.from_buffer(b[0:lsvd.sizeof_j_super])
 
@@ -43,6 +44,16 @@ def c_hdr(fd, blk):
     e = (lsvd.j_extent*n_exts).from_buffer(b[o2:o2+h.extent_len])
     return [h, e]
 
+def restart():
+    lsvd.wcache_shutdown()
+    lsvd.shutdown()
+    for f in os.listdir(dir):
+        os.unlink(dir + "/" + f)
+    t2.write_super(img, 0, 1)
+    mkcache.mkcache(nvme)
+    lsvd.init(img, 1, True)
+    lsvd.wcache_init(1)
+    
 class tests(unittest.TestCase):
     #def setUp(self):
     #def tearDown(self):
@@ -93,15 +104,11 @@ class tests(unittest.TestCase):
         self.assertEqual(h.seq, 3)
         self.assertEqual(ee, [[4,1]])
 
+        n,d,e = lsvd.wcache_oldest(3)
+        print('m', m, 'd', d, 'e', e)
+
     def test_4_backend(self):
-        lsvd.wcache_shutdown()
-        lsvd.shutdown()
-        for f in os.listdir(dir):
-            os.unlink(dir + "/" + f)
-        t2.write_super(img, 0, 1)
-        mkcache.mkcache(nvme)
-        lsvd.init(img, 1, True)
-        lsvd.wcache_init(1)
+        restart()
 
         d = lsvd.read(0, 4096*3)
         self.assertEqual(d, b'\0'*3*4096)
@@ -113,6 +120,10 @@ class tests(unittest.TestCase):
         d = lsvd.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
+    def test_5_cleaning(self):
+        restart()
+        
+        
 if __name__ == '__main__':
     startup()
     unittest.main(exit=False)

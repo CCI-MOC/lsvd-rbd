@@ -204,6 +204,14 @@ def wcache_getmap(base, limit):
     n = lsvd_lib.wcache_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
     return [_ for _ in map(lambda x: [x.base, x.limit, x.plba], tuples[0:n])]
 
+def wcache_oldest(blk):
+    dblk = c_int()
+    exts = (j_extent * 32)()
+    n = c_int()
+    newer = lsvd_lib.wcache_oldest(c_int(blk), byref(dblk), byref(exts), 32, byref(n))
+    e = [(_.lba, _.len) for _ in exts[0:n]]
+    return [newer, dblk, e]
+
 
 #----------------
 class obj_offset(LittleEndianStructure):
@@ -227,6 +235,11 @@ def rcache_read(offset, nbytes):
     lsvd_lib.rcache_read(buf, c_ulong(offset), c_ulong(nbytes))
     return buf[0:nbytes]
 
+def rcache_add(obj, offset, data):
+    nbytes = len(data)
+    assert (nbytes % 512) == 0
+    lsvd_lib.rcache_add(c_int(obj), c_int(offset), data, c_int(nbytes), data)
+    
 def rcache_getmap():
     n = rsuper.units
     k = (obj_offset * n)()
@@ -247,6 +260,10 @@ def rcache_bitmap():
     vals = (c_ushort * n)()
     n = lsvd_lib.rcache_get_masks(byref(vals), c_int(n))
     return vals[0:n]
+
+def rcache_evict():
+    n = lsvd_lib.rcache_evict()
+    return n != 0
 
 def rcache_reset():
     lsvd_lib.rcache_reset()
