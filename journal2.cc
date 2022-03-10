@@ -8,6 +8,12 @@ struct j_extent {
     uint64_t len : 24;		// length (sectors)
 } __attribute__((packed));
 
+struct j_map_extent {
+    uint64_t lba : 40;		// volume LBA (in sectors)
+    uint64_t len : 24;		// length (sectors)
+    uint32_t page;		// on-SSD 4KB page
+} __attribute__((packed));
+
 enum {LSVD_J_DATA    = 10,
       LSVD_J_CKPT    = 11,
       LSVD_J_PAD     = 12,

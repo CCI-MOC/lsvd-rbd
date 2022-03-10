@@ -216,6 +216,8 @@ def wcache_oldest(blk):
     e = [(_.lba, _.len) for _ in exts[0:n.value]]
     return [newer, e]
 
+def wcache_checkpoint():
+    lsvd_lib.wcache_write_ckpt()
 
 #----------------
 class obj_offset(LittleEndianStructure):
@@ -281,10 +283,16 @@ def fakemap_reset():
     lsvd_lib.fakemap_reset()
 
 
-class j_extent(Structure):
+class j_extent(LittleEndianStructure):
     _fields_ = [("lba", c_ulong, 40),
                 ("len", c_ulong, 24)]
 sizeof_j_extent = sizeof(j_extent)
+
+class j_map_extent(LittleEndianStructure):
+    _fields_ = [("lba", c_ulong, 40),
+                ("len", c_ulong, 24),
+                ("page", c_uint)]
+sizeof_j_map_extent = sizeof(j_map_extent)
 
 LSVD_J_DATA    = 10
 LSVD_J_CKPT    = 11

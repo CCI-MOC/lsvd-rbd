@@ -1083,9 +1083,9 @@ static void iov_zero(iovec *iov, int iovcnt, size_t nbytes)
     }
 }
 
+typedef int page_t;
 
 /* all addresses are in units of 4KB blocks
- * TODO: should this use direct I/O? 
  */
 class write_cache {
     int            fd;
@@ -1104,9 +1104,9 @@ class write_cache {
 
     /* lock must be held before calling
      */
-    uint32_t allocate(uint32_t n, uint32_t &pad) {
+    uint32_t allocate(page_t n, page_t &pad) {
 	pad = 0;
-	if (super->limit - super->next < n) {
+	if (super->limit - super->next < (uint32_t)n) {
 	    pad = super->next;
 	    super->next = 0;
 	}
@@ -1115,14 +1115,12 @@ class write_cache {
 	return val;
     }
 
-    typedef int page_t;
-    
-    
-    j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, uint32_t blks) {
+    j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks) {
 	memset(buf, 0, 4096);
 	j_hdr *h = (j_hdr*)buf;
 	*h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1, .vol_uuid = {0},
-		     .seq = super->seq++, .len = blks, .crc32 = 0, .extent_offset = 0, .extent_len = 0};
+		     .seq = super->seq++, .len = (uint32_t)blks, .crc32 = 0,
+		     .extent_offset = 0, .extent_len = 0};
 	memcpy(h->vol_uuid, uuid, sizeof(uuid));
 	return h;
     }
@@ -1149,9 +1147,9 @@ class write_cache {
 		work.push_back(w);
 	    }
 	    
-	    int blocks = div_round_up(sectors, 8);
+	    page_t blocks = div_round_up(sectors, 8);
 	    // allocate blocks + 1
-	    uint32_t pad, blockno = allocate(blocks+1, pad);
+	    page_t pad, blockno = allocate(blocks+1, pad);
 	    lk.unlock();
 
 	    if (pad != 0) {
@@ -1186,9 +1184,9 @@ class write_cache {
 		for (int i = 0; i < w.iovcnt; i++)
 		    iovs.push_back(w.iov[i]);
 		    
-	    size_t pad_sectors = blocks*8 - sectors;
+	    sector_t pad_sectors = blocks*8 - sectors;
 	    if (pad_sectors > 0)
-		iovs.push_back((iovec){pad_page, pad_sectors*512});
+		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
 
 	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096) < 0)
 		/* TODO: do something */;
@@ -1218,12 +1216,6 @@ class write_cache {
 	}
 	free(buf);
     }
-    
-public:
-
-    void get_super(j_write_super *s) {
-	*s = *super;
-    }
 
     /* note - free space logic
      *  N = limit - base
@@ -1252,18 +1244,80 @@ public:
 
 	return next_blk;
     }
+
+    void throw_fs_error(std::string msg) {
+	throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
+    }
     
+    void write_checkpoint(void) {
+	char *buf = (char*)aligned_alloc(512, 4096);
+	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
+
+	std::unique_lock<std::mutex> lk(m);
+	size_t ckpt_bytes = map.size() * sizeof(j_map_extent);
+	page_t ckpt_pages = div_round_up(ckpt_bytes, 4096);
+	page_t pad, blockno = allocate(ckpt_pages+1, pad);
+
+	std::vector<j_map_extent> extents;
+	for (auto it = map.begin(); it != map.end(); it++)
+	    extents.push_back((j_map_extent){(uint64_t)it->s.base, (uint64_t)it->s.len,
+			(uint32_t)it->s.ptr/8});
+	memcpy(super_copy, super, 4096);
+	lk.unlock();
+
+	if (pad != 0) {
+	    mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
+	    if (pwrite(fd, buf, 4096, pad*4096) < 0)
+		throw_fs_error("wckpt_pad");
+	}
+
+	mk_header(buf, LSVD_J_CKPT, my_uuid, 1+ckpt_pages);
+	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
+	memcpy(e_buf, extents.data(), ckpt_bytes);
+	super_copy->map_start = blockno+1; // don't need to update in original copy
+	super_copy->map_blocks = ckpt_pages;
+	super_copy->map_entries = extents.size();
+	
+	std::vector<iovec> iovs;
+	iovs.push_back((iovec){buf, 4096});
+	iovs.push_back((iovec){e_buf, (size_t)4096*ckpt_pages});
+
+	if (pwritev(fd, iovs.data(), iovs.size(), 4096*blockno) < 0)
+	    throw_fs_error("wckpt_e");
+	if (pwrite(fd, (char*)super_copy, 4096, 4096*super_blkno) < 0)
+	    throw_fs_error("wckpt_s");
+
+	free(buf);
+	free(super_copy);
+	free(e_buf);
+    }
+    
+
+public:
     write_cache(uint32_t blkno, int _fd, translate *_be) : workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
-	    throw fs::filesystem_error("wcache", std::error_code(errno, std::system_category()));
+	    throw_fs_error("wcache");
 	super = (j_write_super*)buf;
 	pad_page = (char*)aligned_alloc(512, 4096);
 	memset(pad_page, 0, 4096);
 
+	if (super->map_entries) {
+	    size_t map_bytes = super->map_entries * sizeof(j_map_extent),
+		map_bytes_rounded = round_up(map_bytes, 4096);
+	    char *map_buf = (char*)aligned_alloc(512, map_bytes_rounded);
+	    std::vector<j_map_extent> extents;
+	    if (pread(fd, map_buf, map_bytes_rounded, 4096 * super->map_start) < 0)
+		throw_fs_error("wcache_map");
+	    decode_offset_len<j_map_extent>(buf, 0, map_bytes, extents);
+	    for (auto e : extents)
+		map.update(e.lba, e.lba+e.len, e.page*8);
+	    free(map_buf);
+	}
+	    
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
@@ -1278,6 +1332,7 @@ public:
     }
 
     // TODO: how the hell to handle fragments?
+    // hmm, what did I mean by "fragments"?
     void readv(size_t offset, iovec *iov, int iovcnt) {
 	auto bytes = iov_sum(iov, iovcnt);
 	lba_t base = offset/512, limit = base + bytes/512, prev = base;
@@ -1294,8 +1349,7 @@ public:
 		nvme_offset = 512 * plba;
 	    lk.unlock();
 	    if (preadv(fd, iov, iovcnt, nvme_offset) < 0)
-		throw fs::filesystem_error("wcache_read",
-					   std::error_code(errno, std::system_category()));
+		throw_fs_error("wcache_read");
 	    lk.lock();
 	    iov_consume(iov, iovcnt, bytes);
 	    prev = _limit;
@@ -1315,6 +1369,15 @@ public:
     }
     void reset(void) {
 	map.reset();
+    }
+    void get_super(j_write_super *s) {
+	*s = *super;
+    }
+    page_t do_get_oldest(page_t blk, std::vector<j_extent> &extents) {
+	return get_oldest(blk, extents);
+    }
+    void do_write_checkpoint(void) {
+	write_checkpoint();
     }
 };
 
@@ -1411,11 +1474,17 @@ extern "C" int wcache_oldest(int blk, j_extent *extents, int max, int *n);
 int wcache_oldest(int blk, j_extent *extents, int max, int *p_n)
 {
     std::vector<j_extent> exts;
-    int next_blk = wcache->get_oldest(blk, exts);
+    int next_blk = wcache->do_get_oldest(blk, exts);
     int n = std::min(max, (int)exts.size());
     memcpy((void*)extents, exts.data(), n*sizeof(j_extent));
     *p_n = n;
     return next_blk;
+}
+
+extern "C" void wcache_write_ckpt(void);
+void wcache_write_ckpt(void)
+{
+    wcache->do_write_checkpoint();
 }
 
 extern "C" void wcache_reset(void);
