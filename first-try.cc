@@ -1095,15 +1095,9 @@ class write_cache {
     extmap::cachemap2 map;
     translate        *be;
     
-    uint32_t       base;
-    uint32_t       limit;
-    uint32_t       next;
-    uint32_t       oldest;
-
     thread_pool<wcache_work> workers;
     std::mutex               m;
 
-    uint64_t sequence;
     char *pad_page;
     
     static const int n_threads = 1;
@@ -1112,12 +1106,12 @@ class write_cache {
      */
     uint32_t allocate(uint32_t n, uint32_t &pad) {
 	pad = 0;
-	if (limit - next < n) {
-	    pad = next;
-	    next = 0;
+	if (super->limit - super->next < n) {
+	    pad = super->next;
+	    super->next = 0;
 	}
-	auto val = next;
-	next += n;
+	auto val = super->next;
+	super->next += n;
 	return val;
     }
 
@@ -1128,7 +1122,7 @@ class write_cache {
 	memset(buf, 0, 4096);
 	j_hdr *h = (j_hdr*)buf;
 	*h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1, .vol_uuid = {0},
-		     .seq = sequence++, .len = blks, .crc32 = 0, .extent_offset = 0, .extent_len = 0};
+		     .seq = super->seq++, .len = blks, .crc32 = 0, .extent_offset = 0, .extent_len = 0};
 	memcpy(h->vol_uuid, uuid, sizeof(uuid));
 	return h;
     }
@@ -1161,7 +1155,7 @@ class write_cache {
 	    lk.unlock();
 
 	    if (pad != 0) {
-		mk_header(buf, LSVD_J_PAD, my_uuid, (limit - pad));
+		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
 		if (pwrite(fd, buf, 4096, pad*4096) < 0)
 		    /* TODO: do something */;
 	    }
@@ -1227,24 +1221,32 @@ class write_cache {
     
 public:
 
+    void get_super(j_write_super *s) {
+	*s = *super;
+    }
+
+    /* note - free space logic
+     *  N = limit - base
+     *  oldest == newest : free = N-1
+     *  else : free = ((oldest + N) - newest - 1) % N
+     */
     
     /* cache eviction - get info from oldest entry in cache. [should be private]
      *  @blk - header to read
-     *  @data_blk - first data page
      *  @extents - data to move. empty if J_PAD or J_CKPT
-     *  return value - next page
+     *  return value - first page of next record
      */
-    page_t get_oldest(page_t blk, page_t &data_blk, std::vector<j_extent> extents) {
+    page_t get_oldest(page_t blk, std::vector<j_extent> &extents) {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	j_hdr *h = (j_hdr*)buf;
 	
-	if (pread(fd, buf, 4096, oldest*4096) < 0)
+	if (pread(fd, buf, 4096, blk*4096) < 0)
 	    throw fs::filesystem_error("wcache", std::error_code(errno, std::system_category()));
 	assert(h->magic == LSVD_MAGIC && h->version == 1);
 
-	auto next_blk = oldest + h->len;
-	if (next_blk >= limit)
-	    next_blk = base;
+	auto next_blk = blk + h->len;
+	if (next_blk >= super->limit)
+	    next_blk = super->base;
 	if (h->type == LSVD_J_DATA)
 	    decode_offset_len<j_extent>(buf, h->extent_offset, h->extent_len, extents);
 
@@ -1262,12 +1264,6 @@ public:
 	pad_page = (char*)aligned_alloc(512, 4096);
 	memset(pad_page, 0, 4096);
 
-	base = super->base;
-	limit = super->limit;
-	next = super->next;
-	oldest = super->oldest;
-	sequence = super->seq;
-	
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
@@ -1405,16 +1401,20 @@ int wcache_getmap(int base, int limit, int max, struct tuple *t)
     return s.i;
 }
 
-extern "C" int wcache_oldest(int blk, int *dblk, j_extent *extents, int max, int *n);
-int wcache_oldest(int blk, int *dblk, j_extent *extents, int max, int *p_n)
+extern "C" void wcache_get_super(j_write_super *s);
+void wcache_get_super(j_write_super *s)
+{
+    wcache->get_super(s);
+}
+
+extern "C" int wcache_oldest(int blk, j_extent *extents, int max, int *n);
+int wcache_oldest(int blk, j_extent *extents, int max, int *p_n)
 {
     std::vector<j_extent> exts;
-    int data_blk = 0;
-    int next_blk = wcache->get_oldest(blk, data_blk, exts);
+    int next_blk = wcache->get_oldest(blk, exts);
     int n = std::min(max, (int)exts.size());
     memcpy((void*)extents, exts.data(), n*sizeof(j_extent));
     *p_n = n;
-    *dblk = data_blk;
     return next_blk;
 }
 

@@ -24,7 +24,6 @@ def startup():
     fd2 = os.open(nvme, os.O_RDONLY)
 
 def c_super(fd):
-    print('fd', fd)
     b = bytearray(os.pread(fd, 4096, 0))   # always first block
     return lsvd.j_super.from_buffer(b[0:lsvd.sizeof_j_super])
 
@@ -80,33 +79,40 @@ class tests(unittest.TestCase):
         mkcache.mkcache(nvme)
         lsvd.wcache_init(1)
         
-        wsup = c_w_super(fd2, 1)
-        n = wsup.next
+        wsup = lsvd.wcache_getsuper()
+        n = n0 = wsup.next
         lsvd.wcache_write(0, b'X'*8192)
-        m = lsvd.wcache_getmap(0, 1000)
 
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 1)
         self.assertEqual(ee, [[0,16]])
-        
+
+        n = lsvd.wcache_getsuper().next
         lsvd.wcache_write(1024, b'A'*512)
-        n += h.len
+
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 2)
         self.assertEqual(ee, [[2,1]])
 
+        n = lsvd.wcache_getsuper().next
         lsvd.wcache_write(2048, b'B'*512)
-        n += h.len
+
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 3)
         self.assertEqual(ee, [[4,1]])
 
-        n,d,e = lsvd.wcache_oldest(3)
-        print('m', m, 'd', d, 'e', e)
+        n,e = lsvd.wcache_oldest(n0)
+        self.assertEqual(e, [(0, 16)])
 
+        n,e = lsvd.wcache_oldest(n)
+        self.assertEqual(e, [(2,1)])
+
+        n,e = lsvd.wcache_oldest(n)
+        self.assertEqual(e, [(4,1)])
+        
     def test_4_backend(self):
         restart()
 

@@ -22,7 +22,7 @@ def mkcache(name, uuid=b'\0'*16):
 
     # write cache has 125 single-page entries. default: map_blocks = map_entries = 0
     wsup = lsvd.j_write_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_W_SUPER,
-                              seq=1, base=3, limit=128, next=3, oldest=127)
+                              seq=1, base=3, limit=128, next=3, oldest=3)
     wsup.vol_uuid[:] = uuid
     data = bytearray() + wsup
     data += b'\0' * (4096-len(data))

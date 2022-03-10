@@ -202,15 +202,19 @@ def wcache_getmap(base, limit):
     n_tuples = 128
     tuples = (tuple * n_tuples)()
     n = lsvd_lib.wcache_getmap(c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
-    return [_ for _ in map(lambda x: [x.base, x.limit, x.plba], tuples[0:n])]
+    return list(map(lambda x: [x.base, x.limit, x.plba], tuples[0:n]))
+
+def wcache_getsuper():
+    s = j_write_super()
+    lsvd_lib.wcache_get_super(byref(s))
+    return s
 
 def wcache_oldest(blk):
-    dblk = c_int()
     exts = (j_extent * 32)()
     n = c_int()
-    newer = lsvd_lib.wcache_oldest(c_int(blk), byref(dblk), byref(exts), 32, byref(n))
-    e = [(_.lba, _.len) for _ in exts[0:n]]
-    return [newer, dblk, e]
+    newer = lsvd_lib.wcache_oldest(c_int(blk), byref(exts), 32, byref(n))
+    e = [(_.lba, _.len) for _ in exts[0:n.value]]
+    return [newer, e]
 
 
 #----------------
