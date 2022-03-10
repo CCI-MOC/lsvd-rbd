@@ -1274,9 +1274,12 @@ class write_cache {
 	mk_header(buf, LSVD_J_CKPT, my_uuid, 1+ckpt_pages);
 	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
 	memcpy(e_buf, extents.data(), ckpt_bytes);
-	super_copy->map_start = blockno+1; // don't need to update in original copy
-	super_copy->map_blocks = ckpt_pages;
-	super_copy->map_entries = extents.size();
+	if (ckpt_bytes % 4096)	// make valgrind happy
+	    memset(e_buf + ckpt_bytes, 0, 4096 - (ckpt_bytes % 4096));
+	
+	super_copy->map_start = super->map_start = blockno+1;
+	super_copy->map_blocks = super->map_blocks = ckpt_pages;
+	super_copy->map_entries = super->map_entries = extents.size();
 	
 	std::vector<iovec> iovs;
 	iovs.push_back((iovec){buf, 4096});
@@ -1312,7 +1315,7 @@ public:
 	    std::vector<j_map_extent> extents;
 	    if (pread(fd, map_buf, map_bytes_rounded, 4096 * super->map_start) < 0)
 		throw_fs_error("wcache_map");
-	    decode_offset_len<j_map_extent>(buf, 0, map_bytes, extents);
+	    decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
 	    for (auto e : extents)
 		map.update(e.lba, e.lba+e.len, e.page*8);
 	    free(map_buf);

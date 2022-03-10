@@ -126,14 +126,35 @@ class tests(unittest.TestCase):
         d = lsvd.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
-    def test_5_cleaning(self):
+    def test_5_ckpt(self):
         restart()
+        lsvd.wcache_write(0, b'W'*4096)
+        lsvd.wcache_write(4096, b'X'*4096)
+        lsvd.wcache_write(8192, b'Y'*4096)
+        time.sleep(0.1)
+
+        m1 = lsvd.wcache_getmap(0, 1000)
+        lsvd.wcache_checkpoint()
+        m2 = lsvd.wcache_getmap(0, 1000)
+        self.assertEqual(m1, m2)
+
+        lsvd.wcache_shutdown()
+        lsvd.wcache_init(1)
         
+        m3 = lsvd.wcache_getmap(0, 1000)
+        self.assertEqual(m1, m3)
         
+        d = lsvd.read(0, 4096*3)
+        self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
+
+
 if __name__ == '__main__':
     startup()
     unittest.main(exit=False)
+    print('1')
     lsvd.wcache_shutdown()
+    print('2')
     lsvd.shutdown()
+    print('3')
     time.sleep(1)
 
