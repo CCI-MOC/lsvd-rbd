@@ -267,9 +267,8 @@ def rcache_bitmap():
     n = lsvd_lib.rcache_get_masks(byref(vals), c_int(n))
     return vals[0:n]
 
-def rcache_evict():
-    n = lsvd_lib.rcache_evict()
-    return n != 0
+def rcache_evict(n):
+    lsvd_lib.rcache_evict(c_int(n))
 
 def rcache_reset():
     lsvd_lib.rcache_reset()

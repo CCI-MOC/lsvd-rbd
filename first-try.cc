@@ -686,6 +686,10 @@ public:
     }
 };
 
+void throw_fs_error(std::string msg) {
+    throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
+}
+
 /* the read cache is:
  * 1. indexed by obj/offset[*], not LBA
  * 2. stores aligned 64KB blocks 
@@ -731,6 +735,21 @@ class read_cache {
 	return val;
     }
 
+    /* evict 'n' blocks
+     */
+    void evict(int n) {
+	assert(!m.try_lock());	// m must be locked
+	std::uniform_int_distribution<int> uni(0,super->units - 1);
+	for (int i = 0; i < n; i++) {
+	    int j = uni(rng);
+	    bitmap[j] = 0;
+	    auto oo = flat_map[j];
+	    flat_map[j] = (extmap::obj_offset){0, 0};
+	    map.erase(oo);
+	    free_blks.push_back(j);
+	}
+    }
+
     void evict_thread(thread_pool<int> *p) {
 	auto wait_time = std::chrono::seconds(2);
 	auto t0 = std::chrono::system_clock::now();
@@ -747,40 +766,26 @@ class read_cache {
 	    if (!map_dirty)	// free list didn't change
 		continue;
 
-	    /* write the map if (a) we evict something, or (b) occasionally as
-	     * we dirty the map.
+	    int n = 0;
+	    if ((int)free_blks.size() < super->units / 16)
+		n = super->units / 4 - free_blks.size();
+	    if (n)
+		evict(n);
+
+	    /* write the map (a) immediately if we evict something, or 
+	     * (b) occasionally if the map is dirty
 	     */
 	    auto t = std::chrono::system_clock::now();
-	    if (do_evict() || t - t0 > timeout) {
+	    if (n > 0 || t - t0 > timeout) {
 		lk.unlock();
 		pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
 		pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
 		lk.lock();
 	    }
-
 	}
     }
     
-public:
-    /* requires: 'm' locked
-     */
-    bool do_evict(void) {
-	std::uniform_int_distribution<int> uni(0,super->units - 1);
-	if ((int)free_blks.size() < super->units / 16) {
-	    int n = super->units / 4 - free_blks.size();
-	    for (int i = 0; i < n; i++) {
-		int j = uni(rng);
-		bitmap[j] = 0;
-		auto oo = flat_map[j];
-		flat_map[j] = (extmap::obj_offset){0, 0};
-		map.erase(oo);
-		free_blks.push_back(j);
-	    }
-	    return true;
-	}
-	return false;
-    }
-    
+public:    
     
     // TODO: iovec version
     void add(extmap::obj_offset oo, int sectors, char *buf) {
@@ -825,7 +830,7 @@ public:
 	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096;
 	    blk_offset += (obj_page - blk_page) * 4096;
 	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
-		throw fs::filesystem_error("rcache", std::error_code(errno, std::system_category()));
+		throw_fs_error("rcache");
 
 	    lk.lock();
 	    map[obj_blk] = cache_blk;
@@ -891,8 +896,7 @@ public:
 			finish = start + (blk_top_offset - blk_offset);
 
 		    if (pread(fd, buf, 512*(finish-start), 512*start) < 0)
-			throw fs::filesystem_error("rcache",
-						   std::error_code(errno, std::system_category()));
+			throw_fs_error("rcache");
 		    base += (finish - start);
 		    ptr.offset += (finish - start); // HACK
 		    buf += 512*(finish-start);
@@ -933,9 +937,9 @@ public:
     {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
-	    throw fs::filesystem_error("rcache", std::error_code(errno, std::system_category()));
+	    throw_fs_error("rcache");
 	super = (j_read_super*)buf;
-
+	
 	assert(super->unit_size == 128); // 64KB, in sectors
 	unit_sectors = super->unit_size; // todo: fixme
 	
@@ -945,10 +949,10 @@ public:
 
 	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
 	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096) < 0)
-	    throw fs::filesystem_error("rcache2", std::error_code(errno, std::system_category()));	    
+	    throw_fs_error("rcache2");
 	bitmap = (uint16_t*)aligned_alloc(512, super->bitmap_blocks*4096);
 	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096) < 0)
-	    throw fs::filesystem_error("rcache3", std::error_code(errno, std::system_category()));
+	    throw_fs_error("rcache3");
 
 	for (int i = 0; i < super->units; i++)
 	    if (flat_map[i].obj != 0)
@@ -989,6 +993,10 @@ public:
 	    *p_map = &map;
     }
 
+    void do_evict(int n) {
+	std::unique_lock lk(m);
+	evict(n);
+    }
     void reset(void) {
     }
     
@@ -1096,6 +1104,7 @@ class write_cache {
     translate        *be;
     
     thread_pool<wcache_work> workers;
+    thread_pool<int>         misc_threads;
     std::mutex               m;
 
     char *pad_page;
@@ -1216,12 +1225,6 @@ class write_cache {
 	}
 	free(buf);
     }
-
-    /* note - free space logic
-     *  N = limit - base
-     *  oldest == newest : free = N-1
-     *  else : free = ((oldest + N) - newest - 1) % N
-     */
     
     /* cache eviction - get info from oldest entry in cache. [should be private]
      *  @blk - header to read
@@ -1233,7 +1236,7 @@ class write_cache {
 	j_hdr *h = (j_hdr*)buf;
 	
 	if (pread(fd, buf, 4096, blk*4096) < 0)
-	    throw fs::filesystem_error("wcache", std::error_code(errno, std::system_category()));
+	    throw_fs_error("wcache");
 	assert(h->magic == LSVD_MAGIC && h->version == 1);
 
 	auto next_blk = blk + h->len;
@@ -1245,10 +1248,75 @@ class write_cache {
 	return next_blk;
     }
 
-    void throw_fs_error(std::string msg) {
-	throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
+    /* min free is min(5%, 100MB). Free space:
+     *  N = limit - base
+     *  oldest == newest : free = N-1
+     *  else : free = ((oldest + N) - newest - 1) % N
+     */
+    void get_exts_to_evict(std::vector<j_extent> &exts_in, page_t pg_base, page_t pg_limit, 
+			   std::vector<j_extent> &exts_out) {
+	std::unique_lock<std::mutex> lk(m);
+	for (auto e : exts_in) {
+	    lba_t base = e.lba, limit = e.lba + e.len;
+	    for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
+		auto [_base, _limit, ptr] = it->vals(base, limit);
+		if (pg_base*8 <= ptr && ptr < pg_limit*8)
+		    exts_out.push_back((j_extent){.lba = (uint64_t)_base,
+				.len = (uint64_t)(_limit-_base)});
+	    }
+	}
     }
     
+    void evict_thread(thread_pool<int> *p) {
+	auto period = std::chrono::seconds(1);
+	const int evict_min_pct = 5;
+	const int evict_max_mb = 100;
+	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
+			       evict_max_mb * (1024*1024/4096));
+	while (p->running) {
+	    std::unique_lock<std::mutex> lk(m);
+	    p->cv.wait_for(lk, period);
+	    int N = super->limit - super->base,
+		pgs_free = ((super->oldest + N) - super->next - 1) % N;
+	    if (p->running && super->oldest != super->next && pgs_free <= trigger) {
+		lk.unlock();
+
+		auto oldest = super->oldest;
+		std::vector<j_extent> to_delete;
+		while (pgs_free < trigger) {
+		    std::vector<j_extent> extents;
+		    auto tmp = get_oldest(oldest, extents);
+		    get_exts_to_evict(extents, oldest, tmp, to_delete);
+		    pgs_free -= (tmp - oldest);
+		    oldest = tmp;
+		}
+
+		/* TODO: read the data and add to read cache
+		 */
+
+		lk.lock();
+		for (auto e : to_delete)
+		    map.trim(e.lba, e.lba + e.len);
+	    }
+	}
+    }
+    
+    void ckpt_thread(thread_pool<int> *p) {
+	auto seq0 = batch_seq;
+	auto period = std::chrono::seconds(1);
+	const int ckpt_interval = 100;
+
+	while (p->running) {
+	    std::unique_lock lk(m);
+	    p->cv.wait_for(lk, period);
+	    if (p->running && batch_seq - seq0 > ckpt_interval) {
+		seq0 = batch_seq;
+		lk.unlock();
+		write_checkpoint();
+	    }
+	}
+    }
+
     void write_checkpoint(void) {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
@@ -1297,7 +1365,7 @@ class write_cache {
     
 
 public:
-    write_cache(uint32_t blkno, int _fd, translate *_be) : workers(&m) {
+    write_cache(uint32_t blkno, int _fd, translate *_be) : workers(&m), misc_threads(&m) {
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
@@ -1324,6 +1392,7 @@ public:
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
+	misc_threads.pool.push(std::thread(&write_cache::evict_thread, this, &misc_threads));
     }
     ~write_cache() {
 	free(pad_page);
@@ -1595,10 +1664,10 @@ void rcache_shutdown(void)
     rcache = NULL;
 }
 
-extern "C" bool rcache_evict(void);
-bool rcache_evict(void)
+extern "C" void rcache_evict(int n);
+void rcache_evict(int n)
 {
-    return rcache->do_evict();
+    rcache->do_evict(n);
 }
 
 extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len);

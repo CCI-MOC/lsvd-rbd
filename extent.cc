@@ -656,11 +656,11 @@ namespace extmap {
 	}
 
 	void trim(T_in base, T_in limit, std::vector<T> *del) {
-	    T_out unused;
+	    static T_out unused;
 	    _update(base, limit, unused, true, del);
 	}
 	void trim(T_in base, T_in limit) {
-	    T_out unused;
+	    static T_out unused; // get rid of that damn "ininitialized message"
 	    _update(base, limit, unused, true, nullptr);
 	}
 	void reset(void) {

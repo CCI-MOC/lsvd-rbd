@@ -105,8 +105,7 @@ class tests(unittest.TestCase):
         self.assertEqual(m, [(i,0,15-i) for i in range(16)])
         s1 = set(m)
 
-        val = lsvd.rcache_evict()
-        self.assertTrue(val)              # TODO - return number evicted???
+        lsvd.rcache_evict(4)
         m = map_tuples(lsvd.rcache_getmap())
         s2 = set(m)
         self.assertEqual(len(s1-s2), 4)
