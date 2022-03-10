@@ -1752,15 +1752,12 @@ void fakemap_reset(void)
 
 #include "fake_rbd.h"
 
-int rbd_aio_create_completion(void *cb_arg,
-                              rbd_callback_t complete_cb,
-                              rbd_completion_t *c)
+int rbd_aio_create_completion(void *cb_arg, rbd_callback_t complete_cb, rbd_completion_t *c)
 {
     return 0;
 }
 
-int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
-                    rbd_completion_t c)
+int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
 {
     return 0;
 }
@@ -1780,8 +1777,7 @@ ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return 0;
 }
 
-int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len,
-                 char *buf, rbd_completion_t c)
+int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_completion_t c)
 {
     return 0;
 }
@@ -1808,8 +1804,7 @@ int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
 }
 
 
-int rbd_open(rados_ioctx_t io, const char *name,
-             rbd_image_t *image, const char *snap_name)
+int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char *snap_name)
 {
     return 0;
 }
@@ -1830,3 +1825,43 @@ int rbd_set_image_notification(rbd_image_t image, int fd, int type)
     return 0;
 }
 
+/* we just need null implementations of the RADOS functions.
+ */
+int rados_conf_read_file(rados_t cluster, const char *path)
+{
+    return 0;
+}
+
+int rados_conf_set(rados_t cluster, const char *option, const char *value)
+{
+    return 0;
+}
+
+int rados_connect(rados_t cluster)
+{
+    return 0;
+}
+
+int rados_create(rados_t *cluster, const char * const id)
+{
+    return 0;
+}
+
+int rados_create2(rados_t *pcluster, const char *const clustername,
+                  const char * const name, uint64_t flags)
+{
+    return 0;
+}
+
+int rados_ioctx_create(rados_t cluster, const char *pool_name, rados_ioctx_t *ioctx)
+{
+    return 0;
+}
+
+void rados_ioctx_destroy(rados_ioctx_t io)
+{
+}
+
+void rados_shutdown(rados_t cluster)
+{
+}

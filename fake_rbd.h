@@ -61,6 +61,23 @@ int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp);
 
 int rbd_set_image_notification(rbd_image_t image, int fd, int type);
 
+typedef void *rados_t;
+typedef void *rados_config_t;
+int rados_conf_read_file(rados_t cluster, const char *path);
+int rados_conf_set(rados_t cluster, const char *option,
+                                  const char *value);
+int rados_connect(rados_t cluster);
+int rados_create(rados_t *cluster, const char * const id);
+int rados_create2(rados_t *pcluster,
+                  const char *const clustername,
+                  const char * const name, uint64_t flags);
+
+int rados_ioctx_create(rados_t cluster, const char *pool_name,
+                                      rados_ioctx_t *ioctx);
+void rados_ioctx_destroy(rados_ioctx_t io);
+
+void rados_shutdown(rados_t cluster);
+
 #ifdef __cplusplus
 }
 #endif
