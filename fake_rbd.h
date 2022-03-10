@@ -32,34 +32,34 @@ typedef struct {
 #define CEPH_RBD_API          __attribute__ ((visibility ("default")))
 typedef void *rados_ioctx_t;
 
-CEPH_RBD_API int rbd_aio_create_completion(void *cb_arg,
-                                           rbd_callback_t complete_cb,
-                                           rbd_completion_t *c);
-CEPH_RBD_API int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
-                                 rbd_completion_t c);
+int rbd_aio_create_completion(void *cb_arg,
+                              rbd_callback_t complete_cb,
+                              rbd_completion_t *c);
+int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
+                    rbd_completion_t c);
 
-CEPH_RBD_API int rbd_aio_flush(rbd_image_t image, rbd_completion_t c);
+int rbd_aio_flush(rbd_image_t image, rbd_completion_t c);
 
-CEPH_RBD_API void *rbd_aio_get_arg(rbd_completion_t c);
+void *rbd_aio_get_arg(rbd_completion_t c);
 
-CEPH_RBD_API ssize_t rbd_aio_get_return_value(rbd_completion_t c);
+ssize_t rbd_aio_get_return_value(rbd_completion_t c);
 
-CEPH_RBD_API int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len,
-                              char *buf, rbd_completion_t c);
-CEPH_RBD_API void rbd_aio_release(rbd_completion_t c);
-CEPH_RBD_API int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len,
-                               const char *buf, rbd_completion_t c);
-CEPH_RBD_API int rbd_close(rbd_image_t image);
-CEPH_RBD_API int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
-                          size_t infosize);
+int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len,
+                 char *buf, rbd_completion_t c);
+void rbd_aio_release(rbd_completion_t c);
+int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len,
+                  const char *buf, rbd_completion_t c);
+int rbd_close(rbd_image_t image);
+int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
+             size_t infosize);
 
-CEPH_RBD_API int rbd_open(rados_ioctx_t io, const char *name,
-                          rbd_image_t *image, const char *snap_name);
+int rbd_open(rados_ioctx_t io, const char *name,
+             rbd_image_t *image, const char *snap_name);
 
-CEPH_RBD_API int rbd_invalidate_cache(rbd_image_t image);
-CEPH_RBD_API int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp);
+int rbd_invalidate_cache(rbd_image_t image);
+int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp);
 
-CEPH_RBD_API int rbd_set_image_notification(rbd_image_t image, int fd, int type);
+int rbd_set_image_notification(rbd_image_t image, int fd, int type);
 
 #ifdef __cplusplus
 }

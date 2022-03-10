@@ -1749,3 +1749,84 @@ void fakemap_reset(void)
 {
     omap->map.reset();
 }
+
+#include "fake_rbd.h"
+
+int rbd_aio_create_completion(void *cb_arg,
+                              rbd_callback_t complete_cb,
+                              rbd_completion_t *c)
+{
+    return 0;
+}
+
+int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
+                    rbd_completion_t c)
+{
+    return 0;
+}
+
+int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
+{
+    return 0;
+}
+
+void *rbd_aio_get_arg(rbd_completion_t c)
+{
+    return NULL;
+}
+
+ssize_t rbd_aio_get_return_value(rbd_completion_t c)
+{
+    return 0;
+}
+
+int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len,
+                 char *buf, rbd_completion_t c)
+{
+    return 0;
+}
+
+void rbd_aio_release(rbd_completion_t c)
+{
+}
+
+int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len,
+                  const char *buf, rbd_completion_t c)
+{
+    return 0;
+}
+
+int rbd_close(rbd_image_t image)
+{
+    return 0;
+}
+
+int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
+             size_t infosize)
+{
+    return 0;
+}
+
+
+int rbd_open(rados_ioctx_t io, const char *name,
+             rbd_image_t *image, const char *snap_name)
+{
+    return 0;
+}
+
+
+int rbd_invalidate_cache(rbd_image_t image)
+{
+    return 0;
+}
+
+int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
+{
+    return 0;
+}
+
+int rbd_set_image_notification(rbd_image_t image, int fd, int type)
+{
+    return 0;
+}
+
