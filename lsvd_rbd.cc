@@ -1,6 +1,6 @@
 /*
- * file:        first-try.cc
- * description: first pass at a userspace block-on-object layer
+ * file:        lsvd_rbd.cc
+ * description: userspace block-on-object layer with librbd interface
  */
 
 #include "extent.cc"
@@ -237,7 +237,7 @@ class translate {
      * rather than values. That's OK because we allocate superblock permanently
      */
     typedef clone_info *clone_p;
-    ssize_t read_super(char *name, std::vector<uint32_t> &ckpts,
+    ssize_t read_super(const char *name, std::vector<uint32_t> &ckpts,
 		       std::vector<clone_p> &clones, std::vector<snap_info> &snaps) {
 	super = read_object_hdr(name, false);
 	super_h = (hdr*)super;
@@ -503,7 +503,7 @@ public:
 	return val;
     }
 
-    ssize_t init(char *name, int nthreads, bool timedflush) {
+    ssize_t init(const char *name, int nthreads, bool timedflush) {
 	std::vector<uint32_t>  ckpts;
 	std::vector<clone_p>   clones;
 	std::vector<snap_info> snaps;
@@ -1008,7 +1008,7 @@ public:
 class file_backend : public backend {
     char *prefix;
 public:
-    file_backend(char *_prefix) {
+    file_backend(const char *_prefix) {
 	prefix = strdup(_prefix);
     }
     ~file_backend() {
@@ -1059,6 +1059,7 @@ static bool aligned(void *ptr, int a)
     return 0 == ((long)ptr & (a-1));
 }
 
+#if 0
 static void iov_consume(iovec *iov, int iovcnt, size_t nbytes)
 {
     for (int i = 0; i < iovcnt && nbytes > 0; i++) {
@@ -1090,6 +1091,7 @@ static void iov_zero(iovec *iov, int iovcnt, size_t nbytes)
 	}
     }
 }
+#endif
 
 typedef int page_t;
 
@@ -1403,32 +1405,57 @@ public:
 	workers.put((wcache_work){offset/512, iov, iovcnt, callback, ptr});
     }
 
+    void get_iov_range(size_t off, size_t len, iovec *iov, int iovcnt,
+		       std::vector<iovec> &range) {
+	int i = 0;
+	while (off > iov[i].iov_len)
+	    off -= iov[i++].iov_len;
+	auto bytes = std::min(len, iov[i].iov_len - off);
+	range.push_back((iovec){(char*)(iov[i++].iov_base) + off, bytes});
+	while (len >= iov[i].iov_len) {
+	    range.push_back(iov[i]);
+	    len -= iov[i].iov_len;
+	}
+	if (len > 0)
+	    range.push_back((iovec){iov[i].iov_base, len});
+	assert(i < iovcnt);
+    }
+    
+    /* returns tuples of:
+     * offset, len, buf_offset
+     */
+    typedef std::tuple<size_t,size_t,size_t> cache_miss;
+
     // TODO: how the hell to handle fragments?
-    // hmm, what did I mean by "fragments"?
-    void readv(size_t offset, iovec *iov, int iovcnt) {
+    void readv(size_t offset, iovec *iov, int iovcnt, std::vector<cache_miss> &misses) {
 	auto bytes = iov_sum(iov, iovcnt);
 	lba_t base = offset/512, limit = base + bytes/512, prev = base;
 	std::unique_lock<std::mutex> lk(m);
-	
+
+	size_t buf_offset = 0;
 	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, plba] = it->vals(base, limit);
 	    if (_base > prev) {
 		size_t bytes = 512 * (_base - prev);
-		iov_zero(iov, iovcnt, bytes);
-		offset += bytes;
+		misses.push_back(std::tuple((size_t)512*prev, bytes, buf_offset));
+		buf_offset += bytes;
 	    }
+
 	    size_t bytes = 512 * (_limit - _base),
 		nvme_offset = 512 * plba;
+	    std::vector<iovec> iovs;
+	    get_iov_range(buf_offset, bytes, iov, iovcnt, iovs);
+
 	    lk.unlock();
 	    if (preadv(fd, iov, iovcnt, nvme_offset) < 0)
 		throw_fs_error("wcache_read");
 	    lk.lock();
-	    iov_consume(iov, iovcnt, bytes);
+
+	    buf_offset += bytes;
 	    prev = _limit;
 	}
-	if (prev < limit) 
-	    iov_zero(iov, iovcnt, 512 * (limit - prev));
-
+	if (prev < limit)
+	    misses.push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
     }
     
     // debugging
@@ -1516,7 +1543,9 @@ void wcache_read(char *buf, uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     iovec iov = {buf2, len};
-    wcache->readv(offset, &iov, 1);
+    std::vector<write_cache::cache_miss> misses;
+    wcache->readv(offset, &iov, 1, misses);
+
     memcpy(buf, buf2, len);
     free(buf2);
 }
@@ -1752,43 +1781,101 @@ void fakemap_reset(void)
 
 #include "fake_rbd.h"
 
+struct fake_rbd_image {
+    backend     *io;
+    objmap      *omap;
+    translate   *lsvd;
+    write_cache *wcache;
+    read_cache  *rcache;
+    ssize_t      size;		// bytes
+    int          fd;		// cache device
+    j_super     *js;		// cache page 0
+};
+
+
+struct lsvd_completion {
+    rbd_callback_t cb;
+    void *arg;
+    int retval;
+};
+
 int rbd_aio_create_completion(void *cb_arg, rbd_callback_t complete_cb, rbd_completion_t *c)
 {
+    lsvd_completion *p = (lsvd_completion*)calloc(sizeof(*c), 1);
+    p->cb = complete_cb;
+    p->arg = cb_arg;
+    *c = (rbd_completion_t)p;
     return 0;
 }
 
 int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
 {
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->cb(c, p->arg);
     return 0;
 }
 
 int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->cb(c, p->arg);
     return 0;
 }
 
 void *rbd_aio_get_arg(rbd_completion_t c)
 {
-    return NULL;
+    lsvd_completion *p = (lsvd_completion *)c;
+    return p->arg;
 }
 
 ssize_t rbd_aio_get_return_value(rbd_completion_t c)
 {
-    return 0;
+    lsvd_completion *p = (lsvd_completion *)c;
+    return p->retval;
 }
 
 int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_completion_t c)
 {
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    lsvd_completion *p = (lsvd_completion *)c;
+    char *aligned_buf = buf;
+    if (!aligned(buf, 512)) {
+	aligned_buf = (char*)aligned_alloc(512, len);
+	memcpy(aligned_buf, buf, len);
+    }
+
+    std::vector<write_cache::cache_miss> misses;
+    iovec iov = {aligned_buf, len};
+    fri->wcache->readv(off, &iov, 1, misses);
+
+    for (auto [_off, _len, buf_offset] : misses)
+	fri->rcache->read(_off, _len, aligned_buf + buf_offset);
+    
+    if (aligned_buf != buf) {
+	memcpy(buf, aligned_buf, len);
+	free(aligned_buf);
+    }
+    p->cb(c, p->arg);
     return 0;
 }
 
 void rbd_aio_release(rbd_completion_t c)
 {
+    free((void*)c);
 }
 
-int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len,
-                  const char *buf, rbd_completion_t c)
+void fake_rbd_cb(void *ptr)
 {
+    lsvd_completion *p = (lsvd_completion *)ptr;
+    p->cb(ptr, p->arg);
+}
+
+int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+		  rbd_completion_t c)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    iovec iov = {(void*)buf, len};
+    fri->wcache->write(off, &iov, 1, fake_rbd_cb, (void*)c);
     return 0;
 }
 
@@ -1797,19 +1884,46 @@ int rbd_close(rbd_image_t image)
     return 0;
 }
 
-int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
-             size_t infosize)
+int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
     return 0;
 }
 
+std::pair<std::string,std::string> split_string(std::string s, std::string delim)
+{
+    auto i = s.find(delim);
+    return std::pair(s.substr(0,i), s.substr(i+delim.length()));
+}
 
 int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char *snap_name)
 {
+    int rv;
+    
+    auto [nvme, obj] = split_string(std::string(name), ":");
+    auto fri = new fake_rbd_image;
+
+    // c_init:
+    fri->io = new file_backend(name);
+    fri->omap = new objmap();
+    fri->lsvd = new translate(fri->io, fri->omap);
+    fri->size = fri->lsvd->init(obj.c_str(), 2, true);
+
+    int fd = fri->fd = open(nvme.c_str(), O_RDWR | O_DIRECT);
+    j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
+    if ((rv = pread(fd, (char*)js, 4096, 0)) < 0)
+	return rv;
+    if (js->magic != LSVD_MAGIC || js->type != LSVD_J_SUPER)
+	return -1;
+    
+    fri->wcache = new write_cache(js->write_super, fd, fri->lsvd);
+    fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
+
+    *image = (void*)fri;
     return 0;
 }
 
-
+/* any following functions are stubs only
+ */
 int rbd_invalidate_cache(rbd_image_t image)
 {
     return 0;
