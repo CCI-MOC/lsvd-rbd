@@ -1412,13 +1412,14 @@ public:
 	    off -= iov[i++].iov_len;
 	auto bytes = std::min(len, iov[i].iov_len - off);
 	range.push_back((iovec){(char*)(iov[i++].iov_base) + off, bytes});
-	while (len >= iov[i].iov_len) {
+	len -= bytes;
+	while (len > 0 && len >= iov[i].iov_len) {
 	    range.push_back(iov[i]);
 	    len -= iov[i].iov_len;
 	}
 	if (len > 0)
 	    range.push_back((iovec){iov[i].iov_base, len});
-	assert(i < iovcnt);
+	assert(i <= iovcnt);
     }
     
     /* returns tuples of:
