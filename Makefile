@@ -5,11 +5,11 @@ CFLAGS = -ggdb3 -Wall -Wno-psabi
 CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 
-liblsvd.so: first-try.cc extent.cc journal2.cc
-	g++ -std=c++17 first-try.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs
+liblsvd.so: lsvd_rbd.cc extent.cc journal2.cc
+	g++ -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs
 
-bdus: bdus.o first-try.o extent.cc journal2.cc
-	g++ first-try.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs
+bdus: bdus.o lsvd_rbd.o extent.cc journal2.cc
+	g++ lsvd_rbd.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs
 
 mkdisk: mkdisk.cc objects.cc
 	g++ mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
