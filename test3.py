@@ -68,6 +68,7 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'\0'*4096)
 
     def test_2_readwrite(self):
+        restart()
         offset = 8192
         lsvd.wcache_write(offset, b'A'*512)
         lsvd.wcache_write(offset+1024, b'B'*512)

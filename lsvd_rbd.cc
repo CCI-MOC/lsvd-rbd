@@ -1448,7 +1448,7 @@ public:
 	    get_iov_range(buf_offset, bytes, iov, iovcnt, iovs);
 
 	    lk.unlock();
-	    if (preadv(fd, iov, iovcnt, nvme_offset) < 0)
+	    if (preadv(fd, iovs.data(), iovs.size(), nvme_offset) < 0)
 		throw_fs_error("wcache_read");
 	    lk.lock();
 
