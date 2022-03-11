@@ -151,10 +151,7 @@ class tests(unittest.TestCase):
 if __name__ == '__main__':
     startup()
     unittest.main(exit=False)
-    print('1')
     lsvd.wcache_shutdown()
-    print('2')
     lsvd.shutdown()
-    print('3')
     time.sleep(1)
 
