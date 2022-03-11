@@ -1922,6 +1922,53 @@ int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char 
     return 0;
 }
 
+fake_rbd_image _fri;
+
+extern "C" void fake_rbd_init(void);
+void fake_rbd_init(void)
+{
+    _fri.io = io;
+    _fri.omap = omap;
+    _fri.lsvd = lsvd;
+    _fri.size = 0;
+    _fri.wcache = wcache;
+    _fri.rcache = rcache;
+}
+
+void fake_rbd_cb(rbd_completion_t c, void *arg)
+{
+    do_write *d = (do_write*)arg;
+    std::unique_lock lk(d->m);
+    d->done = true;
+    d->cv.notify_all();
+}
+
+extern "C" void fake_rbd_read(char *buf, size_t off, size_t len);
+void fake_rbd_read(char *buf, size_t off, size_t len)
+{
+    rbd_completion_t c;
+    do_write dw;
+    rbd_aio_create_completion((void*)&dw, fake_rbd_cb, &c);
+    rbd_aio_read((rbd_image_t)&_fri, off, len, buf, c);
+    std::unique_lock lk(dw.m);
+    while (!dw.done)
+	dw.cv.wait(lk);
+    rbd_aio_release(c);
+}
+
+extern "C" void fake_rbd_write(char *buf, size_t off, size_t len);
+void fake_rbd_write(char *buf, size_t off, size_t len)
+{
+    rbd_completion_t c;
+    do_write dw;
+    rbd_aio_create_completion((void*)&dw, fake_rbd_cb, &c);
+    rbd_aio_write((rbd_image_t)&_fri, off, len, buf, c);
+    std::unique_lock lk(dw.m);
+    while (!dw.done)
+	dw.cv.wait(lk);
+    rbd_aio_release(c);
+}
+
 /* any following functions are stubs only
  */
 int rbd_invalidate_cache(rbd_image_t image)

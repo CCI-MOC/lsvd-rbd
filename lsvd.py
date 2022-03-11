@@ -281,6 +281,20 @@ def fakemap_update(base, limit, obj, offset):
 def fakemap_reset():
     lsvd_lib.fakemap_reset()
 
+# fake RBD functions
+def fake_rbd_init():
+    lsvd_lib.fake_rbd_init();
+
+def fake_rbd_read(off, bytes):
+    buf = (c_char * bytes)()
+    lsvd_lib.fake_rbd_read(buf, c_ulong(off), c_ulong(bytes))
+    return buf[0:bytes]
+
+def fake_rbd_write(off, data):
+    if type(data) != bytes:
+        data = bytes(data, 'utf-8')
+    bytes = len(data)
+    lsvd_lib.fake_rbd_write(data, c_ulong(off), c_ulong(bytes))
 
 class j_extent(LittleEndianStructure):
     _fields_ = [("lba", c_ulong, 40),
