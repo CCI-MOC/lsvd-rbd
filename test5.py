@@ -36,6 +36,7 @@ class tests(unittest.TestCase):
     def test_1_wcache_holes(self):
         startup()
         lsvd.write(0, b'A'*20*1024)
+        lsvd.flush()
         lsvd.wcache_write(4096, b'B'*4096)
         lsvd.wcache_write(3*4096, b'C'*4096)
         d = lsvd.fake_rbd_read(0, 20*1024)
