@@ -1798,11 +1798,14 @@ struct lsvd_completion {
     rbd_callback_t cb;
     void *arg;
     int retval;
+    bool done;
+    std::mutex m;
+    std::condition_variable cv;
 };
 
 int rbd_aio_create_completion(void *cb_arg, rbd_callback_t complete_cb, rbd_completion_t *c)
 {
-    lsvd_completion *p = (lsvd_completion*)calloc(sizeof(*c), 1);
+    lsvd_completion *p = (lsvd_completion*)calloc(sizeof(*p), 1);
     p->cb = complete_cb;
     p->arg = cb_arg;
     *c = (rbd_completion_t)p;
@@ -1822,6 +1825,13 @@ int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
     p->cb(c, p->arg);
     return 0;
 }
+
+extern "C" int rbd_flush(rbd_image_t image);
+int rbd_flush(rbd_image_t image)
+{
+    return 0;
+}
+
 
 void *rbd_aio_get_arg(rbd_completion_t c)
 {
@@ -1856,6 +1866,7 @@ int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_com
 	memcpy(buf, aligned_buf, len);
 	free(aligned_buf);
     }
+    p->done = true;
     p->cb(c, p->arg);
     return 0;
 }
@@ -1865,9 +1876,23 @@ void rbd_aio_release(rbd_completion_t c)
     free((void*)c);
 }
 
+extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c);
+int rbd_aio_wait_for_complete(rbd_completion_t c)
+{
+    lsvd_completion *p = (lsvd_completion *)c;
+    std::unique_lock lk(p->m);
+    while (!p->done)
+	p->cv.wait(lk);
+    return 0;
+}
+
 void fake_rbd_cb(void *ptr)
 {
     lsvd_completion *p = (lsvd_completion *)ptr;
+    std::unique_lock lk(p->m);
+    p->done = true;
+    lk.unlock();
+    p->cv.notify_all();
     p->cb(ptr, p->arg);
 }
 
@@ -1887,29 +1912,36 @@ int rbd_close(rbd_image_t image)
 
 int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    info->size = fri->size;
     return 0;
 }
 
+#if 0
 std::pair<std::string,std::string> split_string(std::string s, std::string delim)
 {
     auto i = s.find(delim);
     return std::pair(s.substr(0,i), s.substr(i+delim.length()));
 }
+#endif
 
 int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char *snap_name)
 {
     int rv;
-    
-    auto [nvme, obj] = split_string(std::string(name), ":");
+    char nvme[48], obj[48];
+    sscanf(name, "%[^:]:%[^:]", nvme, obj);
+    printf("nvme %s obj %s\n", nvme, obj);
+//    auto [nvme, obj] = split_string(std::string(name), ":");
     auto fri = new fake_rbd_image;
 
     // c_init:
-    fri->io = new file_backend(name);
+    fri->io = new file_backend(obj);
     fri->omap = new objmap();
     fri->lsvd = new translate(fri->io, fri->omap);
-    fri->size = fri->lsvd->init(obj.c_str(), 2, true);
-
-    int fd = fri->fd = open(nvme.c_str(), O_RDWR | O_DIRECT);
+    fri->size = fri->lsvd->init(obj, 2, true);
+    printf("size: %ld\n", fri->size);
+    
+    int fd = fri->fd = open(nvme, O_RDWR | O_DIRECT);
     j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
     if ((rv = pread(fd, (char*)js, 4096, 0)) < 0)
 	return rv;
@@ -1972,6 +2004,19 @@ void fake_rbd_write(char *buf, size_t off, size_t len)
 
 /* any following functions are stubs only
  */
+extern "C" int rbd_invalidate_cache(rbd_image_t image);
+extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp);
+extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type);
+extern "C" int rados_conf_read_file(rados_t cluster, const char *path);
+extern "C" int rados_conf_set(rados_t cluster, const char *option, const char *value);
+extern "C" int rados_connect(rados_t cluster);
+extern "C" int rados_create(rados_t *cluster, const char * const id);
+extern "C" int rados_create2(rados_t *pcluster, const char *const clustername,
+			     const char * const name, uint64_t flags);
+extern "C" int rados_ioctx_create(rados_t cluster, const char *pool_name, rados_ioctx_t *ioctx);
+extern "C" void rados_ioctx_destroy(rados_ioctx_t io);
+extern "C" void rados_shutdown(rados_t cluster);
+
 int rbd_invalidate_cache(rbd_image_t image)
 {
     return 0;
