@@ -1116,14 +1116,21 @@ class write_cache {
     thread_pool<int>          misc_threads;
     std::mutex                m;
     std::condition_variable   alloc_cv;
+    int                       nfree;
     
     char *pad_page;
     
     static const int n_threads = 1;
 
+    int free_space(void) {
+	auto size = super->limit - super->base;
+	auto tail = (super->next >= super->oldest) ? super->oldest + size : super->oldest;
+	return tail - super->next - 1;
+    }
+    
     uint32_t allocate(page_t n, page_t &pad) {
 	std::unique_lock lk(m);
-	while (super->oldest + (super->limit - super->base) - super->next < 2)
+	while (free_space() < 2*n)
 	    alloc_cv.wait(lk);
 	
 	pad = 0;
@@ -1297,21 +1304,23 @@ class write_cache {
 
 		auto oldest = super->oldest;
 		std::vector<j_extent> to_delete;
-		while (pgs_free < trigger) {
+		while (pgs_free < trigger*3) {
 		    std::vector<j_extent> extents;
 		    auto tmp = get_oldest(oldest, extents);
 		    get_exts_to_evict(extents, oldest, tmp, to_delete);
-		    pgs_free -= (tmp - oldest);
+		    pgs_free += (tmp - oldest);
 		    oldest = tmp;
 		}
 
 		/* TODO: read the data and add to read cache
 		 */
-
+		super->oldest = oldest;
+		if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
+		    throw_fs_error("wsuper_rewrite");
+		
 		lk.lock();
 		for (auto e : to_delete)
 		    map.trim(e.lba, e.lba + e.len);
-
 		alloc_cv.notify_all();
 	    }
 	}
@@ -1404,6 +1413,12 @@ public:
 		map.update(e.lba, e.lba+e.len, e.page*8);
 	    free(map_buf);
 	}
+
+	auto N = super->limit - super->base;
+	if (super->oldest == super->next)
+	    nfree = N - 1;
+	else
+	    nfree = (super->oldest + N - super->next) % N;
 	    
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
