@@ -1115,14 +1115,17 @@ class write_cache {
     thread_pool<wcache_work*> workers;
     thread_pool<int>          misc_threads;
     std::mutex                m;
-
+    std::condition_variable   alloc_cv;
+    
     char *pad_page;
     
     static const int n_threads = 1;
 
-    /* lock must be held before calling
-     */
     uint32_t allocate(page_t n, page_t &pad) {
+	std::unique_lock lk(m);
+	while (super->oldest + (super->limit - super->base) - super->next < 2)
+	    alloc_cv.wait(lk);
+	
 	pad = 0;
 	if (super->limit - super->next < (uint32_t)n) {
 	    pad = super->next;
@@ -1148,7 +1151,7 @@ class write_cache {
 	
 	while (p->running) {
 	    std::vector<char*> bounce_bufs;
-	    std::unique_lock<std::mutex> lk(m);
+	    std::unique_lock lk(m);
 	    if (!p->wait_locked(lk))
 		break;
 
@@ -1164,11 +1167,11 @@ class write_cache {
 		lengths.push_back(l);
 		work.push_back(w);
 	    }
+	    lk.unlock();
 	    
 	    page_t blocks = div_round_up(sectors, 8);
 	    // allocate blocks + 1
 	    page_t pad, blockno = allocate(blocks+1, pad);
-	    lk.unlock();
 
 	    if (pad != 0) {
 		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
@@ -1279,7 +1282,7 @@ class write_cache {
     }
     
     void evict_thread(thread_pool<int> *p) {
-	auto period = std::chrono::seconds(1);
+	auto period = std::chrono::milliseconds(250);
 	const int evict_min_pct = 5;
 	const int evict_max_mb = 100;
 	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
@@ -1308,6 +1311,8 @@ class write_cache {
 		lk.lock();
 		for (auto e : to_delete)
 		    map.trim(e.lba, e.lba + e.len);
+
+		alloc_cv.notify_all();
 	    }
 	}
     }
