@@ -223,6 +223,7 @@ def wcache_checkpoint():
 class obj_offset(LittleEndianStructure):
     _fields_ = [("obj", c_ulong, 36),
                 ("offset", c_ulong, 28)]
+sizeof_obj_offset = sizeof(obj_offset)
 
 rsuper = None
 def rcache_init(blkno):
