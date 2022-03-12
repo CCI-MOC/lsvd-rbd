@@ -1047,11 +1047,18 @@ public:
 /* each write queues up one of these for a worker thread
  */
 struct wcache_work {
+public:
     uint64_t  lba;
-    iovec    *iov;
-    int       iovcnt;
     void    (*callback)(void*);
     void     *ptr;
+    std::vector<iovec> iovs;
+    wcache_work(lba_t _lba, iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
+	lba = _lba;
+	for (int i = 0; i < iovcnt; i++)
+	    iovs.push_back(iov[i]);
+	callback = _callback;
+	ptr = _ptr;
+    }
 };
 
 static bool aligned(void *ptr, int a)
@@ -1105,9 +1112,9 @@ class write_cache {
     extmap::cachemap2 map;
     translate        *be;
     
-    thread_pool<wcache_work> workers;
-    thread_pool<int>         misc_threads;
-    std::mutex               m;
+    thread_pool<wcache_work*> workers;
+    thread_pool<int>          misc_threads;
+    std::mutex                m;
 
     char *pad_page;
     
@@ -1136,7 +1143,7 @@ class write_cache {
 	return h;
     }
 
-    void writer(thread_pool<wcache_work> *p) {
+    void writer(thread_pool<wcache_work*> *p) {
 	char *buf = (char*)aligned_alloc(512, 4096); // for direct I/O
 	
 	while (p->running) {
@@ -1145,14 +1152,14 @@ class write_cache {
 	    if (!p->wait_locked(lk))
 		break;
 
-	    std::vector<wcache_work> work;
+	    std::vector<wcache_work*> work;
 	    std::vector<int> lengths;
 	    int sectors = 0;
 	    while (p->running) {
-		wcache_work w;
+		wcache_work *w;
 		if (!p->get_nowait(w))
 		    break;
-		auto l = iov_sum(w.iov, w.iovcnt) / 512;		
+		auto l = iov_sum(w->iovs.data(), w->iovs.size()) / 512;		
 		sectors += l;
 		lengths.push_back(l);
 		work.push_back(w);
@@ -1171,15 +1178,15 @@ class write_cache {
 
 	    std::vector<j_extent> extents;
 	    for (auto w : work) {
-		for (int i = 0; i < w.iovcnt; i++) {
-		    if (aligned(w.iov[i].iov_base, 512))
+		for (int i = 0; i < (int)w->iovs.size(); i++) {
+		    if (aligned(w->iovs[i].iov_base, 512))
 			continue;
-		    char *p = (char*)aligned_alloc(512, w.iov[i].iov_len);
-		    memcpy(p, w.iov[i].iov_base, w.iov[i].iov_len);
-		    w.iov[i].iov_base = p;
+		    char *p = (char*)aligned_alloc(512, w->iovs[i].iov_len);
+		    memcpy(p, w->iovs[i].iov_base, w->iovs[i].iov_len);
+		    w->iovs[i].iov_base = p;
 		    bounce_bufs.push_back(p);
 		}
-		extents.push_back((j_extent){w.lba, iov_sum(w.iov, w.iovcnt)/512});
+		extents.push_back((j_extent){w->lba, iov_sum(w->iovs.data(), w->iovs.size())/512});
 	    }
 
 	    j_hdr *j = mk_header(buf, LSVD_J_DATA, my_uuid, 1+blocks);
@@ -1192,8 +1199,8 @@ class write_cache {
 	    iovs.push_back((iovec){buf, 4096});
 
 	    for (auto w : work)
-		for (int i = 0; i < w.iovcnt; i++)
-		    iovs.push_back(w.iov[i]);
+		for (auto i : w->iovs)
+		    iovs.push_back(i);
 		    
 	    sector_t pad_sectors = blocks*8 - sectors;
 	    if (pad_sectors > 0)
@@ -1208,22 +1215,24 @@ class write_cache {
 	    lk.lock();
 	    uint64_t lba = (blockno+1) * 8;
 	    for (auto w : work) {
-		auto sectors = iov_sum(w.iov, w.iovcnt) / 512;
-		map.update(w.lba, w.lba + sectors, lba);
+		auto sectors = iov_sum(w->iovs.data(), w->iovs.size()) / 512;
+		map.update(w->lba, w->lba + sectors, lba);
 		lba += sectors;
 	    }
 	    
 	    /* then send to backend */
 	    lk.unlock();
 	    for (auto w : work) {
-		be->writev(w.lba*512, w.iov, w.iovcnt);
-		w.callback(w.ptr);
+		be->writev(w->lba*512, w->iovs.data(), w->iovs.size());
+		w->callback(w->ptr);
 	    }
 
 	    while (!bounce_bufs.empty()) {
 		free(bounce_bufs.back());
 		bounce_bufs.pop_back();
 	    }
+	    for (auto w : work)
+		delete w;
 	}
 	free(buf);
     }
@@ -1402,7 +1411,7 @@ public:
     }
 
     void write(size_t offset, iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
-	workers.put((wcache_work){offset/512, iov, iovcnt, callback, ptr});
+	workers.put(new wcache_work(offset/512, iov, iovcnt, callback, ptr));
     }
 
     void get_iov_range(size_t off, size_t len, iovec *iov, int iovcnt,
