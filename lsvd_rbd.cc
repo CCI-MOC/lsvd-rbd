@@ -1127,7 +1127,7 @@ class write_cache {
     
     char *pad_page;
     
-    static const int n_threads = 1;
+    static const int n_threads = 2;
 
     int pages_free(uint32_t oldest) {
 	auto size = super->limit - super->base;
@@ -1147,7 +1147,7 @@ class write_cache {
 	pad = 0;
 	if (super->limit - super->next < (uint32_t)n) {
 	    pad = super->next;
-	    super->next = 0;
+	    super->next = super->base;
 	}
 	auto val = super->next;
 	super->next += n;
@@ -1234,11 +1234,15 @@ class write_cache {
 	    if (pad != 0)
 		lengths[pad] = super->limit - pad;
 	    lengths[blockno] = blocks+1;
-	    uint64_t plba = (blockno+1) * 8;
+	    lba_t plba = (blockno+1) * 8;
+	    std::vector<extmap::lba2lba> garbage;
 	    for (auto w : work) {
-		map.update(w->lba, w->lba + w->sectors, plba);
+		map.update(w->lba, w->lba + w->sectors, plba, &garbage);
 		rmap.update(plba, plba+w->sectors, w->lba);
 		plba += sectors;
+	    }
+	    for (auto it = garbage.begin(); it != garbage.end(); it++) {
+		rmap.trim(it->s.base, it->s.base+it->s.len);
 	    }
 	    lk.unlock();
 	    
@@ -1303,37 +1307,37 @@ class write_cache {
     }
     
     void evict_thread(thread_pool<int> *p) {
-	auto period = std::chrono::milliseconds(100);
+	auto period = std::chrono::milliseconds(25);
 	const int evict_min_pct = 5;
 	const int evict_max_mb = 100;
-//	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
-//			       evict_max_mb * (1024*1024/4096));
-	int trigger = 25;
+	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
+			       evict_max_mb * (1024*1024/4096));
+//	int trigger = 100;
 
 	// TODO - fix this by finding the entries deleted when we update the forward
 	// map, then delete them from the rmap.
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
 	    p->cv.wait_for(lk, period);
-	    int N = super->limit - super->base,
-		pgs_free = ((super->oldest + N) - super->next - 1) % N;
+	    int pgs_free = pages_free(super->oldest);
 	    if (p->running && super->oldest != super->next && pgs_free <= trigger) {
 		auto oldest = super->oldest;
 		std::vector<j_extent> to_delete;
+
 		while (pages_free(oldest) < trigger*3) {
+		    /*
+		     * for each record we trim from the cache, collect the vLBA->pLBA
+		     * mappings that we need to remove. Note that we keep the revers map
+		     * up to date, so we don't need to check them against the forward map.
+		     */
 		    auto len = lengths[oldest];
 		    lengths.erase(oldest);
 		    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
 		    for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
 			auto [p_base, p_limit, vlba] = it->vals(base, limit);
-			auto vlimit = vlba + (p_limit-p_base);
-			for (auto it = map.lookup(vlba);
-			     it != map.end() && it->base() < vlimit; it++) {
-			    auto [b2, l2, p2] = it->vals(vlba, vlimit);
-			    if (p_base <= p2 && p2 <= p_limit)
-				to_delete.push_back((j_extent){b2, l2-b2});
-			}
+			to_delete.push_back((j_extent){vlba, p_limit-p_base});
 		    }
+		    rmap.trim(base, limit);
 		    oldest += len;
 		    if (oldest >= super->limit)
 			oldest = super->base;
@@ -1991,7 +1995,7 @@ int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char 
     fri->io = new file_backend(obj);
     fri->omap = new objmap();
     fri->lsvd = new translate(fri->io, fri->omap);
-    fri->size = fri->lsvd->init(obj, 2, true);
+    fri->size = fri->lsvd->init(obj, 3, true);
     
 //    int fd = fri->fd = open(nvme, O_RDWR | O_DIRECT);
     int fd = fri->fd = open(nvme, O_RDWR);    
