@@ -1192,7 +1192,7 @@ class write_cache {
 	    if (pad != 0) {
 		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
 		if (pwrite(fd, buf, 4096, pad*4096) < 0)
-		    /* todo: do something */;
+		    throw_fs_error("wpad");
 	    }
 	    
 	    std::vector<j_extent> extents;
@@ -1226,7 +1226,7 @@ class write_cache {
 		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
 
 	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096) < 0)
-		/* TODO: do something */;
+		throw_fs_error("wdata");
 
 	    /* update map first under lock. 
 	     * Note that map is in units of *sectors*, not blocks 
@@ -1995,8 +1995,8 @@ int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char 
     fri->lsvd = new translate(fri->io, fri->omap);
     fri->size = fri->lsvd->init(obj.c_str(), 3, true);
     
-//    int fd = fri->fd = open(nvme, O_RDWR | O_DIRECT);
-    int fd = fri->fd = open(nvme.c_str(), O_RDWR);
+    int fd = fri->fd = open(nvme.c_str(), O_RDWR | O_DIRECT);
+//    int fd = fri->fd = open(nvme.c_str(), O_RDWR);
     j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
     if ((rv = pread(fd, (char*)js, 4096, 0)) < 0)
 	return rv;
