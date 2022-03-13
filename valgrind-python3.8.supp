@@ -1,0 +1,23 @@
+{
+   s1
+   Memcheck:Cond
+   obj:/usr/bin/python3.8
+}
+
+{
+   s2
+   Memcheck:Cond
+   obj:/usr/bin/python3.8
+}
+
+{
+   s3
+   Memcheck:Value8
+   obj:/usr/bin/python3.8
+}
+
+{
+   s4
+   Memcheck:Addr4
+   obj:/usr/bin/python3.8
+}
