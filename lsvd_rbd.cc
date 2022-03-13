@@ -1051,11 +1051,16 @@ public:
     uint64_t  lba;
     void    (*callback)(void*);
     void     *ptr;
+    lba_t     sectors;
     std::vector<iovec> iovs;
     wcache_work(lba_t _lba, iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
 	lba = _lba;
-	for (int i = 0; i < iovcnt; i++)
+	int bytes = 0;
+	for (int i = 0; i < iovcnt; i++) {
 	    iovs.push_back(iov[i]);
+	    bytes += iov[i].iov_len;
+	}
+	sectors = bytes / 512;
 	callback = _callback;
 	ptr = _ptr;
     }
@@ -1110,6 +1115,8 @@ class write_cache {
     j_write_super *super;	// 4KB
 
     extmap::cachemap2 map;
+    extmap::cachemap2 rmap;
+    std::map<page_t,int> lengths;
     translate        *be;
     
     thread_pool<wcache_work*> workers;
@@ -1122,16 +1129,20 @@ class write_cache {
     
     static const int n_threads = 1;
 
-    int free_space(void) {
+    int pages_free(uint32_t oldest) {
 	auto size = super->limit - super->base;
-	auto tail = (super->next >= super->oldest) ? super->oldest + size : super->oldest;
+	auto tail = (super->next >= oldest) ? oldest + size : oldest;
 	return tail - super->next - 1;
     }
     
     uint32_t allocate(page_t n, page_t &pad) {
 	std::unique_lock lk(m);
-	while (free_space() < 2*n)
-	    alloc_cv.wait(lk);
+	auto timeout = std::chrono::seconds(1);
+	while (pages_free(super->oldest) < 2*n) {
+	    alloc_cv.wait_for(lk, timeout);
+	    if (pages_free(super->oldest) < 2*n)
+		printf("\nwaiting(1): %d %d %d\n", pages_free(super->oldest), super->next, super->oldest);
+	}
 	
 	pad = 0;
 	if (super->limit - super->next < (uint32_t)n) {
@@ -1163,15 +1174,12 @@ class write_cache {
 		break;
 
 	    std::vector<wcache_work*> work;
-	    std::vector<int> lengths;
 	    int sectors = 0;
 	    while (p->running) {
 		wcache_work *w;
 		if (!p->get_nowait(w))
 		    break;
-		auto l = iov_sum(w->iovs.data(), w->iovs.size()) / 512;		
-		sectors += l;
-		lengths.push_back(l);
+		sectors += w->sectors;
 		work.push_back(w);
 	    }
 	    lk.unlock();
@@ -1183,9 +1191,9 @@ class write_cache {
 	    if (pad != 0) {
 		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
 		if (pwrite(fd, buf, 4096, pad*4096) < 0)
-		    /* TODO: do something */;
+		    /* todo: do something */;
 	    }
-
+	    
 	    std::vector<j_extent> extents;
 	    for (auto w : work) {
 		for (int i = 0; i < (int)w->iovs.size(); i++) {
@@ -1223,15 +1231,18 @@ class write_cache {
 	     * Note that map is in units of *sectors*, not blocks 
 	     */
 	    lk.lock();
-	    uint64_t lba = (blockno+1) * 8;
+	    if (pad != 0)
+		lengths[pad] = super->limit - pad;
+	    lengths[blockno] = blocks+1;
+	    uint64_t plba = (blockno+1) * 8;
 	    for (auto w : work) {
-		auto sectors = iov_sum(w->iovs.data(), w->iovs.size()) / 512;
-		map.update(w->lba, w->lba + sectors, lba);
-		lba += sectors;
+		map.update(w->lba, w->lba + w->sectors, plba);
+		rmap.update(plba, plba+w->sectors, w->lba);
+		plba += sectors;
 	    }
+	    lk.unlock();
 	    
 	    /* then send to backend */
-	    lk.unlock();
 	    for (auto w : work) {
 		be->writev(w->lba*512, w->iovs.data(), w->iovs.size());
 		w->callback(w->ptr);
@@ -1255,9 +1266,12 @@ class write_cache {
     page_t get_oldest(page_t blk, std::vector<j_extent> &extents) {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	j_hdr *h = (j_hdr*)buf;
-	
+
 	if (pread(fd, buf, 4096, blk*4096) < 0)
 	    throw_fs_error("wcache");
+	if (h->magic != LSVD_MAGIC) {
+	    printf("bad block: %d\n", blk);
+	}
 	assert(h->magic == LSVD_MAGIC && h->version == 1);
 
 	auto next_blk = blk + h->len;
@@ -1289,53 +1303,65 @@ class write_cache {
     }
     
     void evict_thread(thread_pool<int> *p) {
-	auto period = std::chrono::milliseconds(250);
+	auto period = std::chrono::milliseconds(100);
 	const int evict_min_pct = 5;
 	const int evict_max_mb = 100;
-	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
-			       evict_max_mb * (1024*1024/4096));
+//	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
+//			       evict_max_mb * (1024*1024/4096));
+	int trigger = 25;
+
+	// TODO - fix this by finding the entries deleted when we update the forward
+	// map, then delete them from the rmap.
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
 	    p->cv.wait_for(lk, period);
 	    int N = super->limit - super->base,
 		pgs_free = ((super->oldest + N) - super->next - 1) % N;
 	    if (p->running && super->oldest != super->next && pgs_free <= trigger) {
-		lk.unlock();
-
 		auto oldest = super->oldest;
 		std::vector<j_extent> to_delete;
-		while (pgs_free < trigger*3) {
-		    std::vector<j_extent> extents;
-		    auto tmp = get_oldest(oldest, extents);
-		    get_exts_to_evict(extents, oldest, tmp, to_delete);
-		    pgs_free += (tmp - oldest);
-		    oldest = tmp;
+		while (pages_free(oldest) < trigger*3) {
+		    auto len = lengths[oldest];
+		    lengths.erase(oldest);
+		    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
+		    for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
+			auto [p_base, p_limit, vlba] = it->vals(base, limit);
+			auto vlimit = vlba + (p_limit-p_base);
+			for (auto it = map.lookup(vlba);
+			     it != map.end() && it->base() < vlimit; it++) {
+			    auto [b2, l2, p2] = it->vals(vlba, vlimit);
+			    if (p_base <= p2 && p2 <= p_limit)
+				to_delete.push_back((j_extent){b2, l2-b2});
+			}
+		    }
+		    oldest += len;
+		    if (oldest >= super->limit)
+			oldest = super->base;
 		}
-
-		/* TODO: read the data and add to read cache
+		
+		/* TODO: unlock, read the data and add to read cache, re-lock
 		 */
 		super->oldest = oldest;
-		if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
-		    throw_fs_error("wsuper_rewrite");
+//		if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
+//		    throw_fs_error("wsuper_rewrite");
 		
-		lk.lock();
 		for (auto e : to_delete)
 		    map.trim(e.lba, e.lba + e.len);
 		alloc_cv.notify_all();
 	    }
 	}
     }
-    
+
     void ckpt_thread(thread_pool<int> *p) {
-	auto seq0 = batch_seq;
-	auto period = std::chrono::seconds(1);
-	const int ckpt_interval = 100;
+	auto next0 = super->next, N = super->limit - super->base;
+	auto period = std::chrono::milliseconds(100);
+	const int ckpt_interval = N / 8;
 
 	while (p->running) {
 	    std::unique_lock lk(m);
 	    p->cv.wait_for(lk, period);
-	    if (p->running && batch_seq - seq0 > ckpt_interval) {
-		seq0 = batch_seq;
+	    if (p->running && (int)(super->next + N - next0) > ckpt_interval) {
+		next0 = super->next;
 		lk.unlock();
 		write_checkpoint();
 	    }
@@ -1959,8 +1985,6 @@ int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char 
     int rv;
     char nvme[48], obj[48];
     sscanf(name, "%[^:]:%[^:]", nvme, obj);
-    printf("nvme %s obj %s\n", nvme, obj);
-//    auto [nvme, obj] = split_string(std::string(name), ":");
     auto fri = new fake_rbd_image;
 
     // c_init:
@@ -1968,9 +1992,9 @@ int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char 
     fri->omap = new objmap();
     fri->lsvd = new translate(fri->io, fri->omap);
     fri->size = fri->lsvd->init(obj, 2, true);
-    printf("size: %ld\n", fri->size);
     
-    int fd = fri->fd = open(nvme, O_RDWR | O_DIRECT);
+//    int fd = fri->fd = open(nvme, O_RDWR | O_DIRECT);
+    int fd = fri->fd = open(nvme, O_RDWR);    
     j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
     if ((rv = pread(fd, (char*)js, 4096, 0)) < 0)
 	return rv;
