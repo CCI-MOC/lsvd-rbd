@@ -467,6 +467,7 @@ public:
 	io = _io;
 	map = omap;
 	current_batch = NULL;
+	nocache = false;
     }
     ~translate() {
 	while (!batches.empty()) {
@@ -1976,29 +1977,26 @@ int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
     return 0;
 }
 
-#if 0
 std::pair<std::string,std::string> split_string(std::string s, std::string delim)
 {
     auto i = s.find(delim);
     return std::pair(s.substr(0,i), s.substr(i+delim.length()));
 }
-#endif
 
 int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char *snap_name)
 {
     int rv;
-    char nvme[48], obj[48];
-    sscanf(name, "%[^:]:%[^:]", nvme, obj);
+    auto [nvme, obj] = split_string(std::string(name), ":");
     auto fri = new fake_rbd_image;
 
     // c_init:
-    fri->io = new file_backend(obj);
+    fri->io = new file_backend(obj.c_str());
     fri->omap = new objmap();
     fri->lsvd = new translate(fri->io, fri->omap);
-    fri->size = fri->lsvd->init(obj, 3, true);
+    fri->size = fri->lsvd->init(obj.c_str(), 3, true);
     
 //    int fd = fri->fd = open(nvme, O_RDWR | O_DIRECT);
-    int fd = fri->fd = open(nvme, O_RDWR);    
+    int fd = fri->fd = open(nvme.c_str(), O_RDWR);
     j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
     if ((rv = pread(fd, (char*)js, 4096, 0)) < 0)
 	return rv;
