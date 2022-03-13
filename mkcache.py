@@ -34,9 +34,7 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
     rbase = wblks+3
     units = rblks // 16
     map_blks = div_round_up(units*lsvd.sizeof_obj_offset, 4096)
-    print('map blocks', map_blks)
     bitmap_blks = div_round_up(units*2, 4096)
-    print('bitmap blocks', bitmap_blks)
     
     # 1 page for map, 1 page for bitmap
     rsup = lsvd.j_read_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_R_SUPER,

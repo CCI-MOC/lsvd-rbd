@@ -1541,6 +1541,7 @@ public:
     }
 };
 
+/* ------------------- DEBUGGING ----------------------*/
 
 translate   *lsvd;
 write_cache *wcache;
@@ -1561,20 +1562,17 @@ struct getmap_s {
     struct tuple *t;
 };
 
-extern "C" void wcache_init(uint32_t blkno, int fd);
-void wcache_init(uint32_t blkno, int fd)
+extern "C" void wcache_init(uint32_t blkno, int fd)
 {
     wcache = new write_cache(blkno, fd, lsvd);
 }
 
-extern "C" void wcache_shutdown(void);
-void wcache_shutdown(void)
+extern "C" void wcache_shutdown(void)
 {
     delete wcache;
     wcache = NULL;
 }
 
-extern "C" void wcache_write(char* buf, uint64_t offset, uint64_t len);
 struct do_write {
 public:
     std::mutex m;
@@ -1582,25 +1580,26 @@ public:
     bool done;
     do_write(){done = false;}
 };
-static void cb(void *ptr)
+
+static void wcw_cb(void *ptr)
 {
     do_write *d = (do_write*)ptr;
     std::unique_lock<std::mutex> lk(d->m);
     d->done = true;
     d->cv.notify_all();
 }
-void wcache_write(char *buf, uint64_t offset, uint64_t len)
+
+extern "C" void wcache_write(char *buf, uint64_t offset, uint64_t len)
 {
     do_write dw;
     iovec iov = {buf, len};
     std::unique_lock<std::mutex> lk(dw.m);
-    wcache->write(offset, &iov, 1, cb, (void*)&dw);
+    wcache->write(offset, &iov, 1, wcw_cb, (void*)&dw);
     while (!dw.done)
 	dw.cv.wait(lk);
 }
 
-extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len);
-void wcache_read(char *buf, uint64_t offset, uint64_t len)
+extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     iovec iov = {buf2, len};
@@ -1611,29 +1610,26 @@ void wcache_read(char *buf, uint64_t offset, uint64_t len)
     free(buf2);
 }
 
-extern "C" int wcache_getmap(int, int, int, struct tuple*);
-int wc_getmap_cb(void *ptr, int base, int limit, int plba)
+static int wc_getmap_cb(void *ptr, int base, int limit, int plba)
 {
     getmap_s *s = (getmap_s*)ptr;
     if (s->i < s->max)
 	s->t[s->i++] = (tuple){base, limit, 0, 0, plba};
     return s->i < s->max;
 }
-int wcache_getmap(int base, int limit, int max, struct tuple *t)
+extern "C" int wcache_getmap(int base, int limit, int max, struct tuple *t)
 {
     getmap_s s = {0, max, t};
     wcache->getmap(base, limit, wc_getmap_cb, (void*)&s);
     return s.i;
 }
 
-extern "C" void wcache_get_super(j_write_super *s);
-void wcache_get_super(j_write_super *s)
+extern "C" void wcache_get_super(j_write_super *s)
 {
     wcache->get_super(s);
 }
 
-extern "C" int wcache_oldest(int blk, j_extent *extents, int max, int *n);
-int wcache_oldest(int blk, j_extent *extents, int max, int *p_n)
+extern "C" int wcache_oldest(int blk, j_extent *extents, int max, int *p_n)
 {
     std::vector<j_extent> exts;
     int next_blk = wcache->do_get_oldest(blk, exts);
@@ -1643,20 +1639,17 @@ int wcache_oldest(int blk, j_extent *extents, int max, int *p_n)
     return next_blk;
 }
 
-extern "C" void wcache_write_ckpt(void);
-void wcache_write_ckpt(void)
+extern "C" void wcache_write_ckpt(void)
 {
     wcache->do_write_checkpoint();
 }
 
-extern "C" void wcache_reset(void);
-void wcache_reset(void)
+extern "C" void wcache_reset(void)
 {
     wcache->reset();
 }
 
-extern "C" void c_shutdown(void);
-void c_shutdown(void)
+extern "C" void c_shutdown(void)
 {
     lsvd->shutdown();
     delete lsvd;
@@ -1664,14 +1657,12 @@ void c_shutdown(void)
     delete io;
 }
 
-extern "C" int c_flush(void);
-int c_flush(void)
+extern "C" int c_flush(void)
 {
     return lsvd->flush();
 }
 
-extern "C" ssize_t c_init(char* name, int n, bool flushthread, bool nocache);
-ssize_t c_init(char *name, int n, bool flushthread, bool nocache)
+extern "C" ssize_t c_init(char *name, int n, bool flushthread, bool nocache)
 {
     io = new file_backend(name);
     omap = new objmap();
@@ -1680,34 +1671,29 @@ ssize_t c_init(char *name, int n, bool flushthread, bool nocache)
     return lsvd->init(name, n, flushthread);
 }
 
-extern "C" int c_size(void);
-int c_size(void)
+extern "C" int c_size(void)
 {
     return lsvd->mapsize();
 }
 
-extern "C" int c_read(char*, uint64_t, uint32_t);
-int c_read(char *buffer, uint64_t offset, uint32_t size)
+extern "C" int c_read(char *buffer, uint64_t offset, uint32_t size)
 {
     size_t val = lsvd->read(offset, size, buffer);
     return val < 0 ? -1 : 0;
 }
 
-extern "C" int c_write(char*, uint64_t, uint32_t);
-int c_write(char *buffer, uint64_t offset, uint32_t size)
+extern "C" int c_write(char *buffer, uint64_t offset, uint32_t size)
 {
     size_t val = lsvd->write(offset, size, buffer);
     return val < 0 ? -1 : 0;
 }
 
-extern "C" int dbg_inmem(int max, int *list);
-
-int dbg_inmem(int max, int *list)
+extern "C" int dbg_inmem(int max, int *list)
 {
     return lsvd->inmem(max, list);
 }
 
-int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
+static int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
 {
     getmap_s *s = (getmap_s*)ptr;
     if (s->i < s->max) 
@@ -1715,53 +1701,45 @@ int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
     return s->i < s->max;
 }
    
-extern "C" int dbg_getmap(int, int, int, struct tuple*);
-int dbg_getmap(int base, int limit, int max, struct tuple *t)
+extern "C" int dbg_getmap(int base, int limit, int max, struct tuple *t)
 {
     getmap_s s = {0, max, t};
     lsvd->getmap(base, limit, getmap_cb, (void*)&s);
     return s.i;
 }
 
-extern "C" int dbg_checkpoint(void);
-int dbg_checkpoint(void)
+extern "C" int dbg_checkpoint(void)
 {
     return lsvd->checkpoint();
 }
 
-extern "C" void dbg_reset(void);
-void dbg_reset(void)
+extern "C" void dbg_reset(void)
 {
     lsvd->reset();
 }
 
-extern "C" int dbg_frontier(void);
-int dbg_frontier(void)
+extern "C" int dbg_frontier(void)
 {
     return lsvd->frontier();
 }
 
-extern "C" void rcache_init(uint32_t blkno, int fd);
-void rcache_init(uint32_t blkno, int fd)
+extern "C" void rcache_init(uint32_t blkno, int fd)
 {
     rcache = new read_cache(blkno, fd, false, lsvd, omap, io);
 }
 
-extern "C" void rcache_shutdown(void);
-void rcache_shutdown(void)
+extern "C" void rcache_shutdown(void)
 {
     delete rcache;
     rcache = NULL;
 }
 
-extern "C" void rcache_evict(int n);
-void rcache_evict(int n)
+extern "C" void rcache_evict(int n)
 {
     rcache->do_evict(n);
 }
 
-extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len);
-void rcache_add(int object, int sector_offset, char* buf, size_t len)
+extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     memcpy(buf2, buf, len);
@@ -1770,8 +1748,7 @@ void rcache_add(int object, int sector_offset, char* buf, size_t len)
     free(buf2);
 }
 
-extern "C" void rcache_read(char *buf, uint64_t offset, uint64_t len);
-void rcache_read(char *buf, uint64_t offset, uint64_t len)
+extern "C" void rcache_read(char *buf, uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     rcache->read(offset, len, buf2);
@@ -1779,15 +1756,14 @@ void rcache_read(char *buf, uint64_t offset, uint64_t len)
     free(buf2);
 }
 
-extern "C" void rcache_getsuper(j_read_super *p_super)
+extern "C" extern "C" void rcache_getsuper(j_read_super *p_super)
 {
     j_read_super *p;
     rcache->get_info(&p, NULL, NULL, NULL, NULL);
     *p_super = *p;
 }
 
-extern "C" int rcache_getmap(extmap::obj_offset *keys, int *vals, int n);
-int rcache_getmap(extmap::obj_offset *keys, int *vals, int n)
+extern "C" int rcache_getmap(extmap::obj_offset *keys, int *vals, int n)
 {
     int i = 0;
     std::map<extmap::obj_offset,int> *p_map;
@@ -1800,8 +1776,7 @@ int rcache_getmap(extmap::obj_offset *keys, int *vals, int n)
     return i;
 }
 
-extern "C" int rcache_get_flat(extmap::obj_offset *vals, int n);
-int rcache_get_flat(extmap::obj_offset *vals, int n)
+extern "C" int rcache_get_flat(extmap::obj_offset *vals, int n)
 {
     extmap::obj_offset *p;
     j_read_super *p_super;
@@ -1811,8 +1786,7 @@ int rcache_get_flat(extmap::obj_offset *vals, int n)
     return n;
 }
 
-extern "C" int rcache_get_masks(uint16_t *vals, int n);
-int rcache_get_masks(uint16_t *vals, int n)
+extern "C" int rcache_get_masks(uint16_t *vals, int n)
 {
     j_read_super *p_super;
     uint16_t *masks;
@@ -1822,23 +1796,22 @@ int rcache_get_masks(uint16_t *vals, int n)
     return n;
 }
 
-extern "C" void rcache_reset(void);
-void rcache_reset(void)
+extern "C" void rcache_reset(void)
 {
 }
 
-extern "C" void fakemap_update(int base, int limit, int obj, int offset);
-void fakemap_update(int base, int limit, int obj, int offset)
+extern "C" void fakemap_update(int base, int limit, int obj, int offset)
 {
     extmap::obj_offset oo = {obj,offset};
     omap->map.update(base, limit, oo);
 }
 
-extern "C" void fakemap_reset(void);
-void fakemap_reset(void)
+extern "C" void fakemap_reset(void)
 {
     omap->map.reset();
 }
+
+/* ------------------- FAKE RBD INTERFACE ----------------------*/
 
 #include "fake_rbd.h"
 
@@ -1863,7 +1836,8 @@ struct lsvd_completion {
     std::condition_variable cv;
 };
 
-int rbd_aio_create_completion(void *cb_arg, rbd_callback_t complete_cb, rbd_completion_t *c)
+extern "C" int rbd_aio_create_completion(void *cb_arg,
+					 rbd_callback_t complete_cb, rbd_completion_t *c)
 {
     lsvd_completion *p = (lsvd_completion*)calloc(sizeof(*p), 1);
     p->cb = complete_cb;
@@ -1872,40 +1846,39 @@ int rbd_aio_create_completion(void *cb_arg, rbd_callback_t complete_cb, rbd_comp
     return 0;
 }
 
-int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
+extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     p->cb(c, p->arg);
     return 0;
 }
 
-int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
+extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     p->cb(c, p->arg);
     return 0;
 }
 
-extern "C" int rbd_flush(rbd_image_t image);
-int rbd_flush(rbd_image_t image)
+extern "C" int rbd_flush(rbd_image_t image)
 {
     return 0;
 }
 
 
-void *rbd_aio_get_arg(rbd_completion_t c)
+extern "C" void *rbd_aio_get_arg(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     return p->arg;
 }
 
-ssize_t rbd_aio_get_return_value(rbd_completion_t c)
+extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     return p->retval;
 }
 
-int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_completion_t c)
+extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
@@ -1931,13 +1904,12 @@ int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_com
     return 0;
 }
 
-void rbd_aio_release(rbd_completion_t c)
+extern "C" void rbd_aio_release(rbd_completion_t c)
 {
     free((void*)c);
 }
 
-extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c);
-int rbd_aio_wait_for_complete(rbd_completion_t c)
+extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     std::unique_lock lk(p->m);
@@ -1946,7 +1918,7 @@ int rbd_aio_wait_for_complete(rbd_completion_t c)
     return 0;
 }
 
-void fake_rbd_cb(void *ptr)
+static void fake_rbd_cb(void *ptr)
 {
     lsvd_completion *p = (lsvd_completion *)ptr;
     std::unique_lock lk(p->m);
@@ -1956,8 +1928,8 @@ void fake_rbd_cb(void *ptr)
     p->cb(ptr, p->arg);
 }
 
-int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
-		  rbd_completion_t c)
+extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+			     rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     iovec iov = {(void*)buf, len};
@@ -1965,25 +1937,26 @@ int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
     return 0;
 }
 
-int rbd_close(rbd_image_t image)
+extern "C" int rbd_close(rbd_image_t image)
 {
     return 0;
 }
 
-int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
+extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     info->size = fri->size;
     return 0;
 }
 
-std::pair<std::string,std::string> split_string(std::string s, std::string delim)
+static std::pair<std::string,std::string> split_string(std::string s, std::string delim)
 {
     auto i = s.find(delim);
     return std::pair(s.substr(0,i), s.substr(i+delim.length()));
 }
 
-int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char *snap_name)
+extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
+			const char *snap_name)
 {
     int rv;
     auto [nvme, obj] = split_string(std::string(name), ":");
@@ -2012,8 +1985,7 @@ int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image, const char 
 
 fake_rbd_image _fri;
 
-extern "C" void fake_rbd_init(void);
-void fake_rbd_init(void)
+extern "C" void fake_rbd_init(void)
 {
     _fri.io = io;
     _fri.omap = omap;
@@ -2023,7 +1995,7 @@ void fake_rbd_init(void)
     _fri.rcache = rcache;
 }
 
-void fake_rbd_cb(rbd_completion_t c, void *arg)
+static void fake_rbd_cb2(rbd_completion_t c, void *arg)
 {
     do_write *d = (do_write*)arg;
     std::unique_lock lk(d->m);
@@ -2031,12 +2003,11 @@ void fake_rbd_cb(rbd_completion_t c, void *arg)
     d->cv.notify_all();
 }
 
-extern "C" void fake_rbd_read(char *buf, size_t off, size_t len);
-void fake_rbd_read(char *buf, size_t off, size_t len)
+extern "C" void fake_rbd_read(char *buf, size_t off, size_t len)
 {
     rbd_completion_t c;
     do_write dw;
-    rbd_aio_create_completion((void*)&dw, fake_rbd_cb, &c);
+    rbd_aio_create_completion((void*)&dw, fake_rbd_cb2, &c);
     rbd_aio_read((rbd_image_t)&_fri, off, len, buf, c);
     std::unique_lock lk(dw.m);
     while (!dw.done)
@@ -2044,12 +2015,11 @@ void fake_rbd_read(char *buf, size_t off, size_t len)
     rbd_aio_release(c);
 }
 
-extern "C" void fake_rbd_write(char *buf, size_t off, size_t len);
-void fake_rbd_write(char *buf, size_t off, size_t len)
+extern "C" void fake_rbd_write(char *buf, size_t off, size_t len)
 {
     rbd_completion_t c;
     do_write dw;
-    rbd_aio_create_completion((void*)&dw, fake_rbd_cb, &c);
+    rbd_aio_create_completion((void*)&dw, fake_rbd_cb2, &c);
     rbd_aio_write((rbd_image_t)&_fri, off, len, buf, c);
     std::unique_lock lk(dw.m);
     while (!dw.done)
@@ -2059,71 +2029,58 @@ void fake_rbd_write(char *buf, size_t off, size_t len)
 
 /* any following functions are stubs only
  */
-extern "C" int rbd_invalidate_cache(rbd_image_t image);
-extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp);
-extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type);
-extern "C" int rados_conf_read_file(rados_t cluster, const char *path);
-extern "C" int rados_conf_set(rados_t cluster, const char *option, const char *value);
-extern "C" int rados_connect(rados_t cluster);
-extern "C" int rados_create(rados_t *cluster, const char * const id);
-extern "C" int rados_create2(rados_t *pcluster, const char *const clustername,
-			     const char * const name, uint64_t flags);
-extern "C" int rados_ioctx_create(rados_t cluster, const char *pool_name, rados_ioctx_t *ioctx);
-extern "C" void rados_ioctx_destroy(rados_ioctx_t io);
-extern "C" void rados_shutdown(rados_t cluster);
-
-int rbd_invalidate_cache(rbd_image_t image)
+extern "C" int rbd_invalidate_cache(rbd_image_t image)
 {
     return 0;
 }
 
-int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
+extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
 {
     return 0;
 }
 
-int rbd_set_image_notification(rbd_image_t image, int fd, int type)
+extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
 {
     return 0;
 }
 
 /* we just need null implementations of the RADOS functions.
  */
-int rados_conf_read_file(rados_t cluster, const char *path)
+extern "C" int rados_conf_read_file(rados_t cluster, const char *path)
 {
     return 0;
 }
 
-int rados_conf_set(rados_t cluster, const char *option, const char *value)
+extern "C" int rados_conf_set(rados_t cluster, const char *option, const char *value)
 {
     return 0;
 }
 
-int rados_connect(rados_t cluster)
+extern "C" int rados_connect(rados_t cluster)
 {
     return 0;
 }
 
-int rados_create(rados_t *cluster, const char * const id)
+extern "C" int rados_create(rados_t *cluster, const char * const id)
 {
     return 0;
 }
 
-int rados_create2(rados_t *pcluster, const char *const clustername,
-                  const char * const name, uint64_t flags)
+extern "C" int rados_create2(rados_t *pcluster, const char *const clustername,
+			     const char * const name, uint64_t flags)
 {
     return 0;
 }
 
-int rados_ioctx_create(rados_t cluster, const char *pool_name, rados_ioctx_t *ioctx)
+extern "C" int rados_ioctx_create(rados_t cluster, const char *pool_name, rados_ioctx_t *ioctx)
 {
     return 0;
 }
 
-void rados_ioctx_destroy(rados_ioctx_t io)
+extern "C" void rados_ioctx_destroy(rados_ioctx_t io)
 {
 }
 
-void rados_shutdown(rados_t cluster)
+extern "C" void rados_shutdown(rados_t cluster)
 {
 }
