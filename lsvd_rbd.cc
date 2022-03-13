@@ -1380,7 +1380,9 @@ class write_cache {
 	std::unique_lock<std::mutex> lk(m);
 	size_t ckpt_bytes = map.size() * sizeof(j_map_extent);
 	page_t ckpt_pages = div_round_up(ckpt_bytes, 4096);
+	lk.unlock();		// TODO: HACK
 	page_t pad, blockno = allocate(ckpt_pages+1, pad);
+	lk.lock();
 
 	std::vector<j_map_extent> extents;
 	for (auto it = map.begin(); it != map.end(); it++)
