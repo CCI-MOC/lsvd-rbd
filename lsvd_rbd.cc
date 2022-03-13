@@ -24,6 +24,7 @@
 namespace fs = std::experimental::filesystem;
 #include <random>
 #include <algorithm>
+#include <list>
 
 #include <unistd.h>
 #include <sys/uio.h>
@@ -1826,17 +1827,56 @@ struct fake_rbd_image {
     ssize_t      size;		// bytes
     int          fd;		// cache device
     j_super     *js;		// cache page 0
+    bool         notify;
+    int          eventfd;
+    std::queue<rbd_completion_t> completions;
 };
 
-
 struct lsvd_completion {
+public:
+    fake_rbd_image *fri;
     rbd_callback_t cb;
     void *arg;
     int retval;
     bool done;
     std::mutex m;
     std::condition_variable cv;
+
+    void complete(int val) {
+	retval = val;
+	std::unique_lock lk(m);
+	done = true;
+	if (fri->notify) {
+	    fri->completions.push((rbd_completion_t)this);
+	    uint64_t value = 1;
+	    if (write(fri->eventfd, &value, sizeof (value)) < 0)
+		throw_fs_error("eventfd");
+	}
+	cv.notify_all();
+	lk.unlock();
+	cb((rbd_completion_t)this, arg);
+    }
 };
+
+extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    int i;
+    for (i = 0; i < numcomp && !fri->completions.empty(); i++) {
+	comps[i] = fri->completions.front();
+	fri->completions.pop();
+    }
+    return i;
+}
+
+extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    assert(type == EVENT_TYPE_EVENTFD);
+    fri->notify = true;
+    fri->eventfd = fd;
+    return 0;
+}
 
 extern "C" int rbd_aio_create_completion(void *cb_arg,
 					 rbd_callback_t complete_cb, rbd_completion_t *c)
@@ -1851,14 +1891,16 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
 extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
-    p->cb(c, p->arg);
+    p->fri = (fake_rbd_image*)image;
+    p->complete(0);
     return 0;
 }
 
 extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
-    p->cb(c, p->arg);
+    p->fri = (fake_rbd_image*)image;
+    p->complete(0);
     return 0;
 }
 
@@ -1866,7 +1908,6 @@ extern "C" int rbd_flush(rbd_image_t image)
 {
     return 0;
 }
-
 
 extern "C" void *rbd_aio_get_arg(rbd_completion_t c)
 {
@@ -1880,7 +1921,8 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf, rbd_completion_t c)
+extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf,
+			    rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
@@ -1901,8 +1943,9 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *b
 	memcpy(buf, aligned_buf, len);
 	free(aligned_buf);
     }
-    p->done = true;
-    p->cb(c, p->arg);
+
+    p->fri = (fake_rbd_image*)image;
+    p->complete(0);
     return 0;
 }
 
@@ -1923,17 +1966,15 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 static void fake_rbd_cb(void *ptr)
 {
     lsvd_completion *p = (lsvd_completion *)ptr;
-    std::unique_lock lk(p->m);
-    p->done = true;
-    lk.unlock();
-    p->cv.notify_all();
-    p->cb(ptr, p->arg);
+    p->complete(0);
 }
 
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
 			     rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->fri = fri;
     iovec iov = {(void*)buf, len};
     fri->wcache->write(off, &iov, 1, fake_rbd_cb, (void*)c);
     return 0;
@@ -1980,7 +2021,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     
     fri->wcache = new write_cache(js->write_super, fd, fri->lsvd);
     fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
-
+    fri->notify = false;
+    
     *image = (void*)fri;
     return 0;
 }
@@ -2032,16 +2074,6 @@ extern "C" void fake_rbd_write(char *buf, size_t off, size_t len)
 /* any following functions are stubs only
  */
 extern "C" int rbd_invalidate_cache(rbd_image_t image)
-{
-    return 0;
-}
-
-extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
-{
-    return 0;
-}
-
-extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
 {
     return 0;
 }

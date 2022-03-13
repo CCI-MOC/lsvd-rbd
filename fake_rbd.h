@@ -8,6 +8,11 @@
 extern "C" {
 #endif
 
+enum {
+    EVENT_TYPE_PIPE = 1,
+    EVENT_TYPE_EVENTFD = 2
+};
+    
 typedef void *rbd_image_t;
 typedef void *rbd_image_options_t;
 typedef void *rbd_pool_stats_t;
