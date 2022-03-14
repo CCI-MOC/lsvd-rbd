@@ -209,6 +209,7 @@ class translate {
     };
     std::map<int,obj_info> object_info;
 
+    char      *super_name;
     char      *super;
     hdr       *super_h;
     super_hdr *super_sh;
@@ -359,6 +360,13 @@ class translate {
 		       {.iov_base = (char*)objects.data(), objs_bytes},
 		       {.iov_base = (char*)entries.data(), map_bytes}};
 	io->write_numbered_object(seq, iov, 4);
+
+	size_t offset = sizeof(*super_h) + sizeof(*super_sh);
+	super_sh->ckpts_offset = offset;
+	super_sh->ckpts_len = sizeof(seq);
+	*(int*)(super + offset) = seq;
+	struct iovec iov2 = {super, 4096};
+	io->write_object(super_name, &iov2, 1);
 	return seq;
     }
     
@@ -509,6 +517,8 @@ public:
 	std::vector<uint32_t>  ckpts;
 	std::vector<clone_p>   clones;
 	std::vector<snap_info> snaps;
+
+	super_name = strdup(name);
 	ssize_t bytes = read_super(name, ckpts, clones, snaps);
 	if (bytes < 0)
 	  return bytes;
@@ -1129,8 +1139,6 @@ class write_cache {
     
     char *pad_page;
     
-    static const int n_threads = 2;
-
     int pages_free(uint32_t oldest) {
 	auto size = super->limit - super->base;
 	auto tail = (super->next >= oldest) ? oldest + size : oldest;
@@ -1424,7 +1432,7 @@ class write_cache {
     
 
 public:
-    write_cache(uint32_t blkno, int _fd, translate *_be) : workers(&m), misc_threads(&m) {
+    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m), misc_threads(&m) {
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
@@ -1567,7 +1575,7 @@ struct getmap_s {
 
 extern "C" void wcache_init(uint32_t blkno, int fd)
 {
-    wcache = new write_cache(blkno, fd, lsvd);
+    wcache = new write_cache(blkno, fd, lsvd, 2);
 }
 
 extern "C" void wcache_shutdown(void)
@@ -1819,6 +1827,7 @@ extern "C" void fakemap_reset(void)
 #include "fake_rbd.h"
 
 struct fake_rbd_image {
+    std::mutex   m;
     backend     *io;
     objmap      *omap;
     translate   *lsvd;
@@ -1841,11 +1850,21 @@ public:
     bool done;
     std::mutex m;
     std::condition_variable cv;
+    int refcount;
 
+    void get(void) {
+	refcount++;
+    }
+    void put(void) {
+	if (--refcount == 0)
+	    free(this);
+    }
+    
     void complete(int val) {
 	retval = val;
 	std::unique_lock lk(m);
 	done = true;
+	cb((rbd_completion_t)this, arg);
 	if (fri->notify) {
 	    fri->completions.push((rbd_completion_t)this);
 	    uint64_t value = 1;
@@ -1854,13 +1873,13 @@ public:
 	}
 	cv.notify_all();
 	lk.unlock();
-	cb((rbd_completion_t)this, arg);
     }
 };
 
 extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
+    std::unique_lock lk(fri->m);
     int i;
     for (i = 0; i < numcomp && !fri->completions.empty(); i++) {
 	comps[i] = fri->completions.front();
@@ -1884,6 +1903,7 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
     lsvd_completion *p = (lsvd_completion*)calloc(sizeof(*p), 1);
     p->cb = complete_cb;
     p->arg = cb_arg;
+    p->refcount = 1;
     *c = (rbd_completion_t)p;
     return 0;
 }
@@ -1926,6 +1946,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *b
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
+    p->get();
     char *aligned_buf = buf;
     if (!aligned(buf, 512)) {
 	aligned_buf = (char*)aligned_alloc(512, len);
@@ -1946,27 +1967,33 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *b
 
     p->fri = (fake_rbd_image*)image;
     p->complete(0);
+    p->put();
     return 0;
 }
 
 extern "C" void rbd_aio_release(rbd_completion_t c)
 {
-    free((void*)c);
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->put();
 }
 
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     std::unique_lock lk(p->m);
+    p->get();
     while (!p->done)
 	p->cv.wait(lk);
+    p->put();
     return 0;
 }
 
 static void fake_rbd_cb(void *ptr)
 {
     lsvd_completion *p = (lsvd_completion *)ptr;
+    p->get();
     p->complete(0);
+    p->put();
 }
 
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
@@ -2009,17 +2036,29 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     fri->io = new file_backend(obj.c_str());
     fri->omap = new objmap();
     fri->lsvd = new translate(fri->io, fri->omap);
-    fri->size = fri->lsvd->init(obj.c_str(), 3, true);
+    int n_xlate_threads = 3;
+    char *nxt = getenv("N_XLATE");
+    if (nxt) {
+	n_xlate_threads = atoi(nxt);
+	printf("translate threads: %d\n", n_xlate_threads);
+    }
+    fri->size = fri->lsvd->init(obj.c_str(), n_xlate_threads, true);
     
     int fd = fri->fd = open(nvme.c_str(), O_RDWR | O_DIRECT);
-//    int fd = fri->fd = open(nvme.c_str(), O_RDWR);
     j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
     if ((rv = pread(fd, (char*)js, 4096, 0)) < 0)
 	return rv;
     if (js->magic != LSVD_MAGIC || js->type != LSVD_J_SUPER)
 	return -1;
+
+    int n_wc_threads = 2;
+    char *nwt = getenv("N_WCACHE");
+    if (nwt) {
+	n_wc_threads = atoi(nwt);
+	printf("write cache threads: %d\n", n_wc_threads);
+    }
     
-    fri->wcache = new write_cache(js->write_super, fd, fri->lsvd);
+    fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
     fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
     fri->notify = false;
     
