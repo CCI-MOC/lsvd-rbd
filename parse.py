@@ -39,6 +39,13 @@ def fmt_ckpt_map(maps):
         l.append("[%d+%d -> %d+%d]" % (m.lba, m.len, m.obj, m.offset))
     return l
 
+def read_ckpts(buf, base, bytes):
+    if bytes <= 0:
+        return [ 'none' ]
+    n = bytes//4
+    ckpts = (c_int * n).from_buffer(buf[base:base+bytes])
+    return [_ for _ in ckpts]
+
 h = lsvd.hdr.from_buffer(bytearray(obj[0:l1]))
 if h.type == lsvd.LSVD_SUPER:
     o3 = o2+lsvd.sizeof_super_hdr
@@ -56,7 +63,11 @@ if h.type == lsvd.LSVD_SUPER:
     print('vol_size:      ', sh.vol_size)
     print('total_sectors: ', sh.total_sectors)
     print('live_sectors:  ', sh.live_sectors)
-    print('ckpts:         ', '[tbd]')
+    print('ckpts_offset:  ', sh.ckpts_offset)
+    print('ckpts_len:     ', sh.ckpts_len)
+    if sh.ckpts_offset > sh.ckpts_len:
+        ckpts = read_ckpts(bytearray(obj), sh.ckpts_offset, sh.ckpts_len)
+        print('ckpts:         ', ','.join(map(lambda x: '%08x' % x, ckpts)))
     print('clones:        ', '[tbd]')
     print('snaps:         ', '[tbd]')
     
