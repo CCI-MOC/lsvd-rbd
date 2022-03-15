@@ -1852,12 +1852,13 @@ public:
     std::condition_variable cv;
     int refcount;
 
+    lsvd_completion() : done(false), refcount(0) {}
     void get(void) {
 	refcount++;
     }
     void put(void) {
 	if (--refcount == 0)
-	    free(this);
+	    delete this;
     }
     
     void complete(int val) {
@@ -1900,7 +1901,7 @@ extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
 extern "C" int rbd_aio_create_completion(void *cb_arg,
 					 rbd_callback_t complete_cb, rbd_completion_t *c)
 {
-    lsvd_completion *p = (lsvd_completion*)calloc(sizeof(*p), 1);
+    lsvd_completion *p = new lsvd_completion;
     p->cb = complete_cb;
     p->arg = cb_arg;
     p->refcount = 1;
@@ -2019,6 +2020,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
+    p->fri = fri;
     fri->wcache->write(off, iov, iovcnt, fake_rbd_cb, (void*)c);
     return 0;
 }
