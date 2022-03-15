@@ -5,6 +5,7 @@ import os
 import lsvd
 import test3 as t3
 import uuid
+import blkdev
 
 def prettyprint(p, insns):
     for field,fmt in insns:
@@ -37,7 +38,11 @@ rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["uni
                ["evict_start", '%d'], ["evict_blocks", '%d']]
 
 fd = os.open(sys.argv[1], os.O_RDONLY)
-npages = os.fstat(fd).st_size // 4096
+sb = os.fstat(fd)
+if blkdev.S_ISBLK(sb.st_mode):
+    npages = blkdev.dev_get_size(fd)
+else:
+    npages = sb.st_size // 4096
 
 super = t3.c_super(fd)
 print('superblock: (0)')

@@ -5,6 +5,7 @@ import sys
 import os
 import argparse
 import uuid
+import blkdev
 
 # TODO:
 # 1. variable size
@@ -14,7 +15,7 @@ def div_round_up(n, m):
     return (n + m - 1) // m
 
 def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
-    fd = os.open(name, os.O_WRONLY | os.O_CREAT, 0o777)
+    fd = os.open(name, os.O_RDWR | os.O_CREAT, 0o777)
 
     sup = lsvd.j_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_SUPER,
                        write_super=1, read_super=2, backend_type=lsvd.LSVD_BE_FILE)
@@ -68,8 +69,12 @@ if __name__ == '__main__':
 
     if os.access(args.device, os.F_OK):
         s = os.stat(args.device)
-        bytes = s.st_size
+        if blkdev.S_ISBLK(s.st_mode):
+            bytes = blkdev.dev_get_size(os.open(args.device, os.O_RDONLY))
+        else:
+            bytes = s.st_size
         pages = bytes // 4096
+        print('%d pages' % pages)
         r_units = int(0.75*pages) // 16
         r_pages = r_units * 16
         oh = div_round_up(r_units*(2+lsvd.sizeof_obj_offset), 4096)
