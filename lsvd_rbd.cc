@@ -2039,6 +2039,13 @@ extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosi
     return 0;
 }
 
+extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    *size = fri->size;
+    return 0;
+}
+
 static std::pair<std::string,std::string> split_string(std::string s, std::string delim)
 {
     auto i = s.find(delim);
@@ -2049,7 +2056,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
     int rv;
-    auto [nvme, obj] = split_string(std::string(name), ":");
+    auto [nvme, obj] = split_string(std::string(name), ",");
     auto fri = new fake_rbd_image;
 
     // c_init:
@@ -2183,10 +2190,6 @@ extern "C" void rados_shutdown(rados_t cluster)
 
 extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
                             int *order)
-{
-    return -1;
-}
-extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
 {
     return -1;
 }
