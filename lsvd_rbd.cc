@@ -1,6 +1,9 @@
 /*
  * file:        lsvd_rbd.cc
  * description: userspace block-on-object layer with librbd interface
+ * 
+ * Copyright 2021, 2022 Peter Desnoyers
+ * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
 #include "extent.cc"

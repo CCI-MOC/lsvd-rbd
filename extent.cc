@@ -1,15 +1,17 @@
 // file:        extent.cc
 // description: Extent map for S3 Block Device
 // author:      Peter Desnoyers, Northeastern University
-//              Copyright Peter Desnoyers, 2021
+//              Copyright 2021, 2022 Peter Desnoyers
 // license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
 //
 
 // There may be an elegant way to do this in C++; this isn't it.
 
-// Defines three types of map:
+// Defines four types of map:
 //  objmap (int64_t => obj_offset)   - maps LBA to obj+offset
 //  cachemap (obj_offset => int64_t) - maps obj+offset to LBA
+//  cachemap2 (int64_t => int64_t)   - maps vLBA to pLBA
 //  bufmap (int64_t => sector_ptr)   - maps LBA to char*
 //
 // Update/trim takes a pointer to a vector for discarded extents, so
