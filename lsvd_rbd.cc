@@ -422,6 +422,7 @@ class translate {
 		    if (ptr.obj != b->seq)
 			object_info[ptr.obj].live -= (limit - base);
 		}
+		oo.offset += e.len;
 	    }
 	    in_mem_objects.erase(b->seq);
 	    batches.push(b);
@@ -702,6 +703,8 @@ void throw_fs_error(std::string msg) {
     throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
 }
 
+#include "smartiov.cc"
+
 /* the read cache is:
  * 1. indexed by obj/offset[*], not LBA
  * 2. stores aligned 64KB blocks 
@@ -855,12 +858,9 @@ public:
 	}
     }
 
-    /* eventual implementation (full async):
-     * - cache device uses io_uring, fire writes from here
-     * - worker threads for backend reads
-     * - some sort of reference count structure for completion
-     */
-    void read(size_t offset, size_t len, char *buf) {
+    void readv(size_t offset, iovec *iov, int iovcnt) {
+	auto iovs = smartiovec(iov, iovcnt);
+	size_t len = iovs.bytes();
 	lba_t lba = offset/512, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
 	std::shared_lock lk(omap->m);
@@ -870,6 +870,7 @@ public:
 	lk.unlock();
 
 	std::vector<std::tuple<extmap::obj_offset,sector_t,char*>> to_add;
+	size_t buf_offset = 0;
 	
 	for (auto e : extents) {
 	    assert(len > 0);
@@ -877,8 +878,7 @@ public:
 	    auto [base, limit, ptr] = e;
 	    if (base > lba) {
 		auto bytes = (base-lba)*512;
-		memset(buf, 0, bytes);
-		buf += bytes;
+		iovs.slice(buf_offset, bytes).zero();
 		len -= bytes;
 	    }
 	    while (base < limit) {
@@ -901,18 +901,20 @@ public:
 			in_cache = true;
 		}
 
-		
 		if (in_cache) {
 		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 			start = blk_in_ssd + blk_offset,
 			finish = start + (blk_top_offset - blk_offset);
-
-		    if (pread(fd, buf, 512*(finish-start), 512*start) < 0)
+		    size_t bytes = 512 * (finish - start);
+		    
+		    auto tmp = iovs.slice(buf_offset, buf_offset+bytes);
+		    if (preadv(fd, tmp.iov(), tmp.size(), 512*start) < 0)
 			throw_fs_error("rcache");
+		    
 		    base += (finish - start);
 		    ptr.offset += (finish - start); // HACK
-		    buf += 512*(finish-start);
-		    len -= 512*(finish-start);
+		    buf_offset += bytes;
+		    len -= bytes;
 		}
 		else {
 		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
@@ -922,11 +924,12 @@ public:
 			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
 
-		    memcpy(buf, cache_line+start, (finish-start));
+		    iovs.slice(buf_offset, (finish-start)).copy_in(cache_line+start);
+		    //memcpy(buf, cache_line+start, (finish-start));
 
 		    base += (blk_top_offset - blk_offset);
 		    ptr.offset += (blk_top_offset - blk_offset); // HACK
-		    buf += (finish-start);
+		    buf_offset += (finish-start);
 		    len -= (finish-start);
 		    extmap::obj_offset ox = {unit.obj, unit.offset * unit_sectors};
 		    to_add.push_back(std::tuple(ox, bytes/512, cache_line));
@@ -935,13 +938,18 @@ public:
 	    lba = limit;
 	}
 	if (len > 0)
-	    memset(buf, 0, len);
+	    iovs.slice(buf_offset, buf_offset+len).zero();
 
 	// now read is finished, and we can add shit to the cache
 	for (auto [oo, n, cache_line] : to_add) {
 	    add(oo, n, cache_line);
 	    free(cache_line);
 	}
+    }
+
+    void read(size_t offset, size_t len, char *buf) {
+	iovec iov = {buf, len};
+	return readv(offset, &iov, 1);
     }
 
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
