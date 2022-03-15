@@ -24,10 +24,29 @@ for the different backends,
 
 The `mkdisk.py` script creates a disk superblock, e.g.:
 ```
-mkdir -p /dir/
-python3 parse.py /dir/obj
+$ mkdir -p /tmp/dir/
+$ python3 mkdisk.py /tmp/dir/obj
 ```
-The `parse.py` script parses the superblock or other backend objects, for debugging purposes
+
+The `parse.py` script parses the superblock or other backend objects, for debugging purposes:
+```
+$ python3 parse.py /tmp/dir/obj
+name:      /tmp/dir/obj
+magic:     OK
+UUID:      2a9e7b82-a4a6-11ec-95e3-2dc9b17b86ce
+version:   1
+type:      SUPER
+seq:       0
+n_hdr:     8
+n_data:    0
+vol_size:       20480
+total_sectors:  0
+live_sectors:   0
+ckpts_offset:   0
+ckpts_len:      0
+clones:         [tbd]
+snaps:          [tbd]
+```
 
 ### SSD cache
 
