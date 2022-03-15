@@ -46,7 +46,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     size = parse_size(args.size)
-    uuid = uuid.UUID(args.uuid).bytes
+    _uuid = uuid.UUID(args.uuid).bytes
+    if _uuid == b'\0'*16:
+        _uuid = uuid.uuid1().bytes
+    
     cleanup(args.prefix)
-    mkdisk(args.prefix, size//512, uuid)
+    mkdisk(args.prefix, size//512, _uuid)
 
