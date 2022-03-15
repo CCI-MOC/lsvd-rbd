@@ -1783,9 +1783,46 @@ extern "C" void fakemap_reset(void)
 }
 
 /* ------------------- FAKE RBD INTERFACE ----------------------*/
+/* following types are from librados.h
+ */
+enum {
+    EVENT_TYPE_PIPE = 1,
+    EVENT_TYPE_EVENTFD = 2
+};
+    
+typedef void *rbd_image_t;
+typedef void *rbd_image_options_t;
+typedef void *rbd_pool_stats_t;
 
-#include "fake_rbd.h"
+typedef void *rbd_completion_t;
+typedef void (*rbd_callback_t)(rbd_completion_t cb, void *arg);
 
+typedef void *rados_ioctx_t;
+typedef void *rados_t;
+typedef void *rados_config_t;
+
+#define RBD_MAX_BLOCK_NAME_SIZE 24
+#define RBD_MAX_IMAGE_NAME_SIZE 96
+
+/* fio only looks at 'size' */
+typedef struct {
+  uint64_t size;
+  uint64_t obj_size;
+  uint64_t num_objs;
+  int order;
+  char block_name_prefix[RBD_MAX_BLOCK_NAME_SIZE]; /* deprecated */
+  int64_t parent_pool;                             /* deprecated */
+  char parent_name[RBD_MAX_IMAGE_NAME_SIZE];       /* deprecated */
+} rbd_image_info_t;
+
+typedef struct {
+  uint64_t id;
+  uint64_t size;
+  const char *name;
+} rbd_snap_info_t;
+
+/* now our fake implementation
+ */
 struct fake_rbd_image {
     std::mutex   m;
     backend     *io;
@@ -2139,4 +2176,42 @@ extern "C" void rados_ioctx_destroy(rados_ioctx_t io)
 
 extern "C" void rados_shutdown(rados_t cluster)
 {
+}
+
+/* These RBD functions are unimplemented and return errors
+ */
+
+extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
+                            int *order)
+{
+    return -1;
+}
+extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
+{
+    return -1;
+}
+extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
+{
+    return -1;
+}
+
+extern "C" int rbd_snap_create(rbd_image_t image, const char *snapname)
+{
+    return -1;
+}
+extern "C" int rbd_snap_list(rbd_image_t image, rbd_snap_info_t *snaps,
+                               int *max_snaps)
+{
+    return -1;
+}
+extern "C" void rbd_snap_list_end(rbd_snap_info_t *snaps)
+{
+}
+extern "C" int rbd_snap_remove(rbd_image_t image, const char *snapname)
+{
+    return -1;
+}
+extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
+{
+    return -1;
 }
