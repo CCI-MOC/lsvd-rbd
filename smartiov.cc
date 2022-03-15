@@ -8,14 +8,14 @@ class smartiovec {
     std::vector<iovec> iovs;
 public:
     smartiovec() {}
-    smartiovec(iovec *iov, int iovcnt) {
+    smartiovec(const iovec *iov, int iovcnt) {
 	for (int i = 0; i < iovcnt; i++)
 	    iovs.push_back(iov[i]);
     }
     void push_back(const iovec &iov) {
 	iovs.push_back(iov);
     }
-    iovec *iov(void) {
+    iovec *data(void) {
 	return iovs.data();
     }
     iovec& operator[](int i) {
@@ -60,6 +60,12 @@ public:
 	    memcpy((void*)buf, (void*)i.iov_base, (size_t)i.iov_len);
 	    buf += i.iov_len;
 	}
+    }
+    bool aligned(int n) {
+	for (auto i : iovs)
+	    if (((long)i.iov_base & (n-1)) != 0)
+		return false;
+	return true;
     }
 };
 

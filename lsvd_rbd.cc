@@ -55,7 +55,7 @@ static int round_up(int n, int m)
     return m * div_round_up(n, m);
 }
 
-size_t iov_sum(iovec *iov, int iovcnt)
+size_t iov_sum(const iovec *iov, int iovcnt)
 {
     size_t sum = 0;
     for (int i = 0; i < iovcnt; i++)
@@ -858,7 +858,7 @@ public:
 	}
     }
 
-    void readv(size_t offset, iovec *iov, int iovcnt) {
+    void readv(size_t offset, const iovec *iov, int iovcnt) {
 	auto iovs = smartiovec(iov, iovcnt);
 	size_t len = iovs.bytes();
 	lba_t lba = offset/512, sectors = len/512;
@@ -908,7 +908,7 @@ public:
 		    size_t bytes = 512 * (finish - start);
 		    
 		    auto tmp = iovs.slice(buf_offset, buf_offset+bytes);
-		    if (preadv(fd, tmp.iov(), tmp.size(), 512*start) < 0)
+		    if (preadv(fd, tmp.data(), tmp.size(), 512*start) < 0)
 			throw_fs_error("rcache");
 		    
 		    base += (finish - start);
@@ -1073,7 +1073,7 @@ public:
     void     *ptr;
     lba_t     sectors;
     std::vector<iovec> iovs;
-    wcache_work(lba_t _lba, iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
+    wcache_work(lba_t _lba, const iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
 	lba = _lba;
 	int bytes = 0;
 	for (int i = 0; i < iovcnt; i++) {
@@ -1091,39 +1091,6 @@ static bool aligned(void *ptr, int a)
     return 0 == ((long)ptr & (a-1));
 }
 
-#if 0
-static void iov_consume(iovec *iov, int iovcnt, size_t nbytes)
-{
-    for (int i = 0; i < iovcnt && nbytes > 0; i++) {
-	if (iov[i].iov_len < nbytes) {
-	    nbytes -= iov[i].iov_len;
-	    iov[i].iov_len = 0;
-	}
-	else {
-	    iov[i].iov_len -= nbytes;
-	    iov[i].iov_base = (char*)iov[i].iov_base + nbytes;
-	    nbytes = 0;
-	}
-    }
-}
-
-static void iov_zero(iovec *iov, int iovcnt, size_t nbytes)
-{
-    for (int i = 0; i < iovcnt && nbytes > 0; i++) {
-	if (iov[i].iov_len < nbytes) {
-	    memset(iov[i].iov_base, 0, iov[i].iov_len);
-	    nbytes -= iov[i].iov_len;
-	    iov[i].iov_len = 0;
-	}
-	else {
-	    memset(iov[i].iov_base, 0, iov[i].iov_len);
-	    iov[i].iov_len -= nbytes;
-	    iov[i].iov_base = (char*)iov[i].iov_base + nbytes;
-	    nbytes = 0;
-	}
-    }
-}
-#endif
 
 typedef int page_t;
 
@@ -1480,35 +1447,21 @@ public:
 	free(super);
     }
 
-    void write(size_t offset, iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
+    void write(size_t offset, const iovec *iov, int iovcnt,
+	       void (*callback)(void*), void *ptr) {
 	workers.put(new wcache_work(offset/512, iov, iovcnt, callback, ptr));
     }
 
-    void get_iov_range(size_t off, size_t len, iovec *iov, int iovcnt,
-		       std::vector<iovec> &range) {
-	int i = 0;
-	while (off > iov[i].iov_len)
-	    off -= iov[i++].iov_len;
-	auto bytes = std::min(len, iov[i].iov_len - off);
-	range.push_back((iovec){(char*)(iov[i++].iov_base) + off, bytes});
-	len -= bytes;
-	while (len > 0 && len >= iov[i].iov_len) {
-	    range.push_back(iov[i]);
-	    len -= iov[i].iov_len;
-	}
-	if (len > 0)
-	    range.push_back((iovec){iov[i].iov_base, len});
-	assert(i <= iovcnt);
-    }
-    
-    /* returns tuples of:
+   /* returns tuples of:
      * offset, len, buf_offset
      */
     typedef std::tuple<size_t,size_t,size_t> cache_miss;
 
     // TODO: how the hell to handle fragments?
-    void readv(size_t offset, iovec *iov, int iovcnt, std::vector<cache_miss> &misses) {
-	auto bytes = iov_sum(iov, iovcnt);
+    void readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> &misses) {
+	auto iovs = smartiovec(iov, iovcnt);
+	auto bytes = iovs.bytes();
+
 	lba_t base = offset/512, limit = base + bytes/512, prev = base;
 	std::unique_lock<std::mutex> lk(m);
 
@@ -1523,11 +1476,10 @@ public:
 
 	    size_t bytes = 512 * (_limit - _base),
 		nvme_offset = 512 * plba;
-	    std::vector<iovec> iovs;
-	    get_iov_range(buf_offset, bytes, iov, iovcnt, iovs);
+	    auto slice = iovs.slice(buf_offset, buf_offset+bytes);
 
 	    lk.unlock();
-	    if (preadv(fd, iovs.data(), iovs.size(), nvme_offset) < 0)
+	    if (preadv(fd, slice.data(), slice.size(), nvme_offset) < 0)
 		throw_fs_error("wcache_read");
 	    lk.lock();
 
@@ -1949,34 +1901,52 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf,
-			    rbd_completion_t c)
+extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
+			     int iovcnt, uint64_t off, rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     p->get();
-    char *aligned_buf = buf;
-    if (!aligned(buf, 512)) {
-	aligned_buf = (char*)aligned_alloc(512, len);
-	memcpy(aligned_buf, buf, len);
+    
+    char *aligned_buf = NULL;
+    auto iovs = smartiovec(iov, iovcnt);
+    iovec tmp;
+    auto tmp_iov = iov;
+    auto tmp_iovcnt = iovcnt;
+    
+    if (!iovs.aligned(512)) {
+	aligned_buf = (char*)aligned_alloc(512, iovs.bytes());
+	iovs.copy_out(aligned_buf);
+	tmp = (iovec){aligned_buf, iovs.bytes()};
+	tmp_iov = &tmp;
+	tmp_iovcnt = 1;
     }
 
     std::vector<write_cache::cache_miss> misses;
-    iovec iov = {aligned_buf, len};
-    fri->wcache->readv(off, &iov, 1, misses);
+    fri->wcache->readv(off, tmp_iov, tmp_iovcnt, misses);
 
-    for (auto [_off, _len, buf_offset] : misses)
-	fri->rcache->read(_off, _len, aligned_buf + buf_offset);
-    
-    if (aligned_buf != buf) {
-	memcpy(buf, aligned_buf, len);
-	free(aligned_buf);
+    auto iovs2 = smartiovec(tmp_iov, tmp_iovcnt);
+    for (auto [_off, _len, buf_offset] : misses) {
+	auto slice = iovs2.slice(buf_offset, buf_offset+_len);
+	fri->rcache->readv(_off, slice.data(), slice.size());
     }
 
     p->fri = (fake_rbd_image*)image;
     p->complete(0);
     p->put();
+
+    if (aligned_buf) {
+	iovs.copy_in(aligned_buf);
+	free(aligned_buf);
+    }
     return 0;
+}
+
+extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf,
+			    rbd_completion_t c)
+{
+    iovec iov = {buf, len};
+    return rbd_aio_readv(image, &iov, 1, off, c);
 }
 
 extern "C" void rbd_aio_release(rbd_completion_t c)
@@ -2004,15 +1974,20 @@ static void fake_rbd_cb(void *ptr)
     p->put();
 }
 
-extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
-			     rbd_completion_t c)
+extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
+			      int iovcnt, uint64_t off, rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
-    p->fri = fri;
-    iovec iov = {(void*)buf, len};
-    fri->wcache->write(off, &iov, 1, fake_rbd_cb, (void*)c);
+    fri->wcache->write(off, iov, iovcnt, fake_rbd_cb, (void*)c);
     return 0;
+}
+
+extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+			     rbd_completion_t c)
+{
+    iovec iov = {(void*)buf, len};
+    return rbd_aio_writev(image, &iov, 1, off, c);
 }
 
 extern "C" int rbd_close(rbd_image_t image)
