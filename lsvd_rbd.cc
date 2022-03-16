@@ -142,12 +142,18 @@ public:
 	    pool.pop();
 	}
     }	
-    T get_locked(std::unique_lock<std::mutex> &lk) {
+    bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
 	while (running && q.empty())
 	    cv.wait(lk);
-	auto val = q.front();
+	if (!running)
+	    return false;
+	val = q.front();
 	q.pop();
 	return val;
+    }
+    bool get(T &val) {
+	std::unique_lock<std::mutex> lk(*m);
+	return get_locked(lk, val);
     }
     bool wait_locked(std::unique_lock<std::mutex> &lk) {
 	while (running && q.empty())
@@ -160,10 +166,6 @@ public:
 	val = q.front();
 	q.pop();
 	return true;
-    }
-    T get(void) {
-	std::unique_lock<std::mutex> lk(*m);
-	return get_locked();
     }
     void put_locked(T work) {
 	q.push(work);
@@ -399,8 +401,8 @@ class translate {
     void worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
-	    auto b = p->get_locked(lk);
-	    if (!p->running)
+	    batch *b;
+	    if (!p->get_locked(lk, b))
 		return;
 	    uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
 	    object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
@@ -706,6 +708,29 @@ void throw_fs_error(std::string msg) {
     throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
 }
 
+/* each read or write queues up one of these for a worker thread
+ */
+struct cache_work {
+public:
+    uint64_t  lba;
+    void    (*callback)(void*);
+    void     *ptr;
+    lba_t     sectors;
+    std::vector<iovec> iovs;
+    cache_work(lba_t _lba, const iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
+	lba = _lba;
+	int bytes = 0;
+	for (int i = 0; i < iovcnt; i++) {
+	    iovs.push_back(iov[i]);
+	    bytes += iov[i].iov_len;
+	}
+	sectors = bytes / 512;
+	callback = _callback;
+	ptr = _ptr;
+    }
+};
+
+
 #include "smartiov.cc"
 
 /* the read cache is:
@@ -730,6 +755,7 @@ class read_cache {
     std::vector<int>  free_blks;
     bool              map_dirty;
     
+    thread_pool<cache_work*> workers;
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads;	   // for debug
     
@@ -802,67 +828,9 @@ class read_cache {
 	    }
 	}
     }
-    
-public:    
-    
-    // TODO: iovec version
-    void add(extmap::obj_offset oo, int sectors, char *buf) {
-	// must be 4KB aligned
-	assert(!(oo.offset & 7)); 
-	
-	while (sectors > 0) {
-	    std::unique_lock lk(m);
 
-	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / unit_sectors};
-	    int cache_blk = -1;
-	    auto it = map.find(obj_blk);
-	    if (it != map.end())
-		cache_blk = it->second;
-	    else if (free_blks.size() > 0) {
-		cache_blk = free_blks.back();
-		free_blks.pop_back();
-	    }
-	    else
-		return;
-	    while (busy[cache_blk])
-		cv.wait(lk);
-	    busy[cache_blk] = true;
-	    auto mask = bitmap[cache_blk];
-	    lk.unlock();
-
-	    assert(cache_blk >= 0);
-	    
-	    auto obj_page = oo.offset / 8;
-	    auto pages_in_blk = unit_sectors / 8;
-	    auto blk_page = obj_blk.offset * pages_in_blk;
-	    std::vector<iovec> iov;
-	    
-	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
-		mask |= (1 << i);
-		iov.push_back((iovec){buf, 4096});
-		buf += 4096;
-		sectors -= 8;
-		oo.offset += 8;
-	    }
-
-	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096;
-	    blk_offset += (obj_page - blk_page) * 4096;
-	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
-		throw_fs_error("rcache");
-
-	    lk.lock();
-	    map[obj_blk] = cache_blk;
-	    bitmap[cache_blk] = mask;
-	    flat_map[cache_blk] = obj_blk;
-	    busy[cache_blk] = false;
-	    map_dirty = true;
-	    cv.notify_one();
-	    lk.unlock();
-	}
-    }
-
-    void readv(size_t offset, const iovec *iov, int iovcnt) {
-	auto iovs = smartiovec(iov, iovcnt);
+    void do_readv(size_t offset, const iovec *iov, int iovcnt) {
+	auto iovs = smartiov(iov, iovcnt);
 	size_t len = iovs.bytes();
 	lba_t lba = offset/512, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
@@ -950,13 +918,88 @@ public:
 	}
     }
 
+    void reader(thread_pool<cache_work*> *p) {
+	while (p->running) {
+	    cache_work *w;
+	    if (!p->get(w))
+		break;
+	    do_readv(w->lba * 512, w->iovs.data(), w->iovs.size());
+	    w->callback(w->ptr);
+	    delete w;
+	}
+    }
+
+public:
+
+    // TODO: iovec version
+    void add(extmap::obj_offset oo, int sectors, char *buf) {
+	// must be 4KB aligned
+	assert(!(oo.offset & 7));
+
+	while (sectors > 0) {
+	    std::unique_lock lk(m);
+
+	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / unit_sectors};
+	    int cache_blk = -1;
+	    auto it = map.find(obj_blk);
+	    if (it != map.end())
+		cache_blk = it->second;
+	    else if (free_blks.size() > 0) {
+		cache_blk = free_blks.back();
+		free_blks.pop_back();
+	    }
+	    else
+		return;
+	    while (busy[cache_blk])
+		cv.wait(lk);
+	    busy[cache_blk] = true;
+	    auto mask = bitmap[cache_blk];
+	    lk.unlock();
+
+	    assert(cache_blk >= 0);
+	    
+	    auto obj_page = oo.offset / 8;
+	    auto pages_in_blk = unit_sectors / 8;
+	    auto blk_page = obj_blk.offset * pages_in_blk;
+	    std::vector<iovec> iov;
+	    
+	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
+		mask |= (1 << i);
+		iov.push_back((iovec){buf, 4096});
+		buf += 4096;
+		sectors -= 8;
+		oo.offset += 8;
+	    }
+
+	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096;
+	    blk_offset += (obj_page - blk_page) * 4096;
+	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
+		throw_fs_error("rcache");
+
+	    lk.lock();
+	    map[obj_blk] = cache_blk;
+	    bitmap[cache_blk] = mask;
+	    flat_map[cache_blk] = obj_blk;
+	    busy[cache_blk] = false;
+	    map_dirty = true;
+	    cv.notify_one();
+	    lk.unlock();
+	}
+    }
+
+    void readv(size_t offset, const iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
+	workers.put(new cache_work(offset/512, iov, iovcnt, callback, ptr));
+    }
+
+#if 0
     void read(size_t offset, size_t len, char *buf) {
 	iovec iov = {buf, len};
 	return readv(offset, &iov, 1);
     }
-
+#endif
+    
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
-	omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m), nothreads(nt)
+	omap(_om), be(_be), fd(_fd), io(_io), workers(&m), misc_threads(&m), nothreads(nt)
     {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
@@ -990,6 +1033,8 @@ public:
 	    busy.push_back(false);
 	map_dirty = false;
 
+	for (int i = 0; i < 12; i++)
+	    workers.pool.push(std::thread(&read_cache::reader, this, &workers));
 	if (!nothreads)
 	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
     }
@@ -1067,28 +1112,6 @@ public:
 };    
 
 
-/* each write queues up one of these for a worker thread
- */
-struct wcache_work {
-public:
-    uint64_t  lba;
-    void    (*callback)(void*);
-    void     *ptr;
-    lba_t     sectors;
-    std::vector<iovec> iovs;
-    wcache_work(lba_t _lba, const iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
-	lba = _lba;
-	int bytes = 0;
-	for (int i = 0; i < iovcnt; i++) {
-	    iovs.push_back(iov[i]);
-	    bytes += iov[i].iov_len;
-	}
-	sectors = bytes / 512;
-	callback = _callback;
-	ptr = _ptr;
-    }
-};
-
 static bool aligned(void *ptr, int a)
 {
     return 0 == ((long)ptr & (a-1));
@@ -1109,7 +1132,7 @@ class write_cache {
     std::map<page_t,int> lengths;
     translate        *be;
     
-    thread_pool<wcache_work*> workers;
+    thread_pool<cache_work*> workers;
     thread_pool<int>          misc_threads;
     std::mutex                m;
     std::condition_variable   alloc_cv;
@@ -1152,7 +1175,7 @@ class write_cache {
 	return h;
     }
 
-    void writer(thread_pool<wcache_work*> *p) {
+    void writer(thread_pool<cache_work*> *p) {
 	char *buf = (char*)aligned_alloc(512, 4096); // for direct I/O
 	
 	while (p->running) {
@@ -1161,10 +1184,10 @@ class write_cache {
 	    if (!p->wait_locked(lk))
 		break;
 
-	    std::vector<wcache_work*> work;
+	    std::vector<cache_work*> work;
 	    int sectors = 0;
 	    while (p->running) {
-		wcache_work *w;
+		cache_work *w;
 		if (!p->get_nowait(w))
 		    break;
 		sectors += w->sectors;
@@ -1452,7 +1475,7 @@ public:
 
     void write(size_t offset, const iovec *iov, int iovcnt,
 	       void (*callback)(void*), void *ptr) {
-	workers.put(new wcache_work(offset/512, iov, iovcnt, callback, ptr));
+	workers.put(new cache_work(offset/512, iov, iovcnt, callback, ptr));
     }
 
    /* returns tuples of:
@@ -1462,7 +1485,7 @@ public:
 
     // TODO: how the hell to handle fragments?
     void readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> &misses) {
-	auto iovs = smartiovec(iov, iovcnt);
+	auto iovs = smartiov(iov, iovcnt);
 	auto bytes = iovs.bytes();
 
 	lba_t base = offset/512, limit = base + bytes/512, prev = base;
@@ -1547,30 +1570,30 @@ extern "C" void wcache_shutdown(void)
     wcache = NULL;
 }
 
-struct do_write {
+struct waitq {
 public:
     std::mutex m;
     std::condition_variable cv;
     bool done;
-    do_write(){done = false;}
+    waitq(){done = false;}
 };
 
-static void wcw_cb(void *ptr)
+static void waitq_cb(void *ptr)
 {
-    do_write *d = (do_write*)ptr;
-    std::unique_lock<std::mutex> lk(d->m);
-    d->done = true;
-    d->cv.notify_all();
+    waitq *q = (waitq*)ptr;
+    std::unique_lock<std::mutex> lk(q->m);
+    q->done = true;
+    q->cv.notify_all();
 }
 
 extern "C" void wcache_write(char *buf, uint64_t offset, uint64_t len)
 {
-    do_write dw;
+    waitq q;
     iovec iov = {buf, len};
-    std::unique_lock<std::mutex> lk(dw.m);
-    wcache->write(offset, &iov, 1, wcw_cb, (void*)&dw);
-    while (!dw.done)
-	dw.cv.wait(lk);
+    std::unique_lock<std::mutex> lk(q.m);
+    wcache->write(offset, &iov, 1, waitq_cb, (void*)&q);
+    while (!q.done)
+	q.cv.wait(lk);
 }
 
 extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len)
@@ -1725,7 +1748,12 @@ extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len)
 extern "C" void rcache_read(char *buf, uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    rcache->read(offset, len, buf2);
+    waitq q;
+    iovec iov = {buf2, len};
+    std::unique_lock lk(q.m);
+    rcache->readv(offset, &iov, 1, waitq_cb, (void*)&q);
+    while (!q.done)
+	q.cv.wait(lk);
     memcpy(buf, buf2, len);
     free(buf2);
 }
@@ -1942,15 +1970,44 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
+#include <atomic>
+
+struct waitq2 {
+public:
+    std::atomic<int> n;
+    lsvd_completion *p;
+    char *buf;
+    smartiov iovs;
+    waitq2(iovec *iov, int iovcnt, char *_buf, lsvd_completion *_p) :
+	n(0), p(_p), buf(_buf), iovs(iov, iovcnt) {}
+};
+
+static void waitq2_cb(void *ptr)
+{
+    waitq2 *q2 = (waitq2*)ptr;
+    auto n = --(q2->n);
+    
+    if (n == 0) {
+	if (q2->buf) {
+	    q2->iovs.copy_in(q2->buf);
+	    free(q2->buf);
+	}
+	q2->p->complete(0);
+	q2->p->put();
+	delete q2;
+    }
+}
+
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t off, rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
+    p->fri = fri;
     p->get();
     
     char *aligned_buf = NULL;
-    auto iovs = smartiovec(iov, iovcnt);
+    auto iovs = smartiov(iov, iovcnt);
     iovec tmp;
     auto tmp_iov = iov;
     auto tmp_iovcnt = iovcnt;
@@ -1966,20 +2023,14 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
     std::vector<write_cache::cache_miss> misses;
     fri->wcache->readv(off, tmp_iov, tmp_iovcnt, misses);
 
-    auto iovs2 = smartiovec(tmp_iov, tmp_iovcnt);
+    auto q2 = new waitq2(iovs.data(), iovs.size(), aligned_buf, p);
+    auto iovs2 = smartiov(tmp_iov, tmp_iovcnt);
     for (auto [_off, _len, buf_offset] : misses) {
 	auto slice = iovs2.slice(buf_offset, buf_offset+_len);
-	fri->rcache->readv(_off, slice.data(), slice.size());
+	++(q2->n);
+	fri->rcache->readv(_off, slice.data(), slice.size(), waitq2_cb, (void*)q2);
     }
 
-    p->fri = (fake_rbd_image*)image;
-    p->complete(0);
-    p->put();
-
-    if (aligned_buf) {
-	iovs.copy_in(aligned_buf);
-	free(aligned_buf);
-    }
     return 0;
 }
 
@@ -2112,33 +2163,33 @@ extern "C" void fake_rbd_init(void)
 
 static void fake_rbd_cb2(rbd_completion_t c, void *arg)
 {
-    do_write *d = (do_write*)arg;
-    std::unique_lock lk(d->m);
-    d->done = true;
-    d->cv.notify_all();
+    waitq *q = (waitq*)arg;
+    std::unique_lock lk(q->m);
+    q->done = true;
+    q->cv.notify_all();
 }
 
 extern "C" void fake_rbd_read(char *buf, size_t off, size_t len)
 {
     rbd_completion_t c;
-    do_write dw;
-    rbd_aio_create_completion((void*)&dw, fake_rbd_cb2, &c);
+    waitq q;
+    rbd_aio_create_completion((void*)&q, fake_rbd_cb2, &c);
     rbd_aio_read((rbd_image_t)&_fri, off, len, buf, c);
-    std::unique_lock lk(dw.m);
-    while (!dw.done)
-	dw.cv.wait(lk);
+    std::unique_lock lk(q.m);
+    while (!q.done)
+	q.cv.wait(lk);
     rbd_aio_release(c);
 }
 
 extern "C" void fake_rbd_write(char *buf, size_t off, size_t len)
 {
     rbd_completion_t c;
-    do_write dw;
-    rbd_aio_create_completion((void*)&dw, fake_rbd_cb2, &c);
+    waitq q;
+    rbd_aio_create_completion((void*)&q, fake_rbd_cb2, &c);
     rbd_aio_write((rbd_image_t)&_fri, off, len, buf, c);
-    std::unique_lock lk(dw.m);
-    while (!dw.done)
-	dw.cv.wait(lk);
+    std::unique_lock lk(q.m);
+    while (!q.done)
+	q.cv.wait(lk);
     rbd_aio_release(c);
 }
 

@@ -4,11 +4,11 @@
 
 /* this makes readv / writev a lot easier...
  */
-class smartiovec {
+class smartiov {
     std::vector<iovec> iovs;
 public:
-    smartiovec() {}
-    smartiovec(const iovec *iov, int iovcnt) {
+    smartiov() {}
+    smartiov(const iovec *iov, int iovcnt) {
 	for (int i = 0; i < iovcnt; i++)
 	    iovs.push_back(iov[i]);
     }
@@ -30,8 +30,8 @@ public:
 	    sum += i.iov_len;
 	return sum;
     }
-    smartiovec slice(size_t off, size_t limit) {
-	smartiovec other;
+    smartiov slice(size_t off, size_t limit) {
+	smartiov other;
 	size_t len = limit - off;
 	for (auto it = iovs.begin(); it != iovs.end() && len > 0; it++) {
 	    if (it->iov_len < off)
@@ -81,7 +81,7 @@ void test1(void)
     memset(buf1, 'A', 1000);
     iovec iov1[] = {{buf1, 117}, {buf1+117, 204}, {buf1+117+204, 412},
 		    {buf1+733, 1000-733}};
-    auto s = smartiovec(iov1, 4);
+    auto s = smartiov(iov1, 4);
     s.copy_out(buf2);
     assert(strlen(buf2) == 1000);
 
