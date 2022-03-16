@@ -957,12 +957,12 @@ public:
 	    lk.unlock();
 
 	    assert(cache_blk >= 0);
-	    
+
 	    auto obj_page = oo.offset / 8;
 	    auto pages_in_blk = unit_sectors / 8;
 	    auto blk_page = obj_blk.offset * pages_in_blk;
 	    std::vector<iovec> iov;
-	    
+
 	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
 		mask |= (1 << i);
 		iov.push_back((iovec){buf, 4096});
@@ -997,7 +997,7 @@ public:
 	return readv(offset, &iov, 1);
     }
 #endif
-    
+
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
 	omap(_om), be(_be), fd(_fd), io(_io), workers(&m), misc_threads(&m), nothreads(nt)
     {
@@ -1986,7 +1986,7 @@ static void waitq2_cb(void *ptr)
 {
     waitq2 *q2 = (waitq2*)ptr;
     auto n = --(q2->n);
-    
+
     if (n == 0) {
 	if (q2->buf) {
 	    q2->iovs.copy_in(q2->buf);
