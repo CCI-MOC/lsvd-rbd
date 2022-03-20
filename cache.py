@@ -6,6 +6,7 @@ import lsvd
 import test3 as t3
 import uuid
 import blkdev
+import argparse
 
 def prettyprint(p, insns):
     for field,fmt in insns:
@@ -37,7 +38,13 @@ rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["uni
                ["bitmap_start", '%d'], ["bitmap_blocks", '%d'], ["evict_type", '%d'],
                ["evict_start", '%d'], ["evict_blocks", '%d']]
 
-fd = os.open(sys.argv[1], os.O_RDONLY)
+parser = argparse.ArgumentParser(description='Read SSD cache')
+parser.add_argument('--write', help='print write cache details', action='store_true')
+parser.add_argument('--read', help='print read cache details', action='store_true')
+parser.add_argument('device', help='cache device/file')
+args = parser.parse_args()
+
+fd = os.open(args.device, os.O_RDONLY)
 sb = os.fstat(fd)
 if blkdev.S_ISBLK(sb.st_mode):
     npages = blkdev.dev_get_size(fd)
@@ -47,6 +54,7 @@ else:
 super = t3.c_super(fd)
 print('superblock: (0)')
 prettyprint(super, hdr_pp)
+w_super = r_super = None
 print('\nwrite superblock: (%s)' % blk_fmt(super.write_super))
 if super.write_super < npages:
     w_super = t3.c_w_super(fd, super.write_super)
@@ -63,7 +71,7 @@ def read_exts(b, npgs, n):
     e = (lsvd.j_map_extent*n).from_buffer(bytearray(buf[0:bytes]))
     return [(_.lba, _.len, _.page) for _ in e]
 
-if super.write_super < npages:
+if args.write and super.write_super < npages:
     b = w_super.oldest
     while True:
         [j,e] = t3.c_hdr(fd, b)
@@ -82,3 +90,11 @@ if super.write_super < npages:
             print('extents    :', ' '.join(['%d+%d' % (_.lba,_.len) for _ in e]))
         b = b + j.len
 
+if args.read and r_super:
+    nbytes = r_super.units * lsvd.sizeof_obj_offset
+    print("map start:", r_super.map_start)
+    buf = os.pread(fd, nbytes, r_super.map_start * 4096)
+    vals = (lsvd.obj_offset * r_super.units).from_buffer(bytearray(buf))
+    print("\nread map:")
+    for i in range(len(vals[:])):
+        print("%d %d %d" % (i, vals[i].obj, vals[i].offset))
