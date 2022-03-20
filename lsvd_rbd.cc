@@ -35,6 +35,30 @@ namespace fs = std::experimental::filesystem;
 #include <string.h>
 #include <errno.h>
 
+struct _log {
+    int l;
+    pthread_t th;
+    long arg;
+} *logbuf, *logptr;
+
+void dbg(int l, long arg)
+{
+    logptr->l = l;
+    logptr->th = pthread_self();
+    logptr->arg = arg;
+    logptr++;
+}
+//#define DBG(a) dbg(__LINE__, a)
+#define DBG(a) 
+
+void printlog(FILE *fp)
+{
+    while (logbuf != logptr) {
+	fprintf(fp, "%d %lx %lx\n", logbuf->l, logbuf->th, logbuf->arg);
+	logbuf++;
+    }
+}
+
 // https://stackoverflow.com/questions/5008804/generating-random-integer-from-a-range
 std::random_device rd;     // only used once to initialise (seed) engine
 //std::mt19937 rng(rd());  // random-number engine used (Mersenne-Twister in this case)
@@ -754,6 +778,10 @@ class read_cache {
     int               unit_sectors;
     std::vector<int>  free_blks;
     bool              map_dirty;
+
+    double            hit_rate;
+    int               n_hits;
+    int               n_misses;
     
     thread_pool<cache_work*> workers;
     thread_pool<int> misc_threads; // eviction thread, for now
@@ -819,8 +847,10 @@ class read_cache {
 	    /* write the map (a) immediately if we evict something, or 
 	     * (b) occasionally if the map is dirty
 	     */
+	    printf("\nevict read:\n");
 	    auto t = std::chrono::system_clock::now();
 	    if (n > 0 || t - t0 > timeout) {
+		printf("\n write map\n");
 		lk.unlock();
 		pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
 		pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
@@ -829,6 +859,8 @@ class read_cache {
 	}
     }
 
+    int n_lines_read;
+    
     void do_readv(size_t offset, const iovec *iov, int iovcnt) {
 	auto iovs = smartiov(iov, iovcnt);
 	size_t len = iovs.bytes();
@@ -838,6 +870,17 @@ class read_cache {
 	for (auto it = omap->map.lookup(lba);
 	     it != omap->map.end() && it->base() < lba+sectors; it++) 
 	    extents.push_back(it->vals(lba, lba+sectors));
+
+	if (n_hits + n_misses >= 10000) {
+	    hit_rate = (hit_rate * 0.5) + (0.5 * n_hits) / (n_hits + n_misses);
+	    printf("\nhit rate: %f hits %d misses %d lines_read %d\n", hit_rate, n_hits, n_misses, n_lines_read);
+	    n_hits = n_misses = 0;
+	}
+	/* hack for better random performance - if hit rate is less than 50%, gradually
+	 * stop using the cache.
+	 */
+	std::uniform_real_distribution<double> unif(0.0,1.0);
+	bool use_cache = unif(rng) < 2 * hit_rate;
 	lk.unlock();
 
 	std::vector<std::tuple<extmap::obj_offset,sector_t,char*>> to_add;
@@ -872,6 +915,11 @@ class read_cache {
 			in_cache = true;
 		}
 
+		if (in_cache)
+		    n_hits++;
+		else
+		    n_misses++;
+		
 		if (in_cache) {
 		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 			start = blk_in_ssd + blk_offset,
@@ -887,7 +935,18 @@ class read_cache {
 		    buf_offset += bytes;
 		    len -= bytes;
 		}
+		else if (!use_cache) {
+		    lba_t sectors = limit - base;
+		    char *buf = (char*)malloc(512 * sectors);
+		    auto bytes = io->read_numbered_object(ptr.obj, buf, 512 * ptr.offset, 512 * sectors);
+		    iovs.slice(buf_offset, blk_offset + 512 * sectors).copy_in(buf);
+		    free(buf);
+		    base = limit;
+		    buf_offset += 512 * sectors;
+		    len -= 512 * sectors;
+		}
 		else {
+		    n_lines_read++;
 		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
 		    auto bytes = io->read_numbered_object(unit.obj, cache_line,
 							  512*blk_base_lba, 512*unit_sectors);
@@ -896,7 +955,6 @@ class read_cache {
 		    assert((int)finish <= bytes);
 
 		    iovs.slice(buf_offset, (finish-start)).copy_in(cache_line+start);
-		    //memcpy(buf, cache_line+start, (finish-start));
 
 		    base += (blk_top_offset - blk_offset);
 		    ptr.offset += (blk_top_offset - blk_offset); // HACK
@@ -924,6 +982,7 @@ class read_cache {
 	    if (!p->get(w))
 		break;
 	    do_readv(w->lba * 512, w->iovs.data(), w->iovs.size());
+	    DBG((long)w->ptr);
 	    w->callback(w->ptr);
 	    delete w;
 	}
@@ -936,6 +995,7 @@ public:
 	// must be 4KB aligned
 	assert(!(oo.offset & 7));
 
+	printf("\nadd %d %d %d\n", (int)oo.obj, (int)oo.offset, (int)sectors);
 	while (sectors > 0) {
 	    std::unique_lock lk(m);
 
@@ -948,8 +1008,10 @@ public:
 		cache_blk = free_blks.back();
 		free_blks.pop_back();
 	    }
-	    else
+	    else {
+		printf("\nADD: no space\n");
 		return;
+	    }
 	    while (busy[cache_blk])
 		cv.wait(lk);
 	    busy[cache_blk] = true;
@@ -999,8 +1061,10 @@ public:
 #endif
 
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
-	omap(_om), be(_be), fd(_fd), io(_io), workers(&m), misc_threads(&m), nothreads(nt)
+	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0), workers(&m),
+	misc_threads(&m), nothreads(nt)
     {
+	n_lines_read = 0;
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
 	    throw_fs_error("rcache");
@@ -1177,6 +1241,11 @@ class write_cache {
 
     void writer(thread_pool<cache_work*> *p) {
 	char *buf = (char*)aligned_alloc(512, 4096); // for direct I/O
+	auto period = std::chrono::milliseconds(25);
+	const int write_max_pct = 2;
+	const int write_max_kb = 512;
+	int max_sectors = std::min((write_max_pct * (int)(super->limit - super->base) * 8 / 100),
+				   write_max_kb * 2);
 	
 	while (p->running) {
 	    std::vector<char*> bounce_bufs;
@@ -1186,7 +1255,7 @@ class write_cache {
 
 	    std::vector<cache_work*> work;
 	    int sectors = 0;
-	    while (p->running) {
+	    while (p->running && sectors < max_sectors) {
 		cache_work *w;
 		if (!p->get_nowait(w))
 		    break;
@@ -1934,6 +2003,7 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
     p->arg = cb_arg;
     p->refcount = 1;
     *c = (rbd_completion_t)p;
+    DBG((long)p);
     return 0;
 }
 
@@ -1987,6 +2057,7 @@ static void waitq2_cb(void *ptr)
     waitq2 *q2 = (waitq2*)ptr;
     auto n = --(q2->n);
 
+    DBG((long)q2->p);
     if (n == 0) {
 	if (q2->buf) {
 	    q2->iovs.copy_in(q2->buf);
@@ -2021,11 +2092,13 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
     }
 
     std::vector<write_cache::cache_miss> misses;
+    DBG((long)c);
     fri->wcache->readv(off, tmp_iov, tmp_iovcnt, misses);
 
     auto q2 = new waitq2(iovs.data(), iovs.size(), aligned_buf, p);
     auto iovs2 = smartiov(tmp_iov, tmp_iovcnt);
     for (auto [_off, _len, buf_offset] : misses) {
+	DBG((long)c);
 	auto slice = iovs2.slice(buf_offset, buf_offset+_len);
 	++(q2->n);
 	fri->rcache->readv(_off, slice.data(), slice.size(), waitq2_cb, (void*)q2);
@@ -2108,9 +2181,22 @@ static std::pair<std::string,std::string> split_string(std::string s, std::strin
     return std::pair(s.substr(0,i), s.substr(i+delim.length()));
 }
 
+static void* delay_printlog(void *q)
+{
+    sleep(50);
+    FILE *fp = fopen("/tmp/print.log", "w");
+    printlog(fp);
+    fclose(fp);
+    exit(0);
+}
+pthread_t _th;
+
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
+//    logbuf = logptr = (struct _log*)malloc(2*1024*1024*8*sizeof(*logbuf));
+//    pthread_create(&_th, NULL, delay_printlog, NULL);
+
     int rv;
     auto [nvme, obj] = split_string(std::string(name), ",");
     auto fri = new fake_rbd_image;

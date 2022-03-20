@@ -1,5 +1,13 @@
 # new-lsvd
 
+### 3/20/22
+
+weird things to fix and add to tests:
+- write cache is overwriting the read cache map, I think, with PAD record.
+- read cache only registers 200 misses, but replacing the cache line fetch logic with straight read doubles the throughput
+- not getting misses despite random read of 1GB volume with 100MB cache
+
+## stuff
 thread pool:
 
 took a stab at using https://github.com/DeveloperPaul123/thread-pool,
