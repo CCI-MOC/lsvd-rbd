@@ -286,17 +286,35 @@ def fakemap_reset():
 def fake_rbd_init():
     lsvd_lib.fake_rbd_init();
 
-def fake_rbd_read(off, bytes):
-    buf = (c_char * bytes)()
-    lsvd_lib.fake_rbd_read(buf, c_ulong(off), c_ulong(bytes))
-    return buf[0:bytes]
+def fake_rbd_read(off, nbytes):
+    buf = (c_char * nbytes)()
+    lsvd_lib.fake_rbd_read(buf, c_ulong(off), c_ulong(nbytes))
+    return buf[0:nbytes]
 
 def fake_rbd_write(off, data):
     if type(data) != bytes:
         data = bytes(data, 'utf-8')
-    bytes = len(data)
-    lsvd_lib.fake_rbd_write(data, c_ulong(off), c_ulong(bytes))
+    nbytes = len(data)
+    lsvd_lib.fake_rbd_write(data, c_ulong(off), c_ulong(nbytes))
 
+def rbd_open(name):
+    img = c_void_p()
+    print('open', name)
+    rv = lsvd_lib.rbd_open(None, c_char_p(bytes(name, 'utf-8')), byref(img), None)
+    assert rv >= 0
+    return img
+
+def rbd_read(img, off, nbytes):
+    buf = (c_char * nbytes)()
+    lsvd_lib.rbd_read(img, c_ulong(off), c_ulong(nbytes), buf)
+    return buf[0:nbytes]
+
+def rbd_write(img, off, data):
+    if type(data) != bytes:
+        data = bytes(data, 'utf-8')
+    nbytes = len(data)
+    lsvd_lib.rbd_write(img, c_ulong(off), c_ulong(nbytes), data)
+    
 class j_extent(LittleEndianStructure):
     _fields_ = [("lba", c_ulong, 40),
                 ("len", c_ulong, 24)]

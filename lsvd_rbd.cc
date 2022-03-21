@@ -2007,6 +2007,12 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
     return 0;
 }
 
+extern "C" void rbd_aio_release(rbd_completion_t c)
+{
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->put();
+}
+
 extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
@@ -2107,28 +2113,11 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
     return 0;
 }
 
-extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, char *buf,
+extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len, const char *buf,
 			    rbd_completion_t c)
 {
-    iovec iov = {buf, len};
+    iovec iov = {(char*)buf, len};
     return rbd_aio_readv(image, &iov, 1, off, c);
-}
-
-extern "C" void rbd_aio_release(rbd_completion_t c)
-{
-    lsvd_completion *p = (lsvd_completion *)c;
-    p->put();
-}
-
-extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
-{
-    lsvd_completion *p = (lsvd_completion *)c;
-    std::unique_lock lk(p->m);
-    p->get();
-    while (!p->done)
-	p->cv.wait(lk);
-    p->put();
-    return 0;
 }
 
 static void fake_rbd_cb(void *ptr)
@@ -2154,6 +2143,51 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const 
 {
     iovec iov = {(void*)buf, len};
     return rbd_aio_writev(image, &iov, 1, off, c);
+}
+
+static void fake_rbd_cb2(rbd_completion_t c, void *arg)
+{
+    waitq *q = (waitq*)arg;
+    std::unique_lock lk(q->m);
+    q->done = true;
+    q->cv.notify_all();
+}
+
+typedef int (rbd_op_t)(rbd_image_t, uint64_t, size_t, const char*, rbd_completion_t);
+
+int rbd_op(rbd_op_t op, rbd_image_t image, uint64_t off, size_t len, char *buf)
+{
+    rbd_completion_t c;
+    waitq q;
+    rbd_aio_create_completion((void*)&q, fake_rbd_cb2, &c);
+    op(image, off, len, buf, c);
+    std::unique_lock lk(q.m);
+    while (!q.done)
+	q.cv.wait(lk);
+    auto val = rbd_aio_get_return_value(c);
+    rbd_aio_release(c);
+    return val;
+}
+
+extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
+{
+    return rbd_op(rbd_aio_read, image, off, len, buf);
+}
+
+extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, char *buf)
+{
+    return rbd_op(rbd_aio_write, image, off, len, buf);
+}
+
+extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
+{
+    lsvd_completion *p = (lsvd_completion *)c;
+    std::unique_lock lk(p->m);
+    p->get();
+    while (!p->done)
+	p->cv.wait(lk);
+    p->put();
+    return 0;
 }
 
 extern "C" int rbd_close(rbd_image_t image)
@@ -2245,14 +2279,6 @@ extern "C" void fake_rbd_init(void)
     _fri.size = 0;
     _fri.wcache = wcache;
     _fri.rcache = rcache;
-}
-
-static void fake_rbd_cb2(rbd_completion_t c, void *arg)
-{
-    waitq *q = (waitq*)arg;
-    std::unique_lock lk(q->m);
-    q->done = true;
-    q->cv.notify_all();
 }
 
 extern "C" void fake_rbd_read(char *buf, size_t off, size_t len)
