@@ -304,6 +304,9 @@ def rbd_open(name):
     assert rv >= 0
     return img
 
+def rbd_close(img):
+    lsvd_lib.rbd_close(img)
+
 def rbd_read(img, off, nbytes):
     buf = (c_char * nbytes)()
     lsvd_lib.rbd_read(img, c_ulong(off), c_ulong(nbytes), buf)

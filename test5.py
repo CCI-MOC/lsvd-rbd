@@ -31,19 +31,15 @@ def finish():
     lsvd.cache_close()
     lsvd.shutdown()
 
-_img = None
 def rbd_startup():
-    global _img
-    print('img', img)
-    print('nvme', nvme)
     mkdisk.cleanup(img)
     sectors = 10*1024*2 # 10MB
     mkdisk.mkdisk(img, sectors)
     mkcache.mkcache(nvme)
     name = nvme + ',' + img
-    _img = lsvd.rbd_open(name)
+    return lsvd.rbd_open(name)
 
-def rbd_finish():
+def rbd_finish(_img):
     lsvd.rbd_close(_img)
 
 class tests(unittest.TestCase):
@@ -59,25 +55,57 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'A'*4096 + b'B'*4096 + b'A'*4096 + b'C'*4096 + b'A'*4096)
         finish()
         
+    def test_2_write(self):
+        _img = rbd_startup()
+        print('_img', _img)
+        data = b'A' * 4096
+        for i in range(26):
+            lsvd.rbd_write(_img, i*4096, data)
+        time.sleep(0.1)
+        rbd_finish(_img)
+
+    def test_3_write_read(self):
+        _img = rbd_startup()
+        c = ord('A')
+        for i in range(26):
+            data = bytes(chr(c + i), 'utf-8') * 4096
+            lsvd.rbd_write(_img, i*4096, data)
+        time.sleep(0.1)
+
+        for i in range(26):
+            data = bytes(chr(c + i), 'utf-8') * 4096
+            d2 = lsvd.rbd_read(_img, i*4096, 4096)
+            self.assertEqual(d2, data)
+        
+        rbd_finish(_img)
+
     # write cache is 125 pages = 1000 sectors
     # read cache is 16 * 64k blocks = 2048 sectors
     # volume is 10MiB = 20480 sectors = 2650 4KB pages
-    def test_2_rand_write(self):
-        pgs = [_*4096 for _ in [b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H']]
-        rbd_startup()
+
+    def test_4_rand_write(self):
+        #s = [bytes(chr(65+i),'utf-8') for i in range(26)]
+        #pgs = [_*4096 for _ in s]
+        startup()
+        N = 2650
         pg = 0
-        for i in range(26):
-            data = pgs[i % 8]
-            lsvd.rbd_write(_img, pg*4096, data)
+        for i in range(N):
+            data = bytes('%05d' % pg, 'utf-8') + b'A'*4091
+            lsvd.fake_rbd_write(pg*4096, data)
             pg = (pg + 97) % 2650         # close enough to random...
+            if i and not i % 100:
+                print(i)
         time.sleep(0.1)
         pg = 0
-        for i in range(26):
-            d0 = pgs[i % 8]
-            d = lsvd.rbd_read(_img, pg*4096, 4096)
-            self.assertEqual(d0, d)
-            pg = (pg + 97) % 2650         # close enough to random...
-        rbd_finish()
+        passed = True
+        for i in range(N):
+            d0 = bytes('%05d' % i, 'utf-8') + b'A'*4091
+            d = lsvd.fake_rbd_read(i*4096, 4096)
+            if d0 != d:
+                passed = False
+                print('FAILED:', d[0:10], '!=', d0[0:10])
+        self.assertTrue(passed)
+        finish()
 
         
 if __name__ == '__main__':
