@@ -119,10 +119,9 @@ class tests(unittest.TestCase):
             if d0 != d:
                 passed = False
                 print('FAILED:', i, d[0:10]+b'...'+d[-10:], '!=', d0[0:10]+b'...'+d0[-10:])
-        self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
+        time.sleep(4)
         self.assertTrue(passed)
 
-        time.sleep(4)
         rbd_finish(_img)
 
         

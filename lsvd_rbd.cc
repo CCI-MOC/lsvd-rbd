@@ -896,7 +896,7 @@ class read_cache {
 	    auto [base, limit, ptr] = e;
 	    if (base > lba) {
 		auto bytes = (base-lba)*512;
-		iovs.slice(buf_offset, bytes).zero();
+		iovs.slice(buf_offset, buf_offset+bytes).zero();
 		len -= bytes;
 	    }
 	    while (base < limit) {
@@ -958,7 +958,8 @@ class read_cache {
 			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
 
-		    iovs.slice(buf_offset, (finish-start)).copy_in(cache_line+start);
+		    iovs.slice(buf_offset,
+			       buf_offset+(finish-start)).copy_in(cache_line+start);
 
 		    base += (blk_top_offset - blk_offset);
 		    ptr.offset += (blk_top_offset - blk_offset); // HACK
@@ -999,7 +1000,6 @@ public:
 	// must be 4KB aligned
 	assert(!(oo.offset & 7));
 
-	printf("\nadd %d %d %d\n", (int)oo.obj, (int)oo.offset, (int)sectors);
 	while (sectors > 0) {
 	    std::unique_lock lk(m);
 
@@ -1169,7 +1169,7 @@ public:
 	auto val = pread(fd, buf, len, offset);
 	close(fd);
 	if (val < 0)
-	    printf("bad\n");
+	    throw_fs_error("read_obj");
 	return val;
     }
     ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
@@ -2041,6 +2041,8 @@ extern "C" int rbd_flush(rbd_image_t image)
 {
     auto fri = (fake_rbd_image*)image;
     fri->lsvd->flush();
+    usleep(10000);
+    fri->lsvd->checkpoint();
     return 0;
 }
 
