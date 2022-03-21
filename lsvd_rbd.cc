@@ -401,13 +401,18 @@ class translate {
     
     int make_hdr(char *buf, batch *b) {
 	hdr *h = (hdr*)buf;
-	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0}, .type = LSVD_DATA,
-		   .seq = (uint32_t)b->seq, .hdr_sectors = 8, .data_sectors = (uint32_t)(b->len / 512)};
+	data_hdr *dh = (data_hdr*)(h+1);
+	uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
+	    o2 = o1 + l1, l2 = b->entries.size() * sizeof(data_map),
+	    hdr_bytes = o2 + l2;
+	lba_t hdr_sectors = div_round_up(hdr_bytes, 512);
+	
+	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
+		   .type = LSVD_DATA, .seq = (uint32_t)b->seq,
+		   .hdr_sectors = hdr_sectors,
+		   .data_sectors = (uint32_t)(b->len / 512)};
 	memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
 
-	data_hdr *dh = (data_hdr*)(h+1);
-	uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t), o2 = o1 + l1,
-	    l2 = b->entries.size() * sizeof(data_map);
 	*dh = (data_hdr){.last_data_obj = (uint32_t)b->seq, .ckpts_offset = o1, .ckpts_len = l1,
 			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
 			 .map_offset = o2, .map_len = l2};
@@ -451,7 +456,7 @@ class translate {
 		    if (ptr.obj != b->seq)
 			object_info[ptr.obj].live -= (limit - base);
 		}
-		oo.offset += e.len;
+		offset += e.len;
 	    }
 	    in_mem_objects.erase(b->seq);
 	    batches.push(b);
@@ -823,15 +828,14 @@ class read_cache {
     }
 
     void evict_thread(thread_pool<int> *p) {
-	auto wait_time = std::chrono::seconds(2);
+	auto wait_time = std::chrono::milliseconds(500);
 	auto t0 = std::chrono::system_clock::now();
-	auto timeout = std::chrono::seconds(15);
+	auto timeout = std::chrono::seconds(2);
 
 	std::unique_lock<std::mutex> lk(m);
 
 	while (p->running) {
-	    while (p->running)
-		p->cv.wait_for(lk, wait_time);
+	    p->cv.wait_for(lk, wait_time);
 	    if (!p->running)
 		return;
 
@@ -847,14 +851,14 @@ class read_cache {
 	    /* write the map (a) immediately if we evict something, or 
 	     * (b) occasionally if the map is dirty
 	     */
-	    printf("\nevict read:\n");
 	    auto t = std::chrono::system_clock::now();
-	    if (n > 0 || t - t0 > timeout) {
-		printf("\n write map\n");
+	    if (n > 0 || (t - t0) > timeout) {
 		lk.unlock();
 		pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
 		pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+		t0 = t;
 		lk.lock();
+		map_dirty = false;
 	    }
 	}
     }
@@ -1164,6 +1168,8 @@ public:
 	    return -1;
 	auto val = pread(fd, buf, len, offset);
 	close(fd);
+	if (val < 0)
+	    printf("bad\n");
 	return val;
     }
     ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
@@ -2033,6 +2039,8 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 
 extern "C" int rbd_flush(rbd_image_t image)
 {
+    auto fri = (fake_rbd_image*)image;
+    fri->lsvd->flush();
     return 0;
 }
 

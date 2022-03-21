@@ -31,6 +31,16 @@ def finish():
     lsvd.cache_close()
     lsvd.shutdown()
 
+_vals = None
+
+def inv(i, k, m):
+    global _vals
+    if not _vals:
+        _vals = [None] * m
+        for i in range(m):
+            _vals[(i*k)%m] = i
+    return _vals[i]
+
 def rbd_startup():
     mkdisk.cleanup(img)
     sectors = 10*1024*2 # 10MB
@@ -86,26 +96,34 @@ class tests(unittest.TestCase):
     def test_4_rand_write(self):
         #s = [bytes(chr(65+i),'utf-8') for i in range(26)]
         #pgs = [_*4096 for _ in s]
-        startup()
-        N = 2650
+        _img = rbd_startup()
+        # 59 is enough to force write cache eviction
+        N = 200
         pg = 0
         for i in range(N):
+            pg = (i * 97) % 2650
             data = bytes('%05d' % pg, 'utf-8') + b'A'*4091
-            lsvd.fake_rbd_write(pg*4096, data)
-            pg = (pg + 97) % 2650         # close enough to random...
-            if i and not i % 100:
-                print(i)
-        time.sleep(0.1)
+            lsvd.rbd_write(_img, pg*4096, data)
+
+        lsvd.rbd_flush(_img)
+        time.sleep(0.2)
+
         pg = 0
         passed = True
-        for i in range(N):
+        for i in range(2650):
+            j = inv(i, 97, 2650)
+            if j >= N:
+                continue
             d0 = bytes('%05d' % i, 'utf-8') + b'A'*4091
-            d = lsvd.fake_rbd_read(i*4096, 4096)
+            d = lsvd.rbd_read(_img, i*4096, 4096)
             if d0 != d:
                 passed = False
-                print('FAILED:', d[0:10], '!=', d0[0:10])
+                print('FAILED:', i, d[0:10]+b'...'+d[-10:], '!=', d0[0:10]+b'...'+d0[-10:])
+        self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
         self.assertTrue(passed)
-        finish()
+
+        time.sleep(4)
+        rbd_finish(_img)
 
         
 if __name__ == '__main__':

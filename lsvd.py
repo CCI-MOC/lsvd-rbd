@@ -299,7 +299,6 @@ def fake_rbd_write(off, data):
 
 def rbd_open(name):
     img = c_void_p()
-    print('open', name)
     rv = lsvd_lib.rbd_open(None, c_char_p(bytes(name, 'utf-8')), byref(img), None)
     assert rv >= 0
     return img
@@ -318,6 +317,9 @@ def rbd_write(img, off, data):
     nbytes = len(data)
     lsvd_lib.rbd_write(img, c_ulong(off), c_ulong(nbytes), data)
     
+def rbd_flush(img):
+    lsvd_lib.rbd_flush(img)
+
 class j_extent(LittleEndianStructure):
     _fields_ = [("lba", c_ulong, 40),
                 ("len", c_ulong, 24)]
