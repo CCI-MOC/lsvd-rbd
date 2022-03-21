@@ -1263,6 +1263,8 @@ class write_cache {
 		work.push_back(w);
 	    }
 	    lk.unlock();
+	    if (!p->running)
+		break;
 	    
 	    page_t blocks = div_round_up(sectors, 8);
 	    // allocate blocks + 1
@@ -2064,7 +2066,7 @@ static void waitq2_cb(void *ptr)
     auto n = --(q2->n);
 
     DBG((long)q2->p);
-    if (n == 0) {
+    if (n <= 0) {
 	if (q2->buf) {
 	    q2->iovs.copy_in(q2->buf);
 	    free(q2->buf);
@@ -2100,10 +2102,14 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
     std::vector<write_cache::cache_miss> misses;
     DBG((long)c);
     fri->wcache->readv(off, tmp_iov, tmp_iovcnt, misses);
-
+    
     auto q2 = new waitq2(iovs.data(), iovs.size(), aligned_buf, p);
     auto iovs2 = smartiov(tmp_iov, tmp_iovcnt);
-    for (auto [_off, _len, buf_offset] : misses) {
+
+    if (misses.size() == 0) {
+	waitq2_cb((void*)q2);
+    }
+    else for (auto [_off, _len, buf_offset] : misses) {
 	DBG((long)c);
 	auto slice = iovs2.slice(buf_offset, buf_offset+_len);
 	++(q2->n);
