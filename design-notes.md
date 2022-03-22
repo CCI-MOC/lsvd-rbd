@@ -1,5 +1,12 @@
 # new-lsvd
 
+### 3/21/22
+
+- fixed the bug that was overwriting the read cache map
+- added clean shutdown stuff to `rbd_close`, but now fio read seems to hang when it's done
+- some cleanup of cache.py
+- added some synchronization so that translate::flush actually waits until stuff has been written. (more importantly, until it's been updated in the map so we can do a checkpoint)
+
 ### 3/20/22
 
 weird things to fix and add to tests:

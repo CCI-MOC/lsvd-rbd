@@ -227,7 +227,7 @@ class translate {
     batch              *current_batch;
     std::stack<batch*>  batches;
     std::map<int,char*> in_mem_objects;
-
+    
     /* info on all live objects - all sizes in sectors
      */
     struct obj_info {
@@ -246,6 +246,12 @@ class translate {
 
     thread_pool<batch*> workers;
     thread_pool<int>    misc_threads;
+
+    /* for flush()
+     */
+    int last_written;
+    int last_pushed;
+    std::condition_variable cv;
     
     char *read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
@@ -427,6 +433,7 @@ class translate {
 	return (char*)dm - (char*)buf;
     }
 
+    
     void worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
@@ -458,9 +465,14 @@ class translate {
 		}
 		offset += e.len;
 	    }
-	    in_mem_objects.erase(b->seq);
+
+	    last_written = std::max(last_written, b->seq); // for flush()
+	    cv.notify_all();
+	    
+	    in_mem_objects.erase(b->seq); // no need to free, since we re-use the batch
 	    batches.push(b);
 	    objlock.unlock();
+
 	    lk.unlock();
 	}
     }
@@ -512,6 +524,7 @@ public:
 	map = omap;
 	current_batch = NULL;
 	nocache = false;
+	last_written = last_pushed = 0;
     }
     ~translate() {
 	while (!batches.empty()) {
@@ -529,9 +542,12 @@ public:
     int checkpoint(void) {
 	std::unique_lock<std::mutex> lk(m);
 	if (current_batch && current_batch->len > 0) {
+	    last_pushed = current_batch->seq;
 	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
+	if (map->map.size() == 0)
+	    return 0;
 	int seq = batch_seq++;
 	lk.unlock();
 	return write_checkpoint(seq);
@@ -542,9 +558,12 @@ public:
 	int val = 0;
 	if (current_batch && current_batch->len > 0) {
 	    val = current_batch->seq;
+	    last_pushed = val;
 	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
+	while (last_written < last_pushed)
+	    cv.wait(lk);
 	return val;
     }
 
@@ -614,6 +633,7 @@ public:
 	size_t len = iov_sum(iov, iovcnt);
 
 	if (current_batch && current_batch->len + len > current_batch->max) {
+	    last_pushed = current_batch->seq;
 	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
@@ -854,8 +874,7 @@ class read_cache {
 	    auto t = std::chrono::system_clock::now();
 	    if (n > 0 || (t - t0) > timeout) {
 		lk.unlock();
-		pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
-		pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+		write_map();
 		t0 = t;
 		lk.lock();
 		map_dirty = false;
@@ -1013,7 +1032,7 @@ public:
 		free_blks.pop_back();
 	    }
 	    else {
-		printf("\nADD: no space\n");
+		//printf("\nADD: no space\n");
 		return;
 	    }
 	    while (busy[cache_blk])
@@ -1107,6 +1126,11 @@ public:
 	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
     }
 
+    void write_map(void) {
+	pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
+	pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+    }
+    
     ~read_cache() {
 	free((void*)flat_map);
 	free((void*)bitmap);
@@ -1232,6 +1256,8 @@ class write_cache {
 	}
 	auto val = super->next;
 	super->next += n;
+	if (super->next == super->limit)
+	    super->next = super->base;
 	return val;
     }
 
@@ -1278,6 +1304,7 @@ class write_cache {
 
 	    if (pad != 0) {
 		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
+		assert(pad < super->limit);
 		if (pwrite(fd, buf, 4096, pad*4096) < 0)
 		    throw_fs_error("wpad");
 	    }
@@ -1301,7 +1328,7 @@ class write_cache {
 	    j->extent_len = e_bytes;
 	    memcpy((void*)(buf + sizeof(*j)), (void*)extents.data(), e_bytes);
 		
-	    std::vector<iovec> iovs;
+	    auto iovs = smartiov();
 	    iovs.push_back((iovec){buf, 4096});
 
 	    for (auto w : work)
@@ -1312,6 +1339,7 @@ class write_cache {
 	    if (pad_sectors > 0)
 		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
 
+	    assert(blockno + div_round_up(iovs.bytes(), 4096) <= super->limit);
 	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096) < 0)
 		throw_fs_error("wdata");
 
@@ -2041,7 +2069,6 @@ extern "C" int rbd_flush(rbd_image_t image)
 {
     auto fri = (fake_rbd_image*)image;
     fri->lsvd->flush();
-    usleep(10000);
     fri->lsvd->checkpoint();
     return 0;
 }
@@ -2206,11 +2233,6 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
     return 0;
 }
 
-extern "C" int rbd_close(rbd_image_t image)
-{
-    return 0;
-}
-
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
@@ -2282,6 +2304,23 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     fri->notify = false;
     
     *image = (void*)fri;
+    return 0;
+}
+
+extern "C" int rbd_close(rbd_image_t image)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    fri->rcache->write_map();
+    delete fri->rcache;
+    fri->wcache->do_write_checkpoint();
+    delete fri->wcache;
+    close(fri->fd);
+    fri->lsvd->flush();
+    fri->lsvd->checkpoint();
+    delete fri->lsvd;
+    delete fri->omap;
+    delete fri->io;
+    
     return 0;
 }
 
