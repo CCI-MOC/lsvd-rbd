@@ -67,7 +67,6 @@ class tests(unittest.TestCase):
         
     def test_2_write(self):
         _img = rbd_startup()
-        print('_img', _img)
         data = b'A' * 4096
         for i in range(26):
             lsvd.rbd_write(_img, i*4096, data)
@@ -118,8 +117,7 @@ class tests(unittest.TestCase):
             d = lsvd.rbd_read(_img, i*4096, 4096)
             if d0 != d:
                 passed = False
-                print('FAILED:', i, d[0:10]+b'...'+d[-10:], '!=', d0[0:10]+b'...'+d0[-10:])
-        time.sleep(4)
+                print('FAILED:', i, d[0:10]+b'...'+d[-5:], '!=', d0[0:10]+b'...'+d0[-5:])
         self.assertTrue(passed)
 
         rbd_finish(_img)
