@@ -8,7 +8,7 @@ SOFLAGS = -shared -fPIC
 liblsvd.so: lsvd_rbd.cc extent.cc journal2.cc
 	g++ -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread
 
-lsvd_rbd.o: lsvd_rbd.cc extent.cc journal2.cc
+lsvd_rbd.o: lsvd_rbd.cc extent.cc journal2.cc smartiov.cc
 	g++ -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS) 
 
 bdus: bdus.o lsvd_rbd.o extent.cc journal2.cc

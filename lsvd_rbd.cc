@@ -974,7 +974,7 @@ class read_cache {
 		    lba_t sectors = limit - base;
 		    char *buf = (char*)malloc(512 * sectors);
 		    auto bytes = io->read_numbered_object(ptr.obj, buf, 512 * ptr.offset, 512 * sectors);
-		    iovs.slice(buf_offset, blk_offset + 512 * sectors).copy_in(buf);
+		    iovs.slice(buf_offset, buf_offset + 512 * sectors).copy_in(buf);
 		    free(buf);
 		    base = limit;
 		    buf_offset += 512 * sectors;
@@ -1240,7 +1240,7 @@ class write_cache {
     bool              map_dirty;
     
     thread_pool<cache_work*> workers;
-    thread_pool<int>          misc_threads;
+    thread_pool<int>          *misc_threads;
     std::mutex                m;
     std::condition_variable   alloc_cv;
     int                       nfree;
@@ -1449,8 +1449,10 @@ class write_cache {
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
 	    p->cv.wait_for(lk, period);
+	    if (!p->running)
+		return;
 	    int pgs_free = pages_free(super->oldest);
-	    if (p->running && super->oldest != super->next && pgs_free <= trigger) {
+	    if (super->oldest != super->next && pgs_free <= trigger) {
 		auto oldest = super->oldest;
 		std::vector<j_extent> to_delete;
 
@@ -1572,16 +1574,14 @@ public:
 	while (p->running) {
 	    aio_readv_work *w;
 	    if (!p->get(w)) {
-		xprintf("get false\n");
 		break;
 	    }
-	    xprintf("aio_readv: %ld\n", w->offset/4096);
 	    readv(w->offset, w->iovs.data(), w->iovs.size(), w->misses);
 	    w->cb(w->ptr);
 	}
     }
 
-    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m), misc_threads(&m), readv_workers(&m) {
+    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m), readv_workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
@@ -1617,12 +1617,14 @@ public:
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
 	for (auto i = 0; i < 4; i++)
 	    readv_workers.pool.push(std::thread(&write_cache::aio_readv_thread, this, &readv_workers));
-	
-	misc_threads.pool.push(std::thread(&write_cache::evict_thread, this, &misc_threads));
+
+	misc_threads = new thread_pool<int>(&m);
+	misc_threads->pool.push(std::thread(&write_cache::evict_thread, this, misc_threads));
     }
     ~write_cache() {
 	free(pad_page);
 	free(super);
+	delete misc_threads;
     }
 
     void write(size_t offset, const iovec *iov, int iovcnt,
@@ -2159,7 +2161,8 @@ struct readv_state {
 
     readv_state(rbd_image_t _image, const iovec *_iov, int _iovcnt,
 		uint64_t _off, rbd_completion_t _c) :
-	phase(0), image(_image), iov(_iov), iovcnt(_iovcnt), off(_off), c(_c) {}
+	phase(0), image(_image), iov(_iov), iovcnt(_iovcnt), off(_off),
+	c(_c), n(0) {}
     ~readv_state(){ std::unique_lock lk(m);}
 };
 

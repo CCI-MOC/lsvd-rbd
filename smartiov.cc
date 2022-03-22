@@ -35,6 +35,7 @@ public:
 	return sum;
     }
     smartiov slice(size_t off, size_t limit) {
+	assert(limit <= bytes());
 	smartiov other;
 	size_t len = limit - off;
 	for (auto it = iovs.begin(); it != iovs.end() && len > 0; it++) {
