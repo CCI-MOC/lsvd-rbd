@@ -28,12 +28,19 @@ namespace fs = std::experimental::filesystem;
 #include <random>
 #include <algorithm>
 #include <list>
+#include <atomic>
 
 #include <unistd.h>
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <string.h>
 #include <errno.h>
+
+std::mutex printf_m;
+#define xprintf(...) do { \
+	std::unique_lock lk(printf_m); \
+	printf(__VA_ARGS__); \
+    } while (0)
 
 struct _log {
     int l;
@@ -890,6 +897,7 @@ class read_cache {
 	lba_t lba = offset/512, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
 	std::shared_lock lk(omap->m);
+	std::unique_lock lk2(m);
 	for (auto it = omap->map.lookup(lba);
 	     it != omap->map.end() && it->base() < lba+sectors; it++) 
 	    extents.push_back(it->vals(lba, lba+sectors));
@@ -904,6 +912,7 @@ class read_cache {
 	 */
 	std::uniform_real_distribution<double> unif(0.0,1.0);
 	bool use_cache = unif(rng) < 2 * hit_rate;
+	lk2.unlock();
 	lk.unlock();
 	use_cache = false;
 
@@ -931,6 +940,8 @@ class read_cache {
 		
 		bool in_cache = false;
 		int n = -1;
+
+		lk2.lock();
 		auto it = map.find(unit);
 		if (it != map.end()) {
 		    n = it->second;
@@ -938,11 +949,11 @@ class read_cache {
 		    if ((access_mask & bitmap[n]) == access_mask)
 			in_cache = true;
 		}
-
 		if (in_cache)
 		    n_hits++;
 		else
 		    n_misses++;
+		lk2.unlock();
 		
 		if (in_cache) {
 		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
@@ -1559,10 +1570,12 @@ public:
     
     void aio_readv_thread(thread_pool<aio_readv_work*> *p) {
 	while (p->running) {
-	    std::unique_lock lk(m);
 	    aio_readv_work *w;
-	    if (!p->get(w))
+	    if (!p->get(w)) {
+		xprintf("get false\n");
 		break;
+	    }
+	    xprintf("aio_readv: %ld\n", w->offset/4096);
 	    readv(w->offset, w->iovs.data(), w->iovs.size(), w->misses);
 	    w->cb(w->ptr);
 	}
@@ -2023,7 +2036,7 @@ public:
     bool done;
     std::mutex m;
     std::condition_variable cv;
-    int refcount;
+    std::atomic<int> refcount;
 
     lsvd_completion() : done(false), refcount(0) {}
     void get(void) {
@@ -2125,8 +2138,6 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-#include <atomic>
-
 struct readv_state {
     int phase;
     rbd_image_t image;
@@ -2144,15 +2155,19 @@ struct readv_state {
     int    tmp_iovcnt;
     std::vector<write_cache::cache_miss> misses;
     std::atomic<int> n;
+    std::mutex m;		// to make valgrind happy
 
     readv_state(rbd_image_t _image, const iovec *_iov, int _iovcnt,
 		uint64_t _off, rbd_completion_t _c) :
 	phase(0), image(_image), iov(_iov), iovcnt(_iovcnt), off(_off), c(_c) {}
+    ~readv_state(){ std::unique_lock lk(m);}
 };
 
 void rbd_aio_readv_fsm(void *ptr)
 {
     readv_state *s = (readv_state*)ptr;
+    std::unique_lock lk(m);
+
     switch (s->phase) {
     case 0:
 	s->fri = (fake_rbd_image*)s->image;
@@ -2173,6 +2188,7 @@ void rbd_aio_readv_fsm(void *ptr)
 	    s->tmp_iovcnt = 1;
 	}
 	s->phase = 1;
+	lk.unlock();
 	s->fri->wcache->aio_readv(s->off, s->tmp_iov, s->tmp_iovcnt,
 				  &s->misses, rbd_aio_readv_fsm, ptr);
 	break;
@@ -2180,11 +2196,13 @@ void rbd_aio_readv_fsm(void *ptr)
     case 1:
 	if (s->misses.size() == 0) {
 	    s->phase = 3;
+	    lk.unlock();
 	    rbd_aio_readv_fsm(ptr);
 	}
 	else {
 	    auto iovs2 = smartiov(s->tmp_iov, s->tmp_iovcnt);
 	    s->phase = 2;
+	    lk.unlock();
 	    for (auto [_off, _len, buf_offset] : s->misses) {
 		auto slice = iovs2.slice(buf_offset, buf_offset+_len);
 		s->n++;
@@ -2197,11 +2215,12 @@ void rbd_aio_readv_fsm(void *ptr)
     case 2:
 	if (--(s->n) == 0) {
 	    s->phase = 3;
+	    lk.unlock();
 	    rbd_aio_readv_fsm(ptr);
 	}
 	break;
        
-    case 3:
+    case 3: {
 	if (s->aligned_buf) {
 	    s->iovs.copy_in(s->aligned_buf);
 	    free(s->aligned_buf);
@@ -2209,7 +2228,7 @@ void rbd_aio_readv_fsm(void *ptr)
 	s->p->complete(0);
 	s->p->put();
 	delete s;
-	break;
+    } break;
 	
     default:
 	assert(false);
