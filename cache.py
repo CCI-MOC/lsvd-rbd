@@ -7,6 +7,7 @@ import test3 as t3
 import uuid
 import blkdev
 import argparse
+import ctypes
 
 def prettyprint(p, insns):
     for field,fmt in insns:
@@ -92,9 +93,13 @@ if args.write and super.write_super < npages:
 
 if args.read and r_super:
     nbytes = r_super.units * lsvd.sizeof_obj_offset
-    print("map start:", r_super.map_start)
+    print("map start:   ", r_super.map_start)
+    print("bitmap start:", r_super.bitmap_start)
     buf = os.pread(fd, nbytes, r_super.map_start * 4096)
-    vals = (lsvd.obj_offset * r_super.units).from_buffer(bytearray(buf))
-    print("\nread map:")
-    for i in range(len(vals[:])):
-        print("%d %d %d" % (i, vals[i].obj, vals[i].offset))
+    oos = (lsvd.obj_offset * r_super.units).from_buffer(bytearray(buf))
+    buf = os.pread(fd, r_super.units*2, r_super.bitmap_start * 4096)
+    masks = (ctypes.c_uint16 * r_super.units).from_buffer(bytearray(buf))
+    print("\nread map / mask:")
+    for i in range(len(oos[:])):
+        a = "%d %d %d" % (i, oos[i].obj, oos[i].offset)
+        print(a + ' '*(16 - len(a)) + ("%04x" % masks[i]))
