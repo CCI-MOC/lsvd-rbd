@@ -896,7 +896,7 @@ class read_cache {
 
 	if (n_hits + n_misses >= 10000) {
 	    hit_rate = (hit_rate * 0.5) + (0.5 * n_hits) / (n_hits + n_misses);
-	    printf("\nhit rate: %f hits %d misses %d lines_read %d\n", hit_rate, n_hits, n_misses, n_lines_read);
+	    //printf("\nhit rate: %f hits %d misses %d lines_read %d\n", hit_rate, n_hits, n_misses, n_lines_read);
 	    n_hits = n_misses = 0;
 	}
 	/* hack for better random performance - if hit rate is less than 50%, gradually
@@ -905,6 +905,7 @@ class read_cache {
 	std::uniform_real_distribution<double> unif(0.0,1.0);
 	bool use_cache = unif(rng) < 2 * hit_rate;
 	lk.unlock();
+	use_cache = false;
 
 	std::vector<std::tuple<extmap::obj_offset,sector_t,char*>> to_add;
 	size_t buf_offset = 0;
@@ -1120,7 +1121,7 @@ public:
 	    busy.push_back(false);
 	map_dirty = false;
 
-	for (int i = 0; i < 12; i++)
+	for (int i = 0; i < 4; i++)
 	    workers.pool.push(std::thread(&read_cache::reader, this, &workers));
 	if (!nothreads)
 	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
@@ -1225,6 +1226,7 @@ class write_cache {
     extmap::cachemap2 rmap;
     std::map<page_t,int> lengths;
     translate        *be;
+    bool              map_dirty;
     
     thread_pool<cache_work*> workers;
     thread_pool<int>          misc_threads;
@@ -1356,6 +1358,7 @@ class write_cache {
 		map.update(w->lba, w->lba + w->sectors, plba, &garbage);
 		rmap.update(plba, plba+w->sectors, w->lba);
 		plba += sectors;
+		map_dirty = true;
 	    }
 	    for (auto it = garbage.begin(); it != garbage.end(); it++) {
 		rmap.trim(it->s.base, it->s.base+it->s.len);
@@ -1534,11 +1537,38 @@ class write_cache {
 	free(buf);
 	free(super_copy);
 	free(e_buf);
+	map_dirty = false;
     }
-    
 
 public:
-    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m), misc_threads(&m) {
+    typedef std::tuple<size_t,size_t,size_t> cache_miss;
+    
+    class aio_readv_work {
+    public:
+	size_t offset;
+	smartiov iovs;
+	std::vector<cache_miss> *misses;
+	void (*cb)(void*);
+	void *ptr;
+	aio_readv_work() : offset(0), misses(NULL), cb(NULL), ptr(NULL){}
+	aio_readv_work(size_t _offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *_misses,
+		       void (*_cb)(void*), void *_ptr) : offset(_offset), iovs(iov, iovcnt), misses(_misses), cb(_cb), ptr(_ptr) {}
+    };
+
+    thread_pool<aio_readv_work*> readv_workers;
+    
+    void aio_readv_thread(thread_pool<aio_readv_work*> *p) {
+	while (p->running) {
+	    std::unique_lock lk(m);
+	    aio_readv_work *w;
+	    if (!p->get(w))
+		break;
+	    readv(w->offset, w->iovs.data(), w->iovs.size(), w->misses);
+	    w->cb(w->ptr);
+	}
+    }
+
+    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m), misc_threads(&m), readv_workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
@@ -1548,7 +1578,8 @@ public:
 	super = (j_write_super*)buf;
 	pad_page = (char*)aligned_alloc(512, 4096);
 	memset(pad_page, 0, 4096);
-
+	map_dirty = false;
+	
 	if (super->map_entries) {
 	    size_t map_bytes = super->map_entries * sizeof(j_map_extent),
 		map_bytes_rounded = round_up(map_bytes, 4096);
@@ -1571,6 +1602,9 @@ public:
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
+	for (auto i = 0; i < 4; i++)
+	    readv_workers.pool.push(std::thread(&write_cache::aio_readv_thread, this, &readv_workers));
+	
 	misc_threads.pool.push(std::thread(&write_cache::evict_thread, this, &misc_threads));
     }
     ~write_cache() {
@@ -1586,10 +1620,9 @@ public:
    /* returns tuples of:
      * offset, len, buf_offset
      */
-    typedef std::tuple<size_t,size_t,size_t> cache_miss;
 
     // TODO: how the hell to handle fragments?
-    void readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> &misses) {
+    void readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *misses) {
 	auto iovs = smartiov(iov, iovcnt);
 	auto bytes = iovs.bytes();
 
@@ -1601,7 +1634,7 @@ public:
 	    auto [_base, _limit, plba] = it->vals(base, limit);
 	    if (_base > prev) {
 		size_t bytes = 512 * (_base - prev);
-		misses.push_back(std::tuple((size_t)512*prev, bytes, buf_offset));
+		misses->push_back(std::tuple((size_t)512*prev, bytes, buf_offset));
 		buf_offset += bytes;
 	    }
 
@@ -1618,7 +1651,13 @@ public:
 	    prev = _limit;
 	}
 	if (prev < limit)
-	    misses.push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
+	    misses->push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
+    }
+
+    
+    void aio_readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *misses, void (*cb)(void*), void *ptr) {
+	auto w = new aio_readv_work(offset, iov, iovcnt, misses, cb, ptr);
+	readv_workers.put(w);
     }
     
     // debugging
@@ -1639,7 +1678,8 @@ public:
 	return get_oldest(blk, extents);
     }
     void do_write_checkpoint(void) {
-	write_checkpoint();
+	if (map_dirty)
+	    write_checkpoint();
     }
 };
 
@@ -1706,7 +1746,7 @@ extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len)
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     iovec iov = {buf2, len};
     std::vector<write_cache::cache_miss> misses;
-    wcache->readv(offset, &iov, 1, misses);
+    wcache->readv(offset, &iov, 1, &misses);
 
     memcpy(buf, buf2, len);
     free(buf2);
@@ -2087,72 +2127,100 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
 
 #include <atomic>
 
-struct waitq2 {
-public:
-    std::atomic<int> n;
+struct readv_state {
+    int phase;
+    rbd_image_t image;
+    const iovec *iov;
+    int iovcnt;
+    uint64_t off;
+    rbd_completion_t c;
+    
+    fake_rbd_image *fri;
     lsvd_completion *p;
-    char *buf;
+    char *aligned_buf;
     smartiov iovs;
-    waitq2(iovec *iov, int iovcnt, char *_buf, lsvd_completion *_p) :
-	n(0), p(_p), buf(_buf), iovs(iov, iovcnt) {}
+    iovec tmp;
+    const iovec *tmp_iov;
+    int    tmp_iovcnt;
+    std::vector<write_cache::cache_miss> misses;
+    std::atomic<int> n;
+
+    readv_state(rbd_image_t _image, const iovec *_iov, int _iovcnt,
+		uint64_t _off, rbd_completion_t _c) :
+	phase(0), image(_image), iov(_iov), iovcnt(_iovcnt), off(_off), c(_c) {}
 };
 
-static void waitq2_cb(void *ptr)
+void rbd_aio_readv_fsm(void *ptr)
 {
-    waitq2 *q2 = (waitq2*)ptr;
-    auto n = --(q2->n);
+    readv_state *s = (readv_state*)ptr;
+    switch (s->phase) {
+    case 0:
+	s->fri = (fake_rbd_image*)s->image;
+	s->p = (lsvd_completion*)s->c;
+	s->p->fri = s->fri;
+	s->p->get();
 
-    DBG((long)q2->p);
-    if (n <= 0) {
-	if (q2->buf) {
-	    q2->iovs.copy_in(q2->buf);
-	    free(q2->buf);
+	s->aligned_buf = NULL;
+	s->iovs.ingest(s->iov, s->iovcnt);
+	s->tmp_iov = s->iov;
+	s->tmp_iovcnt = s->iovcnt;
+
+	if (!s->iovs.aligned(512)) {
+	    s->aligned_buf = (char*)aligned_alloc(512, s->iovs.bytes());
+	    s->iovs.copy_out(s->aligned_buf);
+	    s->tmp = (iovec){s->aligned_buf, s->iovs.bytes()};
+	    s->tmp_iov = &s->tmp;
+	    s->tmp_iovcnt = 1;
 	}
-	q2->p->complete(0);
-	q2->p->put();
-	delete q2;
+	s->phase = 1;
+	s->fri->wcache->aio_readv(s->off, s->tmp_iov, s->tmp_iovcnt,
+				  &s->misses, rbd_aio_readv_fsm, ptr);
+	break;
+	
+    case 1:
+	if (s->misses.size() == 0) {
+	    s->phase = 3;
+	    rbd_aio_readv_fsm(ptr);
+	}
+	else {
+	    auto iovs2 = smartiov(s->tmp_iov, s->tmp_iovcnt);
+	    s->phase = 2;
+	    for (auto [_off, _len, buf_offset] : s->misses) {
+		auto slice = iovs2.slice(buf_offset, buf_offset+_len);
+		s->n++;
+		s->fri->rcache->readv(_off, slice.data(), slice.size(),
+				      rbd_aio_readv_fsm, ptr);
+	    }
+	}
+	break;
+	
+    case 2:
+	if (--(s->n) == 0) {
+	    s->phase = 3;
+	    rbd_aio_readv_fsm(ptr);
+	}
+	break;
+       
+    case 3:
+	if (s->aligned_buf) {
+	    s->iovs.copy_in(s->aligned_buf);
+	    free(s->aligned_buf);
+	}
+	s->p->complete(0);
+	s->p->put();
+	delete s;
+	break;
+	
+    default:
+	assert(false);
     }
 }
 
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t off, rbd_completion_t c)
 {
-    fake_rbd_image *fri = (fake_rbd_image*)image;
-    lsvd_completion *p = (lsvd_completion *)c;
-    p->fri = fri;
-    p->get();
-    
-    char *aligned_buf = NULL;
-    auto iovs = smartiov(iov, iovcnt);
-    iovec tmp;
-    auto tmp_iov = iov;
-    auto tmp_iovcnt = iovcnt;
-    
-    if (!iovs.aligned(512)) {
-	aligned_buf = (char*)aligned_alloc(512, iovs.bytes());
-	iovs.copy_out(aligned_buf);
-	tmp = (iovec){aligned_buf, iovs.bytes()};
-	tmp_iov = &tmp;
-	tmp_iovcnt = 1;
-    }
-
-    std::vector<write_cache::cache_miss> misses;
-    DBG((long)c);
-    fri->wcache->readv(off, tmp_iov, tmp_iovcnt, misses);
-    
-    auto q2 = new waitq2(iovs.data(), iovs.size(), aligned_buf, p);
-    auto iovs2 = smartiov(tmp_iov, tmp_iovcnt);
-
-    if (misses.size() == 0) {
-	waitq2_cb((void*)q2);
-    }
-    else for (auto [_off, _len, buf_offset] : misses) {
-	DBG((long)c);
-	auto slice = iovs2.slice(buf_offset, buf_offset+_len);
-	++(q2->n);
-	fri->rcache->readv(_off, slice.data(), slice.size(), waitq2_cb, (void*)q2);
-    }
-
+    auto s = new readv_state(image, iov, iovcnt, off, c);
+    rbd_aio_readv_fsm((void*)s);
     return 0;
 }
 
