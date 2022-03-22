@@ -15,6 +15,10 @@ public:
     void push_back(const iovec &iov) {
 	iovs.push_back(iov);
     }
+    void ingest(const iovec *iov, int iovcnt) {
+	for (int i = 0; i < iovcnt; i++)
+	    iovs.push_back(iov[i]);
+    }
     iovec *data(void) {
 	return iovs.data();
     }
