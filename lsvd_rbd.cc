@@ -541,7 +541,8 @@ public:
 	}
 	if (current_batch)
 	    delete current_batch;
-	free(super);
+	if (super)
+	    free(super);
     }
     
     /* returns sequence number of ckpt
@@ -671,7 +672,6 @@ public:
 		object_info[ptr.obj].live -= (limit - base);
 	    }
 	}
-	
 	
 	return len;
     }
@@ -2180,8 +2180,8 @@ void rbd_aio_readv_fsm(void *ptr)
 
 	s->aligned_buf = NULL;
 	s->iovs.ingest(s->iov, s->iovcnt);
-	s->tmp_iov = s->iov;
-	s->tmp_iovcnt = s->iovcnt;
+	s->tmp_iov = s->iovs.data();
+	s->tmp_iovcnt = s->iovs.size();
 
 	if (!s->iovs.aligned(512)) {
 	    s->aligned_buf = (char*)aligned_alloc(512, s->iovs.bytes());
