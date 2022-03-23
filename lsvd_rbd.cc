@@ -39,7 +39,7 @@ namespace fs = std::experimental::filesystem;
 std::mutex printf_m;
 #define xprintf(...) do { \
 	std::unique_lock lk(printf_m); \
-	printf(__VA_ARGS__); \
+	fprintf(stderr, __VA_ARGS__); \
     } while (0)
 
 struct _log {
@@ -846,6 +846,8 @@ class read_cache {
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	for (int i = 0; i < n; i++) {
 	    int j = uni(rng);
+	    while (flat_map[j].obj == 0)
+		j = uni(rng);
 	    bitmap[j] = 0;
 	    auto oo = flat_map[j];
 	    flat_map[j] = (extmap::obj_offset){0, 0};
@@ -889,7 +891,7 @@ class read_cache {
 	}
     }
 
-    int n_lines_read;
+    int n_lines_read = 0;
     
     void do_readv(size_t offset, const iovec *iov, int iovcnt) {
 	auto iovs = smartiov(iov, iovcnt);
@@ -904,7 +906,7 @@ class read_cache {
 
 	if (n_hits + n_misses >= 10000) {
 	    hit_rate = (hit_rate * 0.5) + (0.5 * n_hits) / (n_hits + n_misses);
-	    //printf("\nhit rate: %f hits %d misses %d lines_read %d\n", hit_rate, n_hits, n_misses, n_lines_read);
+	    //xprintf("hit rate: %f hits %d misses %d lines_read %d\n", hit_rate, n_hits, n_misses, n_lines_read);
 	    n_hits = n_misses = 0;
 	}
 	/* hack for better random performance - if hit rate is less than 50%, gradually
@@ -914,7 +916,6 @@ class read_cache {
 	bool use_cache = unif(rng) < 2 * hit_rate;
 	lk2.unlock();
 	lk.unlock();
-	use_cache = false;
 
 	std::vector<std::tuple<extmap::obj_offset,sector_t,char*>> to_add;
 	size_t buf_offset = 0;
@@ -954,7 +955,7 @@ class read_cache {
 		else
 		    n_misses++;
 		lk2.unlock();
-		
+
 		if (in_cache) {
 		    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 			start = blk_in_ssd + blk_offset,
@@ -1044,7 +1045,7 @@ public:
 		free_blks.pop_back();
 	    }
 	    else {
-		//printf("\nADD: no space\n");
+		//xprintf("ADD %d.%d: no space\n", oo.obj, oo.offset);
 		return;
 	    }
 	    while (busy[cache_blk])
@@ -1120,8 +1121,9 @@ public:
 	    throw_fs_error("rcache3");
 
 	for (int i = 0; i < super->units; i++)
-	    if (flat_map[i].obj != 0)
+	    if (flat_map[i].obj != 0) {
 		map[flat_map[i]] = i;
+	    }
 	    else {
 		free_blks.push_back(i);
 		bitmap[i] = 0;
@@ -1132,7 +1134,7 @@ public:
 	    busy.push_back(false);
 	map_dirty = false;
 
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 6; i++)
 	    workers.pool.push(std::thread(&read_cache::reader, this, &workers));
 	if (!nothreads)
 	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
@@ -1615,7 +1617,7 @@ public:
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
-	for (auto i = 0; i < 4; i++)
+	for (auto i = 0; i < 6; i++)
 	    readv_workers.pool.push(std::thread(&write_cache::aio_readv_thread, this, &readv_workers));
 
 	misc_threads = new thread_pool<int>(&m);
