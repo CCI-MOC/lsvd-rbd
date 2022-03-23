@@ -332,6 +332,11 @@ class j_map_extent(LittleEndianStructure):
                 ("page", c_uint)]
 sizeof_j_map_extent = sizeof(j_map_extent)
 
+class j_length(Structure):
+    _fields_ = [("page", c_uint),
+                ("len", c_uint)]
+sizeof_j_length = sizeof(j_length)
+
 LSVD_J_DATA    = 10
 LSVD_J_CKPT    = 11
 LSVD_J_PAD     = 12
@@ -363,7 +368,10 @@ class j_write_super(Structure):
                 ("oldest",      c_uint),
                 ("map_start",   c_uint),
                 ("map_blocks",  c_uint),
-                ("map_entries", c_uint)]
+                ("map_entries", c_uint),
+                ("len_start",   c_uint),
+                ("len_blocks",  c_uint),
+                ("len_entries", c_uint)]
 sizeof_j_write_super = sizeof(j_write_super)
 
 class j_read_super(Structure):

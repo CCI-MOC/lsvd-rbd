@@ -352,8 +352,6 @@ class translate {
 	return 0;
     }
 
-    /* TODO: object list
-     */
     int write_checkpoint(int seq) {
 	std::vector<ckpt_mapentry> entries;
 	std::vector<ckpt_obj> objects;
@@ -1319,7 +1317,7 @@ class write_cache {
 
 	    if (pad != 0) {
 		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
-		assert(pad < super->limit);
+		assert(pad < (int)super->limit);
 		if (pwrite(fd, buf, 4096, pad*4096) < 0)
 		    throw_fs_error("wpad");
 	    }
@@ -1354,7 +1352,7 @@ class write_cache {
 	    if (pad_sectors > 0)
 		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
 
-	    assert(blockno + div_round_up(iovs.bytes(), 4096) <= super->limit);
+	    assert(blockno + div_round_up(iovs.bytes(), 4096) <= (int)super->limit);
 	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096) < 0)
 		throw_fs_error("wdata");
 
@@ -1444,10 +1442,11 @@ class write_cache {
 	const int evict_max_mb = 100;
 	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
 			       evict_max_mb * (1024*1024/4096));
+	auto t0 = std::chrono::system_clock::now();
+	auto super_timeout = std::chrono::milliseconds(500);
+	
 //	int trigger = 100;
 
-	// TODO - fix this by finding the entries deleted when we update the forward
-	// map, then delete them from the rmap.
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
 	    p->cv.wait_for(lk, period);
@@ -1465,11 +1464,12 @@ class write_cache {
 		     * up to date, so we don't need to check them against the forward map.
 		     */
 		    auto len = lengths[oldest];
+		    assert(len > 0);
 		    lengths.erase(oldest);
 		    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
 		    for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
 			auto [p_base, p_limit, vlba] = it->vals(base, limit);
-			to_delete.push_back((j_extent){vlba, p_limit-p_base});
+			to_delete.push_back((j_extent){(uint64_t)vlba, (uint64_t)p_limit-p_base});
 		    }
 		    rmap.trim(base, limit);
 		    oldest += len;
@@ -1479,13 +1479,19 @@ class write_cache {
 		
 		/* TODO: unlock, read the data and add to read cache, re-lock
 		 */
-		super->oldest = oldest;
-//		if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
-//		    throw_fs_error("wsuper_rewrite");
-		
+
+		super->oldest = oldest;		
 		for (auto e : to_delete)
 		    map.trim(e.lba, e.lba + e.len);
 		alloc_cv.notify_all();
+
+		lk.unlock();
+		auto t = std::chrono::system_clock::now();
+		if (t - t0 >= super_timeout) {
+		    if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
+			throw_fs_error("wsuper_rewrite");
+		    t0 = t;
+		}
 	    }
 	}
     }
@@ -1511,8 +1517,10 @@ class write_cache {
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
 
 	std::unique_lock<std::mutex> lk(m);
-	size_t ckpt_bytes = map.size() * sizeof(j_map_extent);
-	page_t ckpt_pages = div_round_up(ckpt_bytes, 4096);
+	size_t map_bytes = map.size() * sizeof(j_map_extent);
+	size_t len_bytes = lengths.size() * sizeof(j_length);
+	page_t map_pages = div_round_up(map_bytes, 4096), len_pages = div_round_up(len_bytes, 4096),
+	    ckpt_pages = map_pages + len_pages;
 	lk.unlock();		// TODO: HACK
 	page_t pad, blockno = allocate(ckpt_pages+1, pad);
 	lk.lock();
@@ -1522,6 +1530,9 @@ class write_cache {
 	    extents.push_back((j_map_extent){(uint64_t)it->s.base, (uint64_t)it->s.len,
 			(uint32_t)it->s.ptr/8});
 	memcpy(super_copy, super, 4096);
+	std::vector<j_length> _lengths;
+	for (auto it = lengths.begin(); it != lengths.end(); it++)
+	    _lengths.push_back((j_length){it->first, it->second});
 	lk.unlock();
 
 	if (pad != 0) {
@@ -1532,13 +1543,22 @@ class write_cache {
 
 	mk_header(buf, LSVD_J_CKPT, my_uuid, 1+ckpt_pages);
 	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
-	memcpy(e_buf, extents.data(), ckpt_bytes);
-	if (ckpt_bytes % 4096)	// make valgrind happy
-	    memset(e_buf + ckpt_bytes, 0, 4096 - (ckpt_bytes % 4096));
+	memcpy(e_buf, extents.data(), map_bytes);
+	if (map_bytes % 4096)	// make valgrind happy
+	    memset(e_buf + map_bytes, 0, 4096 - (map_bytes % 4096));
+
+	char *l_buf = e_buf + map_pages*4096;
+	memcpy(l_buf, _lengths.data(), len_bytes);
+	if (len_bytes % 4096)	// make valgrind happy
+	    memset(l_buf + len_bytes, 0, 4096 - (len_bytes % 4096));
 	
 	super_copy->map_start = super->map_start = blockno+1;
-	super_copy->map_blocks = super->map_blocks = ckpt_pages;
+	super_copy->map_blocks = super->map_blocks = map_pages;
 	super_copy->map_entries = super->map_entries = extents.size();
+
+	super_copy->len_start = super->len_start = blockno+1+map_pages;
+	super_copy->len_blocks = super->len_blocks = len_pages;
+	super_copy->len_entries = super->len_entries = lengths.size();
 	
 	std::vector<iovec> iovs;
 	iovs.push_back((iovec){buf, 4096});
@@ -1603,17 +1623,32 @@ public:
 	    if (pread(fd, map_buf, map_bytes_rounded, 4096 * super->map_start) < 0)
 		throw_fs_error("wcache_map");
 	    decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
-	    for (auto e : extents)
+	    for (auto e : extents) {
 		map.update(e.lba, e.lba+e.len, e.page*8);
+		rmap.update(e.page * 8, e.page*8 + e.len, e.lba);
+	    }
 	    free(map_buf);
+
+	    size_t len_bytes = super->len_entries * sizeof(j_length),
+		len_bytes_rounded = round_up(len_bytes, 4096);
+	    char *len_buf = (char*)aligned_alloc(512, len_bytes_rounded);
+	    std::vector<j_length> _lengths;
+	    if (pread(fd, len_buf, len_bytes_rounded, 4096 * super->len_start) < 0)
+		throw_fs_error("wcache_len");
+	    decode_offset_len<j_length>(len_buf, 0, len_bytes, _lengths);
+	    for (auto l : _lengths) 
+		lengths[l.page] = l.len;
+	    free(len_buf);
 	}
 
+	/* TODO TODO TODO - need to roll log forward
+	 */
 	auto N = super->limit - super->base;
 	if (super->oldest == super->next)
 	    nfree = N - 1;
 	else
 	    nfree = (super->oldest + N - super->next) % N;
-	    
+
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));

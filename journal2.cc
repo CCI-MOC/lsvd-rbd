@@ -14,6 +14,11 @@ struct j_map_extent {
     uint32_t page;		// on-SSD 4KB page
 } __attribute__((packed));
 
+struct j_length {
+    int32_t page;		// in pages
+    int32_t len;		// in pages
+};
+
 enum {LSVD_J_DATA    = 10,
       LSVD_J_CKPT    = 11,
       LSVD_J_PAD     = 12,
@@ -60,9 +65,13 @@ struct j_write_super {
      * - write LSVD_J_CKPT header + map entries
      * - overwrite the write superblock
      */
-    uint32_t map_start;
+    uint32_t map_start;		// type: j_map_extent
     uint32_t map_blocks;
     uint32_t map_entries;
+
+    uint32_t len_start;	// type: j_length
+    uint32_t len_blocks;
+    uint32_t len_entries;
 };
 
 /* probably in the third 4KB block, never gets overwritten (overwrite map in place)
