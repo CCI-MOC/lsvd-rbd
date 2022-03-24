@@ -32,7 +32,8 @@ hdr_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
 
 wsup_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
                ['seq', '%d'], ['base', '%d'], ['limit', '%d'],
-               ['next', '%d'], ['oldest', '%d']]
+               ['next', '%d'], ['oldest', '%d'], ['map_start', '%d'], ['map_entries', '%d'],
+               ['len_start', '%d'], ['len_entries', '%d']]
 
 rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["unit_size", '%d'], 
                ["base", '%d'], ["units", '%d'], ["map_start", '%d'],["map_blocks", '%d'],
@@ -72,6 +73,12 @@ def read_exts(b, npgs, n):
     e = (lsvd.j_map_extent*n).from_buffer(bytearray(buf[0:bytes]))
     return [(_.lba, _.len, _.page) for _ in e]
 
+def read_lens(b, npgs, n):
+    buf = os.pread(fd, npgs*4096, b*4096)
+    bytes = n*lsvd.sizeof_j_length
+    l = (lsvd.j_length*n).from_buffer(bytearray(buf[0:bytes]))
+    return [(_.page, _.len) for _ in l]
+    
 if args.write and super.write_super < npages:
     b = w_super.oldest
     while True:
@@ -81,9 +88,13 @@ if args.write and super.write_super < npages:
         if j.magic != lsvd.LSVD_MAGIC:
             break
         if j.type == lsvd.LSVD_J_CKPT:
-            print('\ncheckpoint:', b)
-            e = read_exts(b+1, j.len - 1, w_super.map_entries)
+            print('\ncheckpoint - map:', b)
+            e = read_exts(b+1, w_super.map_blocks, w_super.map_entries)
             print(' '.join(['(%d+%d->%d)' % _ for _ in e]))
+            print('\ncheckpoint - lengths:', )
+            l = read_lens(b+1+w_super.map_blocks, w_super.len_blocks, w_super.len_entries)
+            print(' '.join(['([%d]=%d)' % _ for _ in l]))
+            
         else:
             h_pp = [["magic", magic], ["type", fieldnames], ["seq", '%d'], ["len", '%d']]
             print('\ndata: (%d)' % b)
