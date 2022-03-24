@@ -57,7 +57,7 @@ static struct bdus_attrs device_attrs =
     .size               = 1 << 30, // 1 GiB
     .logical_block_size = 512,
     .dont_daemonize     = 1,
-    .max_concurrent_callbacks = 16,
+//    .max_concurrent_callbacks = 16,
 };
 
 int main(int argc, char **argv)
