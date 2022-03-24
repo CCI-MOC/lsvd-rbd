@@ -24,11 +24,11 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
     data += b'\0' * (4096-len(data))
     os.write(fd, data) # page 0
 
-    # assuming 4KB min write size, write cache has max metadata of 12 bytes
+    # assuming 4KB min write size, write cache has max metadata of 16 bytes
     # extent + 8 bytes length per 8KB (header + block), but we need an integer
     # number of pages for each section, and enough room for 2.
     #
-    _map = div_round_up(wblks, 600)
+    _map = div_round_up(wblks, 512)
     _len = div_round_up(wblks, 1024)
     mblks = 2 * (_map + _len)
     wblks -= mblks

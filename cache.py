@@ -73,7 +73,7 @@ def read_exts(b, npgs, n):
     buf = os.pread(fd, npgs*4096, b*4096)
     bytes = n*lsvd.sizeof_j_map_extent
     e = (lsvd.j_map_extent*n).from_buffer(bytearray(buf[0:bytes]))
-    return [(_.lba, _.len, _.page) for _ in e]
+    return [(_.lba, _.len, _.plba) for _ in e]
 
 def read_lens(b, npgs, n):
     buf = os.pread(fd, npgs*4096, b*4096)

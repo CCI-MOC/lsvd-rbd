@@ -8,11 +8,12 @@ struct j_extent {
     uint64_t len : 24;		// length (sectors)
 } __attribute__((packed));
 
+// could do a horrible hack to make this 14 bytes, but not worth it
 struct j_map_extent {
     uint64_t lba : 40;		// volume LBA (in sectors)
     uint64_t len : 24;		// length (sectors)
-    uint32_t page;		// on-SSD 4KB page
-} __attribute__((packed));
+    uint64_t plba;		// on-SSD LBA
+};
 
 struct j_length {
     int32_t page;		// in pages

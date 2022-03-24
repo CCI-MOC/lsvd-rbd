@@ -327,9 +327,9 @@ sizeof_j_extent = sizeof(j_extent)
 
 class j_map_extent(LittleEndianStructure):
     _pack_ = 1
-    _fields_ = [("lba", c_ulong, 40),
-                ("len", c_ulong, 24),
-                ("page", c_uint)]
+    _fields_ = [("lba",  c_ulong, 40),
+                ("len",  c_ulong, 24),
+                ("plba", c_ulong)]
 sizeof_j_map_extent = sizeof(j_map_extent)
 
 class j_length(Structure):

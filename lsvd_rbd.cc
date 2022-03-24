@@ -1544,7 +1544,7 @@ class write_cache {
 	if (map.size() > 0)
 	    for (auto it = map.begin(); it != map.end(); it++)
 		_extents.push_back((j_map_extent){(uint64_t)it->s.base,
-			    (uint64_t)it->s.len, (uint32_t)it->s.ptr/8});
+			    (uint64_t)it->s.len, (uint32_t)it->s.ptr});
 	std::vector<j_length> _lengths;
 	for (auto it = lengths.begin(); it != lengths.end(); it++)
 	    _lengths.push_back((j_length){it->first, it->second});
@@ -1609,7 +1609,8 @@ public:
 	}
     }
 
-    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m), readv_workers(&m) {
+    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) :
+	workers(&m), readv_workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
 	be = _be;
@@ -1630,8 +1631,8 @@ public:
 		throw_fs_error("wcache_map");
 	    decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
 	    for (auto e : extents) {
-		map.update(e.lba, e.lba+e.len, e.page*8);
-		rmap.update(e.page * 8, e.page*8 + e.len, e.lba);
+		map.update(e.lba, e.lba+e.len, e.plba);
+		rmap.update(e.plba, e.plba + e.len, e.lba);
 	    }
 	    free(map_buf);
 
