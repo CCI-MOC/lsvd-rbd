@@ -1183,9 +1183,6 @@ public:
     file_backend(const char *_prefix) {
 	prefix = strdup(_prefix);
     }
-    ~file_backend() {
-	free((void*)prefix);
-    }
     ssize_t write_object(const char *name, iovec *iov, int iovcnt) {
 	int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0777);
 	if (fd < 0)
@@ -1208,9 +1205,37 @@ public:
 	    throw_fs_error("read_obj");
 	return val;
     }
+
+    std::map<int,int> cached_fds;
+    std::queue<int>   cached_nums;
+    static const int  fd_cache_size = 500;
     ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
-	auto name = std::string(prefix) + "." + hex(seq);
-	return read_object(name.c_str(), buf, offset, len);
+	auto fd = -1;
+	auto it = cached_fds.find(seq);
+	if (it != cached_fds.end())
+	    fd = cached_fds[seq];
+	else {
+	    if (cached_nums.size() >= fd_cache_size) {
+		auto num = cached_nums.front();
+		close(cached_fds[num]);
+		cached_fds.erase(num);
+		cached_nums.pop();
+	    }
+	    auto name = std::string(prefix) + "." + hex(seq);
+	    if ((fd = open(name.c_str(), O_RDONLY)) < 0)
+		throw_fs_error("read_obj_open");
+	    cached_fds[seq] = fd;
+	    cached_nums.push(seq);
+	}
+	auto val = pread(fd, buf, len, offset);
+	if (val < 0)
+	    throw_fs_error("read_obj");
+	return val;
+    }
+    ~file_backend() {
+	free((void*)prefix);
+	for (auto it = cached_fds.begin(); it != cached_fds.end(); it++)
+	    close(it->second);
     }
     std::string object_name(int seq) {
 	return std::string(prefix) + "." + hex(seq);
