@@ -135,4 +135,5 @@ if args.read and r_super:
     print("\nread map / mask:")
     for i in range(len(oos[:])):
         a = "%d %d %d" % (i, oos[i].obj, oos[i].offset)
-        print(a + ' '*(16 - len(a)) + ("%04x" % masks[i]))
+        if masks[i]:
+            print(a + ' '*(16 - len(a)) + ("%04x" % masks[i]))

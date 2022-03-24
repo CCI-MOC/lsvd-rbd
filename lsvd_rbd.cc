@@ -898,11 +898,15 @@ class read_cache {
 	size_t len = iovs.bytes();
 	lba_t lba = offset/512, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
+	xprintf("rc: do_readv %d+%d\n", (int)lba, (int)sectors);
 	std::shared_lock lk(omap->m);
 	std::unique_lock lk2(m);
 	for (auto it = omap->map.lookup(lba);
-	     it != omap->map.end() && it->base() < lba+sectors; it++) 
+	     it != omap->map.end() && it->base() < lba+sectors; it++) {
+	    auto [_b, _l, _p] = it->vals(lba, lba+sectors);
+	    xprintf("rc: map: %d+%d -> %d+%d\n", (int)lba, (int)sectors, (int)_b, (int)(_l-_b));
 	    extents.push_back(it->vals(lba, lba+sectors));
+	}
 
 	if (n_hits + n_misses >= 10000) {
 	    hit_rate = (hit_rate * 0.5) + (0.5 * n_hits) / (n_hits + n_misses);
@@ -928,6 +932,7 @@ class read_cache {
 		auto bytes = (base-lba)*512;
 		iovs.slice(buf_offset, buf_offset+bytes).zero();
 		len -= bytes;
+		xprintf("rc: readzero: %d+%d\n", (int)base, (int)lba);
 	    }
 	    while (base < limit) {
 		extmap::obj_offset unit = {ptr.obj, ptr.offset / unit_sectors};
@@ -961,7 +966,8 @@ class read_cache {
 			start = blk_in_ssd + blk_offset,
 			finish = start + (blk_top_offset - blk_offset);
 		    size_t bytes = 512 * (finish - start);
-		    
+
+		    xprintf("rc: %d+%d in_cache: %d\n", (int)base, (int)bytes/512, (int)start);
 		    auto tmp = iovs.slice(buf_offset, buf_offset+bytes);
 		    if (preadv(fd, tmp.data(), tmp.size(), 512*start) < 0)
 			throw_fs_error("rcache");
@@ -974,6 +980,7 @@ class read_cache {
 		else if (!use_cache) {
 		    lba_t sectors = limit - base;
 		    char *buf = (char*)malloc(512 * sectors);
+		    xprintf("rc: %d+%d rd_obj: %d+%d\n", (int)base, (int)sectors, (int)ptr.obj, (int)ptr.offset);
 		    auto bytes = io->read_numbered_object(ptr.obj, buf, 512 * ptr.offset, 512 * sectors);
 		    iovs.slice(buf_offset, buf_offset + 512 * sectors).copy_in(buf);
 		    free(buf);
@@ -989,6 +996,7 @@ class read_cache {
                     size_t start = 512 * blk_offset,
 			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
+		    xprintf("rc: %d+%d put in cache\n", (int)base, (int)(limit-base));
 
 		    iovs.slice(buf_offset,
 			       buf_offset+(finish-start)).copy_in(cache_line+start);
@@ -1003,8 +1011,10 @@ class read_cache {
 	    }
 	    lba = limit;
 	}
-	if (len > 0)
+	if (len > 0) {
+	    xprintf("rc: zero %d+%d\n", (int)buf_offset, (int)len);
 	    iovs.slice(buf_offset, buf_offset+len).zero();
+	}
 
 	// now read is finished, and we can add shit to the cache
 	for (auto [oo, n, cache_line] : to_add) {
