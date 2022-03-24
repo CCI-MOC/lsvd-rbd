@@ -1,5 +1,9 @@
 # new-lsvd
 
+### 3/23/22
+
+- the whole idea of putting checkpoints inline with the rest of the write cache may be flawed. Maybe we should reserve a section - worst case is 20B for 8KB. (well, worst case is a bit more than that, since in theory we could have a bunch of single-sector writes. Worst is actually 12*8+8 = 104B per 8k, but that's still less than 2%)
+
 ### 3/21/22
 
 - fixed the bug that was overwriting the read cache map

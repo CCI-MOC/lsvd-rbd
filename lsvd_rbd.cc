@@ -1360,9 +1360,15 @@ class write_cache {
 	     * Note that map is in units of *sectors*, not blocks 
 	     */
 	    lk.lock();
-	    if (pad != 0)
+	    if (pad != 0) {
 		lengths[pad] = super->limit - pad;
+		assert(lengths[pad] > 0);
+		xprintf("lens[%d] <- %d\n", pad, super->limit - pad);
+	    }
+	    xprintf("lens[%d] <- %d\n", blockno, blocks+1);
 	    lengths[blockno] = blocks+1;
+	    assert(lengths[blockno] > 0);
+	    
 	    lba_t plba = (blockno+1) * 8;
 	    std::vector<extmap::lba2lba> garbage;
 	    for (auto w : work) {
@@ -1464,6 +1470,7 @@ class write_cache {
 		     * up to date, so we don't need to check them against the forward map.
 		     */
 		    auto len = lengths[oldest];
+		    xprintf("lens[%d] : %d\n", oldest, len);
 		    assert(len > 0);
 		    lengths.erase(oldest);
 		    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
@@ -1486,6 +1493,8 @@ class write_cache {
 		alloc_cv.notify_all();
 
 		lk.unlock();
+		write_checkpoint();
+		
 		auto t = std::chrono::system_clock::now();
 		if (t - t0 >= super_timeout) {
 		    if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
@@ -1499,13 +1508,19 @@ class write_cache {
     void ckpt_thread(thread_pool<int> *p) {
 	auto next0 = super->next, N = super->limit - super->base;
 	auto period = std::chrono::milliseconds(100);
+	auto t0 = std::chrono::system_clock::now();
+	auto timeout = std::chrono::seconds(5);
 	const int ckpt_interval = N / 8;
 
 	while (p->running) {
 	    std::unique_lock lk(m);
 	    p->cv.wait_for(lk, period);
-	    if (p->running && (int)(super->next + N - next0) > ckpt_interval) {
+	    auto t = std::chrono::system_clock::now();
+	    bool do_ckpt = (int)(super->next + N - next0) % N > ckpt_interval ||
+		((t - t0 > timeout) && map_dirty);
+	    if (p->running && do_ckpt) {
 		next0 = super->next;
+		t0 = t;
 		lk.unlock();
 		write_checkpoint();
 	    }
@@ -1526,9 +1541,10 @@ class write_cache {
 	lk.lock();
 
 	std::vector<j_map_extent> extents;
-	for (auto it = map.begin(); it != map.end(); it++)
-	    extents.push_back((j_map_extent){(uint64_t)it->s.base, (uint64_t)it->s.len,
-			(uint32_t)it->s.ptr/8});
+	if (map.size() > 0)
+	    for (auto it = map.begin(); it != map.end(); it++)
+		extents.push_back((j_map_extent){(uint64_t)it->s.base, (uint64_t)it->s.len,
+			    (uint32_t)it->s.ptr/8});
 	memcpy(super_copy, super, 4096);
 	std::vector<j_length> _lengths;
 	for (auto it = lengths.begin(); it != lengths.end(); it++)
@@ -1539,6 +1555,7 @@ class write_cache {
 	    mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
 	    if (pwrite(fd, buf, 4096, pad*4096) < 0)
 		throw_fs_error("wckpt_pad");
+	    lengths[pad] = super->limit - pad;
 	}
 
 	mk_header(buf, LSVD_J_CKPT, my_uuid, 1+ckpt_pages);
@@ -1563,7 +1580,8 @@ class write_cache {
 	std::vector<iovec> iovs;
 	iovs.push_back((iovec){buf, 4096});
 	iovs.push_back((iovec){e_buf, (size_t)4096*ckpt_pages});
-
+	lengths[blockno] = ckpt_pages+1;
+	
 	if (pwritev(fd, iovs.data(), iovs.size(), 4096*blockno) < 0)
 	    throw_fs_error("wckpt_e");
 	if (pwrite(fd, (char*)super_copy, 4096, 4096*super_blkno) < 0)
@@ -1636,8 +1654,11 @@ public:
 	    if (pread(fd, len_buf, len_bytes_rounded, 4096 * super->len_start) < 0)
 		throw_fs_error("wcache_len");
 	    decode_offset_len<j_length>(len_buf, 0, len_bytes, _lengths);
-	    for (auto l : _lengths) 
+	    for (auto l : _lengths) {
 		lengths[l.page] = l.len;
+		assert(lengths[l.page] > 0);
+		xprintf("init: lens[%d] = %d\n", l.page, l.len);
+	    }
 	    free(len_buf);
 	}
 
@@ -1657,6 +1678,7 @@ public:
 
 	misc_threads = new thread_pool<int>(&m);
 	misc_threads->pool.push(std::thread(&write_cache::evict_thread, this, misc_threads));
+	misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
     }
     ~write_cache() {
 	free(pad_page);
