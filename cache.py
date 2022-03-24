@@ -31,8 +31,9 @@ hdr_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
               ['write_super', blk_fmt], ['read_super', blk_fmt]]
 
 wsup_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
-               ['seq', '%d'], ['base', '%d'], ['limit', '%d'],
-               ['next', '%d'], ['oldest', '%d'], ['map_start', '%d'], ['map_entries', '%d'],
+               ['seq', '%d'], ['meta_base', '%d'], ['meta_limit', '%d'],
+               ['base', '%d'], ['limit', '%d'], ['next', '%d'], ['oldest', '%d'], 
+               ['map_start', '%d'], ['map_entries', '%d'],
                ['len_start', '%d'], ['len_entries', '%d']]
 
 rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["unit_size", '%d'], 
@@ -42,6 +43,7 @@ rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["uni
 
 parser = argparse.ArgumentParser(description='Read SSD cache')
 parser.add_argument('--write', help='print write cache details', action='store_true')
+parser.add_argument('--writemap', help='print write cache map', action='store_true')
 parser.add_argument('--read', help='print read cache details', action='store_true')
 parser.add_argument('device', help='cache device/file')
 args = parser.parse_args()
@@ -87,7 +89,7 @@ if args.write and super.write_super < npages:
     #        break
         if j.magic != lsvd.LSVD_MAGIC:
             break
-        if j.type == lsvd.LSVD_J_CKPT:
+        if j.type == lsvd.LSVD_J_CKPT:    # not relevant anymore
             print('\ncheckpoint - map:', b)
             e = read_exts(b+1, w_super.map_blocks, w_super.map_entries)
             print(' '.join(['(%d+%d->%d)' % _ for _ in e]))
@@ -101,6 +103,26 @@ if args.write and super.write_super < npages:
             prettyprint(j, h_pp)
             print('extents    :', ' '.join(['%d+%d' % (_.lba,_.len) for _ in e]))
         b = b + j.len
+
+def wrapjoin(prefix, linelen, items):
+    val = ''
+    line = prefix
+    for i in items:
+        if len(line)+len(i) > linelen:
+            val = val + line + '\n'
+            line = prefix
+        line = line + ' ' + i
+    if line != prefix:
+        val += line
+    return val
+        
+if args.writemap and w_super:
+    print('\nwrite cache map:')
+    e = read_exts(w_super.map_start, w_super.map_blocks, w_super.map_entries)
+    print(wrapjoin(' ', 80, ['%d+%d->%d' % _ for _ in e]))
+    print('\nwrite cache lengths:')
+    l = read_lens(w_super.len_start, w_super.len_blocks, w_super.len_entries)
+    print(wrapjoin(' ', 80, ['[%d]=%d' % _ for _ in l]))
 
 if args.read and r_super:
     nbytes = r_super.units * lsvd.sizeof_obj_offset

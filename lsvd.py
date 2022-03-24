@@ -362,6 +362,8 @@ class j_write_super(Structure):
                 ("version",     c_uint),
                 ("vol_uuid",    c_ubyte*16),
                 ("seq",         c_ulong),
+                ("meta_base",   c_uint),
+                ("meta_limit",  c_uint),
                 ("base",        c_uint),
                 ("limit",       c_uint),
                 ("next",        c_uint),

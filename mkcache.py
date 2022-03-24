@@ -24,15 +24,26 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
     data += b'\0' * (4096-len(data))
     os.write(fd, data) # page 0
 
+    # assuming 4KB min write size, write cache has max metadata of 12 bytes
+    # extent + 8 bytes length per 8KB (header + block), but we need an integer
+    # number of pages for each section, and enough room for 2.
+    #
+    _map = div_round_up(wblks, 600)
+    _len = div_round_up(wblks, 1024)
+    mblks = 2 * (_map + _len)
+    wblks -= mblks
+    
     # write cache has 125 single-page entries. default: map_blocks = map_entries = 0
     wsup = lsvd.j_write_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_W_SUPER,
-                              seq=1, base=3, limit=wblks+3, next=3, oldest=3)
+                              seq=1, meta_base = 3, meta_limit = 3+mblks,
+                              base=3+mblks, limit=3+mblks+wblks,
+                              next=3+mblks, oldest=3+mblks)
     wsup.vol_uuid[:] = uuid
     data = bytearray() + wsup
     data += b'\0' * (4096-len(data))
     os.write(fd, data) # page 1
 
-    rbase = wblks+3
+    rbase = wblks+mblks+3
     units = rblks // 16
     map_blks = div_round_up(units*lsvd.sizeof_obj_offset, 4096)
     bitmap_blks = div_round_up(units*2, 4096)
@@ -54,7 +65,7 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
 
     if (write_zeros):
         data = bytearray(b'\0'*4096)
-        for i in range(3 + wblks + map_blks + bitmap_blks + rblks):
+        for i in range(3 + mblks + wblks + map_blks + bitmap_blks + rblks):
             os.write(fd, data)
     os.close(fd)
     
@@ -77,8 +88,8 @@ if __name__ == '__main__':
         print('%d pages' % pages)
         r_units = int(0.75*pages) // 16
         r_pages = r_units * 16
-        oh = div_round_up(r_units*(2+lsvd.sizeof_obj_offset), 4096)
-        w_pages = pages - oh - r_pages - 3
+        r_oh = div_round_up(r_units*(2+lsvd.sizeof_obj_offset), 4096)
+        w_pages = pages - r_pages - 3     # mkcache subtracts write metadata
     
         mkcache(args.device, uuid, write_zeros=False, wblks=w_pages, rblks=r_pages)
     else:

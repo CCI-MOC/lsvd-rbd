@@ -52,7 +52,15 @@ struct j_write_super {
 
     uint64_t seq;		// next write sequence
 
-    /* all in 4KB block units. FIFO range is [base,limit), 
+    /* all values are in 4KB block units. */
+    
+    /* Map and length checkpoints live in this region. Allocation within this
+     * range is arbitrary, just set {map/len}_{start/blocks/entries} properly
+     */
+    uint32_t meta_base;
+    uint32_t meta_limit;
+    
+    /* FIFO range is [base,limit), 
      *  valid range accounting for wraparound is [oldest,next)
      */
     uint32_t base;

@@ -1363,9 +1363,9 @@ class write_cache {
 	    if (pad != 0) {
 		lengths[pad] = super->limit - pad;
 		assert(lengths[pad] > 0);
-		xprintf("lens[%d] <- %d\n", pad, super->limit - pad);
+		//xprintf("lens[%d] <- %d\n", pad, super->limit - pad);
 	    }
-	    xprintf("lens[%d] <- %d\n", blockno, blocks+1);
+	    //xprintf("lens[%d] <- %d\n", blockno, blocks+1);
 	    lengths[blockno] = blocks+1;
 	    assert(lengths[blockno] > 0);
 	    
@@ -1470,7 +1470,7 @@ class write_cache {
 		     * up to date, so we don't need to check them against the forward map.
 		     */
 		    auto len = lengths[oldest];
-		    xprintf("lens[%d] : %d\n", oldest, len);
+		    //xprintf("lens[%d] : %d\n", oldest, len);
 		    assert(len > 0);
 		    lengths.erase(oldest);
 		    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
@@ -1528,66 +1528,54 @@ class write_cache {
     }
 
     void write_checkpoint(void) {
-	char *buf = (char*)aligned_alloc(512, 4096);
-	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
-
 	std::unique_lock<std::mutex> lk(m);
 	size_t map_bytes = map.size() * sizeof(j_map_extent);
 	size_t len_bytes = lengths.size() * sizeof(j_length);
-	page_t map_pages = div_round_up(map_bytes, 4096), len_pages = div_round_up(len_bytes, 4096),
+	page_t map_pages = div_round_up(map_bytes, 4096),
+	    len_pages = div_round_up(len_bytes, 4096),
 	    ckpt_pages = map_pages + len_pages;
-	lk.unlock();		// TODO: HACK
-	page_t pad, blockno = allocate(ckpt_pages+1, pad);
-	lk.lock();
 
-	std::vector<j_map_extent> extents;
+	/* TODO - switch between top/bottom of metadata region so we
+	 * don't leave in inconsistent state if we crash during checkpoint
+	 */
+	page_t blockno = super->meta_base;
+
+	std::vector<j_map_extent> _extents;
 	if (map.size() > 0)
 	    for (auto it = map.begin(); it != map.end(); it++)
-		extents.push_back((j_map_extent){(uint64_t)it->s.base, (uint64_t)it->s.len,
-			    (uint32_t)it->s.ptr/8});
-	memcpy(super_copy, super, 4096);
+		_extents.push_back((j_map_extent){(uint64_t)it->s.base,
+			    (uint64_t)it->s.len, (uint32_t)it->s.ptr/8});
 	std::vector<j_length> _lengths;
 	for (auto it = lengths.begin(); it != lengths.end(); it++)
 	    _lengths.push_back((j_length){it->first, it->second});
+
+	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
+	memcpy(super_copy, super, 4096);
 	lk.unlock();
 
-	if (pad != 0) {
-	    mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
-	    if (pwrite(fd, buf, 4096, pad*4096) < 0)
-		throw_fs_error("wckpt_pad");
-	    lengths[pad] = super->limit - pad;
-	}
-
-	mk_header(buf, LSVD_J_CKPT, my_uuid, 1+ckpt_pages);
 	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
-	memcpy(e_buf, extents.data(), map_bytes);
+	memcpy(e_buf, _extents.data(), map_bytes);
 	if (map_bytes % 4096)	// make valgrind happy
 	    memset(e_buf + map_bytes, 0, 4096 - (map_bytes % 4096));
+
+	super_copy->map_start = super->map_start = blockno;
+	super_copy->map_blocks = super->map_blocks = map_pages;
+	super_copy->map_entries = super->map_entries = _extents.size();
 
 	char *l_buf = e_buf + map_pages*4096;
 	memcpy(l_buf, _lengths.data(), len_bytes);
 	if (len_bytes % 4096)	// make valgrind happy
 	    memset(l_buf + len_bytes, 0, 4096 - (len_bytes % 4096));
 	
-	super_copy->map_start = super->map_start = blockno+1;
-	super_copy->map_blocks = super->map_blocks = map_pages;
-	super_copy->map_entries = super->map_entries = extents.size();
-
-	super_copy->len_start = super->len_start = blockno+1+map_pages;
+	super_copy->len_start = super->len_start = blockno+map_pages;
 	super_copy->len_blocks = super->len_blocks = len_pages;
-	super_copy->len_entries = super->len_entries = lengths.size();
+	super_copy->len_entries = super->len_entries = _lengths.size();
 	
-	std::vector<iovec> iovs;
-	iovs.push_back((iovec){buf, 4096});
-	iovs.push_back((iovec){e_buf, (size_t)4096*ckpt_pages});
-	lengths[blockno] = ckpt_pages+1;
-	
-	if (pwritev(fd, iovs.data(), iovs.size(), 4096*blockno) < 0)
+	if (pwrite(fd, e_buf, 4096*ckpt_pages, 4096*blockno) < 0)
 	    throw_fs_error("wckpt_e");
 	if (pwrite(fd, (char*)super_copy, 4096, 4096*super_blkno) < 0)
 	    throw_fs_error("wckpt_s");
 
-	free(buf);
 	free(super_copy);
 	free(e_buf);
 	map_dirty = false;
@@ -1657,7 +1645,7 @@ public:
 	    for (auto l : _lengths) {
 		lengths[l.page] = l.len;
 		assert(lengths[l.page] > 0);
-		xprintf("init: lens[%d] = %d\n", l.page, l.len);
+		//xprintf("init: lens[%d] = %d\n", l.page, l.len);
 	    }
 	    free(len_buf);
 	}

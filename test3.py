@@ -60,8 +60,11 @@ class tests(unittest.TestCase):
     def test_1_readwrite(self):
         lsvd.wcache_write(0, b'X'*4096)
         m = lsvd.wcache_getmap(0, 1000)
-        # header is block 3, data starts on 4
-        self.assertEqual(m, [[0,8,(4*8)]])
+
+        # find first data block of write cache
+        ws = lsvd.wcache_getsuper()
+        N = ws.base + 1
+        self.assertEqual(m, [[0,8,(N*8)]])
         d = lsvd.wcache_read(0, 4096)
         self.assertEqual(d, b'X'*4096)
         d = lsvd.wcache_read(4096, 4096)
