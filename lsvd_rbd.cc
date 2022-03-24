@@ -402,6 +402,8 @@ class translate {
 	io->write_numbered_object(seq, iov, 4);
 
 	size_t offset = sizeof(*super_h) + sizeof(*super_sh);
+
+	lk2.lock();
 	super_sh->ckpts_offset = offset;
 	super_sh->ckpts_len = sizeof(seq);
 	*(int*)(super + offset) = seq;
@@ -889,7 +891,7 @@ class read_cache {
 	}
     }
 
-    int n_lines_read = 0;
+    std::atomic<int> n_lines_read = 0;
     
     void do_readv(size_t offset, const iovec *iov, int iovcnt) {
 	auto iovs = smartiov(iov, iovcnt);
@@ -1179,6 +1181,32 @@ public:
  */
 class file_backend : public backend {
     char *prefix;
+    std::mutex m;
+    std::map<int,int> cached_fds;
+    std::queue<int>   cached_nums;
+    static const int  fd_cache_size = 500;
+
+    int get_cached_fd(int seq) {
+	std::unique_lock lk(m);
+	auto it = cached_fds.find(seq);
+	if (it != cached_fds.end())
+	    return cached_fds[seq];
+
+	if (cached_nums.size() >= fd_cache_size) {
+	    auto num = cached_nums.front();
+	    close(cached_fds[num]);
+	    cached_fds.erase(num);
+	    cached_nums.pop();
+	}
+	auto name = std::string(prefix) + "." + hex(seq);
+	auto fd = open(name.c_str(), O_RDONLY);
+	if (fd < 0)
+	    throw_fs_error("read_obj_open");
+	cached_fds[seq] = fd;
+	cached_nums.push(seq);
+	return fd;
+    }
+
 public:
     file_backend(const char *_prefix) {
 	prefix = strdup(_prefix);
@@ -1205,28 +1233,8 @@ public:
 	    throw_fs_error("read_obj");
 	return val;
     }
-
-    std::map<int,int> cached_fds;
-    std::queue<int>   cached_nums;
-    static const int  fd_cache_size = 500;
     ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
-	auto fd = -1;
-	auto it = cached_fds.find(seq);
-	if (it != cached_fds.end())
-	    fd = cached_fds[seq];
-	else {
-	    if (cached_nums.size() >= fd_cache_size) {
-		auto num = cached_nums.front();
-		close(cached_fds[num]);
-		cached_fds.erase(num);
-		cached_nums.pop();
-	    }
-	    auto name = std::string(prefix) + "." + hex(seq);
-	    if ((fd = open(name.c_str(), O_RDONLY)) < 0)
-		throw_fs_error("read_obj_open");
-	    cached_fds[seq] = fd;
-	    cached_nums.push(seq);
-	}
+	auto fd = get_cached_fd(seq);
 	auto val = pread(fd, buf, len, offset);
 	if (val < 0)
 	    throw_fs_error("read_obj");
@@ -1278,8 +1286,8 @@ class write_cache {
 	return tail - super->next - 1;
     }
     
-    uint32_t allocate(page_t n, page_t &pad) {
-	std::unique_lock lk(m);
+    uint32_t allocate_locked(page_t n, page_t &pad,
+			     std::unique_lock<std::mutex> &lk) {
 	auto timeout = std::chrono::seconds(1);
 	while (pages_free(super->oldest) < 2*n) {
 	    alloc_cv.wait_for(lk, timeout);
@@ -1298,6 +1306,10 @@ class write_cache {
 	    super->next = super->base;
 	return val;
     }
+    uint32_t allocate(page_t n, page_t &pad) {
+	std::unique_lock lk(m);
+	return allocate_locked(n, pad, lk);
+    }
 
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks) {
 	memset(buf, 0, 4096);
@@ -1310,12 +1322,18 @@ class write_cache {
     }
 
     void writer(thread_pool<cache_work*> *p) {
-	char *buf = (char*)aligned_alloc(512, 4096); // for direct I/O
+	char *hdr = (char*)aligned_alloc(512, 4096);
+	char *pad_hdr = (char*)aligned_alloc(512, 4096);
 	auto period = std::chrono::milliseconds(25);
 	const int write_max_pct = 2;
 	const int write_max_kb = 512;
-	int max_sectors = std::min((write_max_pct * (int)(super->limit - super->base) * 8 / 100),
+	int max_sectors;
+	{			// make valgrind happy
+	    std::unique_lock lk(m);
+	    max_sectors = std::min((write_max_pct *
+				    (int)(super->limit - super->base) * 8 / 100),
 				   write_max_kb * 2);
+	}
 	
 	while (p->running) {
 	    std::vector<char*> bounce_bufs;
@@ -1332,21 +1350,32 @@ class write_cache {
 		sectors += w->sectors;
 		work.push_back(w);
 	    }
-	    lk.unlock();
 	    if (!p->running)
 		break;
 	    
 	    page_t blocks = div_round_up(sectors, 8);
 	    // allocate blocks + 1
-	    page_t pad, blockno = allocate(blocks+1, pad);
+	    page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
 
 	    if (pad != 0) {
-		mk_header(buf, LSVD_J_PAD, my_uuid, (super->limit - pad));
+		mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
 		assert(pad < (int)super->limit);
-		if (pwrite(fd, buf, 4096, pad*4096) < 0)
-		    throw_fs_error("wpad");
+		lengths[pad] = super->limit - pad;
+		assert(lengths[pad] > 0);
+		//xprintf("lens[%d] <- %d\n", pad, super->limit - pad);
 	    }
+
+	    j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
+	    //xprintf("lens[%d] <- %d\n", blockno, blocks+1);
+	    lengths[blockno] = blocks+1;
+	    assert(lengths[blockno] > 0);
+
+	    lk.unlock();
 	    
+	    if (pad != 0)
+		if (pwrite(fd, pad_hdr, 4096, pad*4096) < 0)
+		    throw_fs_error("wpad");
+
 	    std::vector<j_extent> extents;
 	    for (auto w : work) {
 		for (int i = 0; i < (int)w->iovs.size(); i++) {
@@ -1360,19 +1389,18 @@ class write_cache {
 		extents.push_back((j_extent){w->lba, iov_sum(w->iovs.data(), w->iovs.size())/512});
 	    }
 
-	    j_hdr *j = mk_header(buf, LSVD_J_DATA, my_uuid, 1+blocks);
 	    j->extent_offset = sizeof(*j);
 	    size_t e_bytes = extents.size() * sizeof(j_extent);
 	    j->extent_len = e_bytes;
-	    memcpy((void*)(buf + sizeof(*j)), (void*)extents.data(), e_bytes);
+	    memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
 		
 	    auto iovs = smartiov();
-	    iovs.push_back((iovec){buf, 4096});
+	    iovs.push_back((iovec){hdr, 4096});
 
 	    for (auto w : work)
 		for (auto i : w->iovs)
 		    iovs.push_back(i);
-		    
+
 	    sector_t pad_sectors = blocks*8 - sectors;
 	    if (pad_sectors > 0)
 		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
@@ -1385,14 +1413,6 @@ class write_cache {
 	     * Note that map is in units of *sectors*, not blocks 
 	     */
 	    lk.lock();
-	    if (pad != 0) {
-		lengths[pad] = super->limit - pad;
-		assert(lengths[pad] > 0);
-		//xprintf("lens[%d] <- %d\n", pad, super->limit - pad);
-	    }
-	    //xprintf("lens[%d] <- %d\n", blockno, blocks+1);
-	    lengths[blockno] = blocks+1;
-	    assert(lengths[blockno] > 0);
 	    
 	    lba_t plba = (blockno+1) * 8;
 	    std::vector<extmap::lba2lba> garbage;
@@ -1402,9 +1422,8 @@ class write_cache {
 		plba += sectors;
 		map_dirty = true;
 	    }
-	    for (auto it = garbage.begin(); it != garbage.end(); it++) {
+	    for (auto it = garbage.begin(); it != garbage.end(); it++) 
 		rmap.trim(it->s.base, it->s.base+it->s.len);
-	    }
 	    lk.unlock();
 	    
 	    /* then send to backend */
@@ -1420,7 +1439,8 @@ class write_cache {
 	    for (auto w : work)
 		delete w;
 	}
-	free(buf);
+	free(hdr);
+	free(pad_hdr);
     }
     
     /* cache eviction - get info from oldest entry in cache. [should be private]
@@ -1471,15 +1491,19 @@ class write_cache {
 	auto period = std::chrono::milliseconds(25);
 	const int evict_min_pct = 5;
 	const int evict_max_mb = 100;
-	int trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
+	int trigger;
+	{			// make valgrind happy
+	    std::unique_lock lk(m);
+	    trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
 			       evict_max_mb * (1024*1024/4096));
+	}
 	auto t0 = std::chrono::system_clock::now();
 	auto super_timeout = std::chrono::milliseconds(500);
 	
 //	int trigger = 100;
 
 	while (p->running) {
-	    std::unique_lock<std::mutex> lk(m);
+	    std::unique_lock lk(m);
 	    p->cv.wait_for(lk, period);
 	    if (!p->running)
 		return;
@@ -1552,8 +1576,14 @@ class write_cache {
 	}
     }
 
+    bool ckpt_in_progress = false;
+
     void write_checkpoint(void) {
 	std::unique_lock<std::mutex> lk(m);
+	if (ckpt_in_progress)
+	    return;
+	ckpt_in_progress = true;
+
 	size_t map_bytes = map.size() * sizeof(j_map_extent);
 	size_t len_bytes = lengths.size() * sizeof(j_length);
 	page_t map_pages = div_round_up(map_bytes, 4096),
@@ -1576,7 +1606,6 @@ class write_cache {
 
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
 	memcpy(super_copy, super, 4096);
-	lk.unlock();
 
 	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
 	memcpy(e_buf, _extents.data(), map_bytes);
@@ -1603,7 +1632,9 @@ class write_cache {
 
 	free(super_copy);
 	free(e_buf);
+
 	map_dirty = false;
+	ckpt_in_progress = false;
     }
 
 public:
@@ -1702,7 +1733,8 @@ public:
 
     void write(size_t offset, const iovec *iov, int iovcnt,
 	       void (*callback)(void*), void *ptr) {
-	workers.put(new cache_work(offset/512, iov, iovcnt, callback, ptr));
+	std::unique_lock lk(m);
+	workers.put_locked(new cache_work(offset/512, iov, iovcnt, callback, ptr));
     }
 
    /* returns tuples of:
@@ -1718,6 +1750,8 @@ public:
 	std::unique_lock<std::mutex> lk(m);
 
 	size_t buf_offset = 0;
+	std::vector<std::pair<smartiov, size_t>> to_read;
+
 	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, plba] = it->vals(base, limit);
 	    if (_base > prev) {
@@ -1729,15 +1763,15 @@ public:
 	    size_t bytes = 512 * (_limit - _base),
 		nvme_offset = 512 * plba;
 	    auto slice = iovs.slice(buf_offset, buf_offset+bytes);
-
-	    lk.unlock();
-	    if (preadv(fd, slice.data(), slice.size(), nvme_offset) < 0)
-		throw_fs_error("wcache_read");
-	    lk.lock();
-
+	    to_read.push_back(std::make_pair(slice, nvme_offset));
 	    buf_offset += bytes;
 	    prev = _limit;
 	}
+	lk.unlock();
+	for (auto [slice, nvme_offset] : to_read)
+	    if (preadv(fd, slice.data(), slice.size(), nvme_offset) < 0)
+		throw_fs_error("wcache_read");
+
 	if (prev < limit)
 	    misses->push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
     }
