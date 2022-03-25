@@ -938,7 +938,7 @@ class read_cache {
 		extmap::obj_offset unit = {ptr.obj, ptr.offset / unit_sectors};
 
                 // TODO: unit_sectors -> unit_nsectors
-		sector_t blk_base_lba = unit.offset * unit_sectors;
+		sector_t blk_base = unit.offset * unit_sectors;
                 sector_t blk_offset = ptr.offset % unit_sectors;
                 sector_t blk_top_offset = std::min({(int)(blk_offset+sectors),
 			    round_up(blk_offset+1,unit_sectors),
@@ -992,11 +992,12 @@ class read_cache {
 		    n_lines_read++;
 		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
 		    auto bytes = io->read_numbered_object(unit.obj, cache_line,
-							  512*blk_base_lba, 512*unit_sectors);
+							  512*blk_base, 512*unit_sectors);
                     size_t start = 512 * blk_offset,
 			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
-		    xprintf("rc: %d+%d put in cache\n", (int)base, (int)(limit-base));
+		    xprintf("rc: %d+%d fetch -> cache (%d.%d)\n", (int)base,
+			    (int)(limit-base), (int)unit.obj, (int)blk_base);
 
 		    iovs.slice(buf_offset,
 			       buf_offset+(finish-start)).copy_in(cache_line+start);
@@ -1012,7 +1013,7 @@ class read_cache {
 	    lba = limit;
 	}
 	if (len > 0) {
-	    xprintf("rc: zero %d+%d\n", (int)buf_offset, (int)len);
+	    xprintf("rc: zero %d+%d\n", (int)lba, (int)len/512);
 	    iovs.slice(buf_offset, buf_offset+len).zero();
 	}
 
@@ -1367,6 +1368,13 @@ class write_cache {
 	    // allocate blocks + 1
 	    page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
 
+	    long _lba = (blockno+1)*8;
+	    for (auto w : work) {
+		int len = iov_sum(w->iovs.data(), w->iovs.size())/512;
+		xprintf("wr: %ld+%d -> %ld\n", w->lba, len, _lba);
+		_lba += len;
+	    }
+	    
 	    if (pad != 0) {
 		mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
 		assert(pad < (int)super->limit);
@@ -1649,7 +1657,7 @@ class write_cache {
 
 public:
     typedef std::tuple<size_t,size_t,size_t> cache_miss;
-    
+
     class aio_readv_work {
     public:
 	size_t offset;
@@ -1774,6 +1782,7 @@ public:
 		nvme_offset = 512 * plba;
 	    auto slice = iovs.slice(buf_offset, buf_offset+bytes);
 	    to_read.push_back(std::make_pair(slice, nvme_offset));
+	    xprintf("wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
 	    buf_offset += bytes;
 	    prev = _limit;
 	}
@@ -2317,6 +2326,7 @@ void rbd_aio_readv_fsm(void *ptr)
 	if (s->misses.size() == 0) {
 	    s->phase = 3;
 	    lk.unlock();
+	    xprintf(" ->fsm\n");
 	    rbd_aio_readv_fsm(ptr);
 	}
 	else {
