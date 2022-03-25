@@ -28,6 +28,9 @@ public:
     int size(void) {
 	return iovs.size();
     }
+    std::pair<iovec*,int> c_iov(void) {
+	return std::pair(iovs.data(), (int)iovs.size());
+    }
     size_t bytes(void) {
 	size_t sum = 0;
 	for (auto i : iovs)

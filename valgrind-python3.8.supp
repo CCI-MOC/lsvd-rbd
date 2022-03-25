@@ -5,6 +5,12 @@
 }
 
 {
+   s15
+   Memcheck:Cond
+   fun:malloc
+   obj:/usr/bin/python3.8
+}
+{
    s2
    Memcheck:Cond
    obj:/usr/bin/python3.8

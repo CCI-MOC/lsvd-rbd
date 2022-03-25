@@ -9,6 +9,7 @@
 #include "extent.cc"
 #include "objects.cc"
 #include "journal2.cc"
+#include "smartiov.cc"
 
 #include <vector>
 #include <queue>
@@ -110,8 +111,11 @@ class backend {
 public:
     virtual ssize_t write_object(const char *name, iovec *iov, int iovcnt) = 0;
     virtual ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) = 0;
-    virtual ssize_t read_object(const char *name, char *buf, size_t offset, size_t len) = 0;
-    virtual ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) = 0;
+    virtual ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) = 0;
+    virtual ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt,
+					  size_t offset) = 0;
+    virtual ssize_t read_numbered_object(int seq, char *buf, size_t len,
+					 size_t offset) = 0;
     virtual std::string object_name(int seq) = 0;
     virtual ~backend(){}
 };
@@ -262,13 +266,13 @@ class translate {
     
     char *read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
-	if (io->read_object(name, (char*)h, 0, 4096) < 0)
+	if (io->read_object(name, (char*)h, 4096, 0) < 0)
 	    goto fail;
 	if (fast)
 	    return (char*)h;
 	if (h->hdr_sectors > 8) {
 	    h = (hdr*)realloc(h, h->hdr_sectors * 512);
-	    if (io->read_object(name, (char*)h, 0, h->hdr_sectors*512) < 0)
+	    if (io->read_object(name, (char*)h, h->hdr_sectors*512, 0) < 0)
 		goto fail;
 	}
 	return (char*)h;
@@ -676,17 +680,14 @@ public:
 	return len;
     }
 
-    ssize_t write(size_t offset, size_t len, char *buf) {
-	iovec iov = {buf, len};
-	return this->writev(offset, &iov, 1);
-    }
-
-    ssize_t read(size_t offset, size_t len, char *buf) {
+    ssize_t readv(size_t offset, iovec *iov, int iovcnt) {
+	smartiov iovs(iov, iovcnt);
+	size_t len = iovs.bytes();
 	int64_t base = offset / 512;
 	int64_t sectors = len / 512, limit = base + sectors;
-
+	
 	if (map->map.size() == 0) {
-	    memset(buf, 0, len);
+	    iovs.zero();
 	    return len;
 	}
 
@@ -697,40 +698,43 @@ public:
 	std::shared_lock slk(map->m);
 	
 	auto prev = base;
-	char *ptr = buf;
+	int iov_offset = 0;
+
 	for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, oo] = it->vals(base, limit);
 	    if (_base > prev) {	// unmapped
 		size_t _len = (_base - prev)*512;
 		regions.push_back(std::tuple(-1, 0, _len));
-		ptr += _len;
+		iov_offset += _len;
 	    }
 	    size_t _len = (_limit - _base) * 512,
 		_offset = oo.offset * 512;
 	    int obj = oo.obj;
 	    if (in_mem_objects.find(obj) != in_mem_objects.end()) {
-		memcpy((void*)ptr, in_mem_objects[obj]+_offset, _len);
+		iovs.slice(iov_offset, iov_offset+_len).copy_in(
+		    in_mem_objects[obj]+_offset);
 		obj = -2;
 	    }
 	    regions.push_back(std::tuple(obj, _offset, _len));
-	    ptr += _len;
+	    iov_offset += _len;
 	    prev = _limit;
 	}
 	slk.unlock();
 	lk.unlock();
 
-	ptr = buf;
+	iov_offset = 0;
 	for (auto [obj, _offset, _len] : regions) {
+	    auto slice = iovs.slice(iov_offset, iov_offset + _len);
 	    if (obj == -1)
-		memset(ptr, 0, _len);
+		slice.zero();
 	    else if (obj == -2)
 		/* skip */;
 	    else
-		io->read_numbered_object(obj, ptr, _offset, _len);
-	    ptr += _len;
+		io->read_numbered_objectv(obj, slice.data(), slice.size(), _offset);
+	    iov_offset += _len;
 	}
 
-	return ptr - buf;
+	return iov_offset;
     }
 
     // debug methods
@@ -772,22 +776,18 @@ public:
     void    (*callback)(void*);
     void     *ptr;
     lba_t     sectors;
-    std::vector<iovec> iovs;
-    cache_work(lba_t _lba, const iovec *iov, int iovcnt, void (*_callback)(void*), void *_ptr) {
+    smartiov  iovs;
+    //std::vector<iovec> iovs;
+    cache_work(lba_t _lba, const iovec *iov, int iovcnt,
+	       void (*_callback)(void*), void *_ptr) : iovs(iov, iovcnt) {
 	lba = _lba;
 	int bytes = 0;
-	for (int i = 0; i < iovcnt; i++) {
-	    iovs.push_back(iov[i]);
-	    bytes += iov[i].iov_len;
-	}
 	sectors = bytes / 512;
 	callback = _callback;
 	ptr = _ptr;
     }
 };
 
-
-#include "smartiov.cc"
 
 /* the read cache is:
  * 1. indexed by obj/offset[*], not LBA
@@ -979,11 +979,11 @@ class read_cache {
 		}
 		else if (!use_cache) {
 		    lba_t sectors = limit - base;
-		    char *buf = (char*)malloc(512 * sectors);
-		    xprintf("rc: %d+%d rd_obj: %d+%d\n", (int)base, (int)sectors, (int)ptr.obj, (int)ptr.offset);
-		    auto bytes = io->read_numbered_object(ptr.obj, buf, 512 * ptr.offset, 512 * sectors);
-		    iovs.slice(buf_offset, buf_offset + 512 * sectors).copy_in(buf);
-		    free(buf);
+		    xprintf("rc: %d+%d rd_obj: %d+%d\n", (int)base, (int)sectors,
+			    (int)ptr.obj, (int)ptr.offset);
+		    auto _iov = iovs.slice(buf_offset, buf_offset + 512*sectors);
+		    io->read_numbered_objectv(ptr.obj, _iov.data(), _iov.size(),
+					      512*ptr.offset);
 		    base = limit;
 		    buf_offset += 512 * sectors;
 		    len -= 512 * sectors;
@@ -992,7 +992,7 @@ class read_cache {
 		    n_lines_read++;
 		    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
 		    auto bytes = io->read_numbered_object(unit.obj, cache_line,
-							  512*blk_base, 512*unit_sectors);
+							  512*unit_sectors, 512*blk_base);
                     size_t start = 512 * blk_offset,
 			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
@@ -1029,7 +1029,8 @@ class read_cache {
 	    cache_work *w;
 	    if (!p->get(w))
 		break;
-	    do_readv(w->lba * 512, w->iovs.data(), w->iovs.size());
+	    auto [iov, iovcnt] = w->iovs.c_iov();
+	    do_readv(w->lba * 512, iov, iovcnt);
 	    DBG((long)w->ptr);
 	    w->callback(w->ptr);
 	    delete w;
@@ -1099,13 +1100,6 @@ public:
     void readv(size_t offset, const iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
 	workers.put(new cache_work(offset/512, iov, iovcnt, callback, ptr));
     }
-
-#if 0
-    void read(size_t offset, size_t len, char *buf) {
-	iovec iov = {buf, len};
-	return readv(offset, &iov, 1);
-    }
-#endif
 
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
 	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0), workers(&m),
@@ -1234,7 +1228,7 @@ public:
 	auto name = std::string(prefix) + "." + hex(seq);
 	return write_object(name.c_str(), iov, iovcnt);
     }
-    ssize_t read_object(const char *name, char *buf, size_t offset, size_t len) {
+    ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) {
 	int fd = open(name, O_RDONLY);
 	if (fd < 0)
 	    return -1;
@@ -1244,9 +1238,14 @@ public:
 	    throw_fs_error("read_obj");
 	return val;
     }
-    ssize_t read_numbered_object(int seq, char *buf, size_t offset, size_t len) {
+    ssize_t read_numbered_object(int seq, char *buf, size_t len, size_t offset) {
+	iovec iov = {buf, len};
+	return read_numbered_objectv(seq, &iov, 1, offset);
+    }
+    
+    ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt, size_t offset) {
 	auto fd = get_cached_fd(seq);
-	auto val = pread(fd, buf, len, offset);
+	auto val = preadv(fd, iov, iovcnt, offset);
 	if (val < 0)
 	    throw_fs_error("read_obj");
 	return val;
@@ -1370,7 +1369,7 @@ class write_cache {
 
 	    long _lba = (blockno+1)*8;
 	    for (auto w : work) {
-		int len = iov_sum(w->iovs.data(), w->iovs.size())/512;
+		int len = w->iovs.bytes() / 512;
 		xprintf("wr: %ld+%d -> %ld\n", w->lba, len, _lba);
 		_lba += len;
 	    }
@@ -1395,6 +1394,10 @@ class write_cache {
 		    throw_fs_error("wpad");
 
 	    std::vector<j_extent> extents;
+
+	    /* note that we're replacing the pointers inside the iovs.
+	     * this is really gross.
+	     */
 	    for (auto w : work) {
 		for (int i = 0; i < (int)w->iovs.size(); i++) {
 		    if (aligned(w->iovs[i].iov_base, 512))
@@ -1404,7 +1407,7 @@ class write_cache {
 		    w->iovs[i].iov_base = p;
 		    bounce_bufs.push_back(p);
 		}
-		extents.push_back((j_extent){w->lba, iov_sum(w->iovs.data(), w->iovs.size())/512});
+		extents.push_back((j_extent){w->lba, w->iovs.bytes() / 512});
 	    }
 
 	    j->extent_offset = sizeof(*j);
@@ -1415,9 +1418,10 @@ class write_cache {
 	    auto iovs = smartiov();
 	    iovs.push_back((iovec){hdr, 4096});
 
-	    for (auto w : work)
-		for (auto i : w->iovs)
-		    iovs.push_back(i);
+	    for (auto w : work) {
+		auto [iov, iovcnt] = w->iovs.c_iov();
+		iovs.ingest(iov, iovcnt);
+	    }
 
 	    sector_t pad_sectors = blocks*8 - sectors;
 	    if (pad_sectors > 0)
@@ -1582,6 +1586,8 @@ class write_cache {
 	while (p->running) {
 	    std::unique_lock lk(m);
 	    p->cv.wait_for(lk, period);
+	    if (!p->running)
+		return;
 	    auto t = std::chrono::system_clock::now();
 	    bool do_ckpt = (int)(super->next + N - next0) % N > ckpt_interval ||
 		((t - t0 > timeout) && map_dirty);
@@ -1660,14 +1666,17 @@ public:
 
     class aio_readv_work {
     public:
-	size_t offset;
+	size_t offset = 0;
 	smartiov iovs;
-	std::vector<cache_miss> *misses;
-	void (*cb)(void*);
-	void *ptr;
-	aio_readv_work() : offset(0), misses(NULL), cb(NULL), ptr(NULL){}
-	aio_readv_work(size_t _offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *_misses,
-		       void (*_cb)(void*), void *_ptr) : offset(_offset), iovs(iov, iovcnt), misses(_misses), cb(_cb), ptr(_ptr) {}
+	std::vector<cache_miss> *misses = NULL;
+	void (*cb)(void*) = NULL;
+	void *ptr = NULL;
+	aio_readv_work() {}
+	aio_readv_work(size_t _offset, const iovec *iov, int iovcnt,
+		       std::vector<cache_miss> *_misses,
+		       void (*_cb)(void*), void *_ptr) :
+	    offset(_offset), iovs(iov, iovcnt), misses(_misses),
+	    cb(_cb), ptr(_ptr) {}
     };
 
     thread_pool<aio_readv_work*> readv_workers;
@@ -1749,8 +1758,8 @@ public:
 	delete misc_threads;
     }
 
-    void write(size_t offset, const iovec *iov, int iovcnt,
-	       void (*callback)(void*), void *ptr) {
+    void writev(size_t offset, const iovec *iov, int iovcnt,
+		void (*callback)(void*), void *ptr) {
 	std::unique_lock lk(m);
 	workers.put_locked(new cache_work(offset/512, iov, iovcnt, callback, ptr));
     }
@@ -1877,7 +1886,7 @@ extern "C" void wcache_write(char *buf, uint64_t offset, uint64_t len)
     waitq q;
     iovec iov = {buf, len};
     std::unique_lock<std::mutex> lk(q.m);
-    wcache->write(offset, &iov, 1, waitq_cb, (void*)&q);
+    wcache->writev(offset, &iov, 1, waitq_cb, (void*)&q);
     while (!q.done)
 	q.cv.wait(lk);
 }
@@ -1961,13 +1970,15 @@ extern "C" int c_size(void)
 
 extern "C" int c_read(char *buffer, uint64_t offset, uint32_t size)
 {
-    size_t val = lsvd->read(offset, size, buffer);
+    iovec iov = {buffer, size};
+    size_t val = lsvd->readv(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
 
 extern "C" int c_write(char *buffer, uint64_t offset, uint32_t size)
 {
-    size_t val = lsvd->write(offset, size, buffer);
+    iovec iov = {buffer, size};
+    size_t val = lsvd->writev(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
 
@@ -2394,7 +2405,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     p->fri = fri;
-    fri->wcache->write(off, iov, iovcnt, fake_rbd_cb, (void*)c);
+    fri->wcache->writev(off, iov, iovcnt, fake_rbd_cb, (void*)c);
     return 0;
 }
 
