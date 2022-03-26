@@ -38,10 +38,14 @@ namespace fs = std::experimental::filesystem;
 #include <errno.h>
 
 std::mutex printf_m;
+#if 0
 #define xprintf(...) do { \
 	std::unique_lock lk(printf_m); \
 	fprintf(stderr, __VA_ARGS__); \
     } while (0)
+#else
+#define xprintf(...)
+#endif
 
 struct _log {
     int l;
@@ -74,6 +78,7 @@ std::mt19937 rng(17);      // for deterministic testing
 
 typedef int64_t lba_t;
 typedef int64_t sector_t;
+typedef int page_t;
 
 /* make this atomic? */
 int batch_seq;
@@ -426,7 +431,7 @@ class translate {
 	
 	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_DATA, .seq = (uint32_t)b->seq,
-		   .hdr_sectors = hdr_sectors,
+		   .hdr_sectors = (uint32_t)hdr_sectors,
 		   .data_sectors = (uint32_t)(b->len / 512)};
 	memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
 
@@ -462,18 +467,15 @@ class translate {
 	    io->write_numbered_object(b->seq, iov, 2);
 	    free(hdr);
 
+	    /* Note that we've already decremented object live counts when we copied the data
+	     * into the batch buffer.
+	     */
 	    lk.lock();
 	    std::unique_lock objlock(map->m);
 	    auto offset = hdr_sectors;
 	    for (auto e : b->entries) {
-		std::vector<extmap::lba2obj> deleted;
 		extmap::obj_offset oo = {b->seq, offset};
-		map->map.update(e.lba, e.lba+e.len, oo, &deleted);
-		for (auto d : deleted) {
-		    auto [base, limit, ptr] = d.vals();
-		    if (ptr.obj != b->seq)
-			object_info[ptr.obj].live -= (limit - base);
-		}
+		map->map.update(e.lba, e.lba+e.len, oo, NULL);
 		offset += e.len;
 	    }
 
@@ -528,13 +530,11 @@ class translate {
 
 public:
     backend *io;
-    bool     nocache;
     
     translate(backend *_io, objmap *omap) : workers(&m), misc_threads(&m) {
 	io = _io;
 	map = omap;
 	current_batch = NULL;
-	nocache = false;
 	last_written = last_pushed = 0;
     }
     ~translate() {
@@ -657,24 +657,21 @@ public:
 		batches.pop();
 	    }
 	    current_batch->reset();
-	    if (nocache)
-		in_mem_objects[current_batch->seq] = current_batch->buf;
+	    in_mem_objects[current_batch->seq] = current_batch->buf;
 	}
 
 	int64_t sector_offset = current_batch->len / 512,
 	    lba = offset/512, limit = (offset+len)/512;
 	current_batch->append_iov(offset / 512, iov, iovcnt);
 
-	if (nocache) {
-	    std::vector<extmap::lba2obj> deleted;
-	    extmap::obj_offset oo = {current_batch->seq, sector_offset};
-	    std::unique_lock objlock(map->m);
+	std::vector<extmap::lba2obj> deleted;
+	extmap::obj_offset oo = {current_batch->seq, sector_offset};
+	std::unique_lock objlock(map->m);
 
-	    map->map.update(lba, limit, oo, &deleted);
-	    for (auto d : deleted) {
-		auto [base, limit, ptr] = d.vals();
-		object_info[ptr.obj].live -= (limit - base);
-	    }
+	map->map.update(lba, limit, oo, &deleted);
+	for (auto d : deleted) {
+	    auto [base, limit, ptr] = d.vals();
+	    object_info[ptr.obj].live -= (limit - base);
 	}
 	
 	return len;
@@ -777,7 +774,6 @@ public:
     void     *ptr;
     lba_t     sectors;
     smartiov  iovs;
-    //std::vector<iovec> iovs;
     cache_work(lba_t _lba, const iovec *iov, int iovcnt,
 	       void (*_callback)(void*), void *_ptr) : iovs(iov, iovcnt) {
 	lba = _lba;
@@ -819,8 +815,9 @@ class read_cache {
     bool             nothreads;	   // for debug
     
     // cache block is busy when being written - mask can change, but not
-    // its mapping.
+    // its mapping. It's in_use while being read, and can't be evicted.
     std::vector<bool> busy;
+    std::vector<std::atomic<int>> *in_use;
     std::condition_variable cv;
 
     /* this is kind of crazy. return a bitmap corresponding to the 4KB pages
@@ -845,7 +842,7 @@ class read_cache {
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	for (int i = 0; i < n; i++) {
 	    int j = uni(rng);
-	    while (flat_map[j].obj == 0)
+	    while (flat_map[j].obj == 0 || (*in_use)[j] > 0)
 		j = uni(rng);
 	    bitmap[j] = 0;
 	    auto oo = flat_map[j];
@@ -949,13 +946,15 @@ class read_cache {
 		lk2.lock();
 		auto it = map.find(unit);
 		if (it != map.end()) {
-		    n = it->second;
+		    n = it->second; // block number in cache
 		    mask_t access_mask = page_mask(blk_offset, blk_top_offset, unit_sectors);
 		    if ((access_mask & bitmap[n]) == access_mask)
 			in_cache = true;
 		}
-		if (in_cache)
+		if (in_cache) {
 		    n_hits++;
+		    (*in_use)[n]++;
+		}
 		else
 		    n_misses++;
 		lk2.unlock();
@@ -972,9 +971,11 @@ class read_cache {
 			throw_fs_error("rcache");
 		    
 		    base += (finish - start);
-		    ptr.offset += (finish - start); // HACK
+		    ptr.offset += (finish - start); // HACK (I forget why...)
 		    buf_offset += bytes;
 		    len -= bytes;
+
+		    (*in_use)[n]--;
 		}
 		else if (!use_cache) {
 		    lba_t sectors = limit - base;
@@ -1136,9 +1137,10 @@ public:
 	busy.reserve(super->units);
 	for (int i = 0; i < super->units; i++)
 	    busy.push_back(false);
+	in_use = new std::vector<std::atomic<int>>(super->units);
 	map_dirty = false;
 
-	for (int i = 0; i < 6; i++)
+	for (int i = 0; i < 16; i++)
 	    workers.pool.push(std::thread(&read_cache::reader, this, &workers));
 	if (!nothreads)
 	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
@@ -1153,6 +1155,7 @@ public:
 	free((void*)flat_map);
 	free((void*)bitmap);
 	free((void*)super);
+	delete in_use;
     }
 
     /* debugging
@@ -1257,7 +1260,7 @@ public:
     std::string object_name(int seq) {
 	return std::string(prefix) + "." + hex(seq);
     }
-};    
+};
 
 
 static bool aligned(void *ptr, int a)
@@ -1265,9 +1268,9 @@ static bool aligned(void *ptr, int a)
     return 0 == ((long)ptr & (a-1));
 }
 
+#include "aio.cc"
 
-typedef int page_t;
-
+	
 /* all addresses are in units of 4KB blocks
  */
 class write_cache {
@@ -1588,7 +1591,7 @@ class write_cache {
 	    if (!p->running)
 		return;
 	    auto t = std::chrono::system_clock::now();
-	    bool do_ckpt = (int)(super->next + N - next0) % N > ckpt_interval ||
+	    bool do_ckpt = (int)((super->next + N - next0) % N) > ckpt_interval ||
 		((t - t0 > timeout) && map_dirty);
 	    if (p->running && do_ckpt) {
 		next0 = super->next;
@@ -1661,7 +1664,6 @@ class write_cache {
     }
 
 public:
-    typedef std::tuple<size_t,size_t,size_t> cache_miss;
 
     class aio_readv_work {
     public:
@@ -1678,16 +1680,66 @@ public:
 	    cb(_cb), ptr(_ptr) {}
     };
 
-    thread_pool<aio_readv_work*> readv_workers;
-    
-    void aio_readv_thread(thread_pool<aio_readv_work*> *p) {
-	while (p->running) {
-	    aio_readv_work *w;
-	    if (!p->get(w)) {
-		break;
+    class wc_read_aio : lsvd_aio {
+	std::vector<cache_miss> *misses = NULL;
+	void (*cb2)(void*) = NULL;
+	int state;
+	std::mutex *m;
+	write_cache *cache;
+	
+    public:
+	wc_read_aio(size_t _offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *_misses,
+		    void (*_cb)(void*), void *_ptr, write_cache *c) : lsvd_aio(_offset/512, iov, iovcnt) {
+	    misses = _misses;
+	    cache = c;
+	    m = &c->m;
+	    cb2 = _cb;
+	    ptr1 = _ptr;
+	}
+	void run(void) {
+	    auto bytes = iovs.bytes();
+	    lba_t base = lba, limit = base + bytes/512, prev = base;
+	    std::unique_lock<std::mutex> lk(*m);
+
+	    size_t buf_offset = 0;
+	    std::vector<std::pair<smartiov, size_t>> to_read;
+
+	    for (auto it = cache->map.lookup(base); it != cache->map.end() && it->base() < limit; it++) {
+		auto [_base, _limit, plba] = it->vals(base, limit);
+		if (_base > prev) {
+		    size_t bytes = 512 * (_base - prev);
+		    misses->push_back(std::tuple((size_t)512*prev, bytes, buf_offset));
+		    buf_offset += bytes;
+		}
+
+		size_t bytes = 512 * (_limit - _base),
+		    nvme_offset = 512 * plba;
+		auto slice = iovs.slice(buf_offset, buf_offset+bytes);
+		to_read.push_back(std::make_pair(slice, nvme_offset));
+		xprintf("wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
+		buf_offset += bytes;
+		prev = _limit;
 	    }
-	    readv(w->offset, w->iovs.data(), w->iovs.size(), w->misses);
-	    w->cb(w->ptr);
+	    lk.unlock();
+	    for (auto [slice, nvme_offset] : to_read)
+		if (preadv(cache->fd, slice.data(), slice.size(), nvme_offset) < 0)
+		    throw_fs_error("wcache_read");
+
+	    if (prev < limit)
+		misses->push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
+	    cb2(ptr1);
+	    delete this;
+	}
+    };
+    
+    thread_pool<wc_read_aio*> readv_workers;
+    
+    void aio_readv_thread(thread_pool<wc_read_aio*> *p) {
+	while (p->running) {
+	    wc_read_aio *w;
+	    if (!p->get(w)) 
+		break;
+	    w->run();
 	}
     }
 
@@ -1744,7 +1796,7 @@ public:
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
-	for (auto i = 0; i < 6; i++)
+	for (auto i = 0; i < 16; i++)
 	    readv_workers.pool.push(std::thread(&write_cache::aio_readv_thread, this, &readv_workers));
 
 	misc_threads = new thread_pool<int>(&m);
@@ -1767,6 +1819,7 @@ public:
      * offset, len, buf_offset
      */
 
+#if 0
     // TODO: how the hell to handle fragments?
     void readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *misses) {
 	auto iovs = smartiov(iov, iovcnt);
@@ -1802,10 +1855,11 @@ public:
 	if (prev < limit)
 	    misses->push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
     }
-
+#endif
     
-    void aio_readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *misses, void (*cb)(void*), void *ptr) {
-	auto w = new aio_readv_work(offset, iov, iovcnt, misses, cb, ptr);
+    void aio_readv(size_t offset, const iovec *iov, int iovcnt,
+		   std::vector<cache_miss> *misses, void (*cb)(void*), void *ptr) {
+	auto w = new wc_read_aio(offset, iov, iovcnt, misses, cb, ptr, this);
 	readv_workers.put(w);
     }
     
@@ -1829,6 +1883,75 @@ public:
     void do_write_checkpoint(void) {
 	if (map_dirty)
 	    write_checkpoint();
+    }
+};
+
+/* -------------- RADOS ------------ */
+
+static std::pair<std::string,std::string> split_string(std::string s, std::string delim)
+{
+    auto i = s.find(delim);
+    return std::pair(s.substr(0,i), s.substr(i+delim.length()));
+}
+
+#include <rados/librados.h>
+
+class rados_backend : public backend {
+    std::mutex m;
+    char *pool;
+    char *prefix;
+    rados_t cluster;
+    rados_ioctx_t io_ctx;
+
+public:
+    rados_backend(const char *_prefix) {
+	int r;
+	auto [_pool, _key] = split_string(std::string(_prefix), "/");
+	if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
+	    throw("rados create");
+	if ((r = rados_conf_read_file(cluster, NULL)) < 0)
+	    throw("rados conf");
+	if ((r = rados_connect(cluster)) < 0)
+	    throw("rados connect");
+        if ((r = rados_ioctx_create(cluster, _pool.c_str(), &io_ctx)) < 0)
+	    throw("rados ioctx_create");
+	prefix = strdup(_key.c_str());
+    }
+    ssize_t write_object(const char *name, iovec *iov, int iovcnt) {
+	smartiov iovs(iov, iovcnt);
+	char *buf = (char*)malloc(iovs.bytes());
+	iovs.copy_out(buf);
+	int r = rados_write(io_ctx, name, buf, iovs.bytes(), 0);
+	free(buf);
+	return r;
+    }
+    ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) {
+	auto name = std::string(prefix) + "." + hex(seq);
+	return write_object(name.c_str(), iov, iovcnt);
+    }
+    ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) {
+	return rados_read(io_ctx, name, buf, len, offset);
+    }
+    ssize_t read_numbered_object(int seq, char *buf, size_t len, size_t offset) {
+	auto name = std::string(prefix) + "." + hex(seq);
+	return read_object(name.c_str(), buf, len, offset);
+    }
+    
+    ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt, size_t offset) {
+	smartiov iovs(iov, iovcnt);
+	char *buf = (char*)malloc(iovs.bytes());
+	int r = read_numbered_object(seq, buf, iovs.bytes(), offset);
+	iovs.copy_in(buf);
+	free(buf);
+	return r;
+    }
+    ~rados_backend() {
+	free((void*)prefix);
+	rados_ioctx_destroy(io_ctx);
+	rados_shutdown(cluster);
+    }
+    std::string object_name(int seq) {
+	return std::string(prefix) + "." + hex(seq);
     }
 };
 
@@ -1890,13 +2013,33 @@ extern "C" void wcache_write(char *buf, uint64_t offset, uint64_t len)
 	q.cv.wait(lk);
 }
 
+struct wait1 {
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+};
+void wait1_cb(void *p)
+{
+    wait1 *w = (wait1*)p;
+    std::unique_lock lk(w->m);
+    w->done = true;
+    w->cv.notify_all();
+}
+void wait1_wait(wait1 *w)
+{
+    std::unique_lock lk(w->m);
+    while (!w->done)
+	w->cv.wait(lk);
+}
+
 extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len)
 {
-    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not aligned
     iovec iov = {buf2, len};
-    std::vector<write_cache::cache_miss> misses;
-    wcache->readv(offset, &iov, 1, &misses);
-
+    std::vector<cache_miss> misses;
+    wait1 w;
+    wcache->aio_readv(offset, &iov, 1, &misses, wait1_cb, (void*)&w);
+    wait1_wait(&w);
     memcpy(buf, buf2, len);
     free(buf2);
 }
@@ -1953,12 +2096,11 @@ extern "C" int c_flush(void)
     return lsvd->flush();
 }
 
-extern "C" ssize_t c_init(char *name, int n, bool flushthread, bool nocache)
+extern "C" ssize_t c_init(char *name, int n, bool flushthread)
 {
     io = new file_backend(name);
     omap = new objmap();
     lsvd = new translate(io, omap);
-    lsvd->nocache = nocache;
     return lsvd->init(name, n, flushthread);
 }
 
@@ -2124,9 +2266,9 @@ typedef void *rbd_pool_stats_t;
 typedef void *rbd_completion_t;
 typedef void (*rbd_callback_t)(rbd_completion_t cb, void *arg);
 
-typedef void *rados_ioctx_t;
-typedef void *rados_t;
-typedef void *rados_config_t;
+// typedef void *rados_ioctx_t;
+// typedef void *rados_t;
+// typedef void *rados_config_t;
 
 #define RBD_MAX_BLOCK_NAME_SIZE 24
 #define RBD_MAX_IMAGE_NAME_SIZE 96
@@ -2291,7 +2433,7 @@ struct readv_state {
     iovec tmp;
     const iovec *tmp_iov;
     int    tmp_iovcnt;
-    std::vector<write_cache::cache_miss> misses;
+    std::vector<cache_miss> misses;
     std::atomic<int> n;
     std::mutex m;		// to make valgrind happy
 
@@ -2474,34 +2616,18 @@ extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
     return 0;
 }
 
-static std::pair<std::string,std::string> split_string(std::string s, std::string delim)
-{
-    auto i = s.find(delim);
-    return std::pair(s.substr(0,i), s.substr(i+delim.length()));
-}
-
-static void* delay_printlog(void *q)
-{
-    sleep(50);
-    FILE *fp = fopen("/tmp/print.log", "w");
-    printlog(fp);
-    fclose(fp);
-    exit(0);
-}
-pthread_t _th;
-
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
-//    logbuf = logptr = (struct _log*)malloc(2*1024*1024*8*sizeof(*logbuf));
-//    pthread_create(&_th, NULL, delay_printlog, NULL);
-
     int rv;
     auto [nvme, obj] = split_string(std::string(name), ",");
+    bool rados = (obj.substr(0,6) == "rados:");
     auto fri = new fake_rbd_image;
 
-    // c_init:
-    fri->io = new file_backend(obj.c_str());
+    if (rados)
+	fri->io = new rados_backend(obj.c_str()+6);
+    else
+	fri->io = new file_backend(obj.c_str());
     fri->omap = new objmap();
     fri->lsvd = new translate(fri->io, fri->omap);
     int n_xlate_threads = 3;
@@ -2510,7 +2636,12 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 	n_xlate_threads = atoi(nxt);
 	printf("translate threads: %d\n", n_xlate_threads);
     }
-    fri->size = fri->lsvd->init(obj.c_str(), n_xlate_threads, true);
+    const char *base = obj.c_str();
+    if (rados) {
+	auto [_tmp, key] = split_string(obj, "/");
+	base = key.c_str();
+    }
+    fri->size = fri->lsvd->init(base, n_xlate_threads, true);
     
     int fd = fri->fd = open(nvme.c_str(), O_RDWR | O_DIRECT);
     j_super *js = fri->js = (j_super*)aligned_alloc(512, 4096);
@@ -2592,47 +2723,6 @@ extern "C" void fake_rbd_write(char *buf, size_t off, size_t len)
 extern "C" int rbd_invalidate_cache(rbd_image_t image)
 {
     return 0;
-}
-
-/* we just need null implementations of the RADOS functions.
- */
-extern "C" int rados_conf_read_file(rados_t cluster, const char *path)
-{
-    return 0;
-}
-
-extern "C" int rados_conf_set(rados_t cluster, const char *option, const char *value)
-{
-    return 0;
-}
-
-extern "C" int rados_connect(rados_t cluster)
-{
-    return 0;
-}
-
-extern "C" int rados_create(rados_t *cluster, const char * const id)
-{
-    return 0;
-}
-
-extern "C" int rados_create2(rados_t *pcluster, const char *const clustername,
-			     const char * const name, uint64_t flags)
-{
-    return 0;
-}
-
-extern "C" int rados_ioctx_create(rados_t cluster, const char *pool_name, rados_ioctx_t *ioctx)
-{
-    return 0;
-}
-
-extern "C" void rados_ioctx_destroy(rados_ioctx_t io)
-{
-}
-
-extern "C" void rados_shutdown(rados_t cluster)
-{
 }
 
 /* These RBD functions are unimplemented and return errors

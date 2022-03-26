@@ -6,13 +6,13 @@ CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 
 liblsvd.so: lsvd_rbd.cc extent.cc journal2.cc
-	g++ -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread
+	g++ -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados
 
 lsvd_rbd.o: lsvd_rbd.cc extent.cc journal2.cc smartiov.cc
 	g++ -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS) 
 
 bdus: bdus.o lsvd_rbd.o extent.cc journal2.cc
-	g++ lsvd_rbd.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs
+	g++ lsvd_rbd.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados
 
 mkdisk: mkdisk.cc objects.cc
 	g++ mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
