@@ -781,8 +781,7 @@ public:
     cache_work(lba_t _lba, const iovec *iov, int iovcnt,
 	       void (*_callback)(void*), void *_ptr) : iovs(iov, iovcnt) {
 	lba = _lba;
-	int bytes = 0;
-	sectors = bytes / 512;
+	sectors = iovs.bytes() / 512;
 	callback = _callback;
 	ptr = _ptr;
     }
