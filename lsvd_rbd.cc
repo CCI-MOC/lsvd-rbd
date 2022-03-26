@@ -967,7 +967,7 @@ class read_cache {
 
 		    xprintf("rc: %d+%d in_cache: %d\n", (int)base, (int)bytes/512, (int)start);
 		    auto tmp = iovs.slice(buf_offset, buf_offset+bytes);
-		    if (preadv(fd, tmp.data(), tmp.size(), 512*start) < 0)
+		    if (preadv(fd, tmp.data(), tmp.size(), 512L*start) < 0)
 			throw_fs_error("rcache");
 		    
 		    base += (finish - start);
@@ -1081,10 +1081,10 @@ public:
 		oo.offset += 8;
 	    }
 
-	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096;
-	    blk_offset += (obj_page - blk_page) * 4096;
+	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096L;
+	    blk_offset += (obj_page - blk_page) * 4096L;
 	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
-		throw_fs_error("rcache");
+		throw_fs_error("rcache2");
 
 	    lk.lock();
 	    map[obj_blk] = cache_blk;
@@ -1107,8 +1107,8 @@ public:
     {
 	n_lines_read = 0;
 	char *buf = (char*)aligned_alloc(512, 4096);
-	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
-	    throw_fs_error("rcache");
+	if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
+	    throw_fs_error("rcache3");
 	super = (j_read_super*)buf;
 	
 	assert(super->unit_size == 128); // 64KB, in sectors
@@ -1119,10 +1119,10 @@ public:
 	assert(div_round_up(super->units, 2048) == super->bitmap_blocks);
 
 	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
-	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096) < 0)
+	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096L) < 0)
 	    throw_fs_error("rcache2");
 	bitmap = (uint16_t*)aligned_alloc(512, super->bitmap_blocks*4096);
-	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096) < 0)
+	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096L) < 0)
 	    throw_fs_error("rcache3");
 
 	for (int i = 0; i < super->units; i++)
@@ -1147,8 +1147,8 @@ public:
     }
 
     void write_map(void) {
-	pwrite(fd, flat_map, 4096 * super->map_blocks, 4096 * super->map_start);
-	pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096 * super->bitmap_start);
+	pwrite(fd, flat_map, 4096 * super->map_blocks, 4096L * super->map_start);
+	pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096L * super->bitmap_start);
     }
     
     ~read_cache() {
@@ -1392,7 +1392,7 @@ class write_cache {
 	    lk.unlock();
 	    
 	    if (pad != 0)
-		if (pwrite(fd, pad_hdr, 4096, pad*4096) < 0)
+		if (pwrite(fd, pad_hdr, 4096, pad*4096L) < 0)
 		    throw_fs_error("wpad");
 
 	    std::vector<j_extent> extents;
@@ -1430,7 +1430,7 @@ class write_cache {
 		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
 
 	    assert(blockno + div_round_up(iovs.bytes(), 4096) <= (int)super->limit);
-	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096) < 0)
+	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096L) < 0)
 		throw_fs_error("wdata");
 
 	    /* update map first under lock. 
@@ -1476,7 +1476,7 @@ class write_cache {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	j_hdr *h = (j_hdr*)buf;
 
-	if (pread(fd, buf, 4096, blk*4096) < 0)
+	if (pread(fd, buf, 4096, blk*4096L) < 0)
 	    throw_fs_error("wcache");
 	if (h->magic != LSVD_MAGIC) {
 	    printf("bad block: %d\n", blk);
@@ -1570,7 +1570,7 @@ class write_cache {
 		
 		auto t = std::chrono::system_clock::now();
 		if (t - t0 >= super_timeout) {
-		    if (pwrite(fd, super, 4096, 4096*super_blkno) < 0)
+		    if (pwrite(fd, super, 4096, 4096L*super_blkno) < 0)
 			throw_fs_error("wsuper_rewrite");
 		    t0 = t;
 		}
@@ -1651,9 +1651,9 @@ class write_cache {
 	super_copy->len_blocks = super->len_blocks = len_pages;
 	super_copy->len_entries = super->len_entries = _lengths.size();
 	
-	if (pwrite(fd, e_buf, 4096*ckpt_pages, 4096*blockno) < 0)
+	if (pwrite(fd, e_buf, 4096*ckpt_pages, 4096L*blockno) < 0)
 	    throw_fs_error("wckpt_e");
-	if (pwrite(fd, (char*)super_copy, 4096, 4096*super_blkno) < 0)
+	if (pwrite(fd, (char*)super_copy, 4096, 4096L*super_blkno) < 0)
 	    throw_fs_error("wckpt_s");
 
 	free(super_copy);
@@ -1713,7 +1713,7 @@ public:
 		}
 
 		size_t bytes = 512 * (_limit - _base),
-		    nvme_offset = 512 * plba;
+		    nvme_offset = 512L * plba;
 		auto slice = iovs.slice(buf_offset, buf_offset+bytes);
 		to_read.push_back(std::make_pair(slice, nvme_offset));
 		xprintf("wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
@@ -1749,7 +1749,7 @@ public:
 	fd = _fd;
 	be = _be;
 	char *buf = (char*)aligned_alloc(512, 4096);
-	if (pread(fd, buf, 4096, 4096*blkno) < 4096)
+	if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
 	    throw_fs_error("wcache");
 	super = (j_write_super*)buf;
 	pad_page = (char*)aligned_alloc(512, 4096);
@@ -1761,7 +1761,7 @@ public:
 		map_bytes_rounded = round_up(map_bytes, 4096);
 	    char *map_buf = (char*)aligned_alloc(512, map_bytes_rounded);
 	    std::vector<j_map_extent> extents;
-	    if (pread(fd, map_buf, map_bytes_rounded, 4096 * super->map_start) < 0)
+	    if (pread(fd, map_buf, map_bytes_rounded, 4096L * super->map_start) < 0)
 		throw_fs_error("wcache_map");
 	    decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
 	    for (auto e : extents) {
@@ -1774,7 +1774,7 @@ public:
 		len_bytes_rounded = round_up(len_bytes, 4096);
 	    char *len_buf = (char*)aligned_alloc(512, len_bytes_rounded);
 	    std::vector<j_length> _lengths;
-	    if (pread(fd, len_buf, len_bytes_rounded, 4096 * super->len_start) < 0)
+	    if (pread(fd, len_buf, len_bytes_rounded, 4096L * super->len_start) < 0)
 		throw_fs_error("wcache_len");
 	    decode_offset_len<j_length>(len_buf, 0, len_bytes, _lengths);
 	    for (auto l : _lengths) {
@@ -1840,7 +1840,7 @@ public:
 	    }
 
 	    size_t bytes = 512 * (_limit - _base),
-		nvme_offset = 512 * plba;
+		nvme_offset = 512L * plba;
 	    auto slice = iovs.slice(buf_offset, buf_offset+bytes);
 	    to_read.push_back(std::make_pair(slice, nvme_offset));
 	    xprintf("wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
