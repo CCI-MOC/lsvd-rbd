@@ -107,55 +107,6 @@ class obj_offset(LittleEndianStructure):
                 ("offset", c_ulong, 28)]
 sizeof_obj_offset = sizeof(obj_offset)
 
-rsuper = None
-def rcache_init(blkno):
-    global rsuper
-    assert _fd != -1
-    lsvd_lib.rcache_init(c_uint(blkno), c_int(_fd))
-    rsuper = j_read_super()
-    lsvd_lib.rcache_getsuper(byref(rsuper))
-
-def rcache_shutdown():
-    lsvd_lib.rcache_shutdown()
-
-def rcache_read(offset, nbytes):
-    assert (nbytes % 512) == 0 and (offset % 512) == 0
-    buf = (c_char * nbytes)()
-    lsvd_lib.rcache_read(buf, c_ulong(offset), c_ulong(nbytes))
-    return buf[0:nbytes]
-
-def rcache_add(obj, offset, data):
-    nbytes = len(data)
-    assert (nbytes % 512) == 0
-    lsvd_lib.rcache_add(c_int(obj), c_int(offset), data, c_int(nbytes), data)
-    
-def rcache_getmap():
-    n = rsuper.units
-    k = (obj_offset * n)()
-    v = (c_int * n)()
-    m = lsvd_lib.rcache_getmap(byref(k), byref(v), n)
-    keys = [[_.obj, _.offset] for _ in k[0:m]]
-    vals = v[:]
-    return list(zip(keys, vals))
-    
-def rcache_flatmap():
-    n = rsuper.units
-    vals = (obj_offset * n)()
-    n = lsvd_lib.rcache_get_flat(byref(vals), c_int(n))
-    return [[_.obj,_.offset] for _ in vals[0:n]]
-
-def rcache_bitmap():
-    n = rsuper.units
-    vals = (c_ushort * n)()
-    n = lsvd_lib.rcache_get_masks(byref(vals), c_int(n))
-    return vals[0:n]
-
-def rcache_evict(n):
-    lsvd_lib.rcache_evict(c_int(n))
-
-def rcache_reset():
-    lsvd_lib.rcache_reset()
-
 class j_extent(LittleEndianStructure):
     _fields_ = [("lba", c_ulong, 40),
                 ("len", c_ulong, 24)]
