@@ -5,6 +5,7 @@ import lsvd
 import os
 import ctypes
 import time
+import mkdisk
 import mkcache
 import test2 as t2
 
@@ -15,8 +16,8 @@ fd2 = -1
 
 def startup():
     global fd2
-    val = os.system("./mkdisk --size 10m %s" % img)
-    assert val == 0
+    sectors = 10*1024*2 # 10MB
+    mkdisk.mkdisk(img, sectors)
     lsvd.init(img, 1, False)
     mkcache.mkcache(nvme)
     lsvd.cache_open(nvme)

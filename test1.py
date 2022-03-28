@@ -7,11 +7,11 @@
 import unittest
 import lsvd
 import os
+import mkdisk
 
 img = "/tmp/bkt/obj"
-
-val = os.system("./mkdisk --size 10m %s" % img)
-assert val == 0
+sectors = 10*1024*2 # 10MB
+mkdisk.mkdisk(img, sectors)
 
 _size = lsvd.init(img, 1, False)
 assert _size == 10*1024*1024
