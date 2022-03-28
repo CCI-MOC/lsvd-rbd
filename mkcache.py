@@ -89,7 +89,7 @@ if __name__ == '__main__':
         r_units = int(0.75*pages) // 16
         r_pages = r_units * 16
         r_oh = div_round_up(r_units*(2+lsvd.sizeof_obj_offset), 4096)
-        w_pages = pages - r_pages - 3     # mkcache subtracts write metadata
+        w_pages = pages - r_pages - r_oh - 3     # mkcache subtracts write metadata
     
         mkcache(args.device, uuid, write_zeros=False, wblks=w_pages, rblks=r_pages)
     else:
