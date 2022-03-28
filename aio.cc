@@ -5,7 +5,15 @@ enum lsvd_op {
     LSVD_OP_WRITE = 2
 };
 
-typedef std::tuple<size_t,size_t,size_t> cache_miss;
+/* offset_base, len, buf_offset */
+//typedef std::tuple<size_t,size_t,size_t> cache_miss;
+struct cache_miss {
+    size_t offset;		// volume offset, in bytes
+    size_t len;			// in bytes
+    size_t buf_offset;		// in bytes
+    cache_miss(size_t _off, size_t _len, size_t _buf_offset) :
+	offset(_off), len(_len), buf_offset(_buf_offset) {}
+};
 
 class lsvd_aio {
 public:

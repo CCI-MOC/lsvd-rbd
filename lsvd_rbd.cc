@@ -38,14 +38,25 @@ namespace fs = std::experimental::filesystem;
 #include <errno.h>
 
 std::mutex printf_m;
-#if 0
-#define xprintf(...) do { \
+bool _debug_init_done;
+int  _debug_mask;
+enum {DBG_MAP = 1, DBG_HITS = 2, DBG_AIO = 4};
+void debug_init(void)
+{
+    if (getenv("DBG_AIO"))
+	_debug_mask |= DBG_AIO;
+    if (getenv("DBG_HITS"))
+	_debug_mask |= DBG_HITS;
+    if (getenv("DBG_MAP"))
+	_debug_mask |= DBG_MAP;
+}
+    
+#define xprintf(mask, ...) do { \
+    if (!_debug_init_done) debug_init(); \
+    if (mask & _debug_mask) { \
 	std::unique_lock lk(printf_m); \
 	fprintf(stderr, __VA_ARGS__); \
-    } while (0)
-#else
-#define xprintf(...)
-#endif
+    }} while (0)
 
 struct _log {
     int l;
@@ -783,6 +794,25 @@ public:
     }
 };
 
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+
+size_t getsize64(int fd)
+{
+    struct stat sb;
+    size_t size;
+    
+    if (fstat(fd, &sb) < 0)
+	throw_fs_error("stat");
+    if (S_ISBLK(sb.st_mode)) {
+	if (ioctl(fd, BLKGETSIZE64, &size) < 0)
+	    throw_fs_error("ioctl");
+    }
+    else
+	size = sb.st_size;
+    return size;
+}
 
 /* the read cache is:
  * 1. indexed by obj/offset[*], not LBA
@@ -800,6 +830,7 @@ class read_cache {
     objmap             *omap;
     translate          *be;
     int                 fd;
+    size_t              dev_max;
     backend            *io;
     
     int               unit_sectors;
@@ -810,7 +841,6 @@ class read_cache {
     int               n_hits;
     int               n_misses;
     
-    thread_pool<cache_work*> workers;
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads;	   // for debug
     
@@ -887,26 +917,111 @@ class read_cache {
 	}
     }
 
+    // TODO: iovec version
+    void do_add(extmap::obj_offset oo, int sectors, char *buf) {
+	// must be 4KB aligned
+	assert(!(oo.offset & 7));
+
+	while (sectors > 0) {
+	    std::unique_lock lk(m);
+
+	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / unit_sectors};
+	    int cache_blk = -1;
+	    auto it = map.find(obj_blk);
+	    if (it != map.end())
+		cache_blk = it->second;
+	    else if (free_blks.size() > 0) {
+		cache_blk = free_blks.back();
+		free_blks.pop_back();
+	    }
+	    else {
+		//xprintf("ADD %d.%d: no space\n", oo.obj, oo.offset);
+		return;
+	    }
+	    while (busy[cache_blk])
+		cv.wait(lk);
+	    busy[cache_blk] = true;
+	    auto mask = bitmap[cache_blk];
+	    lk.unlock();
+
+	    assert(cache_blk >= 0);
+
+	    auto obj_page = oo.offset / 8;
+	    auto pages_in_blk = unit_sectors / 8;
+	    auto blk_page = obj_blk.offset * pages_in_blk;
+	    smartiov iov;
+
+	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
+		mask |= (1 << i);
+		iov.push_back((iovec){buf, 4096});
+		buf += 4096;
+		sectors -= 8;
+		oo.offset += 8;
+	    }
+
+	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096L;
+	    blk_offset += (obj_page - blk_page) * 4096L;
+	    assert(blk_offset + iov.bytes() <= dev_max);
+	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
+		throw_fs_error("rcache2");
+
+	    lk.lock();
+	    map[obj_blk] = cache_blk;
+	    bitmap[cache_blk] = mask;
+	    flat_map[cache_blk] = obj_blk;
+	    busy[cache_blk] = false;
+	    map_dirty = true;
+	    cv.notify_one();
+	    lk.unlock();
+	}
+    }
+
+    struct add_work {
+	extmap::obj_offset oo;
+	int sectors;
+	char *buf;
+	add_work(extmap::obj_offset _oo, int _sectors, char *_buf) {
+	    oo = _oo;
+	    sectors = _sectors;
+	    buf = _buf;
+	}
+    };
+    void adder(thread_pool<add_work*> *p) {
+	while (p->running) {
+	    add_work *w;
+	    if (!p->get(w))
+		break;
+	    auto [oo, sectors, buf] = *w;
+	    do_add(oo, sectors, buf);
+	    free(buf);
+	    delete w;
+	}
+    }
+    thread_pool<add_work*> adders;
+
+public:
     std::atomic<int> n_lines_read = 0;
-    
-    void do_readv(size_t offset, const iovec *iov, int iovcnt) {
+
+    void readv(size_t offset, const iovec *iov, int iovcnt,
+	       void (*callback)(void*), void *ptr) {
 	auto iovs = smartiov(iov, iovcnt);
 	size_t len = iovs.bytes();
 	lba_t lba = offset/512, sectors = len/512;
 	std::vector<std::tuple<lba_t,lba_t,extmap::obj_offset>> extents;
-	xprintf("rc: do_readv %d+%d\n", (int)lba, (int)sectors);
+	xprintf(DBG_MAP, "rc: do_readv %d+%d\n", (int)lba, (int)sectors);
 	std::shared_lock lk(omap->m);
 	std::unique_lock lk2(m);
 	for (auto it = omap->map.lookup(lba);
 	     it != omap->map.end() && it->base() < lba+sectors; it++) {
 	    auto [_b, _l, _p] = it->vals(lba, lba+sectors);
-	    xprintf("rc: map: %d+%d -> %d+%d\n", (int)lba, (int)sectors, (int)_b, (int)(_l-_b));
+	    xprintf(DBG_MAP, "rc: map: %d+%d -> %d+%d\n", (int)lba, (int)sectors, (int)_b, (int)(_l-_b));
 	    extents.push_back(it->vals(lba, lba+sectors));
 	}
 
-	if (n_hits + n_misses >= 10000) {
+	if (n_hits + n_misses >= 1000) {
 	    hit_rate = (hit_rate * 0.5) + (0.5 * n_hits) / (n_hits + n_misses);
-	    //xprintf("hit rate: %f hits %d misses %d lines_read %d\n", hit_rate, n_hits, n_misses, n_lines_read);
+	    int x = n_lines_read;
+	    xprintf(DBG_HITS, "hit rate: %f lines_read %d\n", hit_rate, x);
 	    n_hits = n_misses = 0;
 	}
 	/* hack for better random performance - if hit rate is less than 50%, gradually
@@ -928,7 +1043,7 @@ class read_cache {
 		auto bytes = (base-lba)*512;
 		iovs.slice(buf_offset, buf_offset+bytes).zero();
 		len -= bytes;
-		xprintf("rc: readzero: %d+%d\n", (int)base, (int)lba);
+		xprintf(DBG_MAP, "rc: readzero: %d+%d\n", (int)base, (int)lba);
 	    }
 	    while (base < limit) {
 		extmap::obj_offset unit = {ptr.obj, ptr.offset / unit_sectors};
@@ -965,8 +1080,9 @@ class read_cache {
 			finish = start + (blk_top_offset - blk_offset);
 		    size_t bytes = 512 * (finish - start);
 
-		    xprintf("rc: %d+%d in_cache: %d\n", (int)base, (int)bytes/512, (int)start);
+		    xprintf(DBG_MAP, "rc: %d+%d in_cache: %d\n", (int)base, (int)bytes/512, (int)start);
 		    auto tmp = iovs.slice(buf_offset, buf_offset+bytes);
+		    assert(512L*start + tmp.bytes() <= dev_max);
 		    if (preadv(fd, tmp.data(), tmp.size(), 512L*start) < 0)
 			throw_fs_error("rcache");
 		    
@@ -979,7 +1095,7 @@ class read_cache {
 		}
 		else if (!use_cache) {
 		    lba_t sectors = limit - base;
-		    xprintf("rc: %d+%d rd_obj: %d+%d\n", (int)base, (int)sectors,
+		    xprintf(DBG_MAP, "rc: %d+%d rd_obj: %d+%d\n", (int)base, (int)sectors,
 			    (int)ptr.obj, (int)ptr.offset);
 		    auto _iov = iovs.slice(buf_offset, buf_offset + 512*sectors);
 		    io->read_numbered_objectv(ptr.obj, _iov.data(), _iov.size(),
@@ -996,7 +1112,7 @@ class read_cache {
                     size_t start = 512 * blk_offset,
 			finish = 512 * blk_top_offset;
 		    assert((int)finish <= bytes);
-		    xprintf("rc: %d+%d fetch -> cache (%d.%d)\n", (int)base,
+		    xprintf(DBG_MAP, "rc: %d+%d fetch -> cache (%d.%d)\n", (int)base,
 			    (int)(limit-base), (int)unit.obj, (int)blk_base);
 
 		    iovs.slice(buf_offset,
@@ -1013,98 +1129,23 @@ class read_cache {
 	    lba = limit;
 	}
 	if (len > 0) {
-	    xprintf("rc: zero %d+%d\n", (int)lba, (int)len/512);
+	    xprintf(DBG_MAP, "rc: zero %d+%d\n", (int)lba, (int)len/512);
 	    iovs.slice(buf_offset, buf_offset+len).zero();
 	}
+	callback(ptr);
 
 	// now read is finished, and we can add shit to the cache
 	for (auto [oo, n, cache_line] : to_add) {
-	    add(oo, n, cache_line);
-	    free(cache_line);
+	    auto w = new add_work(oo, n, cache_line);
+	    adders.put(w);
 	}
-    }
-
-    void reader(thread_pool<cache_work*> *p) {
-	while (p->running) {
-	    cache_work *w;
-	    if (!p->get(w))
-		break;
-	    auto [iov, iovcnt] = w->iovs.c_iov();
-	    do_readv(w->lba * 512, iov, iovcnt);
-	    DBG((long)w->ptr);
-	    w->callback(w->ptr);
-	    delete w;
-	}
-    }
-
-public:
-
-    // TODO: iovec version
-    void add(extmap::obj_offset oo, int sectors, char *buf) {
-	// must be 4KB aligned
-	assert(!(oo.offset & 7));
-
-	while (sectors > 0) {
-	    std::unique_lock lk(m);
-
-	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / unit_sectors};
-	    int cache_blk = -1;
-	    auto it = map.find(obj_blk);
-	    if (it != map.end())
-		cache_blk = it->second;
-	    else if (free_blks.size() > 0) {
-		cache_blk = free_blks.back();
-		free_blks.pop_back();
-	    }
-	    else {
-		//xprintf("ADD %d.%d: no space\n", oo.obj, oo.offset);
-		return;
-	    }
-	    while (busy[cache_blk])
-		cv.wait(lk);
-	    busy[cache_blk] = true;
-	    auto mask = bitmap[cache_blk];
-	    lk.unlock();
-
-	    assert(cache_blk >= 0);
-
-	    auto obj_page = oo.offset / 8;
-	    auto pages_in_blk = unit_sectors / 8;
-	    auto blk_page = obj_blk.offset * pages_in_blk;
-	    std::vector<iovec> iov;
-
-	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
-		mask |= (1 << i);
-		iov.push_back((iovec){buf, 4096});
-		buf += 4096;
-		sectors -= 8;
-		oo.offset += 8;
-	    }
-
-	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096L;
-	    blk_offset += (obj_page - blk_page) * 4096L;
-	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
-		throw_fs_error("rcache2");
-
-	    lk.lock();
-	    map[obj_blk] = cache_blk;
-	    bitmap[cache_blk] = mask;
-	    flat_map[cache_blk] = obj_blk;
-	    busy[cache_blk] = false;
-	    map_dirty = true;
-	    cv.notify_one();
-	    lk.unlock();
-	}
-    }
-
-    void readv(size_t offset, const iovec *iov, int iovcnt, void (*callback)(void*), void *ptr) {
-	workers.put(new cache_work(offset/512, iov, iovcnt, callback, ptr));
     }
 
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
-	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0), workers(&m),
-	misc_threads(&m), nothreads(nt)
+	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0),
+	misc_threads(&m), nothreads(nt), adders(&m)
     {
+	dev_max = getsize64(fd);
 	n_lines_read = 0;
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
@@ -1140,10 +1181,9 @@ public:
 	in_use = new std::vector<std::atomic<int>>(super->units);
 	map_dirty = false;
 
-	for (int i = 0; i < 16; i++)
-	    workers.pool.push(std::thread(&read_cache::reader, this, &workers));
-	if (!nothreads)
-	    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
+	for (int i = 0; i < 4; i++)
+	    adders.pool.push(std::thread(&read_cache::adder, this, &adders));
+	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
     }
 
     void write_map(void) {
@@ -1160,6 +1200,10 @@ public:
 
     /* debugging
      */
+    void add(extmap::obj_offset oo, int sectors, char *buf) {
+	do_add(oo, sectors, buf);
+    }
+
     void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, uint16_t **p_bitmap,
 		  std::vector<int> **p_free_blks, std::map<extmap::obj_offset,int> **p_map) {
 	if (p_super != NULL)
@@ -1275,6 +1319,7 @@ static bool aligned(void *ptr, int a)
  */
 class write_cache {
     int            fd;
+    size_t         dev_max;
     uint32_t       super_blkno;
     j_write_super *super;	// 4KB
 
@@ -1372,7 +1417,7 @@ class write_cache {
 	    long _lba = (blockno+1)*8;
 	    for (auto w : work) {
 		int len = w->iovs.bytes() / 512;
-		xprintf("wr: %ld+%d -> %ld\n", w->lba, len, _lba);
+		xprintf(DBG_MAP, "wr: %ld+%d -> %ld\n", w->lba, len, _lba);
 		_lba += len;
 	    }
 	    
@@ -1381,7 +1426,7 @@ class write_cache {
 		assert(pad < (int)super->limit);
 		lengths[pad] = super->limit - pad;
 		assert(lengths[pad] > 0);
-		//xprintf("lens[%d] <- %d\n", pad, super->limit - pad);
+		//xprintf(DBG_MAP, "lens[%d] <- %d\n", pad, super->limit - pad);
 	    }
 
 	    j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
@@ -1391,9 +1436,11 @@ class write_cache {
 
 	    lk.unlock();
 	    
-	    if (pad != 0)
+	    if (pad != 0) {
+		assert((pad+1)*4096UL <= dev_max);
 		if (pwrite(fd, pad_hdr, 4096, pad*4096L) < 0)
 		    throw_fs_error("wpad");
+	    }
 
 	    std::vector<j_extent> extents;
 
@@ -1476,6 +1523,7 @@ class write_cache {
 	char *buf = (char*)aligned_alloc(512, 4096);
 	j_hdr *h = (j_hdr*)buf;
 
+	assert((blk+1)*4096UL <= dev_max);
 	if (pread(fd, buf, 4096, blk*4096L) < 0)
 	    throw_fs_error("wcache");
 	if (h->magic != LSVD_MAGIC) {
@@ -1650,7 +1698,8 @@ class write_cache {
 	super_copy->len_start = super->len_start = blockno+map_pages;
 	super_copy->len_blocks = super->len_blocks = len_pages;
 	super_copy->len_entries = super->len_entries = _lengths.size();
-	
+
+	assert(4096UL*blockno + 4096UL*ckpt_pages <= dev_max);
 	if (pwrite(fd, e_buf, 4096*ckpt_pages, 4096L*blockno) < 0)
 	    throw_fs_error("wckpt_e");
 	if (pwrite(fd, (char*)super_copy, 4096, 4096L*super_blkno) < 0)
@@ -1664,89 +1713,10 @@ class write_cache {
     }
 
 public:
-
-    class aio_readv_work {
-    public:
-	size_t offset = 0;
-	smartiov iovs;
-	std::vector<cache_miss> *misses = NULL;
-	void (*cb)(void*) = NULL;
-	void *ptr = NULL;
-	aio_readv_work() {}
-	aio_readv_work(size_t _offset, const iovec *iov, int iovcnt,
-		       std::vector<cache_miss> *_misses,
-		       void (*_cb)(void*), void *_ptr) :
-	    offset(_offset), iovs(iov, iovcnt), misses(_misses),
-	    cb(_cb), ptr(_ptr) {}
-    };
-
-    class wc_read_aio : lsvd_aio {
-	std::vector<cache_miss> *misses = NULL;
-	void (*cb2)(void*) = NULL;
-	int state;
-	std::mutex *m;
-	write_cache *cache;
-	
-    public:
-	wc_read_aio(size_t _offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *_misses,
-		    void (*_cb)(void*), void *_ptr, write_cache *c) : lsvd_aio(_offset/512, iov, iovcnt) {
-	    misses = _misses;
-	    cache = c;
-	    m = &c->m;
-	    cb2 = _cb;
-	    ptr1 = _ptr;
-	}
-	void run(void) {
-	    auto bytes = iovs.bytes();
-	    lba_t base = lba, limit = base + bytes/512, prev = base;
-	    std::unique_lock<std::mutex> lk(*m);
-
-	    size_t buf_offset = 0;
-	    std::vector<std::pair<smartiov, size_t>> to_read;
-
-	    for (auto it = cache->map.lookup(base); it != cache->map.end() && it->base() < limit; it++) {
-		auto [_base, _limit, plba] = it->vals(base, limit);
-		if (_base > prev) {
-		    size_t bytes = 512 * (_base - prev);
-		    misses->push_back(std::tuple((size_t)512*prev, bytes, buf_offset));
-		    buf_offset += bytes;
-		}
-
-		size_t bytes = 512 * (_limit - _base),
-		    nvme_offset = 512L * plba;
-		auto slice = iovs.slice(buf_offset, buf_offset+bytes);
-		to_read.push_back(std::make_pair(slice, nvme_offset));
-		xprintf("wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
-		buf_offset += bytes;
-		prev = _limit;
-	    }
-	    lk.unlock();
-	    for (auto [slice, nvme_offset] : to_read)
-		if (preadv(cache->fd, slice.data(), slice.size(), nvme_offset) < 0)
-		    throw_fs_error("wcache_read");
-
-	    if (prev < limit)
-		misses->push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
-	    cb2(ptr1);
-	    delete this;
-	}
-    };
-    
-    thread_pool<wc_read_aio*> readv_workers;
-    
-    void aio_readv_thread(thread_pool<wc_read_aio*> *p) {
-	while (p->running) {
-	    wc_read_aio *w;
-	    if (!p->get(w)) 
-		break;
-	    w->run();
-	}
-    }
-
-    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) :
-	workers(&m), readv_workers(&m) {
+    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m) {
 	super_blkno = blkno;
 	fd = _fd;
+	dev_max = getsize64(fd);
 	be = _be;
 	char *buf = (char*)aligned_alloc(512, 4096);
 	if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
@@ -1796,8 +1766,6 @@ public:
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 	for (auto i = 0; i < n_threads; i++)
 	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
-	for (auto i = 0; i < 16; i++)
-	    readv_workers.pool.push(std::thread(&write_cache::aio_readv_thread, this, &readv_workers));
 
 	misc_threads = new thread_pool<int>(&m);
 	misc_threads->pool.push(std::thread(&write_cache::evict_thread, this, misc_threads));
@@ -1815,27 +1783,22 @@ public:
 	workers.put_locked(new cache_work(offset/512, iov, iovcnt, callback, ptr));
     }
 
-   /* returns tuples of:
-     * offset, len, buf_offset
-     */
-
-#if 0
-    // TODO: how the hell to handle fragments?
-    void readv(size_t offset, const iovec *iov, int iovcnt, std::vector<cache_miss> *misses) {
-	auto iovs = smartiov(iov, iovcnt);
+    void aio_readv(size_t offset, const iovec *iov, int iovcnt,
+		   std::vector<cache_miss> *misses, void (*cb)(void*), void *ptr) {
+	smartiov iovs(iov, iovcnt);
 	auto bytes = iovs.bytes();
-
 	lba_t base = offset/512, limit = base + bytes/512, prev = base;
 	std::unique_lock<std::mutex> lk(m);
 
 	size_t buf_offset = 0;
 	std::vector<std::pair<smartiov, size_t>> to_read;
 
-	for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
+	for (auto it = map.lookup(base);
+	     it != map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, plba] = it->vals(base, limit);
 	    if (_base > prev) {
 		size_t bytes = 512 * (_base - prev);
-		misses->push_back(std::tuple((size_t)512*prev, bytes, buf_offset));
+		misses->push_back(cache_miss((size_t)512*prev, bytes, buf_offset));
 		buf_offset += bytes;
 	    }
 
@@ -1843,24 +1806,20 @@ public:
 		nvme_offset = 512L * plba;
 	    auto slice = iovs.slice(buf_offset, buf_offset+bytes);
 	    to_read.push_back(std::make_pair(slice, nvme_offset));
-	    xprintf("wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
+	    xprintf(DBG_MAP, "wr: rd: %ld+%ld <- %ld\n", _base, _limit-_base, plba);
 	    buf_offset += bytes;
 	    prev = _limit;
 	}
 	lk.unlock();
-	for (auto [slice, nvme_offset] : to_read)
+	for (auto [slice, nvme_offset] : to_read) {
+	    assert(nvme_offset + slice.bytes() <= dev_max);
 	    if (preadv(fd, slice.data(), slice.size(), nvme_offset) < 0)
 		throw_fs_error("wcache_read");
+	}
 
 	if (prev < limit)
-	    misses->push_back(std::tuple(512 * prev, 512 * (limit - prev), buf_offset));
-    }
-#endif
-    
-    void aio_readv(size_t offset, const iovec *iov, int iovcnt,
-		   std::vector<cache_miss> *misses, void (*cb)(void*), void *ptr) {
-	auto w = new wc_read_aio(offset, iov, iovcnt, misses, cb, ptr, this);
-	readv_workers.put(w);
+	    misses->push_back(cache_miss(512 * prev, 512 * (limit - prev), buf_offset));
+	cb(ptr);
     }
     
     // debugging
@@ -2040,6 +1999,9 @@ extern "C" void wcache_read(char *buf, uint64_t offset, uint64_t len)
     wait1 w;
     wcache->aio_readv(offset, &iov, 1, &misses, wait1_cb, (void*)&w);
     wait1_wait(&w);
+
+    for (auto [_base, _len, buf_offset] : misses)
+	memset(buf2 + buf_offset, 0, _len);
     memcpy(buf, buf2, len);
     free(buf2);
 }
@@ -2188,8 +2150,8 @@ extern "C" void rcache_read(char *buf, uint64_t offset, uint64_t len)
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     waitq q;
     iovec iov = {buf2, len};
-    std::unique_lock lk(q.m);
     rcache->readv(offset, &iov, 1, waitq_cb, (void*)&q);
+    std::unique_lock lk(q.m);
     while (!q.done)
 	q.cv.wait(lk);
     memcpy(buf, buf2, len);
@@ -2449,6 +2411,8 @@ void rbd_aio_readv_fsm(void *ptr)
     readv_state *s = (readv_state*)ptr;
     std::unique_lock lk(m);
 
+    xprintf(DBG_AIO, "fsm %p %d\n", ptr, s->phase);
+    
     switch (s->phase) {
     case 0:
 	s->fri = (fake_rbd_image*)s->image;
@@ -2470,6 +2434,7 @@ void rbd_aio_readv_fsm(void *ptr)
 	}
 	s->phase = 1;
 	lk.unlock();
+	xprintf(DBG_AIO, " ->w readv(1) %p\n", s);
 	s->fri->wcache->aio_readv(s->off, s->tmp_iov, s->tmp_iovcnt,
 				  &s->misses, rbd_aio_readv_fsm, ptr);
 	break;
@@ -2478,28 +2443,34 @@ void rbd_aio_readv_fsm(void *ptr)
 	if (s->misses.size() == 0) {
 	    s->phase = 3;
 	    lk.unlock();
-	    xprintf(" ->fsm\n");
+	    xprintf(DBG_AIO, " ->fsm(3) %p\n", s);
 	    rbd_aio_readv_fsm(ptr);
 	}
 	else {
 	    auto iovs2 = smartiov(s->tmp_iov, s->tmp_iovcnt);
 	    s->phase = 2;
 	    lk.unlock();
+	    std::vector<std::pair<smartiov,size_t>> readv_work;
 	    for (auto [_off, _len, buf_offset] : s->misses) {
-		auto slice = iovs2.slice(buf_offset, buf_offset+_len);
+		readv_work.push_back(std::pair(iovs2.slice(buf_offset, buf_offset+_len),
+					       _off));
 		s->n++;
+	    }
+	    for (auto [slice, _off] : readv_work) 
 		s->fri->rcache->readv(_off, slice.data(), slice.size(),
 				      rbd_aio_readv_fsm, ptr);
-	    }
 	}
 	break;
 	
     case 2:
-	if (--(s->n) == 0) {
+    {int n = --(s->n);
+	xprintf(DBG_AIO, " n->%d %p\n", n, s);
+	if (n == 0) {
 	    s->phase = 3;
 	    lk.unlock();
 	    rbd_aio_readv_fsm(ptr);
 	}
+    }
 	break;
        
     case 3: {
