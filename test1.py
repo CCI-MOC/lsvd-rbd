@@ -10,6 +10,10 @@ import os
 import mkdisk
 
 img = "/tmp/bkt/obj"
+dir = os.path.dirname(img)
+for f in os.listdir(dir):
+    os.unlink(dir + "/" + f)
+
 sectors = 10*1024*2 # 10MB
 mkdisk.mkdisk(img, sectors)
 

@@ -56,6 +56,7 @@ class tests(unittest.TestCase):
         expected = b''.join([_ * 512 for _ in [b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H']])
         d = lsvd.rcache_read(0, 4096)
 
+        time.sleep(0.1)                   # wait for async add()
         m = lsvd.rcache_getmap()
         self.assertEqual(d, expected)
         self.assertEqual(m, [([1,0],15)])
@@ -67,6 +68,8 @@ class tests(unittest.TestCase):
         lsvd.fakemap_update(8*32, 600, 1, 33 + 8*32)
         # this reads the first 33 pages = 132K
         d = lsvd.rcache_read(16*4096, 17*4096)
+
+        time.sleep(0.1)
         m = lsvd.rcache_getmap()
         self.assertEqual(m, [([1, 0], 15), ([1, 1], 14), ([1, 2], 13)])
         finish()
