@@ -1026,7 +1026,7 @@ public:
 	    extents.push_back(it->vals(lba, lba+sectors));
 	}
 
-	if (n_hits + n_misses >= 30000) {
+	if (n_hits + n_misses >= 5000) {
 	    hit_rate = (hit_rate * 0.5) + (0.5 * n_hits) / (n_hits + n_misses);
 	    int x = n_lines_read;
 	    xprintf(DBG_HITS, "hit rate: %f lines_read %d\n", hit_rate, x);
@@ -1129,7 +1129,7 @@ public:
 			    (int)(limit-base), (int)unit.obj, (int)blk_base);
 
 		    int h = (blk_top_offset - blk_offset)/8;
-		    n_misses += (unit_sectors - h);
+		    n_misses += (unit_sectors/8 - h);
 		    n_hits += h;
 
 		    iovs.slice(buf_offset,
