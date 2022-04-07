@@ -84,7 +84,7 @@ def write_super(name, ckpt, next_obj):
     fp.write(buf)
     fp.close()
 
-def start():
+def cleanup():
     if not os.access(dir, os.F_OK):
         os.mkdir(dir, 0o755)
     for f in os.listdir(dir):
@@ -121,97 +121,100 @@ class tests(unittest.TestCase):
 
     def test_1_size(self):
         #print('Test 1')
-        start()
+        cleanup()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1, True)
-        self.assertEqual(_size, 10*1024*1024)
-        finish()
+        xlate = lsvd.translate(img, 1, True)
+        self.assertEqual(xlate.nbytes, 10*1024*1024)
+        xlate.close()
         
     def test_2_recover(self):
         #print('Test 2')
-        start()
+        cleanup()
         write_super(img, 0, 1)
         write_data_1(img + '.00000001', 0, 1)
-        _size = lsvd.init(img, 1, True)
-        self.assertEqual(lsvd.batch_seq(), 2)
-        d = lsvd.read(0, 512)
+        xlate = lsvd.translate(img, 1, True)
+        _size = xlate.nbytes
+        self.assertEqual(xlate.batch_seq(), 2)
+        d = xlate.read(0, 512)
         self.assertEqual(d, b'A' * 512)
-        d = lsvd.read(512, 512)
+        d = xlate.read(512, 512)
         self.assertEqual(d, b'\0' * 512)
-        d = lsvd.read(512*2*20, 512)
+        d = xlate.read(512*2*20, 512)
         self.assertEqual(d, b'U' * 512)
-        d = lsvd.read(512*2*20+512, 512)
+        d = xlate.read(512*2*20+512, 512)
         self.assertEqual(d, b'\0' * 512)
-        finish()
+        xlate.close()
 
     def test_3_persist(self):
         #print('Test 3')
-        start()
+        cleanup()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1, True)
+        xlate = lsvd.translate(img, 1, True)
+        _size = xlate.nbytes
         d = b'X' * 4096
-        lsvd.write(0, d)
-        lsvd.write(8192,d)
-        lsvd.flush()
+        xlate.write(0, d)
+        xlate.write(8192,d)
+        xlate.flush()
         time.sleep(0.1)
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
-        lsvd.shutdown()
+        xlate.close()
 
-        lsvd.init(img, 1, True)
-        d = lsvd.read(0, 4096)
+        xlate2 = lsvd.translate(img, 1, True)        
+        d = xlate2.read(0, 4096)
         self.assertEqual(d, b'X' * 4096)
-        finish()
+        xlate2.close()
 
     def test_4_checkpoint(self):
         #print('Test 4')
-        start()
+        cleanup()
         write_super(img, 0, 1)
-        lsvd.init(img, 1, True)
+        xlate = lsvd.translate(img, 1, True)
         d = b'X' * 4096
-        lsvd.write(0, d)
-        lsvd.write(8192,d)
-        lsvd.write(4096,d)
-        n = lsvd.checkpoint()
+        xlate.write(0, d)
+        xlate.write(8192,d)
+        xlate.write(4096,d)
+        n = xlate.checkpoint()
         hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
         self.assertEqual([_ for _ in ckpts], [2])
         exts = [_ for _ in map(lambda x: [x.lba,x.len,x.obj,x.offset], exts)]
         self.assertEqual(exts, [[0,8,1,0],[8,8,1,16],[16,8,1,8]])
-        finish()
+        xlate.close()
 
     def test_5_flushthread(self):
         #print('Test 5')
-        start()
+        cleanup()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1, True)
+        xlate = lsvd.translate(img, 1, True)
         self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
         d = b'Y' * 4096
-        lsvd.write(0, d)
-        lsvd.write(8192, d)
+        xlate.write(0, d)
+        xlate.write(8192, d)
         self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
         time.sleep(3)
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
-        lsvd.shutdown()
+        xlate.close()
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))        
-
-        lsvd.init(img, 1, True)
-        d = lsvd.read(0, 4096)
+        time.sleep(1)
+        
+        xlate2 = lsvd.translate(img, 1, True)
+        d = xlate2.read(0, 4096)
         self.assertEqual(d, b'Y' * 4096)
-        finish()
+        xlate2.close()
 
     # object list persisted correctly in checkpoint
     def test_6_objects(self):
         #printf('Test 6')
-        start()
+        cleanup()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1, True)
+        xlate = lsvd.translate(img, 1, True)
         d = b'Z' * 4096
-        lsvd.write(4096, d)
+        xlate.write(4096, d)
         self.assertFalse(os.access('/tmp/bkt/obj.00000001', os.R_OK))
-        lsvd.flush()
+        xlate.flush()
         time.sleep(0.1)
         self.assertTrue(os.access('/tmp/bkt/obj.00000001', os.R_OK))
         self.assertFalse(os.access('/tmp/bkt/obj.00000002', os.R_OK))
-        n = lsvd.checkpoint()
+        n = xlate.checkpoint()
 
         self.assertEqual(n, 2)
         self.assertTrue(os.access('/tmp/bkt/obj.00000002', os.R_OK))
@@ -222,28 +225,28 @@ class tests(unittest.TestCase):
         self.assertEqual(o.seq, 1)
         self.assertEqual(o.data_sectors, 8)
         self.assertEqual(o.live_sectors, 8)
-        finish()
+        xlate.close()
 
     def test_7_objects(self):
         #printf('Test 6')
-        start()
+        cleanup()
         write_super(img, 0, 1)
-        _size = lsvd.init(img, 1, True)
+        xlate = lsvd.translate(img, 1, True)
         d = b'Z' * 4096
-        lsvd.write(4096, d)
-        lsvd.flush()
+        xlate.write(4096, d)
+        xlate.flush()
         time.sleep(0.1)
-        n = lsvd.checkpoint()
+        n = xlate.checkpoint()
         self.assertEqual(n, 2)
         self.assertTrue(os.access('/tmp/bkt/obj.00000002', os.R_OK))
 
         d = b'Q' * 4096
-        lsvd.write(4096, d)
-        lsvd.flush()
+        xlate.write(4096, d)
+        xlate.flush()
         time.sleep(0.1)
         self.assertTrue(os.access('/tmp/bkt/obj.00000003', os.R_OK))
         self.assertFalse(os.access('/tmp/bkt/obj.00000004', os.R_OK))
-        n = lsvd.checkpoint()
+        n = xlate.checkpoint()
         self.assertEqual(n, 4)
         self.assertTrue(os.access('/tmp/bkt/obj.00000004', os.R_OK))
 
@@ -255,9 +258,9 @@ class tests(unittest.TestCase):
         self.assertEqual(objs[1].data_sectors, 8)
         self.assertEqual(objs[1].live_sectors, 8)
 
-        data = lsvd.read(4096,4096)
+        data = xlate.read(4096,4096)
         self.assertEqual(data, b'Q' * 4096)
-        finish()
+        xlate.close()
 
 if __name__ == '__main__':
     unittest.main(exit=False)

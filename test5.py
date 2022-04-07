@@ -12,25 +12,6 @@ nvme = '/tmp/nvme'
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
 
-def startup():
-    mkdisk.cleanup(img)
-    sectors = 10*1024*2 # 10MB
-    mkdisk.mkdisk(img, sectors)
-    mkcache.mkcache(nvme)
-    lsvd.init(img, 1, True)
-
-    lsvd.cache_open(nvme)
-    lsvd.wcache_init(1)
-    lsvd.rcache_init(2)
-    lsvd.fake_rbd_init()
-    time.sleep(0.1) # let evict_thread start up in valgrind
-
-def finish():
-    lsvd.rcache_shutdown()
-    lsvd.wcache_shutdown()
-    lsvd.cache_close()
-    lsvd.shutdown()
-
 _vals = None
 
 def inv(i, k, m):
@@ -55,15 +36,15 @@ def rbd_finish(_img):
 class tests(unittest.TestCase):
 
     def test_1_wcache_holes(self):
-        startup()
-        lsvd.write(0, b'A'*20*1024)
-        lsvd.flush()
-        lsvd.wcache_write(4096, b'B'*4096)
-        lsvd.wcache_write(3*4096, b'C'*4096)
-        d = lsvd.fake_rbd_read(0, 20*1024)
+        _img = rbd_startup()
+        lsvd.img_write(_img, 0, b'A'*20*1024)
+        lsvd.img_flush(_img)
+        lsvd.wcache_img_write(_img, 4096, b'B'*4096)
+        lsvd.wcache_img_write(_img, 3*4096, b'C'*4096)
+        d = lsvd.rbd_read(_img, 0, 20*1024)
 
         self.assertEqual(d, b'A'*4096 + b'B'*4096 + b'A'*4096 + b'C'*4096 + b'A'*4096)
-        finish()
+        rbd_finish(_img)
         
     def test_2_write(self):
         _img = rbd_startup()

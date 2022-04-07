@@ -14,14 +14,17 @@ img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
 fd2 = -1
 
+xlate, wcache = None, None
+
 def startup():
+    global xlate, wcache
     global fd2
     sectors = 10*1024*2 # 10MB
     mkdisk.mkdisk(img, sectors)
-    lsvd.init(img, 1, False)
+    xlate = lsvd.translate(img, 1, False)
     mkcache.mkcache(nvme)
-    lsvd.cache_open(nvme)
-    lsvd.wcache_init(1)
+    wcache = lsvd.write_cache(nvme)
+    wcache.init(xlate,1)
     fd2 = os.open(nvme, os.O_RDONLY)
 
 def c_super(fd):
@@ -45,64 +48,67 @@ def c_hdr(fd, blk):
     return [h, e]
 
 def restart():
-    lsvd.wcache_shutdown()
-    lsvd.shutdown()
+    global wcache, xlate
+    wcache.shutdown()
+    xlate.shutdown()
     for f in os.listdir(dir):
         os.unlink(dir + "/" + f)
     t2.write_super(img, 0, 1)
     mkcache.mkcache(nvme)
-    lsvd.init(img, 1, True)
-    lsvd.wcache_init(1)
+    xlate = lsvd.translate(img, 1, True)
+    wcache = lsvd.write_cache(nvme)
+    wcache.init(xlate,1)
     
 class tests(unittest.TestCase):
     #def setUp(self):
     #def tearDown(self):
 
     def test_1_readwrite(self):
-        lsvd.wcache_write(0, b'X'*4096)
-        m = lsvd.wcache_getmap(0, 1000)
+        wcache.write(0, b'X'*4096)
+        m = wcache.getmap(0, 1000)
 
         # find first data block of write cache
-        ws = lsvd.wcache_getsuper()
+        ws = wcache.getsuper()
         N = ws.base + 1
         self.assertEqual(m, [[0,8,(N*8)]])
-        d = lsvd.wcache_read(0, 4096)
+        d = wcache.read(0, 4096)
         self.assertEqual(d, b'X'*4096)
-        d = lsvd.wcache_read(4096, 4096)
+        d = wcache.read(4096, 4096)
         self.assertEqual(d, b'\0'*4096)
 
     def test_2_readwrite(self):
         restart()
         offset = 8192
-        lsvd.wcache_write(offset, b'A'*512)
-        lsvd.wcache_write(offset+1024, b'B'*512)
-        d = lsvd.wcache_read(offset, 2048)
+        wcache.write(offset, b'A'*512)
+        wcache.write(offset+1024, b'B'*512)
+        d = wcache.read(offset, 2048)
         self.assertEqual(d, b'A'*512+b'\0'*512+b'B'*512+b'\0'*512)
 
     def test_3_extents(self):
-        lsvd.wcache_shutdown()
+        wcache.shutdown()
         mkcache.mkcache(nvme)
-        lsvd.wcache_init(1)
+        wcache = lsvd.write_cache(nvme)
+        wcache.init(xlate,1)
         
-        wsup = lsvd.wcache_getsuper()
+        wsup = wcache.getsuper()
         n = n0 = wsup.next
-        lsvd.wcache_write(0, b'X'*8192)
+        wcache.write(0, b'X'*8192)
 
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 1)
         self.assertEqual(ee, [[0,16]])
 
-        n = lsvd.wcache_getsuper().next
-        lsvd.wcache_write(1024, b'A'*512)
+        n = wcache.getsuper().next
+        wcache.write(1024, b'A'*512)
 
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
         self.assertEqual(h.seq, 2)
         self.assertEqual(ee, [[2,1]])
 
-        n = lsvd.wcache_getsuper().next
-        lsvd.wcache_write(2048, b'B'*512)
+        n = wcache.getsuper().next
+        wcache.write(2048, b'B'*512)
 
         h,e = c_hdr(fd2, n)
         ee = [[_.lba, _.len] for _ in e]
@@ -112,51 +118,52 @@ class tests(unittest.TestCase):
         n,e = lsvd.wcache_oldest(n0)
         self.assertEqual(e, [(0, 16)])
 
-        n,e = lsvd.wcache_oldest(n)
+        n,e = wcache.oldest(n)
         self.assertEqual(e, [(2,1)])
 
-        n,e = lsvd.wcache_oldest(n)
+        n,e = wcache.oldest(n)
         self.assertEqual(e, [(4,1)])
         
     def test_4_backend(self):
         restart()
 
-        d = lsvd.read(0, 4096*3)
+        d = xlate.read(0, 4096*3)
         self.assertEqual(d, b'\0'*3*4096)
 
-        lsvd.wcache_write(0, b'W'*4096)
-        lsvd.wcache_write(4096, b'X'*4096)
-        lsvd.wcache_write(8192, b'Y'*4096)
+        wcache.write(0, b'W'*4096)
+        wcache.write(4096, b'X'*4096)
+        wcache.write(8192, b'Y'*4096)
         time.sleep(0.1)
-        d = lsvd.read(0, 4096*3)
+        d = xlate.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
     def test_5_ckpt(self):
         restart()
-        lsvd.wcache_write(0, b'W'*4096)
-        lsvd.wcache_write(4096, b'X'*4096)
-        lsvd.wcache_write(8192, b'Y'*4096)
+        wcache.write(0, b'W'*4096)
+        wcache.write(4096, b'X'*4096)
+        wcache.write(8192, b'Y'*4096)
         time.sleep(0.1)
 
-        m1 = lsvd.wcache_getmap(0, 1000)
-        lsvd.wcache_checkpoint()
-        m2 = lsvd.wcache_getmap(0, 1000)
+        m1 = wcache.getmap(0, 1000)
+        wcache.checkpoint()
+        m2 = wcache.getmap(0, 1000)
         self.assertEqual(m1, m2)
 
-        lsvd.wcache_shutdown()
-        lsvd.wcache_init(1)
+        wcache.shutdown()
+        wcache = lsvd.write_cache(nvme)
+        wcache.init(xlate,1)
         
-        m3 = lsvd.wcache_getmap(0, 1000)
+        m3 = wcache.getmap(0, 1000)
         self.assertEqual(m1, m3)
         
-        d = lsvd.read(0, 4096*3)
+        d = xlate.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
 
 if __name__ == '__main__':
     startup()
     unittest.main(exit=False)
-    lsvd.wcache_shutdown()
-    lsvd.shutdown()
+    wcache.shutdown()
+    xlate.shutdown()
     time.sleep(1)
 
