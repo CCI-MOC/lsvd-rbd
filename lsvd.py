@@ -88,9 +88,7 @@ LSVD_MAGIC = 0x4456534c
 class write_cache:
     def __init__(self, file):
         self._fd = os.open(file, os.O_RDWR | os.O_DIRECT)
-        print('_fd', self._fd, file)
         self.fd = os.open(file, os.O_RDONLY)
-        print('fd', self.fd, file)
         data = os.pread(self.fd, 4096, 0)
         self.super = j_super.from_buffer(bytearray(data[0:sizeof(j_super)]))
 
@@ -126,19 +124,19 @@ class write_cache:
         n = lsvd_lib.wcache_getmap(self.wcache, c_int(base), c_int(limit), c_int(n_tuples), byref(tuples))
         return list(map(lambda x: [x.base, x.limit, x.plba], tuples[0:n]))
 
-    def getsuper():
+    def getsuper(self):
         s = j_write_super()
         lsvd_lib.wcache_get_super(self.wcache, byref(s))
         return s
 
-    def oldest(blk):
+    def oldest(self, blk):
         exts = (j_extent * 32)()
         n = c_int()
         newer = lsvd_lib.wcache_oldest(self.wcache, c_int(blk), byref(exts), 32, byref(n))
         e = [(_.lba, _.len) for _ in exts[0:n.value]]
         return [newer, e]
 
-    def checkpoint():
+    def checkpoint(self):
         lsvd_lib.wcache_write_ckpt(self.wcache)
 
 def wcache_img_write(img, offset, data):

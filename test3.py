@@ -50,7 +50,7 @@ def c_hdr(fd, blk):
 def restart():
     global wcache, xlate
     wcache.shutdown()
-    xlate.shutdown()
+    xlate.close()
     for f in os.listdir(dir):
         os.unlink(dir + "/" + f)
     t2.write_super(img, 0, 1)
@@ -85,6 +85,7 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'A'*512+b'\0'*512+b'B'*512+b'\0'*512)
 
     def test_3_extents(self):
+        global wcache
         wcache.shutdown()
         mkcache.mkcache(nvme)
         wcache = lsvd.write_cache(nvme)
@@ -115,7 +116,7 @@ class tests(unittest.TestCase):
         self.assertEqual(h.seq, 3)
         self.assertEqual(ee, [[4,1]])
 
-        n,e = lsvd.wcache_oldest(n0)
+        n,e = wcache.oldest(n0)
         self.assertEqual(e, [(0, 16)])
 
         n,e = wcache.oldest(n)
@@ -138,6 +139,7 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
     def test_5_ckpt(self):
+        global wcache
         restart()
         wcache.write(0, b'W'*4096)
         wcache.write(4096, b'X'*4096)
@@ -164,6 +166,6 @@ if __name__ == '__main__':
     startup()
     unittest.main(exit=False)
     wcache.shutdown()
-    xlate.shutdown()
+    xlate.close()
     time.sleep(1)
 

@@ -1871,6 +1871,32 @@ public:
     void get_super(j_write_super *s) {
 	*s = *super;
     }
+    /* debug:
+     * cache eviction - get info from oldest entry in cache. [should be private]
+     *  @blk - header to read
+     *  @extents - data to move. empty if J_PAD or J_CKPT
+     *  return value - first page of next record
+     */
+    page_t get_oldest(page_t blk, std::vector<j_extent> &extents) {
+        char *buf = (char*)aligned_alloc(512, 4096);
+        j_hdr *h = (j_hdr*)buf;
+
+        if (pread(fd, buf, 4096, blk*4096) < 0)
+            throw_fs_error("wcache");
+        if (h->magic != LSVD_MAGIC) {
+            printf("bad block: %d\n", blk);
+        }
+        assert(h->magic == LSVD_MAGIC && h->version == 1);
+
+        auto next_blk = blk + h->len;
+        if (next_blk >= super->limit)
+            next_blk = super->base;
+        if (h->type == LSVD_J_DATA)
+            decode_offset_len<j_extent>(buf, h->extent_offset, h->extent_len, extents);
+
+        return next_blk;
+    }
+    
     void do_write_checkpoint(void) {
 	if (map_dirty)
 	    write_checkpoint();
@@ -2750,3 +2776,12 @@ extern "C" void wcache_write_ckpt(write_cache *wcache)
     wcache->do_write_checkpoint();
 }
 
+extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, int max, int *p_n)
+{
+    std::vector<j_extent> exts;
+    int next_blk = wcache->get_oldest(blk, exts);
+    int n = std::min(max, (int)exts.size());
+    memcpy((void*)extents, exts.data(), n*sizeof(j_extent));
+    *p_n = n;
+    return next_blk;
+}
