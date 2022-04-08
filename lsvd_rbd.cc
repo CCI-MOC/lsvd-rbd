@@ -2001,114 +2001,6 @@ objmap      *omap;
 read_cache  *rcache;
 backend     *io;
 
-extern "C" void rcache_init(uint32_t blkno, int fd)
-{
-    rcache = new read_cache(blkno, fd, false, lsvd, omap, io);
-}
-
-extern "C" void rcache_shutdown(void)
-{
-    delete rcache;
-    rcache = NULL;
-}
-
-extern "C" void rcache_evict(int n)
-{
-    rcache->do_evict(n);
-}
-
-extern "C" void rcache_add(int object, int sector_offset, char* buf, size_t len)
-{
-    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    memcpy(buf2, buf, len);
-    extmap::obj_offset oo = {object, sector_offset};
-    rcache->add(oo, len/512, buf2);
-    free(buf2);
-}
-
-extern "C" void rcache_read(char *buf, uint64_t offset, uint64_t len)
-{
-    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    int _len = len;
-    std::mutex m;
-    std::condition_variable cv;
-    bool done = false;
-    
-    for (char *_buf = buf2; _len > 0; ) {
-	void *closure = wrap([&m, &cv, &done]{
-		std::unique_lock lk(m);
-		done = true;
-		cv.notify_all();
-	    });
-	std::unique_lock lk(m);
-	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
-						       call_wrapped, closure);
-	memset(_buf, 0, skip_len);
-	_buf += (skip_len+read_len);
-	_len -= (skip_len+read_len);
-	if (read_len > 0)
-	    while (!done)
-		cv.wait(lk);
-    }
-    memcpy(buf, buf2, len);
-    free(buf2);
-}
-
-extern "C" extern "C" void rcache_getsuper(j_read_super *p_super)
-{
-    j_read_super *p;
-    rcache->get_info(&p, NULL, NULL, NULL, NULL);
-    *p_super = *p;
-}
-
-extern "C" int rcache_getmap(extmap::obj_offset *keys, int *vals, int n)
-{
-    int i = 0;
-    std::map<extmap::obj_offset,int> *p_map;
-    rcache->get_info(NULL, NULL, NULL, NULL, &p_map);
-    for (auto it = p_map->begin(); it != p_map->end() && i < n; it++, i++) {
-	auto [key, val] = *it;
-	keys[i] = key;
-	vals[i] = val;
-    }
-    return i;
-}
-
-extern "C" int rcache_get_flat(extmap::obj_offset *vals, int n)
-{
-    extmap::obj_offset *p;
-    j_read_super *p_super;
-    rcache->get_info(&p_super, &p, NULL, NULL, NULL);
-    n = std::min(n, p_super->units);
-    memcpy(vals, p, n*sizeof(extmap::obj_offset));
-    return n;
-}
-
-extern "C" int rcache_get_masks(uint16_t *vals, int n)
-{
-    j_read_super *p_super;
-    uint16_t *masks;
-    rcache->get_info(&p_super, NULL, &masks, NULL, NULL);
-    n = std::min(n, p_super->units);
-    memcpy(vals, masks, n*sizeof(uint16_t));
-    return n;
-}
-
-extern "C" void rcache_reset(void)
-{
-}
-
-extern "C" void fakemap_update(int base, int limit, int obj, int offset)
-{
-    extmap::obj_offset oo = {obj,offset};
-    omap->map.update(base, limit, oo);
-}
-
-extern "C" void fakemap_reset(void)
-{
-    omap->map.reset();
-}
-
 /* ------------------- FAKE RBD INTERFACE ----------------------*/
 /* following types are from librados.h
  */
@@ -2286,7 +2178,6 @@ void rbd_read_cb(void *ptr)
 {
     auto s = (rbd_read_state*)ptr;
     auto p = (lsvd_completion*)s->c;
-
     if (--(s->n) == 0) {
 	p->get();
 	p->complete(0);
@@ -2294,7 +2185,7 @@ void rbd_read_cb(void *ptr)
 	delete s;
     }
 }
-	
+
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char *buf,
 			    rbd_completion_t c)
 {
@@ -2304,11 +2195,15 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char
 	s->n++;
 	auto [skip,wait] =
 	    fri->wcache->async_read(offset, buf, len, rbd_read_cb, (void*)s);
+	if (wait == 0)
+	    s->n--;
 	len -= skip;
 	while (skip > 0) {
 	    s->n++;
 	    auto [skip2, wait2] =
 		fri->rcache->async_read(offset, buf, skip, rbd_read_cb, (void*)s);
+	    if (wait2 == 0)
+		s->n--;
 	    memset(buf, 0, skip2);
 	    skip -= (skip2 + wait2);
 	    buf += (skip2 + wait2);
@@ -2784,4 +2679,119 @@ extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, in
     memcpy((void*)extents, exts.data(), n*sizeof(j_extent));
     *p_n = n;
     return next_blk;
+}
+
+extern "C" void rcache_init(_dbg *d,
+			    uint32_t blkno, int fd, void **val_p)
+{
+    auto rcache = new read_cache(blkno, fd, false,
+				 d->lsvd, d->omap, d->io);
+    *val_p = (void*)rcache;
+}
+
+extern "C" void rcache_shutdown(read_cache *rcache)
+{
+    delete rcache;
+}
+
+extern "C" void rcache_evict(read_cache *rcache, int n)
+{
+    rcache->do_evict(n);
+}
+
+extern "C" void rcache_add(read_cache *rcache, int object,
+			   int sector_offset, char* buf, size_t len)
+{
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    memcpy(buf2, buf, len);
+    extmap::obj_offset oo = {object, sector_offset};
+    rcache->add(oo, len/512, buf2);
+    free(buf2);
+}
+
+extern "C" void rcache_read(read_cache *rcache, char *buf,
+			    uint64_t offset, uint64_t len)
+{
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    int _len = len;
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    
+    for (char *_buf = buf2; _len > 0; ) {
+	void *closure = wrap([&m, &cv, &done]{
+		std::unique_lock lk(m);
+		done = true;
+		cv.notify_all();
+	    });
+	std::unique_lock lk(m);
+	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
+						       call_wrapped, closure);
+	memset(_buf, 0, skip_len);
+	_buf += (skip_len+read_len);
+	_len -= (skip_len+read_len);
+	if (read_len > 0)
+	    while (!done)
+		cv.wait(lk);
+    }
+    memcpy(buf, buf2, len);
+    free(buf2);
+}
+
+extern "C" extern "C" void rcache_getsuper(read_cache *rcache,
+					   j_read_super *p_super)
+{
+    j_read_super *p;
+    rcache->get_info(&p, NULL, NULL, NULL, NULL);
+    *p_super = *p;
+}
+
+extern "C" int rcache_getmap(read_cache *rcache,
+			     extmap::obj_offset *keys, int *vals, int n)
+{
+    int i = 0;
+    std::map<extmap::obj_offset,int> *p_map;
+    rcache->get_info(NULL, NULL, NULL, NULL, &p_map);
+    for (auto it = p_map->begin(); it != p_map->end() && i < n; it++, i++) {
+	auto [key, val] = *it;
+	keys[i] = key;
+	vals[i] = val;
+    }
+    return i;
+}
+
+extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int n)
+{
+    extmap::obj_offset *p;
+    j_read_super *p_super;
+    rcache->get_info(&p_super, &p, NULL, NULL, NULL);
+    n = std::min(n, p_super->units);
+    memcpy(vals, p, n*sizeof(extmap::obj_offset));
+    return n;
+}
+
+extern "C" int rcache_get_masks(read_cache *rcache, uint16_t *vals, int n)
+{
+    j_read_super *p_super;
+    uint16_t *masks;
+    rcache->get_info(&p_super, NULL, &masks, NULL, NULL);
+    n = std::min(n, p_super->units);
+    memcpy(vals, masks, n*sizeof(uint16_t));
+    return n;
+}
+
+extern "C" void rcache_reset(read_cache *rcache)
+{
+}
+
+extern "C" void fakemap_update(_dbg *d, int base, int limit,
+			       int obj, int offset)
+{
+    extmap::obj_offset oo = {obj,offset};
+    d->omap->map.update(base, limit, oo);
+}
+
+extern "C" void fakemap_reset(_dbg *d)
+{
+    d->omap->map.reset();
 }

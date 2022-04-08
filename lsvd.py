@@ -59,6 +59,14 @@ class translate:
 
     def checkpoint(self):
         return lsvd_lib.xlate_checkpoint(self.lsvd)
+
+    def fakemap_update(self, base, limit, obj, offset):
+        lsvd_lib.fakemap_update(self.lsvd, c_int(base), c_int(limit),
+                                    c_int(obj), c_int(offset))
+
+    def fakemap_reset(self):
+        lsvd_lib.fakemap_reset(self.lsvd)
+
         
 def img_write(img, offset, data):
     if type(data) != bytes:
@@ -146,63 +154,59 @@ def wcache_img_write(img, offset, data):
     assert (nbytes % 512) == 0 and (offset % 512) == 0
     val = lsvd_lib.wcache_img_write(img, data, c_ulong(offset), c_uint(nbytes))
 
-rsuper = None
-def rcache_init(blkno):
-    global rsuper
-    assert _fd != -1
-    lsvd_lib.rcache_init(c_uint(blkno), c_int(_fd))
-    rsuper = j_read_super()
-    lsvd_lib.rcache_getsuper(byref(rsuper))
 
-def rcache_shutdown():
-    lsvd_lib.rcache_shutdown()
+class read_cache:
+    def __init__(self, xlate, blkno, _fd):
+        p = c_void_p()
+        lsvd_lib.rcache_init(xlate.lsvd, c_uint(blkno), c_int(_fd), byref(p))
+        self.rcache = p
+        self.rsuper = j_read_super()
+        lsvd_lib.rcache_getsuper(self.rcache, byref(self.rsuper))
 
-def rcache_read(offset, nbytes):
-    assert (nbytes % 512) == 0 and (offset % 512) == 0
-    buf = (c_char * nbytes)()
-    lsvd_lib.rcache_read(buf, c_ulong(offset), c_ulong(nbytes))
-    return buf[0:nbytes]
+    def close(self):
+        lsvd_lib.rcache_shutdown(self.rcache)
 
-def rcache_add(obj, offset, data):
-    nbytes = len(data)
-    assert (nbytes % 512) == 0
-    lsvd_lib.rcache_add(c_int(obj), c_int(offset), data, c_int(nbytes), data)
+    def read(self, offset, nbytes):
+        assert (nbytes % 512) == 0 and (offset % 512) == 0
+        buf = (c_char * nbytes)()
+        lsvd_lib.rcache_read(self.rcache, buf, c_ulong(offset), c_ulong(nbytes))
+        return buf[0:nbytes]
+
+    def add(self, obj, offset, data):
+        nbytes = len(data)
+        assert (nbytes % 512) == 0
+        lsvd_lib.rcache_add(self.rcache, c_int(obj), c_int(offset), data, c_int(nbytes), data)
     
-def rcache_getmap():
-    n = rsuper.units
-    k = (obj_offset * n)()
-    v = (c_int * n)()
-    m = lsvd_lib.rcache_getmap(byref(k), byref(v), n)
-    keys = [[_.obj, _.offset] for _ in k[0:m]]
-    vals = v[:]
-    return list(zip(keys, vals))
+    def getmap(self):
+        n = self.rsuper.units
+        k = (obj_offset * n)()
+        v = (c_int * n)()
+        m = lsvd_lib.rcache_getmap(self.rcache, byref(k), byref(v), n)
+        keys = [[_.obj, _.offset] for _ in k[0:m]]
+        vals = v[:]
+        return list(zip(keys, vals))
     
-def rcache_flatmap():
-    n = rsuper.units
-    vals = (obj_offset * n)()
-    n = lsvd_lib.rcache_get_flat(byref(vals), c_int(n))
-    return [[_.obj,_.offset] for _ in vals[0:n]]
+    def flatmap(self):
+        n = self.rsuper.units
+        vals = (obj_offset * n)()
+        n = lsvd_lib.rcache_get_flat(self.rcache, byref(vals), c_int(n))
+        return [[_.obj,_.offset] for _ in vals[0:n]]
 
-def rcache_bitmap():
-    n = rsuper.units
-    vals = (c_ushort * n)()
-    n = lsvd_lib.rcache_get_masks(byref(vals), c_int(n))
-    return vals[0:n]
+    def bitmap(self):
+        n = self.rsuper.units
+        vals = (c_ushort * n)()
+        n = lsvd_lib.rcache_get_masks(self.rcache, byref(vals), c_int(n))
+        return vals[0:n]
 
-def rcache_evict(n):
-    lsvd_lib.rcache_evict(c_int(n))
+    def evict(self, n):
+        lsvd_lib.rcache_evict(self.rcache, c_int(n))
 
-def rcache_reset():
-    lsvd_lib.rcache_reset()
+    def reset(self):
+        lsvd_lib.rcache_reset(self.rcache)
 
 #----------------
 # these manipulate the objmap directly, without going through the translation layer
 #
-def fakemap_update(base, limit, obj, offset):
-    lsvd_lib.fakemap_update(c_int(base), c_int(limit), c_int(obj), c_int(offset))
-
-def fakemap_reset():
-    lsvd_lib.fakemap_reset()
 
 # RBD functions
 
