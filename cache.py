@@ -38,8 +38,7 @@ wsup_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
 
 rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["unit_size", '%d'], 
                ["base", '%d'], ["units", '%d'], ["map_start", '%d'],["map_blocks", '%d'],
-               ["bitmap_start", '%d'], ["bitmap_blocks", '%d'], ["evict_type", '%d'],
-               ["evict_start", '%d'], ["evict_blocks", '%d']]
+               ["evict_type", '%d'], ["evict_start", '%d'], ["evict_blocks", '%d']]
 
 parser = argparse.ArgumentParser(description='Read SSD cache')
 parser.add_argument('--write', help='print write cache details', action='store_true')
@@ -127,13 +126,8 @@ if args.writemap and w_super:
 if args.read and r_super:
     nbytes = r_super.units * lsvd.sizeof_obj_offset
     print("map start:   ", r_super.map_start)
-    print("bitmap start:", r_super.bitmap_start)
     buf = os.pread(fd, nbytes, r_super.map_start * 4096)
     oos = (lsvd.obj_offset * r_super.units).from_buffer(bytearray(buf))
-    buf = os.pread(fd, r_super.units*2, r_super.bitmap_start * 4096)
-    masks = (ctypes.c_uint16 * r_super.units).from_buffer(bytearray(buf))
-    print("\nread map / mask:")
-    for i in range(len(oos[:])):
-        a = "%d %d %d" % (i, oos[i].obj, oos[i].offset)
-        if masks[i]:
-            print(a + ' '*(16 - len(a)) + ("%04x" % masks[i]))
+    print("\nread map:")
+    print(wrapjoin(' ', 80, ['[%d] = %d.%d' % _ for _ in
+                                 [(i, oos[i].obj, oos[i].offset) for i in range(len(oos))]]))

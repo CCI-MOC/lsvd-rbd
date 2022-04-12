@@ -12,6 +12,12 @@ import test2 as t2
 nvme = '/tmp/nvme'
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
+if not os.access(dir, os.F_OK):
+    os.mkdir(dir)
+
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 fd2 = -1
 
 xlate, wcache = None, None

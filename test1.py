@@ -9,8 +9,13 @@ import lsvd
 import os
 import mkdisk
 
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 img = "/tmp/bkt/obj"
 dir = os.path.dirname(img)
+if not os.access(dir, os.F_OK):
+    os.mkdir(dir)
 for f in os.listdir(dir):
     os.unlink(dir + "/" + f)
 

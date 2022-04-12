@@ -173,8 +173,6 @@ class j_read_super(Structure):
                 ("units",        c_int),
                 ("map_start",    c_int),
                 ("map_blocks",   c_int),
-                ("bitmap_start", c_int),
-                ("bitmap_blocks", c_int),
                 ("evict_type",   c_int),
                 ("evict_start",  c_int),
                 ("evict_blocks", c_int)]

@@ -27,3 +27,64 @@
    Memcheck:Addr4
    obj:/usr/bin/python3.8
 }
+
+{
+   s22
+   Memcheck:Param
+   write(count)
+   fun:__libc_write
+   fun:write
+   obj:/usr/bin/python3.8
+}
+
+{
+   s23
+   Memcheck:Param
+   write(buf)
+   fun:__libc_write
+   fun:write
+   obj:/usr/bin/python3.8
+}
+
+{
+   s24
+   Memcheck:Cond
+   fun:memmove
+   obj:/usr/bin/python3.8
+}
+
+{
+   s25
+   Memcheck:Cond
+   fun:bcmp
+   obj:/usr/bin/python3.8
+}
+
+{
+   s26
+   Memcheck:Value8
+   fun:memmove
+   obj:/usr/bin/python3.8
+}
+
+{
+   s27
+   Memcheck:Value8
+   fun:memset
+   obj:/usr/bin/python3.8
+}
+
+{
+   s28
+   Memcheck:Cond
+   fun:memset
+   obj:/usr/bin/python3.8
+}
+
+{
+   s29
+   Memcheck:Cond
+   fun:memchr
+   obj:/usr/bin/python3.8
+}
+

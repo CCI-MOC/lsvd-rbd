@@ -8,6 +8,9 @@ import time
 import mkcache
 import mkdisk
 
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 nvme = '/tmp/nvme'
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
@@ -41,6 +44,7 @@ class tests(unittest.TestCase):
         lsvd.img_flush(_img)
         lsvd.wcache_img_write(_img, 4096, b'B'*4096)
         lsvd.wcache_img_write(_img, 3*4096, b'C'*4096)
+        print("---")
         d = lsvd.rbd_read(_img, 0, 20*1024)
 
         self.assertEqual(d, b'A'*4096 + b'B'*4096 + b'A'*4096 + b'C'*4096 + b'A'*4096)

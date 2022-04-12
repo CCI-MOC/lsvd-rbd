@@ -46,26 +46,24 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
     rbase = wblks+mblks+3
     units = rblks // 16
     map_blks = div_round_up(units*lsvd.sizeof_obj_offset, 4096)
-    bitmap_blks = div_round_up(units*2, 4096)
     
-    # 1 page for map, 1 page for bitmap
+    # 1 page for map
     rsup = lsvd.j_read_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_R_SUPER,
                                 unit_size=128, units=units,
                                 map_start=rbase, map_blocks=map_blks,
-                                bitmap_start=rbase+map_blks, bitmap_blocks=bitmap_blks,
-                                base=rbase+map_blks+bitmap_blks)
+                                base=rbase+map_blks)
 
     rsup.vol_uuid[:] = uuid
     data = bytearray() + rsup
     data += b'\0' * (4096-len(data))
     os.write(fd, data) # page 2
 
-    # zeros are invalid entries for cache map/bitmap
+    # zeros are invalid entries for cache map
     # 130 + 16*(64KB/4KB) = 386
 
     if (write_zeros):
         data = bytearray(b'\0'*4096)
-        for i in range(3 + mblks + wblks + map_blks + bitmap_blks + rblks):
+        for i in range(3 + mblks + wblks + map_blks + rblks):
             os.write(fd, data)
     os.close(fd)
     
@@ -88,7 +86,7 @@ if __name__ == '__main__':
         print('%d pages' % pages)
         r_units = int(0.75*pages) // 16
         r_pages = r_units * 16
-        r_oh = div_round_up(r_units*(2+lsvd.sizeof_obj_offset), 4096)
+        r_oh = div_round_up(r_units*lsvd.sizeof_obj_offset, 4096)
         w_pages = pages - r_pages - r_oh - 3     # mkcache subtracts write metadata
     
         mkcache(args.device, uuid, write_zeros=False, wblks=w_pages, rblks=r_pages)

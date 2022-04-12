@@ -108,9 +108,6 @@ struct j_read_super {
     int32_t map_start;		// extmap::obj_offset
     int32_t map_blocks;
 
-    int32_t bitmap_start;	// uint16_t
-    int32_t bitmap_blocks;
-
     int32_t evict_type;		// eviction algorithm - TBD
     int32_t evict_start;	// eviction state - TBD
     int32_t evict_blocks;

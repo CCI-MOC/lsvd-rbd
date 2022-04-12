@@ -6,7 +6,10 @@ import os
 import re
 import argparse
 import uuid
-import rados
+try:
+    import rados
+except:
+    pass
 
 # based on https://stackoverflow.com/a/42865957/2002471
 units = {"B": 1, "KB": 2**10, "MB": 2**20, "GB": 2**30, "TB": 2**40}
@@ -46,6 +49,8 @@ def mkdisk(name, sectors, uuid=b'\0'*16, use_rados=False):
 def cleanup(name):
     d = os.path.dirname(name)
     b = os.path.basename(name)
+    if not os.access(d, os.F_OK):
+        os.mkdir(d)
     for f in os.listdir(d):
         if f.startswith(b):
             os.unlink(d + '/' + f)

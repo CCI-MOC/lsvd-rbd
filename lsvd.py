@@ -172,11 +172,13 @@ class read_cache:
         lsvd_lib.rcache_read(self.rcache, buf, c_ulong(offset), c_ulong(nbytes))
         return buf[0:nbytes]
 
-    def add(self, obj, offset, data):
+    def add(self, obj, blk, data):
+        if type(data) != bytes:
+            data = bytes(data, 'utf-8')
         nbytes = len(data)
-        assert (nbytes % 512) == 0
-        lsvd_lib.rcache_add(self.rcache, c_int(obj), c_int(offset), data, c_int(nbytes), data)
-    
+        assert nbytes == 65536
+        lsvd_lib.rcache_add(self.rcache, c_int(obj), c_int(blk), data, c_int(nbytes))
+        
     def getmap(self):
         n = self.rsuper.units
         k = (obj_offset * n)()
@@ -185,24 +187,15 @@ class read_cache:
         keys = [[_.obj, _.offset] for _ in k[0:m]]
         vals = v[:]
         return list(zip(keys, vals))
-    
+
     def flatmap(self):
         n = self.rsuper.units
         vals = (obj_offset * n)()
         n = lsvd_lib.rcache_get_flat(self.rcache, byref(vals), c_int(n))
         return [[_.obj,_.offset] for _ in vals[0:n]]
 
-    def bitmap(self):
-        n = self.rsuper.units
-        vals = (c_ushort * n)()
-        n = lsvd_lib.rcache_get_masks(self.rcache, byref(vals), c_int(n))
-        return vals[0:n]
-
     def evict(self, n):
         lsvd_lib.rcache_evict(self.rcache, c_int(n))
-
-    def reset(self):
-        lsvd_lib.rcache_reset(self.rcache)
 
 #----------------
 # these manipulate the objmap directly, without going through the translation layer

@@ -37,6 +37,8 @@ namespace fs = std::experimental::filesystem;
 #include <fcntl.h>
 #include <string.h>
 #include <errno.h>
+#include <aio.h>
+
 
 std::mutex printf_m;
 bool _debug_init_done;
@@ -820,11 +822,14 @@ size_t getsize64(int fd)
 /* simple hack so we can pass lambdas through C callback mechanisms
  */
 struct wrapper {
-    std::function<void()> f;
-    wrapper(std::function<void()> _f) : f(_f) {}
+    std::function<bool()> f;
+    wrapper(std::function<bool()> _f) : f(_f) {}
 };
 
-void *wrap(std::function<void()> _f)
+/* invoked function returns boolean - if true, delete the wrapper; otherwise
+ * keep it around for another invocation
+ */
+void *wrap(std::function<bool()> _f)
 {
     auto s = new wrapper(_f);
     return (void*)s;
@@ -833,8 +838,8 @@ void *wrap(std::function<void()> _f)
 void call_wrapped(void *ptr)
 {
     auto s = (wrapper*)ptr;
-    std::invoke(s->f);
-    delete s;
+    if (std::invoke(s->f))
+	delete s;
 }
 
 void delete_wrapped(void *ptr)
@@ -842,40 +847,15 @@ void delete_wrapped(void *ptr)
     auto s = (wrapper*)ptr;
     delete s;
 }
-   
-
-
-#include <aio.h>
 
 typedef void (*posix_aio_cb_t)(union sigval siv);
+void aio_wrapper_done(union sigval siv);
 
 struct aio_wrapper {
     aiocb aio = {0};
-    aio_wrapper(int fd, char *buf, size_t nbytes, off_t offset,
-		   void (*cb)(void*), void *ptr) {
-	aio.aio_fildes = fd;
-	aio.aio_buf = buf;
-	aio.aio_offset = offset;
-	aio.aio_nbytes = nbytes;
-	aio.aio_sigevent.sigev_notify = SIGEV_THREAD;
-	aio.aio_sigevent.sigev_value.sival_ptr = ptr;
-	aio.aio_sigevent.sigev_notify_function = (posix_aio_cb_t)cb;
-    }
-};
-    
-struct aio_read_state {
-    aiocb aio = {0};
     void (*cb)(void*);
-    void *ptr;
-    void *ptr2;
-    int tmp;
-    static void aio_read_done(union sigval siv) {
-	auto r = (aio_read_state*)siv.sival_ptr;
-	r->cb(r->ptr);
-	delete r;
-    }
-public:
-    aio_read_state(int fd, char *buf, size_t nbytes, off_t offset,
+    void *ptr = NULL;
+    aio_wrapper(int fd, char *buf, size_t nbytes, off_t offset,
 		   void (*_cb)(void*), void *_ptr) {
 	cb = _cb;
 	ptr = _ptr;
@@ -885,7 +865,48 @@ public:
 	aio.aio_nbytes = nbytes;
 	aio.aio_sigevent.sigev_notify = SIGEV_THREAD;
 	aio.aio_sigevent.sigev_value.sival_ptr = (void*)this;
-	aio.aio_sigevent.sigev_notify_function = aio_read_done;
+	aio.aio_sigevent.sigev_notify_function = aio_wrapper_done;
+    }
+};
+
+const char *aio_op(int op)
+{
+    if (op == LIO_READ) return "READ";
+    else if (op == LIO_WRITE) return "WRITE";
+    else return "???";
+}
+
+void aio_wrapper_done(union sigval siv)
+{
+    auto w = (aio_wrapper*)siv.sival_ptr;
+    int err = aio_error(&w->aio);
+    assert(err != EINPROGRESS);
+    int rv = aio_return(&w->aio);
+    //printf("%p fd %d op=%s rv=%d err=%d\n", w, w->aio.aio_fildes, aio_op(w->aio.aio_lio_opcode), rv, err);
+    w->cb(w->ptr);
+    delete w;
+}
+
+static bool aligned(const void *ptr, int a)
+{
+    return 0 == ((long)ptr & (a-1));
+}
+
+/* convenience class, because we don't know cache size etc.
+ * at cache object construction time.
+ */
+template <class T>
+class sized_vector {
+    std::vector<T> *elements;
+public:
+    ~sized_vector() {
+	delete elements;
+    }
+    void init(int n) {
+	elements = new std::vector<T>(n);
+    }
+    T &operator[](int index) {
+	return (*elements)[index];
     }
 };
 
@@ -901,7 +922,6 @@ class read_cache {
 
     j_read_super       *super;
     extmap::obj_offset *flat_map;
-    uint16_t           *bitmap;
     objmap             *omap;
     translate          *be;
     int                 fd;
@@ -918,38 +938,38 @@ class read_cache {
     
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads;	   // for debug
-    
-    // cache block is busy when being written - mask can change, but not
-    // its mapping. It's in_use while being read, and can't be evicted.
-    std::vector<bool> busy;
-    std::vector<std::atomic<int>> *in_use;
-    std::condition_variable cv;
 
-    /* this is kind of crazy. return a bitmap corresponding to the 4KB pages
-     * in [base%unit, limit%unit), where base, limit, and unit are in sectors
+    /* if map[obj,offset] = n:
+     *   in_use[n] - not eligible for eviction
+     *   written[n] - safe to read from cache
+     *   buffer[n] - in-memory data for block n
+     *   pending[n] - continuations to invoke when buffer[n] becomes valid
+     * buf_loc - FIFO queue of {n | buffer[n] != NULL}
      */
-    typedef uint16_t mask_t;
-    mask_t page_mask(int base, int limit, int unit) {
-	int top = round_up(base+1, unit);
-	limit = (limit < top) ? limit : top;
-	int base_page = base/8, limit_page = div_round_up(limit, 8),
-	    unit_page = unit / 8;
-	mask_t val = 0;
-	for (int i = base_page % unit_page; base_page < limit_page; base_page++, i++)
-	    val |= (1 << i);
-	return val;
-    }
-
-    /* evict 'n' blocks
+    sized_vector<std::atomic<int>>   in_use;
+    sized_vector<char>               written; // can't use vector<bool> here
+    sized_vector<char*>              buffer;
+    sized_vector<std::vector<void*>> pending;
+    std::queue<int>    buf_loc;
+    
+#if 0
+    /* possible CLOCK implementation - queue holds <block,ojb/offset> pairs so 
+     * that we can evict blocks without having to remove them from the CLOCK queue
+     */
+    sized_vector<char> a_bit;
+    sized_vector<int>  block_version;
+    std::queue<std::pair<int,extmap::obj_offset>> clock_queue;
+#endif
+    
+    /* evict 'n' blocks - random replacement
      */
     void evict(int n) {
 	assert(!m.try_lock());	// m must be locked
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	for (int i = 0; i < n; i++) {
 	    int j = uni(rng);
-	    while (flat_map[j].obj == 0 || (*in_use)[j] > 0)
+	    while (flat_map[j].obj == 0 || in_use[j] > 0)
 		j = uni(rng);
-	    bitmap[j] = 0;
 	    auto oo = flat_map[j];
 	    flat_map[j] = (extmap::obj_offset){0, 0};
 	    map.erase(oo);
@@ -992,141 +1012,98 @@ class read_cache {
 	}
     }
 
-    // TODO: iovec version
-    void do_add(extmap::obj_offset oo, int sectors, char *buf) {
-	// must be 4KB aligned
-	assert(!(oo.offset & 7));
-
-	while (sectors > 0) {
-	    std::unique_lock lk(m);
-
-	    extmap::obj_offset obj_blk = {oo.obj, oo.offset / unit_sectors};
-	    int cache_blk = -1;
-	    auto it = map.find(obj_blk);
-	    if (it != map.end())
-		cache_blk = it->second;
-	    else if (free_blks.size() > 0) {
-		cache_blk = free_blks.back();
-		free_blks.pop_back();
-	    }
-	    else {
-		//xprintf("ADD %d.%d: no space\n", oo.obj, oo.offset);
-		return;
-	    }
-	    while (busy[cache_blk])
-		cv.wait(lk);
-	    busy[cache_blk] = true;
-	    auto mask = bitmap[cache_blk];
-	    lk.unlock();
-
-	    assert(cache_blk >= 0);
-
-	    auto obj_page = oo.offset / 8;
-	    auto pages_in_blk = unit_sectors / 8;
-	    auto blk_page = obj_blk.offset * pages_in_blk;
-	    smartiov iov;
-
-	    for (int i = obj_page - blk_page; sectors > 0 && i < pages_in_blk; i++) {
-		mask |= (1 << i);
-		iov.push_back((iovec){buf, 4096});
-		buf += 4096;
-		sectors -= 8;
-		oo.offset += 8;
-	    }
-
-	    off_t blk_offset = ((cache_blk * pages_in_blk) + super->base) * 4096L;
-	    blk_offset += (obj_page - blk_page) * 4096L;
-	    assert(blk_offset + iov.bytes() <= dev_max);
-	    if (pwritev(fd, iov.data(), iov.size(), blk_offset) < 0)
-		throw_fs_error("rcache2");
-
-	    lk.lock();
-	    map[obj_blk] = cache_blk;
-	    bitmap[cache_blk] = mask;
-	    flat_map[cache_blk] = obj_blk;
-	    busy[cache_blk] = false;
-	    map_dirty = true;
-	    cv.notify_one();
-	    lk.unlock();
-	}
-    }
-
-    std::atomic<int> adds_pending;
-    
-    struct add_work {
-	extmap::obj_offset oo;
-	int sectors;
-	char *buf;
-	add_work(extmap::obj_offset _oo, int _sectors, char *_buf) {
-	    oo = _oo;
-	    sectors = _sectors;
-	    buf = _buf;
-	}
-    };
-    void adder(thread_pool<add_work*> *p) {
-	while (p->running) {
-	    add_work *w;
-	    if (!p->get(w))
-		break;
-	    auto [oo, sectors, buf] = *w;
-	    do_add(oo, sectors, buf);
-	    adds_pending--;
-	    free(buf);
-	    delete w;
-	}
-    }
-    thread_pool<add_work*> adders;
-
 public:
     std::atomic<int> n_lines_read = 0;
 
-    struct read_line_state {
-    public:
-	read_cache *cache;
-	char   *cache_line;
-	char   *buf;
-	size_t  offset;		// of read(buf)
-	size_t  len;
-	int     object;
-	int     obj_blk;
-	void  (*cb)(void*);
-	void   *ptr;
-	read_line_state(read_cache *cache, char *cache_line, char *buf,
-			size_t offset, size_t len, int obj, size_t blk,
-			void (*cb)(void*), void *ptr) {
-	    *this = (read_line_state){cache, cache_line, buf, offset, len,
-				      obj, blk, cb, ptr};
+    read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
+	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0),
+	misc_threads(&m), nothreads(nt)
+    {
+	dev_max = getsize64(fd);
+	n_lines_read = 0;
+	char *buf = (char*)aligned_alloc(512, 4096);
+	if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
+	    throw_fs_error("rcache3");
+	super = (j_read_super*)buf;
+	
+	assert(super->unit_size == 128); // 64KB, in sectors
+	unit_sectors = super->unit_size; // todo: fixme
+	
+	int oos_per_pg = 4096 / sizeof(extmap::obj_offset);
+	assert(div_round_up(super->units, oos_per_pg) == super->map_blocks);
+
+	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
+	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096L) < 0)
+	    throw_fs_error("rcache2");
+
+	for (int i = 0; i < super->units; i++) {
+	    if (flat_map[i].obj != 0) 
+		map[flat_map[i]] = i;
+	    else 
+		free_blks.push_back(i);
 	}
-    };
 
-    static void read_line_done(void *ptr) {
-	auto r = (read_line_state*)ptr;
-	memcpy(r->buf, r->cache_line+r->offset, r->len);
-	extmap::obj_offset oo = {r->object, r->obj_blk * r->cache->unit_sectors};
-	auto w = new add_work(oo, r->cache->unit_sectors, r->cache_line);
-	r->cache->adds_pending++;
-	r->cache->adders.put(w);
-	r->cb(r->ptr);
-	delete r;
-    }
-    
-    static void read_from_cache_done(union sigval siv) {
-	auto s = (aio_read_state*)siv.sival_ptr;
-	int n = s->tmp;
-	read_cache *cache = (read_cache*)s->ptr2;
-	(*(cache->in_use))[n]--;
-	s->cb(s->ptr);
-	delete s;
+	in_use.init(super->units);
+	written.init(super->units);
+	buffer.init(super->units);
+	pending.init(super->units);
+	
+	map_dirty = false;
+
+	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
     }
 
-    /* returns skip_len, read_len
+    /* state machine for block obj,offset can be represented by the tuple:
+     *  map=n - i.e. exists(n) | map[obj,offset] = n
+     *  in_use[n] - 0 / >0
+     *  written[n] - n/a, F, T
+     *  buffer[n] - n/a, NULL, <p>
+     *  pending[n] - n/a, [], [...]
+     *
+     * if not cached                          -> {!map, n/a}
+     * first read will:
+     *   - add to map
+     *   - increment in_use
+     *   - launch read                        -> {map=n, >0, F, NULL, []}
+     * following reads will 
+     *   queue lambdas to copy from buffer[n] -> {map=n, >0, F, NULL, [..]}
+     * read complete will:
+     *   - set buffer[n]
+     *   - invoke lambdas from pending[*]
+     *   - launch write                       -> {map=n, >0, F, <p>, []}
+     * write complete will:
+     *   - set 'written' to true              -> {map=n, >0, T, <p>, []}
+     * eviction of buffer will:
+     *   - decr in_use
+     *   - remove buffer                      -> {map=n, 0, NULL, []}
+     * further reads will temporarily increment in_use
+     * eviction will remove from map:         -> {!map, n/a}
+     */
+    char *get_cacheline_buf(int n) {
+	char *buf;
+	const int maxbufs = 16;
+	if (buf_loc.size() < maxbufs)
+	    buf = (char*)aligned_alloc(512, 65536);
+	else {
+	    int j = buf_loc.front();
+	    buf_loc.pop();
+	    buf = buffer[j];
+	    buffer[j] = NULL;
+	    in_use[j]--;
+	}
+	buf_loc.push(n);
+	return buf;
+    }
+
+    /* returns skip_len, read_len. Fetches from backend directly, so skip_len >0
+     * means unmapped sectors that should be zeroed.
      */
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t len,
 					void (*cb)(void*), void *ptr) {
 	lba_t base = offset/512, sectors = len/512, limit = base+sectors;
 	size_t skip_len = 0, read_len = 0;
 	extmap::obj_offset oo = {0, 0};
-	
+
 	std::shared_lock lk(omap->m);
 	auto it = omap->map.lookup(base);
 	if (it == omap->map.end() || it->base() >= limit)
@@ -1151,143 +1128,146 @@ public:
 	sector_t blk_top_offset = std::min({(int)(blk_offset+sectors),
 		    round_up(blk_offset+1,unit_sectors),
 		    (int)(blk_offset + (limit-base))});
-	bool in_cache = false, use_cache = true;
 	int n = -1;		// cache block number
 
 	std::unique_lock lk2(m);
+	bool in_cache = false, use_cache = free_blks.size() > 0;
 	auto it2 = map.find(unit);
 	if (it2 != map.end()) {
 	    n = it2->second;
-	    mask_t access_mask = page_mask(blk_offset, blk_top_offset, unit_sectors);
-	    if ((access_mask & bitmap[n]) == access_mask)
-		in_cache = true;
+	    in_cache = true;
 	}
-	lk2.unlock();
-	
+
 	if (in_cache) {
-	    (*in_use)[n]++;
 	    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 		start = blk_in_ssd + blk_offset,
 		finish = start + (blk_top_offset - blk_offset);
 	    size_t bytes = 512 * (finish - start);
 
-	    void *closure = wrap([this,n,cb,ptr]{
-		    (*in_use)[n]--;
-		    cb(ptr);});
-	    auto aio = new aio_read_state(fd, buf, bytes, 512L*start,
-					  call_wrapped, closure);
-	    aio_read(&aio->aio);
+	    if (buffer[n] != NULL) {
+		memcpy(buf, buffer[n] + blk_offset*512, bytes);
+		cb(ptr);
+	    }
+	    else if (written[n]) {
+		auto closure = wrap([this, n, cb, ptr]{
+			cb(ptr);
+			in_use[n]--;
+			return true;
+		    });
+		in_use[n]++;
+		auto aio = new aio_wrapper(fd, buf, bytes, 512L*start, call_wrapped, closure);
+		assert(aligned(buf, 512));
+		aio_read(&aio->aio);
+	    }
+	    else {		// prior read is pending
+		auto closure = wrap([this, n, buf, blk_offset, bytes, cb, ptr]{
+			memcpy(buf, buffer[n] + blk_offset*512, bytes);
+			cb(ptr);
+			return true;
+		    });
+		pending[n].push_back(closure);
+	    }
 	    read_len = bytes;
 	}
 	else if (use_cache) {
-	    n_lines_read++;
-	    char *cache_line = (char*)aligned_alloc(512, unit_sectors*512);
-	    size_t start = 512 * blk_offset,
-		finish = 512 * blk_top_offset;
-	    extmap::obj_offset oo = {unit.obj, unit.offset*unit_sectors};
+	    /* assign a location in cache before we start reading (and while we're
+	     * still holding the lock)
+	     */
+	    n = free_blks.back();
+	    free_blks.pop_back();
+	    written[n] = false;
+	    in_use[n]++;
+	    map[unit] = n;
+	    flat_map[n] = unit;
+	    auto _buf = get_cacheline_buf(n);
+	    lk2.unlock();
 
-	    void *closure = wrap([this, cache_line, buf, start, finish, oo, cb, ptr]{
-		    memcpy(buf, cache_line+start, finish-start);
-		    auto w = new add_work(oo, unit_sectors, cache_line);
-		    adds_pending++;
-		    adders.put(w);
-		    cb(ptr);
+	    off_t nvme_offset = (super->base*8 + n*unit_sectors) * 512L;
+	    off_t buf_offset = blk_offset * 512L;
+	    off_t bytes = 512L * (blk_top_offset - blk_offset);
+
+	    auto write_done = wrap([this, n]{
+		    written[n] = true;
+		    return true;
 		});
-	    
-	    io->aio_read_num_object(unit.obj, cache_line, 512L*unit_sectors,
-				    512L*blk_base, call_wrapped, closure);
-	    read_len = finish - start;
+
+	    auto read_done = wrap([this, n, write_done, nvme_offset, buf_offset, bytes,
+				   _buf, buf, cb, ptr]{
+				      std::unique_lock lk(m);
+				      memcpy(buf, _buf + buf_offset, bytes);
+				      buffer[n] = _buf;
+				      std::vector<void*> v(std::make_move_iterator(pending[n].begin()),
+							   std::make_move_iterator(pending[n].end()));
+				      pending[n].erase(pending[n].begin(), pending[n].end());
+				      lk.unlock();
+				      cb(ptr);
+				      for (auto p : v)
+					  call_wrapped(p);
+				      auto aio = new aio_wrapper(fd, _buf, unit_sectors*512L,
+								 512L*nvme_offset,
+								 call_wrapped, write_done);
+				      aio_write(&aio->aio);
+				      return true;
+				  });
+
+	    io->aio_read_num_object(unit.obj, _buf, 512L*unit_sectors,
+				    512L*blk_base, call_wrapped, read_done);
+	    read_len = bytes;
 	}
 	else {
-	    io->aio_read_num_object(oo.obj, buf, read_len, 512L*oo.offset,
-				    cb, ptr);
+	    io->aio_read_num_object(oo.obj, buf, read_len, 512L*oo.offset, cb, ptr);
+	    // read_len unchanged
 	}
 	return std::make_pair(skip_len, read_len);
     }
 
-    read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
-	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0),
-	misc_threads(&m), nothreads(nt), adders(&m)
-    {
-	dev_max = getsize64(fd);
-	n_lines_read = 0;
-	char *buf = (char*)aligned_alloc(512, 4096);
-	if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
-	    throw_fs_error("rcache3");
-	super = (j_read_super*)buf;
-	
-	assert(super->unit_size == 128); // 64KB, in sectors
-	unit_sectors = super->unit_size; // todo: fixme
-	
-	int oos_per_pg = 4096 / sizeof(extmap::obj_offset);
-	assert(div_round_up(super->units, oos_per_pg) == super->map_blocks);
-	assert(div_round_up(super->units, 2048) == super->bitmap_blocks);
-
-	flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
-	if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096L) < 0)
-	    throw_fs_error("rcache2");
-	bitmap = (uint16_t*)aligned_alloc(512, super->bitmap_blocks*4096);
-	if (pread(fd, (char*)bitmap, super->bitmap_blocks*4096, super->bitmap_start*4096L) < 0)
-	    throw_fs_error("rcache3");
-
-	for (int i = 0; i < super->units; i++)
-	    if (flat_map[i].obj != 0) {
-		map[flat_map[i]] = i;
-	    }
-	    else {
-		free_blks.push_back(i);
-		bitmap[i] = 0;
-	    }
-
-	for (int i = 0; i < super->units; i++)
-	    busy.push_back(false);
-	in_use = new std::vector<std::atomic<int>>(super->units);
-	map_dirty = false;
-
-	for (int i = 0; i < 4; i++)
-	    adders.pool.push(std::thread(&read_cache::adder, this, &adders));
-	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
-    }
-
     void write_map(void) {
 	pwrite(fd, flat_map, 4096 * super->map_blocks, 4096L * super->map_start);
-	pwrite(fd, bitmap, 4096 * super->bitmap_blocks, 4096L * super->bitmap_start);
     }
     
     ~read_cache() {
 	free((void*)flat_map);
-	free((void*)bitmap);
 	free((void*)super);
-	delete in_use;
     }
 
-    /* debugging
+    /* debugging. 
      */
-    void add(extmap::obj_offset oo, int sectors, char *buf) {
-	do_add(oo, sectors, buf);
-    }
 
-    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, uint16_t **p_bitmap,
+    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, 
 		  std::vector<int> **p_free_blks, std::map<extmap::obj_offset,int> **p_map) {
 	if (p_super != NULL)
 	    *p_super = super;
 	if (p_flat != NULL)
 	    *p_flat = flat_map;
-	if (p_bitmap != NULL)
-	    *p_bitmap = bitmap;
 	if (p_free_blks != NULL)
 	    *p_free_blks = &free_blks;
 	if (p_map != NULL)
 	    *p_map = &map;
     }
 
+    /* add
+     */
+    void do_add(extmap::obj_offset unit, char *buf) {
+	std::unique_lock lk(m);
+	char *_buf = (char*)aligned_alloc(512, 65536);
+	memcpy(_buf, buf, 65536);
+	int n = free_blks.back();
+	free_blks.pop_back();
+	written[n] = true;
+	map[unit] = n;
+	flat_map[n] = unit;
+	off_t nvme_offset = (super->base*8 + n*unit_sectors)*512L;
+	pwrite(fd, _buf, unit_sectors*512L, nvme_offset);
+	write_map();
+	free(_buf);
+    }
+	
     void do_evict(int n) {
 	std::unique_lock lk(m);
 	evict(n);
     }
     void reset(void) {
     }
-    
 };
 
 
@@ -1365,6 +1345,7 @@ public:
 			    size_t offset, void (*cb)(void*), void *ptr) {
 	int fd = get_cached_fd(seq);
 	auto aio = new aio_wrapper(fd, buf, len, offset, cb, ptr);
+	//printf("read_num_obj: %p %d %ld+%ld\n", aio, seq, offset, len);
 	aio_read(&aio->aio);
 	return 0;
     }
@@ -1379,13 +1360,6 @@ public:
     }
 };
 
-
-static bool aligned(void *ptr, int a)
-{
-    return 0 == ((long)ptr & (a-1));
-}
-
-	
 /* all addresses are in units of 4KB blocks
  */
 class write_cache {
@@ -1852,6 +1826,8 @@ public:
 	lk.unlock();
 	if (read_len) {
 	    auto aio = new aio_wrapper(fd, buf, read_len, nvme_offset, cb, ptr);
+	    assert(aligned(buf, 512));
+	    //printf("aioread3 %p %ld+%ld\n", aio, nvme_offset, read_len);
 	    aio_read(&aio->aio);
 	}
 	return std::make_pair(skip_len, read_len);
@@ -1995,12 +1971,6 @@ public:
 
 /* ------------------- DEBUGGING ----------------------*/
 
-translate   *lsvd;
-write_cache *wcache;
-objmap      *omap;
-read_cache  *rcache;
-backend     *io;
-
 /* ------------------- FAKE RBD INTERFACE ----------------------*/
 /* following types are from librados.h
  */
@@ -2063,12 +2033,14 @@ public:
     rbd_callback_t cb;
     void *arg;
     int retval;
-    bool done;
+    bool done = false;
     std::mutex m;
     std::condition_variable cv;
-    std::atomic<int> refcount;
-
-    lsvd_completion() : done(false), refcount(0) {}
+    std::atomic<int> refcount = 0;
+    std::atomic<int> n = 0;
+    iovec iov;			// occasional use only
+    
+    lsvd_completion() {}
     void get(void) {
 	refcount++;
     }
@@ -2168,42 +2140,44 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-struct rbd_read_state {
-    std::atomic<int> n = 0;
-    rbd_completion_t c;
-    rbd_read_state(rbd_completion_t _c) : c(_c) {}
-};
-
-void rbd_read_cb(void *ptr)
-{
-    auto s = (rbd_read_state*)ptr;
-    auto p = (lsvd_completion*)s->c;
-    if (--(s->n) == 0) {
-	p->get();
-	p->complete(0);
-	p->put();
-	delete s;
-    }
-}
-
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char *buf,
 			    rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
-    auto s = new rbd_read_state(c);
+    char *aligned_buf = buf;
+    if (!aligned(buf, 512))
+	aligned_buf = (char*)aligned_alloc(512, len);
+    auto p = (lsvd_completion*)c;
+    p->fri = fri;
+
+    assert(p != NULL);
+    auto closure = wrap([p, aligned_buf, buf, len]{
+	    if (0 == --p->n) {
+		if (aligned_buf != buf) 
+		    memcpy(buf, aligned_buf, len);
+		p->get();
+		p->complete(0);
+		p->put();
+		if (aligned_buf != buf) 
+		    free(aligned_buf);
+		return true;
+	    }
+	    return false;
+	});
+    
     while (len > 0) {
-	s->n++;
+	p->n++;
 	auto [skip,wait] =
-	    fri->wcache->async_read(offset, buf, len, rbd_read_cb, (void*)s);
+	    fri->wcache->async_read(offset, aligned_buf, len, call_wrapped, closure);
 	if (wait == 0)
-	    s->n--;
+	    p->n--;
 	len -= skip;
 	while (skip > 0) {
-	    s->n++;
+	    p->n++;
 	    auto [skip2, wait2] =
-		fri->rcache->async_read(offset, buf, skip, rbd_read_cb, (void*)s);
+		fri->rcache->async_read(offset, aligned_buf, skip, call_wrapped, closure);
 	    if (wait2 == 0)
-		s->n--;
+		p->n--;
 	    memset(buf, 0, skip2);
 	    skip -= (skip2 + wait2);
 	    buf += (skip2 + wait2);
@@ -2223,29 +2197,36 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
     return 0;
 }
 
-static void fake_rbd_cb(void *ptr)
-{
-    lsvd_completion *p = (lsvd_completion *)ptr;
-    p->get();
-    p->complete(0);
-    p->put();
-}
-
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 			      int iovcnt, uint64_t off, rbd_completion_t c)
 {
-    fake_rbd_image *fri = (fake_rbd_image*)image;
-    lsvd_completion *p = (lsvd_completion *)c;
-    p->fri = fri;
-    fri->wcache->writev(off, iov, iovcnt, fake_rbd_cb, (void*)c);
     return 0;
 }
 
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
 			     rbd_completion_t c)
 {
-    iovec iov = {(void*)buf, len};
-    return rbd_aio_writev(image, &iov, 1, off, c);
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->fri = fri;
+
+    char *aligned_buf = (char*)buf;
+    if (!aligned(buf, 512)) {
+	aligned_buf = (char*)aligned_alloc(512, len);
+	memcpy(aligned_buf, buf, len);
+    }
+    
+    auto closure = wrap([p, buf, aligned_buf]{
+	    p->get();
+	    p->complete(0);
+	    p->put();
+	    if (aligned_buf != buf)
+		free(aligned_buf);
+	    return true;
+	});
+    p->iov = (iovec){aligned_buf, len};
+    fri->wcache->writev(off, &p->iov, 1, call_wrapped, closure);
+    return 0;
 }
 
 void rbd_call_wrapped(rbd_completion_t c, void *ptr)
@@ -2253,6 +2234,8 @@ void rbd_call_wrapped(rbd_completion_t c, void *ptr)
     call_wrapped(ptr);
 }
 
+/* note that rbd_aio_read handles aligned bounce buffers for us
+ */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     rbd_completion_t c;
@@ -2263,6 +2246,7 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 	    std::unique_lock lk(m);
 	    done = true;
 	    cv.notify_all();
+	    return true;
 	});
     rbd_aio_create_completion(closure, rbd_call_wrapped, &c);
 
@@ -2285,6 +2269,7 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char
 	    std::unique_lock lk(m);
 	    done = true;
 	    cv.notify_all();
+	    return true;
 	});
     rbd_aio_create_completion(closure, rbd_call_wrapped, &c);
 
@@ -2589,12 +2574,14 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
 		std::unique_lock lk(m);
 		done = true;
 		cv.notify_all();
+		return true;
 	    });
 	auto [skip_len, read_len] = wcache->async_read(offset, _buf, _len,
 						       call_wrapped, closure);
 	memset(_buf, 0, skip_len);
 	_buf += (skip_len + read_len);
 	_len -= (skip_len + read_len);
+	offset += (skip_len + read_len);
 	if (read_len > 0)
 	    while (!done)
 		cv.wait(lk);
@@ -2615,6 +2602,7 @@ extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, ui
 	    std::unique_lock lk(m);
 	    done = true;
 	    cv.notify_all();
+	    return true;
 	});
 
     std::unique_lock lk(m);
@@ -2635,6 +2623,7 @@ extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, 
 	    std::unique_lock lk(m);
 	    done = true;
 	    cv.notify_all();
+	    return true;
 	});
     fri->wcache->writev(offset, &iov, 1, call_wrapped, closure);
     while (!done)
@@ -2699,16 +2688,6 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
     rcache->do_evict(n);
 }
 
-extern "C" void rcache_add(read_cache *rcache, int object,
-			   int sector_offset, char* buf, size_t len)
-{
-    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    memcpy(buf2, buf, len);
-    extmap::obj_offset oo = {object, sector_offset};
-    rcache->add(oo, len/512, buf2);
-    free(buf2);
-}
-
 extern "C" void rcache_read(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
@@ -2720,29 +2699,42 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
     
     for (char *_buf = buf2; _len > 0; ) {
 	void *closure = wrap([&m, &cv, &done]{
-		std::unique_lock lk(m);
 		done = true;
+		printf("rcache_read closure\n");
 		cv.notify_all();
+		return true;
 	    });
-	std::unique_lock lk(m);
+	printf("rcache_read: launch %p\n", closure);
 	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
 						       call_wrapped, closure);
+	printf("rcache_read = %ld %ld\n", skip_len, read_len);
 	memset(_buf, 0, skip_len);
 	_buf += (skip_len+read_len);
 	_len -= (skip_len+read_len);
-	if (read_len > 0)
+	offset += (skip_len+read_len);
+	if (read_len > 0) {
+	    std::unique_lock lk(m);
 	    while (!done)
 		cv.wait(lk);
+	}
+	else
+	    delete_wrapped(closure);
     }
     memcpy(buf, buf2, len);
     free(buf2);
 }
 
-extern "C" extern "C" void rcache_getsuper(read_cache *rcache,
-					   j_read_super *p_super)
+extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len)
+{
+    assert(len == 65536);
+    extmap::obj_offset oo = {object, block};
+    rcache->do_add(oo, buf);
+}
+
+extern "C" void rcache_getsuper(read_cache *rcache, j_read_super *p_super)
 {
     j_read_super *p;
-    rcache->get_info(&p, NULL, NULL, NULL, NULL);
+    rcache->get_info(&p, NULL, NULL, NULL);
     *p_super = *p;
 }
 
@@ -2751,7 +2743,7 @@ extern "C" int rcache_getmap(read_cache *rcache,
 {
     int i = 0;
     std::map<extmap::obj_offset,int> *p_map;
-    rcache->get_info(NULL, NULL, NULL, NULL, &p_map);
+    rcache->get_info(NULL, NULL, NULL, &p_map);
     for (auto it = p_map->begin(); it != p_map->end() && i < n; it++, i++) {
 	auto [key, val] = *it;
 	keys[i] = key;
@@ -2764,19 +2756,9 @@ extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int
 {
     extmap::obj_offset *p;
     j_read_super *p_super;
-    rcache->get_info(&p_super, &p, NULL, NULL, NULL);
+    rcache->get_info(&p_super, &p, NULL, NULL);
     n = std::min(n, p_super->units);
     memcpy(vals, p, n*sizeof(extmap::obj_offset));
-    return n;
-}
-
-extern "C" int rcache_get_masks(read_cache *rcache, uint16_t *vals, int n)
-{
-    j_read_super *p_super;
-    uint16_t *masks;
-    rcache->get_info(&p_super, NULL, &masks, NULL, NULL);
-    n = std::min(n, p_super->units);
-    memcpy(vals, masks, n*sizeof(uint16_t));
     return n;
 }
 

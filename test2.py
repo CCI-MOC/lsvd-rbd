@@ -8,12 +8,17 @@ import os
 import ctypes
 import time
 
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
 
 def blank_uuid():
     return (ctypes.c_ubyte*16)()
 
+# creates an object spanning 2MB of LBA space, 1MB of data.
+# every even LBA is filled, every odd sector is blank, 2048 entries total
 def write_data_1(name, ckpt, seq):
     data = bytearray()
     chars = [_ for _ in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ']

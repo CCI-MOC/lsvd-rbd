@@ -14,6 +14,9 @@ nvme = '/tmp/nvme'
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
 
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 xlate,wcache,rcache = None,None,None
 
 def startup():
@@ -55,23 +58,33 @@ class tests(unittest.TestCase):
         m = rcache.getmap()
         self.assertEqual(m, [])
         expected = b''.join([_ * 512 for _ in [b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H']])
+        print('before rcache_read');
         d = rcache.read(0, 4096)
+        print('after rcache_read');
 
         time.sleep(0.1)                   # wait for async add()
+        print('before getmap');
         m = rcache.getmap()
+        print('after getmap');
         self.assertEqual(d, expected)
         self.assertEqual(m, [([1,0],15)])
 
         d = rcache.read(0, 4096)
+        print('after read 2');
         self.assertEqual(d, expected)
 
-        rcache.bitmap()
+        print('before next update');
         xlate.fakemap_update(8*32, 600, 1, 33 + 8*32)
         # this reads the first 33 pages = 132K
+        print('before read 3');
+        time.sleep(0.01)
         d = rcache.read(16*4096, 17*4096)
+        print('after read 3');
 
         time.sleep(0.1)
+        print('after sleep, before last read');
         m = rcache.getmap()
+        print('after getmap');
         self.assertEqual(m, [([1, 0], 15), ([1, 1], 14), ([1, 2], 13)])
         finish()
 
@@ -79,24 +92,21 @@ class tests(unittest.TestCase):
         #print('Test 3')
         startup()
 
-        # write 4K of 'A' at LBA=24, obj=2, offset=0
-        data = b'A'*4096
+        # write 64K of 'A' at LBA=24, obj=2, offset=0
+        data = b'A'*65536
         rcache.add(2,0,data)         
-        xlate.fakemap_update(24, 32, 2, 0)
+        xlate.fakemap_update(24, 128+24, 2, 0)
 
         d = rcache.read(24*512, 4096)
-        self.assertEqual(d, data)
-        d = rcache.read(24*512, 8192)
+        self.assertEqual(d, data[0:4096])
+        print('1')
+        d = rcache.read((128+24-8)*512, 8192)
         self.assertEqual(d, b'A'*4096 + b'\0'*4096)
-        mask = lsvd.rcache_bitmap()
-        self.assertEqual(mask[15], 0x0001)
-        self.assertEqual(lsvd.rcache_flatmap(), [[0,0]] * 15 + [[2, 0]])
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 15 + [[2, 0]])
 
-        rcache.add(2,16,b'B'*4096)
-        lsvd.rcache_add(2,24,b'C'*(4096*13))
-        mask = lsvd.rcache_bitmap()
-        self.assertEqual(mask[15], 0xFFFD)
-        self.assertEqual(lsvd.rcache_flatmap(), [[0,0]] * 15 + [[2, 0]])
+        rcache.add(2,128,b'B'*65536)
+        rcache.add(2,256,b'C'*65536)
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 13 + [[2,256], [2,128],[2, 0]])
 
         finish()
 
@@ -105,16 +115,15 @@ class tests(unittest.TestCase):
         data = b'X'*64*1024
         for i in range(16):
             rcache.add(i, 0, data)
-        m = map_tuples(lsvd.rcache_getmap())
+        m = map_tuples(rcache.getmap())
         self.assertEqual(m, [(i,0,15-i) for i in range(16)])
         s1 = set(m)
 
-        lsvd.rcache_evict(4)
-        m = map_tuples(lsvd.rcache_getmap())
+        rcache.evict(4)
+        m = map_tuples(rcache.getmap())
         s2 = set(m)
         self.assertEqual(len(s1-s2), 4)
 
-        lsvd.rcache_bitmap()
         for i in range(50,54):
             rcache.add(i, 0, data)
         s3 = set(map_tuples(rcache.getmap()))
