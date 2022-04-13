@@ -172,6 +172,12 @@ class read_cache:
         lsvd_lib.rcache_read(self.rcache, buf, c_ulong(offset), c_ulong(nbytes))
         return buf[0:nbytes]
 
+    def read2(self, offset, nbytes):
+        assert (nbytes % 512) == 0 and (offset % 512) == 0
+        buf = (c_char * nbytes)()
+        lsvd_lib.rcache_read2(self.rcache, buf, c_ulong(offset), c_ulong(nbytes))
+        return buf[0:nbytes]
+    
     def add(self, obj, blk, data):
         if type(data) != bytes:
             data = bytes(data, 'utf-8')

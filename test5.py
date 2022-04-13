@@ -44,7 +44,6 @@ class tests(unittest.TestCase):
         lsvd.img_flush(_img)
         lsvd.wcache_img_write(_img, 4096, b'B'*4096)
         lsvd.wcache_img_write(_img, 3*4096, b'C'*4096)
-        print("---")
         d = lsvd.rbd_read(_img, 0, 20*1024)
 
         self.assertEqual(d, b'A'*4096 + b'B'*4096 + b'A'*4096 + b'C'*4096 + b'A'*4096)
@@ -92,6 +91,7 @@ class tests(unittest.TestCase):
         lsvd.rbd_flush(_img)
         time.sleep(0.2)
 
+        q = 1
         pg = 0
         passed = True
         for i in range(2650):
@@ -99,6 +99,7 @@ class tests(unittest.TestCase):
             if j >= N:
                 continue
             d0 = bytes('%05d' % i, 'utf-8') + b'A'*4091
+            q += 1
             d = lsvd.rbd_read(_img, i*4096, 4096)
             if d0 != d:
                 passed = False

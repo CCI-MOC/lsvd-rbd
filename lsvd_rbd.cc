@@ -1081,9 +1081,12 @@ public:
      */
     char *get_cacheline_buf(int n) {
 	char *buf;
+	int len = 65536;
 	const int maxbufs = 16;
-	if (buf_loc.size() < maxbufs)
-	    buf = (char*)aligned_alloc(512, 65536);
+	if (buf_loc.size() < maxbufs) {
+	    buf = (char*)aligned_alloc(512, len);
+	    memset(buf, 0, len);
+	}
 	else {
 	    int j = buf_loc.front();
 	    buf_loc.pop();
@@ -2151,40 +2154,75 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char
     p->fri = fri;
 
     assert(p != NULL);
-    auto closure = wrap([p, aligned_buf, buf, len]{
-	    if (0 == --p->n) {
-		if (aligned_buf != buf) 
-		    memcpy(buf, aligned_buf, len);
-		p->get();
-		p->complete(0);
-		p->put();
-		if (aligned_buf != buf) 
-		    free(aligned_buf);
-		return true;
-	    }
-	    return false;
-	});
+
+    /* god, I've got to straighten out all the reference counting stuff.
+     * put a reference on, so that we can get through the loops without 
+     * completing prematurely
+     */
+    p->n.store(1);
+    char *_buf = aligned_buf;	// read and increment these ones
+    size_t _len = len;
     
-    while (len > 0) {
+    while (_len > 0) {
+	/* this is ugly. Need to put the closure here, to capture the proper values
+	 * of 'buf' and 'len'.
+	 */
+	auto closure = wrap([p, aligned_buf, buf, len]{
+		if (0 == --p->n) {
+		    if (aligned_buf != buf) 
+			memcpy(buf, aligned_buf, len);
+		    p->get();
+		    p->complete(0);
+		    p->put();
+		    if (aligned_buf != buf) 
+			free(aligned_buf);
+		    return true;
+		}
+		return false;
+	    });
+
+	bool closure_used = false;
 	p->n++;
 	auto [skip,wait] =
-	    fri->wcache->async_read(offset, aligned_buf, len, call_wrapped, closure);
+	    fri->wcache->async_read(offset, _buf, _len, call_wrapped, closure);
 	if (wait == 0)
 	    p->n--;
-	len -= skip;
+	else
+	    closure_used = true;
+	_len -= skip;
 	while (skip > 0) {
 	    p->n++;
 	    auto [skip2, wait2] =
-		fri->rcache->async_read(offset, aligned_buf, skip, call_wrapped, closure);
+		fri->rcache->async_read(offset, _buf, skip, call_wrapped, closure);
 	    if (wait2 == 0)
 		p->n--;
-	    memset(buf, 0, skip2);
+	    else
+		closure_used = true;
+	    memset(_buf, 0, skip2);
 	    skip -= (skip2 + wait2);
-	    buf += (skip2 + wait2);
+	    _buf += (skip2 + wait2);
+	    offset += (skip2 + wait2);
 	}
-	buf += wait;
-	len -= wait;
+	_buf += wait;
+	_len -= wait;
+	offset += wait;
+	if (!closure_used)
+	    delete_wrapped(closure);
     }
+
+    /* ugly - now I have to repeast the closure code to remove the reference
+     * from up top
+     */
+    if (0 == --p->n) {
+	if (aligned_buf != buf) 
+	    memcpy(buf, aligned_buf, len);
+	p->get();
+	p->complete(0);
+	p->put();
+	if (aligned_buf != buf) 
+	    free(aligned_buf);
+    }
+    
     return 0;
 }
 
@@ -2243,7 +2281,6 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
     std::condition_variable cv;
     bool done = false;
     void *closure = wrap([&m, &cv, &done]{
-	    std::unique_lock lk(m);
 	    done = true;
 	    cv.notify_all();
 	    return true;
@@ -2325,7 +2362,6 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     char *nxt = getenv("N_XLATE");
     if (nxt) {
 	n_xlate_threads = atoi(nxt);
-	printf("translate threads: %d\n", n_xlate_threads);
     }
     const char *base = obj.c_str();
     if (rados) {
@@ -2345,7 +2381,6 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     char *nwt = getenv("N_WCACHE");
     if (nwt) {
 	n_wc_threads = atoi(nwt);
-	printf("write cache threads: %d\n", n_wc_threads);
     }
     
     fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
@@ -2695,19 +2730,16 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
     int _len = len;
     std::mutex m;
     std::condition_variable cv;
-    bool done = false;
     
     for (char *_buf = buf2; _len > 0; ) {
+	bool done = false;
 	void *closure = wrap([&m, &cv, &done]{
 		done = true;
-		printf("rcache_read closure\n");
 		cv.notify_all();
 		return true;
 	    });
-	printf("rcache_read: launch %p\n", closure);
 	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
 						       call_wrapped, closure);
-	printf("rcache_read = %ld %ld\n", skip_len, read_len);
 	memset(_buf, 0, skip_len);
 	_buf += (skip_len+read_len);
 	_len -= (skip_len+read_len);
@@ -2720,6 +2752,44 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
 	else
 	    delete_wrapped(closure);
     }
+    memcpy(buf, buf2, len);
+    free(buf2);
+}
+
+extern "C" void rcache_read2(read_cache *rcache, char *buf,
+			    uint64_t offset, uint64_t len)
+{
+    char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
+    int _len = len;
+    std::atomic<int> left(0);
+    std::mutex m;
+    std::condition_variable cv;
+    
+    for (char *_buf = buf2; _len > 0; ) {
+	void *closure = wrap([&cv, &left]{
+		if (--left == 0) {
+		    cv.notify_all();
+		    return true;
+		}
+		return false;
+	    });
+	left++;
+	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
+						       call_wrapped, closure);
+	memset(_buf, 0, skip_len);
+	_buf += (skip_len+read_len);
+	_len -= (skip_len+read_len);
+	offset += (skip_len+read_len);
+
+	if (read_len == 0) {
+	    left--;
+	    delete_wrapped(closure);
+	}
+    }
+    std::unique_lock lk(m);
+    while (left.load() > 0)
+	cv.wait(lk);
+
     memcpy(buf, buf2, len);
     free(buf2);
 }

@@ -58,38 +58,28 @@ class tests(unittest.TestCase):
         m = rcache.getmap()
         self.assertEqual(m, [])
         expected = b''.join([_ * 512 for _ in [b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H']])
-        print('before rcache_read');
         d = rcache.read(0, 4096)
-        print('after rcache_read');
 
         time.sleep(0.1)                   # wait for async add()
-        print('before getmap');
         m = rcache.getmap()
-        print('after getmap');
         self.assertEqual(d, expected)
         self.assertEqual(m, [([1,0],15)])
 
         d = rcache.read(0, 4096)
-        print('after read 2');
         self.assertEqual(d, expected)
 
-        print('before next update');
         xlate.fakemap_update(8*32, 600, 1, 33 + 8*32)
         # this reads the first 33 pages = 132K
-        print('before read 3');
         time.sleep(0.01)
         d = rcache.read(16*4096, 17*4096)
-        print('after read 3');
 
         time.sleep(0.1)
-        print('after sleep, before last read');
         m = rcache.getmap()
-        print('after getmap');
         self.assertEqual(m, [([1, 0], 15), ([1, 1], 14), ([1, 2], 13)])
         finish()
 
     def test_3_add_fake(self):
-        #print('Test 3')
+        # print('Test 3')
         startup()
 
         # write 64K of 'A' at LBA=24, obj=2, offset=0
@@ -99,7 +89,6 @@ class tests(unittest.TestCase):
 
         d = rcache.read(24*512, 4096)
         self.assertEqual(d, data[0:4096])
-        print('1')
         d = rcache.read((128+24-8)*512, 8192)
         self.assertEqual(d, b'A'*4096 + b'\0'*4096)
         self.assertEqual(rcache.flatmap(), [[0,0]] * 15 + [[2, 0]])
@@ -110,7 +99,30 @@ class tests(unittest.TestCase):
 
         finish()
 
-    def test_4_evict(self):
+    # use rcache.read2, with different internal logic
+    def test_4_add_fake(self):
+        # print('Test 4')
+        startup()
+
+        # write 64K of 'A' at LBA=24, obj=2, offset=0
+        data = b'A'*65536
+        rcache.add(2,0,data)         
+        xlate.fakemap_update(24, 128+24, 2, 0)
+
+        d = rcache.read2(24*512, 4096)
+        self.assertEqual(d, data[0:4096])
+        d = rcache.read2((128+24-8)*512, 8192)
+        self.assertEqual(d, b'A'*4096 + b'\0'*4096)
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 15 + [[2, 0]])
+
+        rcache.add(2,128,b'B'*65536)
+        rcache.add(2,256,b'C'*65536)
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 13 + [[2,256], [2,128],[2, 0]])
+
+        finish()
+        
+    def test_5_evict(self):
+        #print('Test 5')
         startup()
         data = b'X'*64*1024
         for i in range(16):
