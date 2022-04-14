@@ -930,14 +930,14 @@ class read_cache {
     
     int               unit_sectors;
     std::vector<int>  free_blks;
-    bool              map_dirty;
+    bool              map_dirty = false;
 
-    double            hit_rate;
-    int               n_hits;
-    int               n_misses;
+    double            hit_rate = 1.0;
+    int               sectors_hit = 0;
+    int               sectors_fetched = 0;
     
     thread_pool<int> misc_threads; // eviction thread, for now
-    bool             nothreads;	   // for debug
+    bool             nothreads = false;	// for debug
 
     /* if map[obj,offset] = n:
      *   in_use[n] - not eligible for eviction
@@ -964,6 +964,7 @@ class read_cache {
     /* evict 'n' blocks - random replacement
      */
     void evict(int n) {
+	printf("\nEVICTING %d\n", n);
 	assert(!m.try_lock());	// m must be locked
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	for (int i = 0; i < n; i++) {
@@ -989,14 +990,14 @@ class read_cache {
 	    if (!p->running)
 		return;
 
-	    if (!map_dirty)	// free list didn't change
-		continue;
-
 	    int n = 0;
 	    if ((int)free_blks.size() < super->units / 16)
 		n = super->units / 4 - free_blks.size();
 	    if (n)
 		evict(n);
+
+	    if (!map_dirty)	// free list didn't change
+		continue;
 
 	    /* write the map (a) immediately if we evict something, or 
 	     * (b) occasionally if the map is dirty
@@ -1016,8 +1017,7 @@ public:
     std::atomic<int> n_lines_read = 0;
 
     read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
-	omap(_om), be(_be), fd(_fd), io(_io), hit_rate(1.0), n_hits(0), n_misses(0),
-	misc_threads(&m), nothreads(nt)
+	omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m), nothreads(nt)
     {
 	dev_max = getsize64(fd);
 	n_lines_read = 0;
@@ -1134,19 +1134,33 @@ public:
 	int n = -1;		// cache block number
 
 	std::unique_lock lk2(m);
-	bool in_cache = false, use_cache = free_blks.size() > 0;
+	bool in_cache = false;
 	auto it2 = map.find(unit);
 	if (it2 != map.end()) {
 	    n = it2->second;
 	    in_cache = true;
 	}
 
+	bool use_cache = free_blks.size() > 0;
+	if (sectors_hit + sectors_fetched > 20000) {
+	    hit_rate = hit_rate * 0.8 + (sectors_hit*1.0 / sectors_fetched) * 0.2;
+	    printf("hit rate: %03f %d %d free_list %ld (%d)\n", hit_rate,
+		   sectors_hit, sectors_fetched, free_blks.size(), super->units/16);
+	    sectors_hit = sectors_fetched = 0;
+	}
+	if (use_cache) {
+	    std::uniform_real_distribution<double> unif(0.0,1.0);
+	    use_cache = unif(rng) < 2 * hit_rate + 0.001;
+	}
+	
 	if (in_cache) {
 	    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 		start = blk_in_ssd + blk_offset,
 		finish = start + (blk_top_offset - blk_offset);
 	    size_t bytes = 512 * (finish - start);
 
+	    sectors_hit += bytes/512;
+	    
 	    if (buffer[n] != NULL) {
 		memcpy(buf, buffer[n] + blk_offset*512, bytes);
 		cb(ptr);
@@ -1176,6 +1190,7 @@ public:
 	    /* assign a location in cache before we start reading (and while we're
 	     * still holding the lock)
 	     */
+	    map_dirty = true;
 	    n = free_blks.back();
 	    free_blks.pop_back();
 	    written[n] = false;
@@ -1183,6 +1198,8 @@ public:
 	    map[unit] = n;
 	    flat_map[n] = unit;
 	    auto _buf = get_cacheline_buf(n);
+
+	    sectors_fetched += unit_sectors;
 	    lk2.unlock();
 
 	    off_t nvme_offset = (super->base*8 + n*unit_sectors) * 512L;
