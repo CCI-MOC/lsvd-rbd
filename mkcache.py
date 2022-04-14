@@ -37,7 +37,7 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
     wsup = lsvd.j_write_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_W_SUPER,
                               seq=1, meta_base = 3, meta_limit = 3+mblks,
                               base=3+mblks, limit=3+mblks+wblks,
-                              next=3+mblks, oldest=3+mblks)
+                                next=3+mblks, oldest=3+mblks)
     wsup.vol_uuid[:] = uuid
     data = bytearray() + wsup
     data += b'\0' * (4096-len(data))
@@ -61,10 +61,14 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
     # zeros are invalid entries for cache map
     # 130 + 16*(64KB/4KB) = 386
 
+    data = bytearray(b'\0'*4096)
     if (write_zeros):
-        data = bytearray(b'\0'*4096)
         for i in range(3 + mblks + wblks + map_blks + rblks):
             os.write(fd, data)
+    else:
+        for i in range(rbase,rbase+map_blks):
+            os.pwrite(fd, data, i*4096)
+    
     os.close(fd)
     
 if __name__ == '__main__':
