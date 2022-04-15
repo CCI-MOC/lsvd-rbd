@@ -146,6 +146,8 @@ class tests(unittest.TestCase):
         finish()
         
 if __name__ == '__main__':
+    lsvd.io_start()
     unittest.main(exit=False)
+    lsvd.io_stop()
     time.sleep(0.1)
 

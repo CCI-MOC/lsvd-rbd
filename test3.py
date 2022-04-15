@@ -19,6 +19,7 @@ import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 fd2 = -1
+lsvd.io_start()
 
 xlate, wcache = None, None
 
@@ -174,4 +175,4 @@ if __name__ == '__main__':
     wcache.shutdown()
     xlate.close()
     time.sleep(1)
-
+    lsvd.io_stop()

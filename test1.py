@@ -26,6 +26,8 @@ xlate = lsvd.translate(img, 1, False)
 assert xlate.nbytes == 10*1024*1024
 _size = xlate.nbytes
 
+#lsvd.io_start()
+
 def get_frontier():
     m = xlate.getmap(0, 100000)
     obj = max([_[2] for _ in m])
@@ -101,4 +103,4 @@ if __name__ == '__main__':
     unittest.main(exit=False)
     sleep(1)
     xlate.close()
-    
+#    lsvd.io_stop()
