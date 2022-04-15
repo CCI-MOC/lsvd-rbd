@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <aio.h>
+#include <libaio.h>
 
 #if 0
 #include <ios>
@@ -105,6 +106,9 @@ struct aio_wrapper {
     }
 };
 
+std::atomic<int> ios_launched;
+std::atomic<int> ios_done;
+
 void aio_wrapper_done(union sigval siv)
 {
     auto w = (aio_wrapper*)siv.sival_ptr;
@@ -112,7 +116,9 @@ void aio_wrapper_done(union sigval siv)
     assert(err != EINPROGRESS);
     int rv = aio_return(&w->aio);
     //printf("%p fd %d op=%s rv=%d err=%d\n", w, w->aio.aio_fildes, aio_op(w->aio.aio_lio_opcode), rv, err);
+    //printf("%p done rv=%d err=%d\n", w, rv, err);
     w->cb(w->ptr);
+    ios_done++;
     delete w;
 }
 
@@ -137,7 +143,11 @@ struct fake_rbd_image {
     bool         closed = false;
     std::queue<aiocb*> aios;
     std::condition_variable cv;
+    void        (*close)(fake_rbd_image*) = NULL;
+    bool         started = false;
 };
+
+fake_rbd_image *the_fri;
 
 struct lsvd_completion {
 public:
@@ -400,7 +410,7 @@ rbd_image_t write_nvme_pwrite(const char *dev, bool buffered)
 	return NULL;
     }
 
-    auto fri = new fake_rbd_image;
+    auto fri = the_fri = new fake_rbd_image;
     fri->fd = fd;
     fri->vol_size = 10L * 1024 * 1024 * 1024;
     fri->dev_size = getsize64(fd);
@@ -440,42 +450,56 @@ static rbd_ops ops_2 = {
 rbd_image_t write_nvme_async(const char *dev, bool buffered)
 {
     fake_rbd_image *fri = (fake_rbd_image*)write_nvme_pwrite(dev, buffered);
+    fri->close = NULL;
     fri->ops = &ops_2;
     return (rbd_image_t) fri;
 }
 
+std::atomic<int> ios_woke;
+
 void aio_callback_thread(fake_rbd_image *fri)
 {
     std::vector<aiocb*> my_aios;
-    std::unique_lock lk(fri->m);
 
-    lk.unlock();
-    
-    for (;;) {
-	if (my_aios.size() > 0) {
-	    aio_suspend(my_aios.data(), my_aios.size(), NULL);
-	}
-	else {
-	    lk.lock();
-	    fri->cv.wait(lk);
+    while (!fri->closed) {
+	std::unique_lock lk(fri->m);
+	if (my_aios.size() > 0 && !fri->closed) {
+	    struct timespec ts = {0, 100*1000};
 	    lk.unlock();
+	    aio_suspend(my_aios.data(), my_aios.size(), &ts);
+	    ios_woke++;
+	    lk.lock();
 	}
+	else if (fri->aios.empty() && !fri->closed)
+	    fri->cv.wait(lk);
 
-	if (fri->closed)
-	    return;
-	lk.lock();
-	if (fri->aios.size() > 0) {
+	if (fri->closed) 
+	    goto flush;
+
+	while (fri->aios.size() > 0) {
 	    my_aios.push_back(fri->aios.front());
 	    fri->aios.pop();
 	}
 	lk.unlock();
 
-	for (auto it = my_aios.begin(); it != my_aios.end(); it++) {
-	    if (aio_error(*it) != EINPROGRESS) {
+	for (auto it = my_aios.begin(); it != my_aios.end();) {
+	    int err = aio_error(*it);
+	    if (err != EINPROGRESS) {
+		//printf("calling _done: %p err %d\n", (*it)->aio_sigevent.sigev_value.sival_ptr, err);
 		aio_wrapper_done((*it)->aio_sigevent.sigev_value);
 		it = my_aios.erase(it);
 	    }
+	    else
+		it++;
 	}
+    }
+flush:
+    for (auto it = my_aios.begin(); it != my_aios.end(); it++)
+	aio_wrapper_done((*it)->aio_sigevent.sigev_value);
+    while (!fri->aios.empty()) {
+	auto aio = fri->aios.front();
+	aio_wrapper_done(aio->aio_sigevent.sigev_value);
+	fri->aios.pop();
     }
 }
 
@@ -497,8 +521,10 @@ static int aio_write_async3(rbd_image_t image, uint64_t off, size_t len, const c
 	});
     auto aio = new aio_wrapper(fri->fd, (char*)buf, len, nvme_offset, call_wrapped, closure);
     aio->aio.aio_sigevent.sigev_notify = SIGEV_NONE;
+    ios_launched++;
     aio_write(&aio->aio);
 
+    //printf("pushing %p\n", &aio->aio);
     std::unique_lock lk(fri->m);
     fri->aios.push(&aio->aio);
     fri->cv.notify_one();
@@ -516,7 +542,247 @@ rbd_image_t write_nvme_async3(const char *dev, bool buffered)
 {
     fake_rbd_image *fri = (fake_rbd_image*)write_nvme_pwrite(dev, buffered);
     fri->ops = &ops_3;
+    fri->close = NULL;
     fri->threads.push(std::thread(aio_callback_thread, fri));
+    return (rbd_image_t) fri;
+}
+
+/* https://lwn.net/Articles/39285/
+ */
+#define IO_BATCH_EVENTS	8		/* number of events to batch up */
+int io_queue_run2(io_context_t ctx, struct timespec *timeout)
+{
+    struct io_event events[IO_BATCH_EVENTS];
+    struct io_event *ep;
+    int ret = 0;		/* total number of events processed */
+    int n;
+
+    /*
+     * Process io events and call the callbacks.
+     * Try to batch the events up to IO_BATCH_EVENTS at a time.
+     * Loop until we have read all the available events and called the callbacks.
+     */
+    do {
+	int i;
+
+	if ((n = io_getevents(ctx, 1, IO_BATCH_EVENTS, events, timeout)) < 0)
+	    break;
+	ret += n;
+	for (ep = events, i = n; i-- > 0; ep++) {
+	    io_callback_t cb = (io_callback_t)ep->data;
+	    struct iocb *iocb = ep->obj;
+	    cb(ctx, iocb, ep->res, ep->res2);
+	}
+    } while (n >= 0);
+
+    return ret ? ret : n;		/* return number of events or error */
+}
+
+io_context_t ioctx;
+
+void async4_close(fake_rbd_image *fri)
+{
+    io_queue_release(ioctx);
+}
+
+struct myio {
+    iocb io;
+    void (*cb)(void*,void*);
+    void *ptr;
+    void *c;
+};
+
+struct aiocb {
+    iocb io;
+    void (*cb)(void*);
+    void *ptr;
+};
+
+static void async4_thread(fake_rbd_image *fri)
+{
+    fri->started = true;
+    fri->cv.notify_all();
+
+    struct io_event events[IO_BATCH_EVENTS];
+    struct io_event *ep;
+    int ret = 0;		/* total number of events processed */
+    int n;
+    /*
+     * Process io events and call the callbacks.
+     * Try to batch the events up to IO_BATCH_EVENTS at a time.
+     * Loop until we have read all the available events and called the callbacks.
+     */
+    do {
+	int i;
+	struct timespec timeout = {0,1000*1000};
+	if ((n = io_getevents(ioctx, 1, IO_BATCH_EVENTS, events, &timeout)) < 0)
+	    break;
+	ret += n;
+	for (ep = events, i = n; i-- > 0; ep++) {
+	    io_callback_t cb = (io_callback_t)ep->data;
+	    struct iocb *iocb = ep->obj;
+	    auto io = (myio*)iocb;
+	    io->cb(io->c, io->ptr);
+	    delete io;
+	}
+    } while (n >= 0);
+
+    printf("EXITING\n");
+}
+
+static void async4_thread2(fake_rbd_image *fri)
+{
+    io_queue_run2(ioctx, NULL);
+    printf("EXITED\n");
+}
+    
+static void async4_thread3(fake_rbd_image *fri)
+{
+    while (!fri->closed)
+	io_queue_run(ioctx);
+    printf("EXITED\n");
+}
+
+static int aio_write_async4(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+			    rbd_completion_t c)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto p = (lsvd_completion *)c;
+
+    int n = fri->dev_size / len;
+    std::uniform_int_distribution<int> uni(0, n - 1);
+    off_t nvme_offset = uni(rng) * len;
+
+    myio *io = new myio;
+    io->cb = p->cb;
+    io->c = c;
+    io->ptr = p->arg;
+    io_prep_pwrite(&io->io, fri->fd, (void*)buf, len, off);
+    printf("submitting %p\n", io);
+    iocb *iov = &io->io;
+    io_submit(ioctx, 1, &iov);
+    return 0;
+}
+
+void async4_cb(io_context_t ctx, iocb *io, long res, long res2)
+{
+    printf("got iocb %p data %p\n", io, io->data);
+    call_wrapped(io->data);
+    delete io;
+}
+
+void async4_cb2(io_context_t ctx, iocb *io, long res, long res2)
+{
+    myio *m = (myio*)io;
+    //printf("got iocb %p closure %p\n", m, m->ptr);
+    call_wrapped(m->ptr);
+    delete m;
+}
+
+static int aio_write_async4_2(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+			      rbd_completion_t c)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto p = (lsvd_completion *)c;
+
+    int n = fri->dev_size / len;
+    std::uniform_int_distribution<int> uni(0, n - 1);
+    off_t nvme_offset = uni(rng) * len;
+
+    auto closure = wrap([c,p]{
+	    p->done = true;
+	    p->cb(c, p->arg);
+	    std::unique_lock lk(p->m);
+	    p->cv.notify_all();
+	    return true;
+	});
+    //printf("closure %p\n", closure);
+
+    auto io = new myio;
+    //printf("io %p\n", io);
+    io_prep_pwrite(&io->io, fri->fd, (void*)buf, len, off);
+    io->ptr = closure;
+    io_set_callback(&io->io, async4_cb2);
+    iocb *iov = &io->io;
+    io_submit(ioctx, 1, &iov);
+    return 0;
+}
+
+static rbd_ops ops_4 = {
+    .aio_readv = NULL,
+    .aio_writev = NULL,
+    .aio_read = emulate_aio_read,
+    .aio_write = aio_write_async4_2
+};
+
+
+rbd_image_t write_nvme_async4(const char *dev, bool buffered)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)write_nvme_pwrite(dev, buffered);
+    fri->ops = &ops_4;
+    if (io_queue_init(64, &ioctx) < 0)
+	perror("queue_init"), exit(1);
+    fri->close = async4_close;
+
+    fri->threads.push(std::thread(async4_thread3, fri));
+    return (rbd_image_t) fri;
+}
+
+
+int write_frontier;
+
+static int aio_write_async5(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+			      rbd_completion_t c)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto p = (lsvd_completion *)c;
+
+    int N = fri->dev_size / 4096;
+    int n = len / 4096;
+    char *_buf = (char*)malloc(len+4096);
+    memcpy(_buf+4096, buf, len);
+
+    off_t nvme_offset = write_frontier*4096L;
+    write_frontier += (n+1);
+    if (write_frontier >= N)
+	write_frontier = 0;
+
+    auto closure = wrap([c,p,_buf]{
+	    p->done = true;
+	    p->cb(c, p->arg);
+	    std::unique_lock lk(p->m);
+	    p->cv.notify_all();
+	    free(_buf);
+	    return true;
+	});
+    //printf("closure %p\n", closure);
+
+    auto io = new myio;
+    io_prep_pwrite(&io->io, fri->fd, (void*)buf, len, off);
+    io->ptr = closure;
+    io_set_callback(&io->io, async4_cb2);
+    iocb *iov = &io->io;
+    io_submit(ioctx, 1, &iov);
+    return 0;
+}
+
+static rbd_ops ops_5 = {
+    .aio_readv = NULL,
+    .aio_writev = NULL,
+    .aio_read = emulate_aio_read,
+    .aio_write = aio_write_async5
+};
+
+
+rbd_image_t write_nvme_async5(const char *dev, bool buffered)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)write_nvme_pwrite(dev, buffered);
+    fri->ops = &ops_5;
+    if (io_queue_init(64, &ioctx) < 0)
+	perror("queue_init"), exit(1);
+    fri->close = async4_close;
+
+    fri->threads.push(std::thread(async4_thread3, fri));
     return (rbd_image_t) fri;
 }
 
@@ -547,7 +813,16 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 	assert(mode[1] == '1' || mode[1] == '2');
 	*image = write_nvme_async3(nvme.c_str(), mode[1] == '1');
 	return (*image == NULL) ? -1 : 0;
-	
+
+    case '4':
+	assert(mode[1] == '1' || mode[1] == '2');
+	*image = write_nvme_async4(nvme.c_str(), mode[1] == '1');
+	return (*image == NULL) ? -1 : 0;
+
+    case '5':
+	assert(mode[1] == '1' || mode[1] == '2');
+	*image = write_nvme_async5(nvme.c_str(), mode[1] == '1');
+	return (*image == NULL) ? -1 : 0;	
     }
 
     return -1;
@@ -556,17 +831,17 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 extern "C" int rbd_close(rbd_image_t image)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
+    std::unique_lock lk(fri->m);
     fri->closed = true;
-    close(fri->fd);
+    lk.unlock();
     fri->cv.notify_all();
+    close(fri->fd);
+    if (fri->close)
+	fri->close(fri);
     while (!fri->threads.empty()) {
 	fri->threads.front().join();
 	fri->threads.pop();
     }
-#if 0
-    for (auto t : fri->threads)
-	t.join();
-#endif
     return 0;
 }
 
