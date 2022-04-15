@@ -68,7 +68,8 @@ struct snap_info {
 };
 
 struct data_hdr {
-    uint32_t last_data_obj;
+    uint64_t write_seq;		// highest write cache seq#
+    uint32_t last_data_obj;	// skip over checkpoints
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
     uint32_t objs_cleaned_offset;
