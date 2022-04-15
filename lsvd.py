@@ -203,9 +203,14 @@ class read_cache:
     def evict(self, n):
         lsvd_lib.rcache_evict(self.rcache, c_int(n))
 
-#----------------
-# these manipulate the objmap directly, without going through the translation layer
-#
+# start and stop the libaio completion thread
+
+def io_start():
+    lsvd_lib.e_io_start()
+
+def io_stop():
+    lsvd_lib.e_io_stop()
+
 
 # RBD functions
 
