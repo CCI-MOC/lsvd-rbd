@@ -592,11 +592,6 @@ struct myio {
     void *c;
 };
 
-struct aiocb {
-    iocb io;
-    void (*cb)(void*);
-    void *ptr;
-};
 
 static void async4_thread(fake_rbd_image *fri)
 {
@@ -786,6 +781,121 @@ rbd_image_t write_nvme_async5(const char *dev, bool buffered)
     return (rbd_image_t) fri;
 }
 
+/* ----- this one is number 6 */
+
+void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
+
+struct e_iocb {
+    iocb io;
+    void (*cb)(void*) = NULL;
+    void *ptr = NULL;
+    e_iocb() { io_set_callback(&io, e_iocb_cb); }
+};
+
+void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2)
+{
+    auto aio = (e_iocb*)io;
+    aio->cb(aio->ptr);
+    delete aio;
+}
+
+int io_queue_wait(io_context_t ctx, struct timespec *timeout)
+{
+    return io_getevents(ctx, 0, 0, NULL, timeout);
+}
+
+void e_iocb_runner(io_context_t ctx, bool *done)
+{
+    while (!*done) {
+	if (io_queue_run(ctx) < 0)
+	    break;
+	if (io_queue_wait(ctx, NULL) < 0)
+	    break;
+    }
+}
+
+
+void invoke_rbd_cb(void *c)
+{
+    auto p = (lsvd_completion*) c;
+    p->done = true;
+    p->cb(c, p->arg);
+    std::unique_lock lk(p->m);
+    p->cv.notify_all();
+}
+
+void e_io_prep_pwrite(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
+		      void (*cb)(void*), void *arg)
+{
+    io_prep_pwrite(&io->io, fd, buf, len, offset);
+    io->cb = cb;
+    io->ptr = arg;
+    io_set_callback(&io->io, e_iocb_cb);
+}
+
+void e_io_prep_pread(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
+		     void (*cb)(void*), void *arg)
+{
+    io_prep_pread(&io->io, fd, buf, len, offset);
+    io->cb = cb;
+    io->ptr = arg;
+    io_set_callback(&io->io, e_iocb_cb);
+}
+
+void io_prep_pwritev(e_iocb *io, int fd, const struct iovec *iov, int iovcnt,
+		     size_t offset, void (*cb)(void*), void *arg)
+{
+    io_prep_pwritev(&io->io, fd, iov, iovcnt, offset);
+    io->cb = cb;
+    io->ptr = arg;
+    io_set_callback(&io->io, e_iocb_cb);
+}
+
+void io_prep_preadv(e_iocb *io, int fd, const struct iovec *iov, int iovcnt,
+		    size_t offset, void (*cb)(void*), void *arg)
+{
+    io_prep_preadv(&io->io, fd, iov, iovcnt, offset);
+    io->cb = cb;
+    io->ptr = arg;
+    io_set_callback(&io->io, e_iocb_cb);
+}
+
+static int aio_write_async6(rbd_image_t image, uint64_t off, size_t len, const char *buf,
+			      rbd_completion_t c)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto p = (lsvd_completion *)c;
+
+    int n = fri->dev_size / len;
+    std::uniform_int_distribution<int> uni(0, n - 1);
+    off_t nvme_offset = uni(rng) * len;
+
+    auto io = new e_iocb;
+    e_io_prep_pwrite(io, fri->fd, (void*) buf, len, off, invoke_rbd_cb, c);
+    iocb *iov = &io->io;
+    io_submit(ioctx, 1, &iov);
+    return 0;
+}
+
+static rbd_ops ops_6 = {
+    .aio_readv = NULL,
+    .aio_writev = NULL,
+    .aio_read = emulate_aio_read,
+    .aio_write = aio_write_async6
+};
+
+rbd_image_t write_nvme_async6(const char *dev, bool buffered)
+{
+    fake_rbd_image *fri = (fake_rbd_image*)write_nvme_pwrite(dev, buffered);
+    fri->ops = &ops_6;
+    if (io_queue_init(64, &ioctx) < 0)
+	perror("queue_init"), exit(1);
+    fri->close = async4_close;
+
+    fri->threads.push(std::thread(e_iocb_runner, ioctx, &fri->closed));
+    return (rbd_image_t) fri;
+}
+
 /* 11: write randomly to NVME w/ pwrite, buffered
  * 12: write randomly to NVME w/ pwrite, direct
  * 21: write randomly to NVME w/ aio+callback, buffered
@@ -822,6 +932,11 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     case '5':
 	assert(mode[1] == '1' || mode[1] == '2');
 	*image = write_nvme_async5(nvme.c_str(), mode[1] == '1');
+	return (*image == NULL) ? -1 : 0;	
+
+    case '6':
+	assert(mode[1] == '1' || mode[1] == '2');
+	*image = write_nvme_async6(nvme.c_str(), mode[1] == '1');
 	return (*image == NULL) ? -1 : 0;	
     }
 
