@@ -2434,7 +2434,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     auto [nvme, obj] = split_string(std::string(name), ",");
     bool rados = (obj.substr(0,6) == "rados:");
     auto fri = new fake_rbd_image;
-
+    e_io_start();
+    
     if (rados)
 	fri->io = new rados_backend(obj.c_str()+6);
     else
@@ -2487,6 +2488,7 @@ extern "C" int rbd_close(rbd_image_t image)
     delete fri->lsvd;
     delete fri->omap;
     delete fri->io;
+    e_io_stop();
     
     return 0;
 }
