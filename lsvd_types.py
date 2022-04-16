@@ -53,8 +53,7 @@ class snap(Structure):
 sizeof_snap = sizeof(snap) # 20
 
 class data_hdr(Structure):
-    _fields_ = [("write_seq",           c_ulong),
-                ("last_data_obj",       c_uint),
+    _fields_ = [("last_data_obj",       c_uint),
                 ("ckpts_offset",        c_uint),
                 ("ckpts_len",           c_uint),
                 ("objs_cleaned_offset", c_uint),

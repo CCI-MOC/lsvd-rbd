@@ -268,6 +268,7 @@ class tests(unittest.TestCase):
         xlate.close()
 
 if __name__ == '__main__':
+    lsvd.io_start()
     unittest.main(exit=False)
     time.sleep(1)
-    
+    lsvd.io_stop()
