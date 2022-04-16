@@ -1523,7 +1523,6 @@ class write_cache {
     translate        *be;
     bool              map_dirty;
     
-    thread_pool<cache_work*> workers;
     thread_pool<int>          *misc_threads;
     std::mutex                m;
     std::condition_variable   alloc_cv;
@@ -1572,142 +1571,6 @@ class write_cache {
 	return h;
     }
 
-    void writer(thread_pool<cache_work*> *p) {
-	char *hdr = (char*)aligned_alloc(512, 4096);
-	char *pad_hdr = (char*)aligned_alloc(512, 4096);
-	auto period = std::chrono::milliseconds(25);
-	const int write_max_pct = 2;
-	const int write_max_kb = 512;
-	int max_sectors;
-	{			// make valgrind happy
-	    std::unique_lock lk(m);
-	    max_sectors = std::min((write_max_pct *
-				    (int)(super->limit - super->base) * 8 / 100),
-				   write_max_kb * 2);
-	}
-	
-	while (p->running) {
-	    std::vector<char*> bounce_bufs;
-	    std::unique_lock lk(m);
-	    if (!p->wait_locked(lk))
-		break;
-
-	    std::vector<cache_work*> work;
-	    int sectors = 0;
-	    while (p->running && sectors < max_sectors) {
-		cache_work *w;
-		if (!p->get_nowait(w))
-		    break;
-		sectors += w->sectors;
-		work.push_back(w);
-	    }
-	    if (!p->running)
-		break;
-	    
-	    page_t blocks = div_round_up(sectors, 8);
-	    // allocate blocks + 1
-	    page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
-
-	    long _lba = (blockno+1)*8;
-	    for (auto w : work) {
-		int len = w->iovs.bytes() / 512;
-		xprintf(DBG_MAP, "wr: %ld+%d -> %ld\n", w->lba, len, _lba);
-		_lba += len;
-	    }
-	    
-	    if (pad != 0) {
-		mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
-		assert(pad < (int)super->limit);
-		lengths[pad] = super->limit - pad;
-		assert(lengths[pad] > 0);
-		//xprintf(DBG_MAP, "lens[%d] <- %d\n", pad, super->limit - pad);
-	    }
-
-	    j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
-	    
-	    lengths[blockno] = blocks+1;
-	    assert(lengths[blockno] > 0);
-
-	    lk.unlock();
-	    
-	    if (pad != 0) {
-		assert((pad+1)*4096UL <= dev_max);
-		if (pwrite(fd, pad_hdr, 4096, pad*4096L) < 0)
-		    throw_fs_error("wpad");
-	    }
-
-	    std::vector<j_extent> extents;
-
-	    /* note that we're replacing the pointers inside the iovs.
-	     * this is really gross.
-	     */
-	    for (auto w : work) {
-		for (int i = 0; i < (int)w->iovs.size(); i++) {
-		    if (aligned(w->iovs[i].iov_base, 512))
-			continue;
-		    char *p = (char*)aligned_alloc(512, w->iovs[i].iov_len);
-		    memcpy(p, w->iovs[i].iov_base, w->iovs[i].iov_len);
-		    w->iovs[i].iov_base = p;
-		    bounce_bufs.push_back(p);
-		}
-		extents.push_back((j_extent){w->lba, w->iovs.bytes() / 512});
-	    }
-
-	    j->extent_offset = sizeof(*j);
-	    size_t e_bytes = extents.size() * sizeof(j_extent);
-	    j->extent_len = e_bytes;
-	    memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
-		
-	    auto iovs = smartiov();
-	    iovs.push_back((iovec){hdr, 4096});
-
-	    for (auto w : work) {
-		auto [iov, iovcnt] = w->iovs.c_iov();
-		iovs.ingest(iov, iovcnt);
-	    }
-
-	    sector_t pad_sectors = blocks*8 - sectors;
-	    if (pad_sectors > 0)
-		iovs.push_back((iovec){pad_page, (size_t)pad_sectors*512});
-
-	    assert(blockno + div_round_up(iovs.bytes(), 4096) <= (int)super->limit);
-	    if (pwritev(fd, iovs.data(), iovs.size(), blockno*4096L) < 0)
-		throw_fs_error("wdata");
-
-	    /* update map first under lock. 
-	     * Note that map is in units of *sectors*, not blocks 
-	     */
-	    lk.lock();
-	    
-	    lba_t plba = (blockno+1) * 8;
-	    std::vector<extmap::lba2lba> garbage;
-	    for (auto w : work) {
-		map.update(w->lba, w->lba + w->sectors, plba, &garbage);
-		rmap.update(plba, plba+w->sectors, w->lba);
-		plba += sectors;
-		map_dirty = true;
-	    }
-	    for (auto it = garbage.begin(); it != garbage.end(); it++) 
-		rmap.trim(it->s.base, it->s.base+it->s.len);
-	    lk.unlock();
-	    
-	    /* then send to backend */
-	    for (auto w : work) {
-		be->writev(w->lba*512, w->iovs.data(), w->iovs.size());
-		w->callback(w->ptr);
-	    }
-
-	    while (!bounce_bufs.empty()) {
-		free(bounce_bufs.back());
-		bounce_bufs.pop_back();
-	    }
-	    for (auto w : work)
-		delete w;
-	}
-	free(hdr);
-	free(pad_hdr);
-    }
-    
     /* min free is min(5%, 100MB). Free space:
      *  N = limit - base
      *  oldest == newest : free = N-1
@@ -1881,7 +1744,7 @@ class write_cache {
     }
 
 public:
-    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) : workers(&m) {
+    write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) {
 	super_blkno = blkno;
 	fd = _fd;
 	dev_max = getsize64(fd);
@@ -1932,8 +1795,6 @@ public:
 	    nfree = (super->oldest + N - super->next) % N;
 
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
-	for (auto i = 0; i < n_threads; i++)
-	    workers.pool.push(std::thread(&write_cache::writer, this, &workers));
 
 	misc_threads = new thread_pool<int>(&m);
 	misc_threads->pool.push(std::thread(&write_cache::evict_thread, this, misc_threads));
@@ -1945,13 +1806,7 @@ public:
 	delete misc_threads;
     }
 
-    void writev(size_t offset, const iovec *iov, int iovcnt,
-		void (*cb)(void*), void *ptr) {
-	std::unique_lock lk(m);
-	workers.put_locked(new cache_work(offset/512, iov, iovcnt, cb, ptr));
-    }
-
-    void writev2(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
+    void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
 	size_t len = iov_sum(iov, iovcnt);
 	sector_t sectors = len / 512, lba = offset / 512;
 	page_t blocks = div_round_up(sectors, 8);
@@ -1967,6 +1822,7 @@ public:
 	lk.unlock();
 
 	if (pad != 0) {
+	    assert((pad+1)*4096UL <= dev_max);
 	    pad_hdr = (char*)aligned_alloc(512, 4096);
 	    auto closure = wrap([pad_hdr]{
 		    free(pad_hdr);
@@ -1978,19 +1834,8 @@ public:
 	    e_io_submit(ioctx, eio);
 	}
 
-	/* note that we're replacing the pointers inside the iovs.
-	 * this is really gross.
-	 */
-	auto bounce_bufs = new std::vector<char*>();
-	iovec *_iov = (iovec*)iov; // get rid of const
-	for (int i = 0; i < iovcnt; i++) {
-	    if (aligned(_iov[i].iov_base, 512))
-		continue;
-	    char *p = (char*)aligned_alloc(512, _iov[i].iov_len);
-	    memcpy(p, _iov[i].iov_base, _iov[i].iov_len);
-	    _iov[i].iov_base = p;
-	    bounce_bufs->push_back(p);
-	}
+	for (int i = 0; i < iovcnt; i++)
+	    assert(aligned(iov[i].iov_base, 512));
 
         char *hdr = (char*)aligned_alloc(512, 4096);
 	j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
@@ -2002,8 +1847,12 @@ public:
 	memcpy((void*)(hdr + sizeof(*j)), &ext, e_bytes);
 	
 	lba_t plba = (blockno+1) * 8;
+	iovec hdr_iov = (iovec){.iov_base = hdr, .iov_len = 4096};
+	auto s_iovs = new smartiov(&hdr_iov, 1);
+	s_iovs->ingest(iov, iovcnt);
+	
 	auto closure = wrap(
-	    [this, hdr, iov, iovcnt, cb, ptr, lba, sectors, plba, bounce_bufs, j]
+	    [this, hdr, iov, iovcnt, cb, ptr, lba, sectors, plba, j, s_iovs]
 	    {
 		/* first update the maps */
 		std::vector<extmap::lba2lba> garbage; 
@@ -2016,19 +1865,18 @@ public:
 		lk.unlock();
 
 		/* then call back, send to backend */
-		cb(ptr);
 		be->writev(lba*512, (iovec*)iov, iovcnt);
+		cb(ptr);
 
 		/* and finally clean everything up */
 		free(hdr);
-		for (auto b : *bounce_bufs)
-		    free(b);
-		delete bounce_bufs;
+		delete s_iovs;
 		return true;
 	    });
 
 	auto eio = new e_iocb;
-	e_io_prep_pwritev(eio, fd, iov, iovcnt, blockno*4096L, call_wrapped, closure);
+	e_io_prep_pwritev(eio, fd, s_iovs->data(), s_iovs->size(), blockno*4096L,
+			  call_wrapped, closure);
 	e_io_submit(ioctx, eio);
     }
     
@@ -2498,6 +2346,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const 
 	});
     p->iov = (iovec){aligned_buf, len};
     fri->wcache->writev(off, &p->iov, 1, call_wrapped, closure);
+
     return 0;
 }
 
@@ -2863,7 +2712,9 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
 
 extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
 {
-    iovec iov = {buf, len};
+    char *aligned_buf = (char*)aligned_alloc(512, len);
+    memcpy(aligned_buf, buf, len);
+    iovec iov = {aligned_buf, len};
     std::condition_variable cv;
     std::mutex m;
     bool done = false;
@@ -2876,14 +2727,15 @@ extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, ui
 
     std::unique_lock lk(m);
     wcache->writev(offset, &iov, 1, call_wrapped, closure);
+
     while (!done)
         cv.wait(lk);
+    free(aligned_buf);
 }
 
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
-    iovec iov = {buf, len};
     std::mutex m;
     std::condition_variable cv;
     std::unique_lock lk(m);
@@ -2894,9 +2746,20 @@ extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, 
 	    cv.notify_all();
 	    return true;
 	});
+
+    char *aligned_buf = buf;
+    if (!aligned(buf, 512)) {
+	aligned_buf = (char*)aligned_alloc(512, len);
+	memcpy(aligned_buf, buf, len);
+    }
+    iovec iov = {aligned_buf, len};
+
     fri->wcache->writev(offset, &iov, 1, call_wrapped, closure);
     while (!done)
 	cv.wait(lk);
+
+    if (aligned_buf != buf)
+	free(aligned_buf);
 }
 
 extern "C" void wcache_reset(write_cache *wcache)
