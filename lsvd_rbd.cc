@@ -1291,15 +1291,9 @@ public:
 			return true;
 		    });
 		in_use[n]++;
-#if 0
-		auto aio = new aio_wrapper(fd, buf, bytes, 512L*start, call_wrapped, closure);
-		assert(aligned(buf, 512));
-		aio_read(&aio->aio);
-#else
 		auto eio = new e_iocb;
 		e_io_prep_pread(eio, fd, buf, bytes, 512L*start, call_wrapped, closure);
 		e_io_submit(ioctx, eio);
-#endif
 	    }
 	    else {		// prior read is pending
 		auto closure = wrap([this, n, buf, blk_offset, bytes, cb, ptr]{
@@ -1348,17 +1342,10 @@ public:
 				      cb(ptr);
 				      for (auto p : v)
 					  call_wrapped(p);
-#if 0
-				      auto aio = new aio_wrapper(fd, _buf, unit_sectors*512L,
-								 512L*nvme_offset,
-								 call_wrapped, write_done);
-				      aio_write(&aio->aio);
-#else
 				      auto eio = new e_iocb;
 				      e_io_prep_pwrite(eio, fd, _buf, unit_sectors*512L,
 						       512L*nvme_offset, call_wrapped, write_done);
 				      e_io_submit(ioctx, eio);
-#endif
 				      return true;
 				  });
 
@@ -1496,15 +1483,9 @@ public:
     int aio_read_num_object(int seq, char *buf, size_t len,
 			    size_t offset, void (*cb)(void*), void *ptr) {
 	int fd = get_cached_fd(seq);
-#if 0
-	auto aio = new aio_wrapper(fd, buf, len, offset, cb, ptr);
-	//printf("read_num_obj: %p %d %ld+%ld\n", aio, seq, offset, len);
-	aio_read(&aio->aio);
-#else
 	auto eio = new e_iocb;
 	e_io_prep_pread(eio, fd, buf, len, offset, cb, ptr);
 	e_io_submit(ioctx, eio);
-#endif
 	return 0;
     }
     
@@ -2075,16 +2056,9 @@ public:
 	lk.unlock();
 	if (read_len) {
 	    /* fuck. the e_io version doesn't work */
-#if 1
-	    auto aio = new aio_wrapper(fd, buf, read_len, nvme_offset, cb, ptr);
-	    assert(aligned(buf, 512));
-	    //printf("aioread3 %p %ld+%ld\n", aio, nvme_offset, read_len);
-	    aio_read(&aio->aio);
-#else    
 	    auto eio = new e_iocb;
-	    e_io_prep_pwrite(eio, fd, buf, read_len, nvme_offset, cb, ptr);
+	    e_io_prep_pread(eio, fd, buf, read_len, nvme_offset, cb, ptr);
 	    e_io_submit(ioctx, eio);
-#endif
 	}
 	return std::make_pair(skip_len, read_len);
     }
