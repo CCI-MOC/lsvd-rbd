@@ -5,7 +5,7 @@ CFLAGS = -ggdb3 -Wall -Wno-psabi
 CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 
-liblsvd.so: lsvd_rbd.cc extent.cc journal2.cc object.cc
+liblsvd.so: lsvd_rbd.cc extent.cc journal2.cc objects.cc
 	g++ -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 lsvd_rbd.o: lsvd_rbd.cc extent.cc journal2.cc smartiov.cc object.cc
