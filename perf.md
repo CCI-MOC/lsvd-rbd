@@ -1,5 +1,12 @@
 # performance tests
 
+- write batching is finished, works pretty well
+- read hit/miss rate is fixed
+
+need to:
+- fix write eviction - it's never evicting
+- add garbage collection
+
 ## to do:
 
 - write batching, to reduce system CPU usage for small writes

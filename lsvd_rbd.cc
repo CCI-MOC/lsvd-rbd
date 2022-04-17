@@ -1585,6 +1585,7 @@ class write_cache {
 		return;
 	    int pgs_free = pages_free(super->oldest);
 	    if (super->oldest != super->next && pgs_free <= trigger) {
+		printf("\nevicting\n");
 		auto oldest = super->oldest;
 		std::vector<j_extent> to_delete;
 
@@ -1799,6 +1800,7 @@ public:
 	if (pad != 0) 
 	    lengths[pad] = super->limit - pad;
 	lengths[blockno] = blocks+1;
+	lk.unlock();
 	
 	if (pad != 0) {
 	    assert((pad+1)*4096UL <= dev_max);
@@ -1861,8 +1863,10 @@ public:
 
 		lk.lock();
 		--writes_outstanding;
-		if (work.size() > 0)
+		if (work.size() > 0) {
+		    lk.unlock();
 		    send_writes();
+		}
 		return true;
 	    });
 
@@ -1874,10 +1878,10 @@ public:
 
 	    
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
-	std::unique_lock lk(m);
 	auto w = new cache_work(offset/512L, iov, iovcnt, cb, ptr);
+	std::unique_lock lk(m);
 	work.push_back(w);
-	if (writes_outstanding == 0 || work.size() >= 4) {
+	if (writes_outstanding < 4 || work.size() >= 8) {
 	    lk.unlock();
 	    send_writes();
 	}
@@ -2504,6 +2508,7 @@ extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
     return 0;
 }
 
+fake_rbd_image *the_fri;	// debug
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
@@ -2547,7 +2552,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
     fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
     fri->notify = false;
-    
+
+    the_fri = fri;
     *image = (void*)fri;
     return 0;
 }
