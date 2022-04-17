@@ -861,47 +861,6 @@ size_t getsize64(int fd)
     return size;
 }
 
-/* POSIX aio helpers */
-#include <aio.h>
-
-typedef void (*posix_aio_cb_t)(union sigval siv);
-void aio_wrapper_done(union sigval siv);
-
-struct aio_wrapper {
-    aiocb aio = {0};
-    void (*cb)(void*);
-    void *ptr = NULL;
-    aio_wrapper(int fd, char *buf, size_t nbytes, off_t offset,
-                void (*_cb)(void*), void *_ptr) {
-	cb = _cb;
-	ptr = _ptr;
-	aio.aio_fildes = fd;
-	aio.aio_buf = buf;
-	aio.aio_offset = offset;
-	aio.aio_nbytes = nbytes;
-	aio.aio_sigevent.sigev_notify = SIGEV_THREAD;
-	aio.aio_sigevent.sigev_value.sival_ptr = (void*)this;
-	aio.aio_sigevent.sigev_notify_function = aio_wrapper_done;
-    }
-};
-
-const char *aio_op(int op)
-{
-    if (op == LIO_READ) return "READ";
-    else if (op == LIO_WRITE) return "WRITE";
-    else return "???";
-}
- 
-void aio_wrapper_done(union sigval siv)
-{
-    auto w = (aio_wrapper*)siv.sival_ptr;
-    int err = aio_error(&w->aio);
-    assert(err != EINPROGRESS);
-    int rv = aio_return(&w->aio);
-    //printf("%p fd %d op=%s rv=%d err=%d\n", w, w->aio.aio_fildes, aio_op(w->aio.aio_lio_opcode), rv, err);
-    w->cb(w->ptr);
-    delete w;
-}
 /* libaio helpers */
 
 void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
@@ -1535,6 +1494,9 @@ class write_cache {
     std::map<page_t,int> lengths;
     translate        *be;
     bool              map_dirty;
+
+    std::vector<cache_work*> work;
+    int                      writes_outstanding = 0;
     
     thread_pool<int>          *misc_threads;
     std::mutex                m;
@@ -1616,8 +1578,6 @@ class write_cache {
 	auto t0 = std::chrono::system_clock::now();
 	auto super_timeout = std::chrono::milliseconds(500);
 	
-//	int trigger = 100;
-
 	while (p->running) {
 	    std::unique_lock lk(m);
 	    p->cv.wait_for(lk, period);
@@ -1819,7 +1779,111 @@ public:
 	delete misc_threads;
     }
 
+    void send_writes(void) {
+	std::unique_lock lk(m);
+	writes_outstanding++;
+	auto w = new std::vector<cache_work*>(std::make_move_iterator(work.begin()),
+					      std::make_move_iterator(work.end()));
+	work.erase(work.begin(), work.end());
+
+	sector_t sectors = 0;
+	for (auto _w : *w) {
+	    sectors += _w->sectors;
+	    assert(_w->iovs.aligned(512));
+	}
+
+	page_t blocks = div_round_up(sectors, 8);
+	char *pad_hdr = NULL;
+	page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
+
+	if (pad != 0) 
+	    lengths[pad] = super->limit - pad;
+	lengths[blockno] = blocks+1;
+	
+	if (pad != 0) {
+	    assert((pad+1)*4096UL <= dev_max);
+	    pad_hdr = (char*)aligned_alloc(512, 4096);
+	    auto closure = wrap([pad_hdr]{
+		    free(pad_hdr);
+		    return true;
+		});
+	    mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
+	    auto eio = new e_iocb;
+	    e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
+	    e_io_submit(ioctx, eio);
+	}
+
+	std::vector<j_extent> extents;
+	for (auto _w : *w)
+	    extents.push_back((j_extent){_w->lba, (uint64_t)_w->sectors});
+		
+        char *hdr = (char*)aligned_alloc(512, 4096);
+	j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
+
+	j->extent_offset = sizeof(*j);
+	size_t e_bytes = extents.size() * sizeof(j_extent);
+	j->extent_len = e_bytes;
+	memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
+	
+	lba_t plba = (blockno+1) * 8;
+	auto iovs = new smartiov();
+	iovs->push_back((iovec){hdr, 4096});
+	for (auto _w : *w) {
+	    auto [iov, iovcnt] = _w->iovs.c_iov();
+	    iovs->ingest(iov, iovcnt);
+	}
+	
+	auto closure = wrap([this, hdr, plba, iovs, w] {
+		/* first update the maps */
+		std::vector<extmap::lba2lba> garbage; 
+		std::unique_lock lk(m);
+		auto _plba = plba;
+		for (auto _w : *w) {
+		    map.update(_w->lba, _w->lba + _w->sectors, _plba, &garbage);
+		    rmap.update(plba, _plba+_w->sectors, _w->lba);
+		    _plba += _w->sectors;
+		    map_dirty = true;
+		}
+		for (auto it = garbage.begin(); it != garbage.end(); it++) 
+		    rmap.trim(it->s.base, it->s.base+it->s.len);
+
+		/* then call back, send to backend */
+		lk.unlock();
+		for (auto _w : *w) {
+		    be->writev(_w->lba*512, _w->iovs.data(), _w->iovs.size());
+		    _w->callback(_w->ptr);
+		}
+
+		/* and finally clean everything up */
+		free(hdr);
+		delete iovs;
+		delete w;
+
+		lk.lock();
+		--writes_outstanding;
+		if (work.size() > 0)
+		    send_writes();
+		return true;
+	    });
+
+	auto eio = new e_iocb;
+	e_io_prep_pwritev(eio, fd, iovs->data(), iovs->size(), blockno*4096L,
+			  call_wrapped, closure);
+	e_io_submit(ioctx, eio);
+    }
+
+	    
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
+	std::unique_lock lk(m);
+	auto w = new cache_work(offset/512L, iov, iovcnt, cb, ptr);
+	work.push_back(w);
+	if (writes_outstanding == 0 || work.size() >= 4) {
+	    lk.unlock();
+	    send_writes();
+	}
+    }
+    
+    void writev2(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
 	size_t len = iov_sum(iov, iovcnt);
 	sector_t sectors = len / 512, lba = offset / 512;
 	page_t blocks = div_round_up(sectors, 8);
