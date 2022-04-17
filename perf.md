@@ -1,5 +1,49 @@
 # performance tests
 
+## to do:
+
+- write batching, to reduce system CPU usage for small writes
+- garbage collection
+- fix hit/miss rate and read cache
+- fix read pipeline problem
+
+hit/miss rate: measure (a) cache hits, (b) cache line reads, (c) direct backend reads. Waste is (b) - (a),
+keep that to no more than 50% (?) of (a)+(b)+(c)
+
+## 4/16 (after libaio refactoring) performance issues:
+
+###  read pipe problems:
+setting `use_cache` to false to avoid the broken hitrate stuff, direct I/O to the backend is a lot slower
+than native RBD. Using iodepth=64, we get the following speeds:
+
+| lsvd | |
+| --- | --- |
+|6m40.901s 3m58.077s | = 400.901, 238.077 |
+| 1570MiB/30009msec | = 401920 |
+| 7m2.459s 4m10.652s | = 422.459, 250.652 |
+|  |  = 401920 in 21.56, 12.57|
+|  | = 11776 io/cpusec |
+ 
+ | real | |
+ | --- | --- |
+|7m2.459s 4m10.652s | = 422.459, 250.652|
+|4163MiB/30002msec)| = 1065728|
+|8m24.278s 4m53.523s | = 504.278, 293.524|
+| | = 1065728 in 81.82, 42.87|
+| | = 8547 io/cpusec|
+
+so it looks like it's just an issue with filling the pipe - we're actually using less CPU time.
+Are there locking issues keeping us from filling the pipe with one thread?
+
+## write performance
+
+Real RBD looks pretty crappy on this cluster - with QD=64:
+```
+  write: IOPS=4567, BW=17.8MiB/s (18.7MB/s)(536MiB/30012msec); 0 zone resets
+```
+
+##  below tests were done with fio and write_perf.cc
+
 ### local write performance (dl380p-5, /dev/nvme2 Samsung 500G
 
 buffered random write to NVME, no sync, queue depth 1. Second one is with indirection through ops structure, makes no difference 

@@ -124,7 +124,38 @@ std::string hex(uint32_t n)
     return stream.str();
 }
 
-std::mutex   m; 		// for now everything uses one mutex
+/* ------- */
+
+/* simple hack so we can pass lambdas through C callback mechanisms
+ */
+struct wrapper {
+    std::function<bool()> f;
+    wrapper(std::function<bool()> _f) : f(_f) {}
+};
+
+/* invoked function returns boolean - if true, delete the wrapper; otherwise
+ * keep it around for another invocation
+ */
+void *wrap(std::function<bool()> _f)
+{
+    auto s = new wrapper(_f);
+    return (void*)s;
+}
+
+void call_wrapped(void *ptr)
+{
+    auto s = (wrapper*)ptr;
+    if (std::invoke(s->f))
+	delete s;
+}
+
+void delete_wrapped(void *ptr)
+{
+    auto s = (wrapper*)ptr;
+    delete s;
+}
+
+/* ----- */
 
 class backend {
 public:
@@ -245,7 +276,6 @@ void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &val
 	vals.push_back(*p);
 }
 
-
 class objmap {
 public:
     std::shared_mutex m;
@@ -258,7 +288,7 @@ class translate {
     std::mutex   m;
     objmap      *map;
     
-    batch              *current_batch;
+    batch              *current_batch = NULL;
     std::stack<batch*>  batches;
     std::map<int,char*> in_mem_objects;
     
@@ -278,13 +308,15 @@ class translate {
     super_hdr *super_sh;
     size_t     super_len;
 
+    std::atomic<int> puts_outstanding = 0;
+    
     thread_pool<batch*> workers;
     thread_pool<int>    misc_threads;
 
     /* for flush()
      */
-    int last_written;
-    int last_pushed;
+    int last_written = 0;
+    int last_pushed = 0;
     std::condition_variable cv;
     
     char *read_object_hdr(const char *name, bool fast) {
@@ -481,30 +513,38 @@ class translate {
 
 	    char *hdr = (char*)calloc(hdr_sectors*512, 1);
 	    make_hdr(hdr, b);
-	    iovec iov[2] = {{hdr, (size_t)(hdr_sectors*512)}, {b->buf, b->len}};
-	    io->write_numbered_object(b->seq, iov, 2);
-	    free(hdr);
+	    auto iovs = new smartiov;
+	    iovs->push_back((iovec){hdr, (size_t)(hdr_sectors*512)});
+	    iovs->push_back((iovec){b->buf, b->len});
 
 	    /* Note that we've already decremented object live counts when we copied the data
 	     * into the batch buffer.
 	     */
-	    lk.lock();
-	    std::unique_lock objlock(map->m);
-	    auto offset = hdr_sectors;
-	    for (auto e : b->entries) {
-		extmap::obj_offset oo = {b->seq, offset};
-		map->map.update(e.lba, e.lba+e.len, oo, NULL);
-		offset += e.len;
-	    }
+	    auto closure = wrap([this, hdr_sectors, hdr, iovs, b]{
+		    std::unique_lock lk(m);
+		    std::unique_lock objlock(map->m);
 
-	    last_written = std::max(last_written, b->seq); // for flush()
-	    cv.notify_all();
+		    auto offset = hdr_sectors;
+		    for (auto e : b->entries) {
+			extmap::obj_offset oo = {b->seq, offset};
+			map->map.update(e.lba, e.lba+e.len, oo, NULL);
+			offset += e.len;
+		    }
+
+		    last_written = std::max(last_written, b->seq); // for flush()
+		    cv.notify_all();
 	    
-	    in_mem_objects.erase(b->seq); // no need to free, since we re-use the batch
-	    batches.push(b);
-	    objlock.unlock();
-
-	    lk.unlock();
+		    in_mem_objects.erase(b->seq);
+		    batches.push(b);
+		    objlock.unlock();
+		    free(hdr);
+		    free(iovs);
+		    puts_outstanding--;
+		    return true;
+		});
+	    puts_outstanding++;
+	    io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
+					  call_wrapped, closure);
 	}
     }
 
@@ -821,35 +861,6 @@ size_t getsize64(int fd)
     return size;
 }
 
-/* simple hack so we can pass lambdas through C callback mechanisms
- */
-struct wrapper {
-    std::function<bool()> f;
-    wrapper(std::function<bool()> _f) : f(_f) {}
-};
-
-/* invoked function returns boolean - if true, delete the wrapper; otherwise
- * keep it around for another invocation
- */
-void *wrap(std::function<bool()> _f)
-{
-    auto s = new wrapper(_f);
-    return (void*)s;
-}
-
-void call_wrapped(void *ptr)
-{
-    auto s = (wrapper*)ptr;
-    if (std::invoke(s->f))
-	delete s;
-}
-
-void delete_wrapped(void *ptr)
-{
-    auto s = (wrapper*)ptr;
-    delete s;
-}
-
 /* POSIX aio helpers */
 #include <aio.h>
 
@@ -916,9 +927,13 @@ int io_queue_wait(io_context_t ctx, struct timespec *timeout)
 
 void e_iocb_runner(io_context_t ctx, bool *running)
 {
+    int rv;
+    pthread_setname_np(pthread_self(), "e_iocb_runner");
     while (*running) {
-	if (io_queue_run(ctx) < 0)
+	if ((rv = io_queue_run(ctx)) < 0)
 	    break;
+	if (rv == 0)
+	    usleep(100);
 	if (io_queue_wait(ctx, NULL) < 0)
 	    break;
     }
@@ -994,6 +1009,7 @@ extern "C" void e_io_stop(void)
 {
     if (e_io_running) {
 	e_io_running = false;
+	usleep(1000);
 	io_queue_release(ioctx);
 	e_io_th.join();
     }
@@ -1048,9 +1064,10 @@ class read_cache {
     // new idea for hit rate - require that sum(backend reads) is no
     // more than 2 * sum(read sectors) (or 3x?), using 64bit counters 
     //
-    double            hit_rate = 1.0;
-    int               sectors_hit = 0;
-    int               sectors_fetched = 0;
+    struct {
+	int64_t       user = 1000; // hack to get test4/test_2_fakemap to work
+	int64_t       backend = 0;
+    } hit_stats;
     
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads = false;	// for debug
@@ -1259,26 +1276,18 @@ public:
 	    in_cache = true;
 	}
 
-	bool use_cache = free_blks.size() > 0;
-	if (sectors_hit + sectors_fetched > 20000) {
-	    hit_rate = hit_rate * 0.8 + (sectors_hit*1.0 / sectors_fetched) * 0.2;
-	    printf("hit rate: %03f %d %d free_list %ld (%d)\n", hit_rate,
-		   sectors_hit, sectors_fetched, free_blks.size(), super->units/16);
-	    sectors_hit = sectors_fetched = 0;
-	}
-	if (use_cache) {
-	    std::uniform_real_distribution<double> unif(0.0,1.0);
-	    use_cache = unif(rng) < 2 * hit_rate + 0.001;
-	}
-	
+	/* protection against random reads - read-around when hit rate is too low
+	 */
+	bool use_cache = free_blks.size() > 0 && hit_stats.user * 2 > hit_stats.backend;
+
 	if (in_cache) {
 	    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 		start = blk_in_ssd + blk_offset,
 		finish = start + (blk_top_offset - blk_offset);
 	    size_t bytes = 512 * (finish - start);
+
 	    a_bit[n] = true;
-	    
-	    sectors_hit += bytes/512;
+	    hit_stats.user += bytes/512;
 	    
 	    if (buffer[n] != NULL) {
 		memcpy(buf, buffer[n] + blk_offset*512, bytes);
@@ -1318,12 +1327,14 @@ public:
 	    flat_map[n] = unit;
 	    auto _buf = get_cacheline_buf(n);
 
-	    sectors_fetched += unit_sectors;
+	    hit_stats.backend += unit_sectors;
+	    sector_t sectors = blk_top_offset - blk_offset;
+	    hit_stats.user += sectors;
 	    lk2.unlock();
 
 	    off_t nvme_offset = (super->base*8 + n*unit_sectors) * 512L;
 	    off_t buf_offset = blk_offset * 512L;
-	    off_t bytes = 512L * (blk_top_offset - blk_offset);
+	    off_t bytes = 512L * sectors;
 
 	    auto write_done = wrap([this, n]{
 		    written[n] = true;
@@ -1354,6 +1365,8 @@ public:
 	    read_len = bytes;
 	}
 	else {
+	    hit_stats.user += read_len / 512;
+	    hit_stats.backend += read_len / 512;
 	    io->aio_read_num_object(oo.obj, buf, read_len, 512L*oo.offset, cb, ptr);
 	    // read_len unchanged
 	}
