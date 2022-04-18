@@ -19,7 +19,7 @@ if __name__ == '__main__':
     for obj in ioctx.list_objects():
         if obj.key.startswith(prefix):
             ioctx.remove_object(obj.key)
-            print('.', end='')
+            print('.', end='', flush=True)
     print('\ndone')
 
         

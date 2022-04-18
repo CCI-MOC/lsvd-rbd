@@ -124,7 +124,38 @@ std::string hex(uint32_t n)
     return stream.str();
 }
 
-std::mutex   m; 		// for now everything uses one mutex
+/* ------- */
+
+/* simple hack so we can pass lambdas through C callback mechanisms
+ */
+struct wrapper {
+    std::function<bool()> f;
+    wrapper(std::function<bool()> _f) : f(_f) {}
+};
+
+/* invoked function returns boolean - if true, delete the wrapper; otherwise
+ * keep it around for another invocation
+ */
+void *wrap(std::function<bool()> _f)
+{
+    auto s = new wrapper(_f);
+    return (void*)s;
+}
+
+void call_wrapped(void *ptr)
+{
+    auto s = (wrapper*)ptr;
+    if (std::invoke(s->f))
+	delete s;
+}
+
+void delete_wrapped(void *ptr)
+{
+    auto s = (wrapper*)ptr;
+    delete s;
+}
+
+/* ----- */
 
 class backend {
 public:
@@ -245,7 +276,6 @@ void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &val
 	vals.push_back(*p);
 }
 
-
 class objmap {
 public:
     std::shared_mutex m;
@@ -258,7 +288,7 @@ class translate {
     std::mutex   m;
     objmap      *map;
     
-    batch              *current_batch;
+    batch              *current_batch = NULL;
     std::stack<batch*>  batches;
     std::map<int,char*> in_mem_objects;
     
@@ -278,13 +308,15 @@ class translate {
     super_hdr *super_sh;
     size_t     super_len;
 
+    std::atomic<int> puts_outstanding = 0;
+    
     thread_pool<batch*> workers;
     thread_pool<int>    misc_threads;
 
     /* for flush()
      */
-    int last_written;
-    int last_pushed;
+    int last_written = 0;
+    int last_pushed = 0;
     std::condition_variable cv;
     
     char *read_object_hdr(const char *name, bool fast) {
@@ -481,30 +513,38 @@ class translate {
 
 	    char *hdr = (char*)calloc(hdr_sectors*512, 1);
 	    make_hdr(hdr, b);
-	    iovec iov[2] = {{hdr, (size_t)(hdr_sectors*512)}, {b->buf, b->len}};
-	    io->write_numbered_object(b->seq, iov, 2);
-	    free(hdr);
+	    auto iovs = new smartiov;
+	    iovs->push_back((iovec){hdr, (size_t)(hdr_sectors*512)});
+	    iovs->push_back((iovec){b->buf, b->len});
 
 	    /* Note that we've already decremented object live counts when we copied the data
 	     * into the batch buffer.
 	     */
-	    lk.lock();
-	    std::unique_lock objlock(map->m);
-	    auto offset = hdr_sectors;
-	    for (auto e : b->entries) {
-		extmap::obj_offset oo = {b->seq, offset};
-		map->map.update(e.lba, e.lba+e.len, oo, NULL);
-		offset += e.len;
-	    }
+	    auto closure = wrap([this, hdr_sectors, hdr, iovs, b]{
+		    std::unique_lock lk(m);
+		    std::unique_lock objlock(map->m);
 
-	    last_written = std::max(last_written, b->seq); // for flush()
-	    cv.notify_all();
+		    auto offset = hdr_sectors;
+		    for (auto e : b->entries) {
+			extmap::obj_offset oo = {b->seq, offset};
+			map->map.update(e.lba, e.lba+e.len, oo, NULL);
+			offset += e.len;
+		    }
+
+		    last_written = std::max(last_written, b->seq); // for flush()
+		    cv.notify_all();
 	    
-	    in_mem_objects.erase(b->seq); // no need to free, since we re-use the batch
-	    batches.push(b);
-	    objlock.unlock();
-
-	    lk.unlock();
+		    in_mem_objects.erase(b->seq);
+		    batches.push(b);
+		    objlock.unlock();
+		    free(hdr);
+		    free(iovs);
+		    puts_outstanding--;
+		    return true;
+		});
+	    puts_outstanding++;
+	    io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
+					  call_wrapped, closure);
 	}
     }
 
@@ -821,76 +861,6 @@ size_t getsize64(int fd)
     return size;
 }
 
-/* simple hack so we can pass lambdas through C callback mechanisms
- */
-struct wrapper {
-    std::function<bool()> f;
-    wrapper(std::function<bool()> _f) : f(_f) {}
-};
-
-/* invoked function returns boolean - if true, delete the wrapper; otherwise
- * keep it around for another invocation
- */
-void *wrap(std::function<bool()> _f)
-{
-    auto s = new wrapper(_f);
-    return (void*)s;
-}
-
-void call_wrapped(void *ptr)
-{
-    auto s = (wrapper*)ptr;
-    if (std::invoke(s->f))
-	delete s;
-}
-
-void delete_wrapped(void *ptr)
-{
-    auto s = (wrapper*)ptr;
-    delete s;
-}
-
-/* POSIX aio helpers */
-#include <aio.h>
-
-typedef void (*posix_aio_cb_t)(union sigval siv);
-void aio_wrapper_done(union sigval siv);
-
-struct aio_wrapper {
-    aiocb aio = {0};
-    void (*cb)(void*);
-    void *ptr = NULL;
-    aio_wrapper(int fd, char *buf, size_t nbytes, off_t offset,
-                void (*_cb)(void*), void *_ptr) {
-	cb = _cb;
-	ptr = _ptr;
-	aio.aio_fildes = fd;
-	aio.aio_buf = buf;
-	aio.aio_offset = offset;
-	aio.aio_nbytes = nbytes;
-	aio.aio_sigevent.sigev_notify = SIGEV_THREAD;
-	aio.aio_sigevent.sigev_value.sival_ptr = (void*)this;
-	aio.aio_sigevent.sigev_notify_function = aio_wrapper_done;
-    }
-};
-
-const char *aio_op(int op)
-{
-    if (op == LIO_READ) return "READ";
-    else if (op == LIO_WRITE) return "WRITE";
-    else return "???";
-}
- 
-void aio_wrapper_done(union sigval siv)
-{
-    auto w = (aio_wrapper*)siv.sival_ptr;
-    int err = aio_error(&w->aio);
-    assert(err != EINPROGRESS);
-    int rv = aio_return(&w->aio);
-    //printf("%p fd %d op=%s rv=%d err=%d\n", w, w->aio.aio_fildes, aio_op(w->aio.aio_lio_opcode), rv, err);
-    w->cb(w->ptr);
-    delete w;
-}
 /* libaio helpers */
 
 void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
@@ -916,9 +886,13 @@ int io_queue_wait(io_context_t ctx, struct timespec *timeout)
 
 void e_iocb_runner(io_context_t ctx, bool *running)
 {
+    int rv;
+    pthread_setname_np(pthread_self(), "e_iocb_runner");
     while (*running) {
-	if (io_queue_run(ctx) < 0)
+	if ((rv = io_queue_run(ctx)) < 0)
 	    break;
+	if (rv == 0)
+	    usleep(100);
 	if (io_queue_wait(ctx, NULL) < 0)
 	    break;
     }
@@ -994,6 +968,7 @@ extern "C" void e_io_stop(void)
 {
     if (e_io_running) {
 	e_io_running = false;
+	usleep(1000);
 	io_queue_release(ioctx);
 	e_io_th.join();
     }
@@ -1048,9 +1023,10 @@ class read_cache {
     // new idea for hit rate - require that sum(backend reads) is no
     // more than 2 * sum(read sectors) (or 3x?), using 64bit counters 
     //
-    double            hit_rate = 1.0;
-    int               sectors_hit = 0;
-    int               sectors_fetched = 0;
+    struct {
+	int64_t       user = 1000; // hack to get test4/test_2_fakemap to work
+	int64_t       backend = 0;
+    } hit_stats;
     
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads = false;	// for debug
@@ -1082,7 +1058,7 @@ class read_cache {
      */
     void evict(int n) {
 	printf("\nEVICTING %d\n", n);
-	assert(!m.try_lock());	// m must be locked
+	// assert(!m.try_lock());	// m must be locked
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	for (int i = 0; i < n; i++) {
 	    int j = uni(rng);
@@ -1259,26 +1235,18 @@ public:
 	    in_cache = true;
 	}
 
-	bool use_cache = free_blks.size() > 0;
-	if (sectors_hit + sectors_fetched > 20000) {
-	    hit_rate = hit_rate * 0.8 + (sectors_hit*1.0 / sectors_fetched) * 0.2;
-	    printf("hit rate: %03f %d %d free_list %ld (%d)\n", hit_rate,
-		   sectors_hit, sectors_fetched, free_blks.size(), super->units/16);
-	    sectors_hit = sectors_fetched = 0;
-	}
-	if (use_cache) {
-	    std::uniform_real_distribution<double> unif(0.0,1.0);
-	    use_cache = unif(rng) < 2 * hit_rate + 0.001;
-	}
-	
+	/* protection against random reads - read-around when hit rate is too low
+	 */
+	bool use_cache = free_blks.size() > 0 && hit_stats.user * 2 > hit_stats.backend;
+
 	if (in_cache) {
 	    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 		start = blk_in_ssd + blk_offset,
 		finish = start + (blk_top_offset - blk_offset);
 	    size_t bytes = 512 * (finish - start);
+
 	    a_bit[n] = true;
-	    
-	    sectors_hit += bytes/512;
+	    hit_stats.user += bytes/512;
 	    
 	    if (buffer[n] != NULL) {
 		memcpy(buf, buffer[n] + blk_offset*512, bytes);
@@ -1318,12 +1286,14 @@ public:
 	    flat_map[n] = unit;
 	    auto _buf = get_cacheline_buf(n);
 
-	    sectors_fetched += unit_sectors;
+	    hit_stats.backend += unit_sectors;
+	    sector_t sectors = blk_top_offset - blk_offset;
+	    hit_stats.user += sectors;
 	    lk2.unlock();
 
 	    off_t nvme_offset = (super->base*8 + n*unit_sectors) * 512L;
 	    off_t buf_offset = blk_offset * 512L;
-	    off_t bytes = 512L * (blk_top_offset - blk_offset);
+	    off_t bytes = 512L * sectors;
 
 	    auto write_done = wrap([this, n]{
 		    written[n] = true;
@@ -1354,6 +1324,8 @@ public:
 	    read_len = bytes;
 	}
 	else {
+	    hit_stats.user += read_len / 512;
+	    hit_stats.backend += read_len / 512;
 	    io->aio_read_num_object(oo.obj, buf, read_len, 512L*oo.offset, cb, ptr);
 	    // read_len unchanged
 	}
@@ -1522,6 +1494,11 @@ class write_cache {
     std::map<page_t,int> lengths;
     translate        *be;
     bool              map_dirty;
+
+    std::vector<cache_work*> work;
+    int                      writes_outstanding = 0;
+
+    page_t evict_trigger;
     
     thread_pool<int>          *misc_threads;
     std::mutex                m;
@@ -1589,9 +1566,43 @@ class write_cache {
 	    }
 	}
     }
-    
+
+    void evict(void) {
+	assert(!m.try_lock());	// m must be locked
+	auto oldest = super->oldest;
+	int pgs_free = pages_free(oldest);
+	assert(pgs_free <= evict_trigger);
+
+	std::vector<j_extent> to_delete;
+	while (pages_free(oldest) < evict_trigger*3) {
+	    /*
+	     * for each record we trim from the cache, collect the vLBA->pLBA
+	     * mappings that we need to remove. Note that we keep the revers map
+	     * up to date, so we don't need to check them against the forward map.
+	     */
+	    auto len = lengths[oldest];
+	    assert(len > 0);
+	    lengths.erase(oldest);
+	    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
+	    for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
+		auto [p_base, p_limit, vlba] = it->vals(base, limit);
+		to_delete.push_back((j_extent){(uint64_t)vlba, (uint64_t)p_limit-p_base});
+	    }
+	    rmap.trim(base, limit);
+	    oldest += len;
+	    if (oldest >= super->limit)
+		oldest = super->base;
+	}
+
+	/* TODO: unlock, read the data and add to read cache, re-lock
+	 */
+	super->oldest = oldest;		
+	for (auto e : to_delete)
+	    map.trim(e.lba, e.lba + e.len);
+    }
+
     void evict_thread(thread_pool<int> *p) {
-	auto period = std::chrono::milliseconds(25);
+	auto period = std::chrono::milliseconds(10);
 	const int evict_min_pct = 5;
 	const int evict_max_mb = 100;
 	int trigger;
@@ -1603,8 +1614,6 @@ class write_cache {
 	auto t0 = std::chrono::system_clock::now();
 	auto super_timeout = std::chrono::milliseconds(500);
 	
-//	int trigger = 100;
-
 	while (p->running) {
 	    std::unique_lock lk(m);
 	    p->cv.wait_for(lk, period);
@@ -1662,7 +1671,7 @@ class write_cache {
 	auto period = std::chrono::milliseconds(100);
 	auto t0 = std::chrono::system_clock::now();
 	auto timeout = std::chrono::seconds(5);
-	const int ckpt_interval = N / 8;
+	const int ckpt_interval = N / 4;
 
 	while (p->running) {
 	    std::unique_lock lk(m);
@@ -1700,44 +1709,52 @@ class write_cache {
 	 */
 	page_t blockno = super->meta_base;
 
-	std::vector<j_map_extent> _extents;
+	char *e_buf = (char*)aligned_alloc(512, 4096L*map_pages);
+	auto jme = (j_map_extent*)e_buf;
+	int n_extents = 0;
 	if (map.size() > 0)
 	    for (auto it = map.begin(); it != map.end(); it++)
-		_extents.push_back((j_map_extent){(uint64_t)it->s.base,
-			    (uint64_t)it->s.len, (uint32_t)it->s.ptr});
-	std::vector<j_length> _lengths;
+		jme[n_extents++] = (j_map_extent){(uint64_t)it->s.base,
+						  (uint64_t)it->s.len, (uint32_t)it->s.ptr};
+	// valgrind:
+	int pad1 = 4096 - (map_bytes % 4096); 
+	memset(e_buf + map_bytes - pad1, 0, pad1);
+	
+	char *l_buf = (char*)aligned_alloc(512, 4096L * len_pages);
+	auto jl = (j_length*)l_buf;
+	int n_lens = 0;
 	for (auto it = lengths.begin(); it != lengths.end(); it++)
-	    _lengths.push_back((j_length){it->first, it->second});
+	    jl[n_lens++] = (j_length){it->first, it->second};
 
+	// valgrind:
+	int pad2 = 4096 - (len_bytes % 4096);
+	memset(l_buf + len_bytes, 0, pad2);
+	
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
 	memcpy(super_copy, super, 4096);
 
-	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
-	memcpy(e_buf, _extents.data(), map_bytes);
-	if (map_bytes % 4096)	// make valgrind happy
-	    memset(e_buf + map_bytes, 0, 4096 - (map_bytes % 4096));
-
 	super_copy->map_start = super->map_start = blockno;
 	super_copy->map_blocks = super->map_blocks = map_pages;
-	super_copy->map_entries = super->map_entries = _extents.size();
+	super_copy->map_entries = super->map_entries = n_extents;
 
-	char *l_buf = e_buf + map_pages*4096;
-	memcpy(l_buf, _lengths.data(), len_bytes);
-	if (len_bytes % 4096)	// make valgrind happy
-	    memset(l_buf + len_bytes, 0, 4096 - (len_bytes % 4096));
-	
 	super_copy->len_start = super->len_start = blockno+map_pages;
 	super_copy->len_blocks = super->len_blocks = len_pages;
-	super_copy->len_entries = super->len_entries = _lengths.size();
+	super_copy->len_entries = super->len_entries = n_lens;
+
+	lk.unlock();
 
 	assert(4096UL*blockno + 4096UL*ckpt_pages <= dev_max);
-	if (pwrite(fd, e_buf, 4096*ckpt_pages, 4096L*blockno) < 0)
+	iovec iov[] = {{e_buf, map_pages*4096L},
+		       {l_buf, len_pages*4096L}};
+
+	if (pwritev(fd, iov, 2, 4096L*blockno) < 0)
 	    throw_fs_error("wckpt_e");
 	if (pwrite(fd, (char*)super_copy, 4096, 4096L*super_blkno) < 0)
 	    throw_fs_error("wckpt_s");
 
 	free(super_copy);
 	free(e_buf);
+	free(l_buf);
 
 	map_dirty = false;
 	ckpt_in_progress = false;
@@ -1794,10 +1811,14 @@ public:
 	else
 	    nfree = (super->oldest + N - super->next) % N;
 
+	int evict_min_pct = 5;
+	int evict_max_mb = 100;
+	evict_trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
+				 evict_max_mb * (1024*1024/4096));
+	
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 
 	misc_threads = new thread_pool<int>(&m);
-	misc_threads->pool.push(std::thread(&write_cache::evict_thread, this, misc_threads));
 	misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
     }
     ~write_cache() {
@@ -1806,7 +1827,126 @@ public:
 	delete misc_threads;
     }
 
+    void send_writes(void) {
+	std::unique_lock lk(m);
+	writes_outstanding++;
+	auto w = new std::vector<cache_work*>(std::make_move_iterator(work.begin()),
+					      std::make_move_iterator(work.end()));
+	work.erase(work.begin(), work.end());
+
+	sector_t sectors = 0;
+	for (auto _w : *w) {
+	    sectors += _w->sectors;
+	    assert(_w->iovs.aligned(512));
+	}
+
+	page_t blocks = div_round_up(sectors, 8);
+	char *pad_hdr = NULL;
+	page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
+
+	if (pad != 0) 
+	    lengths[pad] = super->limit - pad;
+	lengths[blockno] = blocks+1;
+	lk.unlock();
+	
+	if (pad != 0) {
+	    assert((pad+1)*4096UL <= dev_max);
+	    pad_hdr = (char*)aligned_alloc(512, 4096);
+	    auto closure = wrap([pad_hdr]{
+		    free(pad_hdr);
+		    return true;
+		});
+	    mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
+	    auto eio = new e_iocb;
+	    e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
+	    e_io_submit(ioctx, eio);
+	}
+
+	std::vector<j_extent> extents;
+	for (auto _w : *w)
+	    extents.push_back((j_extent){_w->lba, (uint64_t)_w->sectors});
+		
+        char *hdr = (char*)aligned_alloc(512, 4096);
+	j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
+
+	j->extent_offset = sizeof(*j);
+	size_t e_bytes = extents.size() * sizeof(j_extent);
+	j->extent_len = e_bytes;
+	memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
+	
+	lba_t plba = (blockno+1) * 8;
+	auto iovs = new smartiov();
+	iovs->push_back((iovec){hdr, 4096});
+	for (auto _w : *w) {
+	    auto [iov, iovcnt] = _w->iovs.c_iov();
+	    iovs->ingest(iov, iovcnt);
+	}
+	
+	auto closure = wrap([this, hdr, plba, iovs, w] {
+		/* first update the maps */
+		std::vector<extmap::lba2lba> garbage; 
+		std::unique_lock lk(m);
+		auto _plba = plba;
+		for (auto _w : *w) {
+		    map.update(_w->lba, _w->lba + _w->sectors, _plba, &garbage);
+		    rmap.update(plba, _plba+_w->sectors, _w->lba);
+		    _plba += _w->sectors;
+		    map_dirty = true;
+		}
+		for (auto it = garbage.begin(); it != garbage.end(); it++) 
+		    rmap.trim(it->s.base, it->s.base+it->s.len);
+
+		/* then call back, send to backend */
+		lk.unlock();
+		for (auto _w : *w) {
+		    be->writev(_w->lba*512, _w->iovs.data(), _w->iovs.size());
+		    _w->callback(_w->ptr);
+		}
+
+		/* and finally clean everything up */
+		free(hdr);
+		delete iovs;
+		delete w;
+
+		lk.lock();
+		--writes_outstanding;
+		if (work.size() > 0) {
+		    lk.unlock();
+		    send_writes();
+		}
+		return true;
+	    });
+
+	auto eio = new e_iocb;
+	assert(blockno+iovs->bytes()/4096L <= super->limit);
+	e_io_prep_pwritev(eio, fd, iovs->data(), iovs->size(), blockno*4096L,
+			  call_wrapped, closure);
+	e_io_submit(ioctx, eio);
+    }
+
+    bool evicting;
+    
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
+	auto w = new cache_work(offset/512L, iov, iovcnt, cb, ptr);
+	std::unique_lock lk(m);
+
+	while (pages_free(super->oldest) <= evict_trigger) {
+	    if (evicting)
+		alloc_cv.wait(lk);
+	    else {
+		evicting = true;
+		evict();
+		evicting = false;
+	    }
+	}
+	work.push_back(w);
+	if (writes_outstanding < 4 || work.size() >= 8) {
+	    lk.unlock();
+	    send_writes();
+	}
+    }
+    
+    void writev2(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
 	size_t len = iov_sum(iov, iovcnt);
 	sector_t sectors = len / 512, lba = offset / 512;
 	page_t blocks = div_round_up(sectors, 8);
@@ -2427,6 +2567,7 @@ extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
     return 0;
 }
 
+fake_rbd_image *the_fri;	// debug
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
@@ -2470,7 +2611,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
     fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
     fri->notify = false;
-    
+
+    the_fri = fri;
     *image = (void*)fri;
     return 0;
 }
