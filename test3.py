@@ -19,8 +19,6 @@ import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 fd2 = -1
-lsvd.io_start()
-
 xlate, wcache = None, None
 
 def startup():
@@ -170,6 +168,7 @@ class tests(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    lsvd.io_start()
     startup()
     unittest.main(exit=False)
     wcache.shutdown()
