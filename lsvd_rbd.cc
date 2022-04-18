@@ -1058,7 +1058,7 @@ class read_cache {
      */
     void evict(int n) {
 	printf("\nEVICTING %d\n", n);
-	assert(!m.try_lock());	// m must be locked
+	// assert(!m.try_lock());	// m must be locked
 	std::uniform_int_distribution<int> uni(0,super->units - 1);
 	for (int i = 0; i < n; i++) {
 	    int j = uni(rng);
@@ -1497,6 +1497,8 @@ class write_cache {
 
     std::vector<cache_work*> work;
     int                      writes_outstanding = 0;
+
+    page_t evict_trigger;
     
     thread_pool<int>          *misc_threads;
     std::mutex                m;
@@ -1564,9 +1566,43 @@ class write_cache {
 	    }
 	}
     }
-    
+
+    void evict(void) {
+	assert(!m.try_lock());	// m must be locked
+	auto oldest = super->oldest;
+	int pgs_free = pages_free(oldest);
+	assert(pgs_free <= evict_trigger);
+
+	std::vector<j_extent> to_delete;
+	while (pages_free(oldest) < evict_trigger*3) {
+	    /*
+	     * for each record we trim from the cache, collect the vLBA->pLBA
+	     * mappings that we need to remove. Note that we keep the revers map
+	     * up to date, so we don't need to check them against the forward map.
+	     */
+	    auto len = lengths[oldest];
+	    assert(len > 0);
+	    lengths.erase(oldest);
+	    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
+	    for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
+		auto [p_base, p_limit, vlba] = it->vals(base, limit);
+		to_delete.push_back((j_extent){(uint64_t)vlba, (uint64_t)p_limit-p_base});
+	    }
+	    rmap.trim(base, limit);
+	    oldest += len;
+	    if (oldest >= super->limit)
+		oldest = super->base;
+	}
+
+	/* TODO: unlock, read the data and add to read cache, re-lock
+	 */
+	super->oldest = oldest;		
+	for (auto e : to_delete)
+	    map.trim(e.lba, e.lba + e.len);
+    }
+
     void evict_thread(thread_pool<int> *p) {
-	auto period = std::chrono::milliseconds(25);
+	auto period = std::chrono::milliseconds(10);
 	const int evict_min_pct = 5;
 	const int evict_max_mb = 100;
 	int trigger;
@@ -1585,7 +1621,6 @@ class write_cache {
 		return;
 	    int pgs_free = pages_free(super->oldest);
 	    if (super->oldest != super->next && pgs_free <= trigger) {
-		printf("\nevicting\n");
 		auto oldest = super->oldest;
 		std::vector<j_extent> to_delete;
 
@@ -1636,7 +1671,7 @@ class write_cache {
 	auto period = std::chrono::milliseconds(100);
 	auto t0 = std::chrono::system_clock::now();
 	auto timeout = std::chrono::seconds(5);
-	const int ckpt_interval = N / 8;
+	const int ckpt_interval = N / 4;
 
 	while (p->running) {
 	    std::unique_lock lk(m);
@@ -1674,44 +1709,52 @@ class write_cache {
 	 */
 	page_t blockno = super->meta_base;
 
-	std::vector<j_map_extent> _extents;
+	char *e_buf = (char*)aligned_alloc(512, 4096L*map_pages);
+	auto jme = (j_map_extent*)e_buf;
+	int n_extents = 0;
 	if (map.size() > 0)
 	    for (auto it = map.begin(); it != map.end(); it++)
-		_extents.push_back((j_map_extent){(uint64_t)it->s.base,
-			    (uint64_t)it->s.len, (uint32_t)it->s.ptr});
-	std::vector<j_length> _lengths;
+		jme[n_extents++] = (j_map_extent){(uint64_t)it->s.base,
+						  (uint64_t)it->s.len, (uint32_t)it->s.ptr};
+	// valgrind:
+	int pad1 = 4096 - (map_bytes % 4096); 
+	memset(e_buf + map_bytes - pad1, 0, pad1);
+	
+	char *l_buf = (char*)aligned_alloc(512, 4096L * len_pages);
+	auto jl = (j_length*)l_buf;
+	int n_lens = 0;
 	for (auto it = lengths.begin(); it != lengths.end(); it++)
-	    _lengths.push_back((j_length){it->first, it->second});
+	    jl[n_lens++] = (j_length){it->first, it->second};
 
+	// valgrind:
+	int pad2 = 4096 - (len_bytes % 4096);
+	memset(l_buf + len_bytes, 0, pad2);
+	
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
 	memcpy(super_copy, super, 4096);
 
-	char *e_buf = (char*)aligned_alloc(512, 4096*ckpt_pages); // bounce buffer
-	memcpy(e_buf, _extents.data(), map_bytes);
-	if (map_bytes % 4096)	// make valgrind happy
-	    memset(e_buf + map_bytes, 0, 4096 - (map_bytes % 4096));
-
 	super_copy->map_start = super->map_start = blockno;
 	super_copy->map_blocks = super->map_blocks = map_pages;
-	super_copy->map_entries = super->map_entries = _extents.size();
+	super_copy->map_entries = super->map_entries = n_extents;
 
-	char *l_buf = e_buf + map_pages*4096;
-	memcpy(l_buf, _lengths.data(), len_bytes);
-	if (len_bytes % 4096)	// make valgrind happy
-	    memset(l_buf + len_bytes, 0, 4096 - (len_bytes % 4096));
-	
 	super_copy->len_start = super->len_start = blockno+map_pages;
 	super_copy->len_blocks = super->len_blocks = len_pages;
-	super_copy->len_entries = super->len_entries = _lengths.size();
+	super_copy->len_entries = super->len_entries = n_lens;
+
+	lk.unlock();
 
 	assert(4096UL*blockno + 4096UL*ckpt_pages <= dev_max);
-	if (pwrite(fd, e_buf, 4096*ckpt_pages, 4096L*blockno) < 0)
+	iovec iov[] = {{e_buf, map_pages*4096L},
+		       {l_buf, len_pages*4096L}};
+
+	if (pwritev(fd, iov, 2, 4096L*blockno) < 0)
 	    throw_fs_error("wckpt_e");
 	if (pwrite(fd, (char*)super_copy, 4096, 4096L*super_blkno) < 0)
 	    throw_fs_error("wckpt_s");
 
 	free(super_copy);
 	free(e_buf);
+	free(l_buf);
 
 	map_dirty = false;
 	ckpt_in_progress = false;
@@ -1768,10 +1811,14 @@ public:
 	else
 	    nfree = (super->oldest + N - super->next) % N;
 
+	int evict_min_pct = 5;
+	int evict_max_mb = 100;
+	evict_trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
+				 evict_max_mb * (1024*1024/4096));
+	
 	// https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 
 	misc_threads = new thread_pool<int>(&m);
-	misc_threads->pool.push(std::thread(&write_cache::evict_thread, this, misc_threads));
 	misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
     }
     ~write_cache() {
@@ -1871,15 +1918,27 @@ public:
 	    });
 
 	auto eio = new e_iocb;
+	assert(blockno+iovs->bytes()/4096L <= super->limit);
 	e_io_prep_pwritev(eio, fd, iovs->data(), iovs->size(), blockno*4096L,
 			  call_wrapped, closure);
 	e_io_submit(ioctx, eio);
     }
 
-	    
+    bool evicting;
+    
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
 	auto w = new cache_work(offset/512L, iov, iovcnt, cb, ptr);
 	std::unique_lock lk(m);
+
+	while (pages_free(super->oldest) <= evict_trigger) {
+	    if (evicting)
+		alloc_cv.wait(lk);
+	    else {
+		evicting = true;
+		evict();
+		evicting = false;
+	    }
+	}
 	work.push_back(w);
 	if (writes_outstanding < 4 || work.size() >= 8) {
 	    lk.unlock();
