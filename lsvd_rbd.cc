@@ -538,7 +538,7 @@ class translate {
 		    batches.push(b);
 		    objlock.unlock();
 		    free(hdr);
-		    free(iovs);
+		    delete iovs;
 		    puts_outstanding--;
 		    return true;
 		});
@@ -1717,8 +1717,9 @@ class write_cache {
 		jme[n_extents++] = (j_map_extent){(uint64_t)it->s.base,
 						  (uint64_t)it->s.len, (uint32_t)it->s.ptr};
 	// valgrind:
-	int pad1 = 4096 - (map_bytes % 4096); 
-	memset(e_buf + map_bytes - pad1, 0, pad1);
+	int pad1 = 4096 - (map_bytes % 4096);
+	if (pad1 > 0)
+	    memset(e_buf + map_bytes, 0, pad1);
 	
 	char *l_buf = (char*)aligned_alloc(512, 4096L * len_pages);
 	auto jl = (j_length*)l_buf;
@@ -1728,7 +1729,8 @@ class write_cache {
 
 	// valgrind:
 	int pad2 = 4096 - (len_bytes % 4096);
-	memset(l_buf + len_bytes, 0, pad2);
+	if (pad2 > 0)
+	    memset(l_buf + len_bytes, 0, pad2);
 	
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
 	memcpy(super_copy, super, 4096);
@@ -1901,6 +1903,7 @@ public:
 		for (auto _w : *w) {
 		    be->writev(_w->lba*512, _w->iovs.data(), _w->iovs.size());
 		    _w->callback(_w->ptr);
+		    delete _w;
 		}
 
 		/* and finally clean everything up */
@@ -1924,7 +1927,7 @@ public:
 	e_io_submit(ioctx, eio);
     }
 
-    bool evicting;
+    bool evicting = false;
     
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
 	auto w = new cache_work(offset/512L, iov, iovcnt, cb, ptr);
