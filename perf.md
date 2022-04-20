@@ -1,10 +1,20 @@
 # performance tests
 
+need to:
+- use multiple completion queues / threads
+- do write back-pressure correctly
+- add write coalescing
+- fix problem with backend map updates
+
+map update problem: if LBA A is updated in two batches X and Y, X < Y,
+but Y completes before X, then the map update from X will be applied
+last. 
+
 - write batching is finished, works pretty well
 - read hit/miss rate is fixed
+- write eviction is fixed
 
 need to:
-- fix write eviction - it's never evicting
 - add garbage collection
 
 ## to do:

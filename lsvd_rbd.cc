@@ -282,6 +282,9 @@ public:
     extmap::objmap    map;
 };
 
+void throw_fs_error(std::string msg) {
+    throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
+}
 
 class translate {
     // mutex protects batch, thread pools, object_info, in_mem_objects
@@ -499,6 +502,202 @@ class translate {
 	return (char*)dm - (char*)buf;
     }
 
+    sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
+			 data_map *extents, int n_extents) {
+	hdr *h = (hdr*)buf;
+	data_hdr *dh = (data_hdr*)(h+1);
+	uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
+	    o2 = o1 + l1, l2 = n_extents * sizeof(data_map),
+	    hdr_bytes = o2 + l2;
+	lba_t hdr_sectors = div_round_up(hdr_bytes, 512);
+
+	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
+		   .type = LSVD_DATA, .seq = seq,
+		   .hdr_sectors = (uint32_t)hdr_sectors,
+		   .data_sectors = (uint32_t)sectors};
+	memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
+
+	*dh = (data_hdr){.last_data_obj = seq, .ckpts_offset = o1, .ckpts_len = l1,
+			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
+			 .map_offset = o2, .map_len = l2};
+
+	uint32_t *p_ckpt = (uint32_t*)(dh+1);
+	*p_ckpt = last_ckpt;
+
+	data_map *dm = (data_map*)(p_ckpt+1);
+	for (int i = 0; i < n_extents; i++)
+	    *dm++ = extents[i];
+
+	assert(hdr_bytes == ((char*)dm - buf));
+	memset(buf + hdr_bytes, 0, 512*hdr_sectors - hdr_bytes); // valgrind
+
+	return hdr_sectors;
+    }
+    
+    void do_gc(void) {
+	std::unique_lock lk(m);
+	int max_obj = 0;
+
+	std::vector<std::pair<int,int>> objs_to_clean; // obj#, #sectors
+	for (auto p : object_info) 
+	    if (1.0 * p.second.live / p.second.data < 0.4) {
+		objs_to_clean.emplace_back(p.first, p.second.hdr+p.second.data);
+		max_obj = std::max(max_obj, p.first);
+	    }
+	
+	std::vector<bool> bitmap(max_obj+1);
+	for (auto [i,_xx] : objs_to_clean)
+	    bitmap[i] = true;
+
+	extmap::objmap to_clean; // live extents in objs_to_clean
+	for (auto it = map->map.begin(); it != map->map.end(); it++) {
+	    auto [base, limit, ptr] = it->vals();
+	    if (bitmap[ptr.obj])
+		to_clean.update(base, limit, ptr);
+	}
+	lk.unlock();
+
+	/* temporary file, delete on close. Should use mkstemp().
+	 * need a proper config file so we can configure all this crap...
+	 */
+	int fd = open("/mnt/nvme/lsvd/_tmp", O_RDWR | O_CREAT, 0777);
+	unlink("/mnt/nvme/lsvd/_tmp");
+
+	/* read all objects in completely. Someday we can check to see whether
+	 * (a) data is already in cache, or (b) sparse reading would be quicker
+	 */
+	extmap::cachemap file_map;
+	sector_t offset = 0;
+	char *buf = (char*)malloc(10*1024*1024);
+	for (auto [i,sectors] : objs_to_clean) {
+	    io->read_numbered_object(i, buf, sectors*512, 0);
+	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
+	    file_map.update(_base, _limit, offset);
+	    write(fd, buf, sectors*512);
+	    offset += sectors;
+	}
+	free(buf);
+
+	while (to_clean.size() > 0) {
+	    sector_t sectors = 0, max = 16 * 1024;
+	    // 8MB / 4KB = 2K extents = 16KB
+	    char *hdr = (char*)malloc(1024*32);
+	    std::vector<std::tuple<int64_t,int64_t,extmap::obj_offset>> extents;
+
+	    for (auto it = to_clean.begin(); it != to_clean.end() && sectors < max; it++) {
+		auto [base, limit, ptr] = it->vals();
+		sectors += (limit - base);
+		extents.emplace_back(base, limit, ptr);
+	    }
+	    char *buf = (char*)malloc(sectors * 512);
+
+	    /* here's the simple way to do it, where we lock the map while we read
+	     * from the file. The better way is to read everything in, and then go
+	     * back and construct an iovec for the subset that's still valid.
+	     */
+	    lk.lock();
+	    off_t byte_offset = 0;
+	    sector_t data_sectors = 0;
+	    auto obj_extents = new std::vector<data_map>();
+	    
+	    for (auto [base, limit, ptr] : extents) {
+		for (auto it2 = map->map.lookup(base);
+		     limit < it2->base() && it2 != map->map.end(); it2++) {
+		    auto [_base, _limit, _ptr] = it2->vals(base, limit);
+		    sector_t _sectors = _limit - _base;
+		    size_t bytes = _sectors*512;
+		    auto it3 = file_map.lookup(_ptr);
+		    auto file_sector = it3->ptr();
+
+		    if (pread(fd, buf+byte_offset, bytes, file_sector*512) != (ssize_t)bytes)
+			throw_fs_error("gc");
+		    obj_extents->push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
+
+		    data_sectors += _sectors;
+		    byte_offset += bytes;
+		}
+	    }
+	    int32_t seq = batch_seq++;
+	    lk.unlock();
+
+	    int hdr_sectors = make_gc_hdr(hdr, seq, data_sectors,
+					  obj_extents->data(), obj_extents->size());
+
+	    auto iovs = new smartiov;
+	    iovs->push_back((iovec){hdr, (size_t)hdr_sectors*512});
+	    iovs->push_back((iovec){buf, (size_t)byte_offset});
+
+	    auto closure = wrap([this, hdr_sectors, obj_extents, buf, hdr, seq, iovs]{
+		    std::unique_lock lk(m);
+		    std::unique_lock objlock(map->m);
+		    auto offset = hdr_sectors;
+		    for (auto e : *obj_extents) {
+			extmap::obj_offset oo = {seq, offset};
+			map->map.update(e.lba, e.lba+e.len, oo, NULL);
+			offset += e.len;
+		    }
+		    
+		    last_written = std::max(last_written, seq); // is this needed?
+		    cv.notify_all();
+
+		    delete obj_extents;
+		    delete iovs;
+		    free(buf);
+		    free(hdr);
+		    return true;
+		});
+	    
+	    io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
+					  call_wrapped, closure);
+	}
+
+	close(fd);
+	free(buf);
+    }
+
+    void send_batch(std::unique_lock<std::mutex> &lk, batch *b) {
+	uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
+	object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
+					 .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
+	lk.unlock();
+
+	char *hdr = (char*)calloc(hdr_sectors*512, 1);
+	make_hdr(hdr, b);
+	auto iovs = new smartiov;
+	iovs->push_back((iovec){hdr, (size_t)(hdr_sectors*512)});
+	iovs->push_back((iovec){b->buf, b->len});
+
+	/* Note that we've already decremented object live counts when we copied the data
+	 * into the batch buffer.
+	 */
+	auto closure = wrap([this, hdr_sectors, hdr, iovs, b]{
+		std::unique_lock lk(m);
+		std::unique_lock objlock(map->m);
+		
+		auto offset = hdr_sectors;
+		for (auto e : b->entries) {
+		    extmap::obj_offset oo = {b->seq, offset};
+		    map->map.update(e.lba, e.lba+e.len, oo, NULL);
+		    offset += e.len;
+		}
+
+		last_written = std::max(last_written, b->seq); // for flush()
+		cv.notify_all();
+
+		in_mem_objects.erase(b->seq);
+		batches.push(b);
+		objlock.unlock();
+		free(hdr);
+		delete iovs;
+		puts_outstanding--;
+		cv.notify_all();
+		return true;
+	    });
+	puts_outstanding++;
+	io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
+				      call_wrapped, closure);
+	lk.lock();
+    }
     
     void worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
@@ -535,11 +734,13 @@ class translate {
 		    cv.notify_all();
 	    
 		    in_mem_objects.erase(b->seq);
+		    //printf("push\n");
 		    batches.push(b);
 		    objlock.unlock();
 		    free(hdr);
 		    delete iovs;
 		    puts_outstanding--;
+		    cv.notify_all();
 		    return true;
 		});
 	    puts_outstanding++;
@@ -596,6 +797,11 @@ public:
 	last_written = last_pushed = 0;
     }
     ~translate() {
+#if 0
+	printf("xl: batches %ld (8MiB)\n", batches.size());
+	printf("xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
+	printf("omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));
+#endif
 	while (!batches.empty()) {
 	    auto b = batches.top();
 	    batches.pop();
@@ -702,14 +908,18 @@ public:
 	std::unique_lock<std::mutex> lk(m);
 	size_t len = iov_sum(iov, iovcnt);
 
+	while (puts_outstanding >= 32)
+	    cv.wait(lk);
+	
 	if (current_batch && current_batch->len + len > current_batch->max) {
 	    last_pushed = current_batch->seq;
 	    workers.put_locked(current_batch);
 	    current_batch = NULL;
 	}
 	if (current_batch == NULL) {
-	    if (batches.empty())
+	    if (batches.empty()) {
 		current_batch = new batch(BATCH_SIZE);
+	    }
 	    else {
 		current_batch = batches.top();
 		batches.pop();
@@ -732,6 +942,46 @@ public:
 	    object_info[ptr.obj].live -= (limit - base);
 	}
 	
+	return len;
+    }
+
+    ssize_t writev2(size_t offset, iovec *iov, int iovcnt) {
+	std::unique_lock<std::mutex> lk(m);
+	size_t len = iov_sum(iov, iovcnt);
+
+	while (puts_outstanding >= 32)
+	    cv.wait(lk);
+
+	if (current_batch && current_batch->len + len > current_batch->max) {
+	    last_pushed = current_batch->seq;
+	    send_batch(lk, current_batch);
+	    current_batch = NULL;
+	}
+	if (current_batch == NULL) {
+	    if (batches.empty()) 
+		current_batch = new batch(BATCH_SIZE);
+	    else {
+		current_batch = batches.top();
+		batches.pop();
+	    }
+	    current_batch->reset();
+	    in_mem_objects[current_batch->seq] = current_batch->buf;
+	}
+
+	int64_t sector_offset = current_batch->len / 512,
+	    lba = offset/512, limit = (offset+len)/512;
+	current_batch->append_iov(offset / 512, iov, iovcnt);
+
+	std::vector<extmap::lba2obj> deleted;
+	extmap::obj_offset oo = {current_batch->seq, sector_offset};
+	std::unique_lock objlock(map->m);
+
+	map->map.update(lba, limit, oo, &deleted);
+	for (auto d : deleted) {
+	    auto [base, limit, ptr] = d.vals();
+	    object_info[ptr.obj].live -= (limit - base);
+	}
+
 	return len;
     }
 
@@ -818,10 +1068,6 @@ public:
 	return 0;
     }
 };
-
-void throw_fs_error(std::string msg) {
-    throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
-}
 
 /* each read or write queues up one of these for a worker thread
  */
@@ -1337,6 +1583,9 @@ public:
     }
     
     ~read_cache() {
+#if 0
+	printf("rc: map %ld (%ld)\n", map.size(), sizeof(std::pair<extmap::obj_offset,int>));
+#endif
 	free((void*)flat_map);
 	free((void*)super);
     }
@@ -1717,7 +1966,9 @@ class write_cache {
 		jme[n_extents++] = (j_map_extent){(uint64_t)it->s.base,
 						  (uint64_t)it->s.len, (uint32_t)it->s.ptr};
 	// valgrind:
-	int pad1 = 4096 - (map_bytes % 4096);
+	int pad1 = 4096L*map_pages - map_bytes;
+	assert(map_bytes == n_extents * sizeof(j_map_extent));
+	assert(pad1 + map_bytes == 4096UL*map_pages);
 	if (pad1 > 0)
 	    memset(e_buf + map_bytes, 0, pad1);
 	
@@ -1728,10 +1979,11 @@ class write_cache {
 	    jl[n_lens++] = (j_length){it->first, it->second};
 
 	// valgrind:
-	int pad2 = 4096 - (len_bytes % 4096);
+	int pad2 = 4096L * len_pages - len_bytes;
+	assert(len_bytes + pad2 == len_pages*4096UL);
 	if (pad2 > 0)
 	    memset(l_buf + len_bytes, 0, pad2);
-	
+
 	j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
 	memcpy(super_copy, super, 4096);
 
@@ -1746,8 +1998,8 @@ class write_cache {
 	lk.unlock();
 
 	assert(4096UL*blockno + 4096UL*ckpt_pages <= dev_max);
-	iovec iov[] = {{e_buf, map_pages*4096L},
-		       {l_buf, len_pages*4096L}};
+	iovec iov[] = {{e_buf, map_pages*4096UL},
+		       {l_buf, len_pages*4096UL}};
 
 	if (pwritev(fd, iov, 2, 4096L*blockno) < 0)
 	    throw_fs_error("wckpt_e");
@@ -1824,6 +2076,10 @@ public:
 	misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
     }
     ~write_cache() {
+#if 0
+	printf("wc map: %d %d (%ld)\n", map.size(), map.capacity(), sizeof(extmap::lba2lba));
+	printf("wc rmap: %d %d (%ld)\n", rmap.size(), rmap.capacity(), sizeof(extmap::lba2lba));
+#endif
 	free(pad_page);
 	free(super);
 	delete misc_threads;

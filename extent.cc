@@ -162,6 +162,7 @@ namespace extmap {
 	// 
 	T_in base(void) { return s.base; }
 	T_in limit(void) { return s.base + s.len; }
+	T_out ptr(void) { return s.ptr; }
 	void relimit(T_in _limit) {
 	    s.len = _limit - s.base;
 	    s.d = 1;		// dirty
