@@ -414,6 +414,34 @@ class translate {
 	return 0;
     }
 
+    /* completions may come in out of order; need to re-order them before 
+     * updating the map. This is the only modifier of 'completions', 
+     * 'next_completion' - use a separate mutex for simplicity / deadlock avoidance
+     * maybe use insertion sorted vector?
+     *  https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
+     */
+    std::set<std::pair<int32_t,void*>> completions;
+    int32_t                            next_completion = 0;
+    std::mutex                         m_c;
+    std::condition_variable            cv_c;
+    void do_completions(int32_t seq, void *closure) {
+	std::unique_lock lk(m_c);
+	if (seq == next_completion) {
+	    next_completion++;
+	    call_wrapped(closure);
+	}
+	else
+	    completions.emplace(seq, closure);
+	auto it = completions.begin();
+	while (it != completions.end() && it->first == next_completion) {
+	    call_wrapped(it->second);
+	    it = completions.erase(it);
+	    next_completion++;
+	}
+	lk.unlock();
+	cv_c.notify_all();
+    }
+    
     int write_checkpoint(int seq) {
 	std::vector<ckpt_mapentry> entries;
 	std::vector<ckpt_obj> objects;
@@ -461,6 +489,13 @@ class translate {
 		       {.iov_base = (char*)&seq, .iov_len = sizeof(seq)},
 		       {.iov_base = (char*)objects.data(), objs_bytes},
 		       {.iov_base = (char*)entries.data(), map_bytes}};
+
+	{
+	    std::unique_lock lk_complete(m_c);
+	    while (next_completion < seq)
+		cv_c.wait(lk_complete);
+	    next_completion++;
+	}
 	io->write_numbered_object(seq, iov, 4);
 
 	size_t offset = sizeof(*super_h) + sizeof(*super_sh);
@@ -544,16 +579,18 @@ class translate {
 		objs_to_clean.emplace_back(p.first, p.second.hdr+p.second.data);
 		max_obj = std::max(max_obj, p.first);
 	    }
-	
+
+	/* find all live extents in objects listed in objs_to_clean
+	 */
 	std::vector<bool> bitmap(max_obj+1);
 	for (auto [i,_xx] : objs_to_clean)
 	    bitmap[i] = true;
 
-	extmap::objmap to_clean; // live extents in objs_to_clean
+	extmap::objmap live_extents;
 	for (auto it = map->map.begin(); it != map->map.end(); it++) {
 	    auto [base, limit, ptr] = it->vals();
 	    if (bitmap[ptr.obj])
-		to_clean.update(base, limit, ptr);
+		live_extents.update(base, limit, ptr);
 	}
 	lk.unlock();
 
@@ -578,23 +615,24 @@ class translate {
 	}
 	free(buf);
 
-	while (to_clean.size() > 0) {
+	while (live_extents.size() > 0) {
 	    sector_t sectors = 0, max = 16 * 1024;
 	    // 8MB / 4KB = 2K extents = 16KB
 	    char *hdr = (char*)malloc(1024*32);
 	    std::vector<std::tuple<int64_t,int64_t,extmap::obj_offset>> extents;
 
-	    for (auto it = to_clean.begin(); it != to_clean.end() && sectors < max; it++) {
+	    for (auto it = live_extents.begin(); it != live_extents.end() && sectors < max; it++) {
 		auto [base, limit, ptr] = it->vals();
 		sectors += (limit - base);
 		extents.emplace_back(base, limit, ptr);
 	    }
-	    char *buf = (char*)malloc(sectors * 512);
 
-	    /* here's the simple way to do it, where we lock the map while we read
-	     * from the file. The better way is to read everything in, and then go
-	     * back and construct an iovec for the subset that's still valid.
+	    /* TODO: the simple way to do it, where we lock the map while we read
+	     * from the file. The better way is to read everything in, put it in a 
+	     * bufmap, and then go back and construct an iovec for the subset that's 
+	     * still valid.
 	     */
+	    char *buf = (char*)malloc(sectors * 512);
 	    lk.lock();
 	    off_t byte_offset = 0;
 	    sector_t data_sectors = 0;
@@ -646,15 +684,19 @@ class translate {
 		    free(hdr);
 		    return true;
 		});
-	    
+	    auto closure2 = wrap([this, closure, seq]{
+		    do_completions(seq, closure);
+		    return true;
+		});
 	    io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
-					  call_wrapped, closure);
+					  call_wrapped, closure2);
 	}
 
 	close(fd);
 	free(buf);
     }
 
+#if 0
     void send_batch(std::unique_lock<std::mutex> &lk, batch *b) {
 	uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
 	object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
@@ -698,6 +740,7 @@ class translate {
 				      call_wrapped, closure);
 	lk.lock();
     }
+#endif
     
     void worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
@@ -743,9 +786,13 @@ class translate {
 		    cv.notify_all();
 		    return true;
 		});
+	    auto closure2 = wrap([this, closure, b]{
+		    do_completions(b->seq, closure);
+		    return true;
+		});
 	    puts_outstanding++;
 	    io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
-					  call_wrapped, closure);
+					  call_wrapped, closure2);
 	}
     }
 
@@ -891,6 +938,7 @@ public:
 		offset += m.len;
 	    }
 	}
+	next_completion = batch_seq;
 
 	for (int i = 0; i < nthreads; i++) 
 	    workers.pool.push(std::thread(&translate::worker_thread, this, &workers));
@@ -945,6 +993,7 @@ public:
 	return len;
     }
 
+#if 0
     ssize_t writev2(size_t offset, iovec *iov, int iovcnt) {
 	std::unique_lock<std::mutex> lk(m);
 	size_t len = iov_sum(iov, iovcnt);
@@ -984,6 +1033,7 @@ public:
 
 	return len;
     }
+#endif
 
     ssize_t readv(size_t offset, iovec *iov, int iovcnt) {
 	smartiov iovs(iov, iovcnt);
