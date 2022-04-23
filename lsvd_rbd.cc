@@ -1610,7 +1610,7 @@ public:
 					  call_wrapped(p);
 				      auto eio = new e_iocb;
 				      e_io_prep_pwrite(eio, fd, _buf, unit_sectors*512L,
-						       512L*nvme_offset, call_wrapped, write_done);
+						       nvme_offset, call_wrapped, write_done);
 				      e_io_submit(ioctx, eio);
 				      return true;
 				  });
