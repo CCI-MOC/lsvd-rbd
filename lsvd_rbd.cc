@@ -844,7 +844,7 @@ public:
 	last_written = last_pushed = 0;
     }
     ~translate() {
-#if 0
+#if 1
 	printf("xl: batches %ld (8MiB)\n", batches.size());
 	printf("xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
 	printf("omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));
@@ -1180,10 +1180,10 @@ int io_queue_wait(io_context_t ctx, struct timespec *timeout)
     return io_getevents(ctx, 0, 0, NULL, timeout);
 }
 
-void e_iocb_runner(io_context_t ctx, bool *running)
+void e_iocb_runner(io_context_t ctx, bool *running, const char *name)
 {
     int rv;
-    pthread_setname_np(pthread_self(), "e_iocb_runner");
+    pthread_setname_np(pthread_self(), name);
     while (*running) {
 	if ((rv = io_queue_run(ctx)) < 0)
 	    break;
@@ -1193,17 +1193,6 @@ void e_iocb_runner(io_context_t ctx, bool *running)
 	    break;
     }
 }
-
-#if 0
-void invoke_rbd_cb(void *c)
-{
-    auto p = (lsvd_completion*) c;
-    p->done = true;
-    p->cb(c, p->arg);
-    std::unique_lock lk(p->m);
-    p->cv.notify_all();
-}
-#endif
 
 void e_io_prep_pwrite(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
 		      void (*cb)(void*), void *arg)
@@ -1245,29 +1234,6 @@ int e_io_submit(io_context_t ctx, e_iocb *eio)
 {
     iocb *io = &eio->io;
     return io_submit(ctx, 1, &io);
-}
-
-bool e_io_running = false;
-io_context_t ioctx;
-std::thread e_io_th;
-
-extern "C" void e_io_start(void)
-{
-    if (!e_io_running) {
-	io_queue_init(64, &ioctx);
-	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running);
-	e_io_running = true;
-    }
-}
-
-extern "C" void e_io_stop(void)
-{
-    if (e_io_running) {
-	e_io_running = false;
-	usleep(1000);
-	io_queue_release(ioctx);
-	e_io_th.join();
-    }
 }
 
 /* misc helpers stuff */
@@ -1339,6 +1305,10 @@ class read_cache {
     sized_vector<char*>              buffer;
     sized_vector<std::vector<void*>> pending;
     std::queue<int>    buf_loc;
+    
+    io_context_t ioctx;
+    std::thread e_io_th;
+    bool e_io_running = false;
     
     /* possible CLOCK implementation - queue holds <block,ojb/offset> 
      * pairs so that we can evict blocks without having to remove them 
@@ -1441,6 +1411,11 @@ public:
 	map_dirty = false;
 
 	misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
+
+	io_queue_init(64, &ioctx);
+	e_io_running = true;
+	const char *name = "read_cache_cb";
+	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
     }
 
     /* state machine for block obj,offset can be represented by the tuple:
@@ -1638,6 +1613,10 @@ public:
 #endif
 	free((void*)flat_map);
 	free((void*)super);
+
+	e_io_running = false;
+	e_io_th.join();
+	io_queue_release(ioctx);
     }
 
     /* debugging. 
@@ -1712,9 +1691,17 @@ class file_backend : public backend {
 	return fd;
     }
 
+    bool e_io_running = false;
+    io_context_t ioctx;
+    std::thread e_io_th;
+
 public:
     file_backend(const char *_prefix) {
 	prefix = strdup(_prefix);
+	e_io_running = true;
+	io_queue_init(64, &ioctx);
+	const char *name = "file_backend_cb";
+	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
     }
     ssize_t write_object(const char *name, iovec *iov, int iovcnt) {
 	int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0777);
@@ -1763,15 +1750,30 @@ public:
     int aio_write_numbered_object(int seq, iovec *iov, int iovcnt,
 				  void (*cb)(void*), void *ptr) {
 	auto name = std::string(prefix) + "." + hex(seq);
-	auto rv = write_object(name.c_str(), iov, iovcnt);
-	cb(ptr);
-	return rv;
+	int fd = open(name.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
+	if (fd < 0)
+	    return -1;
+
+	auto closure = wrap([fd, cb, ptr]{
+		close(fd);
+		cb(ptr);
+		return true;
+	    });
+	auto eio = new e_iocb;
+	size_t offset = 0;
+	e_io_prep_pwritev(eio, fd, iov, iovcnt, offset, call_wrapped, closure);
+	e_io_submit(ioctx, eio);
+	return 0;
     }
     
     ~file_backend() {
 	free((void*)prefix);
 	for (auto it = cached_fds.begin(); it != cached_fds.end(); it++)
 	    close(it->second);
+
+	e_io_running = false;
+	e_io_th.join();
+	io_queue_release(ioctx);
     }
     std::string object_name(int seq) {
 	return std::string(prefix) + "." + hex(seq);
@@ -1805,6 +1807,10 @@ class write_cache {
     int                       nfree;
     
     char *pad_page;
+
+    bool e_io_running = false;
+    io_context_t ioctx;
+    std::thread e_io_th;
     
     int pages_free(uint32_t oldest) {
 	auto size = super->limit - super->base;
@@ -2124,6 +2130,11 @@ public:
 
 	misc_threads = new thread_pool<int>(&m);
 	misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
+
+	e_io_running = true;
+	io_queue_init(64, &ioctx);
+	const char *name = "write_cache_cb";
+	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
     }
     ~write_cache() {
 #if 0
@@ -2133,6 +2144,10 @@ public:
 	free(pad_page);
 	free(super);
 	delete misc_threads;
+
+	e_io_running = false;
+	e_io_th.join();
+	io_queue_release(ioctx);
     }
 
     void send_writes(void) {
@@ -2884,7 +2899,6 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     auto [nvme, obj] = split_string(std::string(name), ",");
     bool rados = (obj.substr(0,6) == "rados:");
     auto fri = new fake_rbd_image;
-    e_io_start();
     
     if (rados)
 	fri->io = new rados_backend(obj.c_str()+6);
@@ -2939,7 +2953,6 @@ extern "C" int rbd_close(rbd_image_t image)
     delete fri->lsvd;
     delete fri->omap;
     delete fri->io;
-    e_io_stop();
     
     return 0;
 }

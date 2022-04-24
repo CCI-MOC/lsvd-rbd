@@ -206,10 +206,12 @@ class read_cache:
 # start and stop the libaio completion thread
 
 def io_start():
-    lsvd_lib.e_io_start()
+    pass
+    #lsvd_lib.e_io_start()
 
 def io_stop():
-    lsvd_lib.e_io_stop()
+    pass
+    #lsvd_lib.e_io_stop()
 
 
 # RBD functions
