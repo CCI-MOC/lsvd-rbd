@@ -145,6 +145,7 @@ class tests(unittest.TestCase):
 
     def test_5_ckpt(self):
         global wcache
+        time.sleep(0.01)
         restart()
         wcache.write(0, b'W'*4096)
         wcache.write(4096, b'X'*4096)
@@ -165,6 +166,7 @@ class tests(unittest.TestCase):
         
         d = xlate.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
+        time.sleep(0.01)
 
 
 if __name__ == '__main__':

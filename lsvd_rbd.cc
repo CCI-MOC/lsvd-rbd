@@ -1256,6 +1256,9 @@ public:
     void init(int n) {
 	elements = new std::vector<T>(n);
     }
+    void init(int n, T val) {
+	elements = new std::vector<T>(n, val);
+    }
     T &operator[](int index) {
 	return (*elements)[index];
     }
@@ -1447,7 +1450,7 @@ public:
     char *get_cacheline_buf(int n) {
 	char *buf;
 	int len = 65536;
-	const int maxbufs = 16;
+	const int maxbufs = 48;
 	if (buf_loc.size() < maxbufs) {
 	    buf = (char*)aligned_alloc(512, len);
 	    memset(buf, 0, len);
@@ -1455,11 +1458,14 @@ public:
 	else {
 	    int j = buf_loc.front();
 	    buf_loc.pop();
+	    //printf("stealing %d\n", j);
+	    assert(buffer[j] != NULL);
 	    buf = buffer[j];
 	    buffer[j] = NULL;
 	    in_use[j]--;
 	}
 	buf_loc.push(n);
+	assert(buf != NULL);
 	return buf;
     }
 
@@ -1556,7 +1562,8 @@ public:
 	    map[unit] = n;
 	    flat_map[n] = unit;
 	    auto _buf = get_cacheline_buf(n);
-
+	    //printf("reading [%d] %p\n", n, _buf);
+	    
 	    hit_stats.backend += unit_sectors;
 	    sector_t sectors = blk_top_offset - blk_offset;
 	    hit_stats.user += sectors;
@@ -1576,6 +1583,7 @@ public:
 				      std::unique_lock lk(m);
 				      memcpy(buf, _buf + buf_offset, bytes);
 				      buffer[n] = _buf;
+				      //printf("setting buffer[%d] = %p\n", n, _buf);
 				      std::vector<void*> v(std::make_move_iterator(pending[n].begin()),
 							   std::make_move_iterator(pending[n].end()));
 				      pending[n].erase(pending[n].begin(), pending[n].end());
@@ -2498,6 +2506,7 @@ public:
 	rados_aio *aio = new rados_aio;
 	aio->cb = cb;
 	aio->ptr = ptr;
+	assert(buf != NULL);
 	rados_aio_create_completion((void*)aio, aio_read_done, NULL, &aio->c);
 	return rados_aio_read(io_ctx, name.c_str(), aio->c, buf, len, offset);
     }
