@@ -584,7 +584,7 @@ class translate {
 
 	std::vector<std::pair<int,int>> objs_to_clean; // obj#, #sectors
 	for (auto p : object_info) 
-	    if (1.0 * p.second.live / p.second.data < 0.5) {
+	    if (1.0 * p.second.live / p.second.data < 0.7) {
 		objs_to_clean.emplace_back(p.first, p.second.hdr+p.second.data);
 		max_obj = std::max(max_obj, p.first);
 	    }
@@ -631,12 +631,17 @@ class translate {
 	    char *hdr = (char*)malloc(1024*32);
 	    std::vector<std::tuple<int64_t,int64_t,extmap::obj_offset>> extents;
 
+	    sector_t lba_min = 0x7fffffff;
+	    sector_t lba_max = 0;
 	    for (auto it = live_extents.begin(); it != live_extents.end() && sectors < max; it++) {
 		auto [base, limit, ptr] = it->vals();
+		lba_min = std::min(base, lba_min);
+		lba_max = std::max(limit, lba_max);
 		sectors += (limit - base);
 		extents.emplace_back(base, limit, ptr);
 	    }
-
+	    live_extents.trim(lba_min, lba_max);
+	    
 	    /* TODO: the simple way to do it, where we lock the map while we read
 	     * from the file. The better way is to read everything in, put it in a 
 	     * bufmap, and then go back and construct an iovec for the subset that's 
@@ -723,7 +728,7 @@ class translate {
 		return;
 	    if (total_sectors - total_live_sectors < one_GB)
 		continue;
-	    if (((double)total_live_sectors / total_sectors) > 0.5)
+	    if (((double)total_live_sectors / total_sectors) > 0.7)
 		continue;
 	    do_gc(lk);
 	}
