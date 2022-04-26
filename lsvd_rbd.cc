@@ -1472,6 +1472,8 @@ public:
     /* returns skip_len, read_len. Fetches from backend directly, so skip_len >0
      * means unmapped sectors that should be zeroed.
      */
+    int u1 = 0;
+    int u0 = 0;
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t len,
 					void (*cb)(void*), void *ptr) {
 	lba_t base = offset/512, sectors = len/512, limit = base+sectors;
@@ -1514,7 +1516,7 @@ public:
 
 	/* protection against random reads - read-around when hit rate is too low
 	 */
-	bool use_cache = free_blks.size() > 0 && hit_stats.user * 2 > hit_stats.backend;
+	bool use_cache = free_blks.size() > 0 && hit_stats.user * 3 > hit_stats.backend * 2;
 
 	if (in_cache) {
 	    sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
@@ -1526,6 +1528,7 @@ public:
 	    hit_stats.user += bytes/512;
 	    
 	    if (buffer[n] != NULL) {
+		lk2.unlock();
 		memcpy(buf, buffer[n] + blk_offset*512, bytes);
 		cb(ptr);
 	    }
@@ -1551,6 +1554,7 @@ public:
 	    read_len = bytes;
 	}
 	else if (use_cache) {
+	    u1++;
 	    /* assign a location in cache before we start reading (and while we're
 	     * still holding the lock)
 	     */
@@ -1603,8 +1607,10 @@ public:
 	    read_len = bytes;
 	}
 	else {
+	    u0++;
 	    hit_stats.user += read_len / 512;
 	    hit_stats.backend += read_len / 512;
+	    lk2.unlock();
 	    io->aio_read_num_object(oo.obj, buf, read_len, 512L*oo.offset, cb, ptr);
 	    // read_len unchanged
 	}
@@ -1616,8 +1622,9 @@ public:
     }
     
     ~read_cache() {
-#if 0
+#if 1
 	printf("rc: map %ld (%ld)\n", map.size(), sizeof(std::pair<extmap::obj_offset,int>));
+	printf("rc: usecache 1 %d 0 %d (stat.u %ld .b %ld)\n", u1, u0, hit_stats.user, hit_stats.backend);
 #endif
 	free((void*)flat_map);
 	free((void*)super);
@@ -2375,7 +2382,6 @@ public:
 	}
 	lk.unlock();
 	if (read_len) {
-	    /* fuck. the e_io version doesn't work */
 	    auto eio = new e_iocb;
 	    e_io_prep_pread(eio, fd, buf, read_len, nvme_offset, cb, ptr);
 	    e_io_submit(ioctx, eio);
@@ -2469,15 +2475,20 @@ public:
 	return r;
     }
     ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) {
-	auto name = std::string(prefix) + "." + hex(seq);
-	return write_object(name.c_str(), iov, iovcnt);
+	char name[128];
+	sprintf(name, "%s.%08x", prefix, seq);
+	//auto name = std::string(prefix) + "." + hex(seq);
+	return write_object(name, iov, iovcnt);
     }
     ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) {
 	return rados_read(io_ctx, name, buf, len, offset);
     }
     ssize_t read_numbered_object(int seq, char *buf, size_t len, size_t offset) {
-	auto name = std::string(prefix) + "." + hex(seq);
-	return read_object(name.c_str(), buf, len, offset);
+	//auto name = std::string(prefix) + "." + hex(seq);
+	char name[128];
+	sprintf(name, "%s.%08x", prefix, seq);
+	//printf("p: %s +: %s\n", name2, name.c_str());
+	return read_object(name, buf, len, offset);
     }
     
     ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt, size_t offset) {
@@ -2703,6 +2714,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     char *aligned_buf = buf;
+    assert(aligned(buf, 512));
     if (!aligned(buf, 512))
 	aligned_buf = (char*)aligned_alloc(512, len);
     auto p = (lsvd_completion*)c;
