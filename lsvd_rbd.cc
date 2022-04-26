@@ -321,6 +321,14 @@ class translate {
     int last_written = 0;
     int last_pushed = 0;
     std::condition_variable cv;
+
+    /* for triggering GC
+     */
+    sector_t total_sectors = 0;
+    sector_t total_live_sectors = 0;
+    int gc_cycles = 0;
+    int gc_sectors_read = 0;
+    int gc_sectors_written = 0;
     
     char *read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
@@ -569,13 +577,14 @@ class translate {
 	return hdr_sectors;
     }
     
-    void do_gc(void) {
-	std::unique_lock lk(m);
+    void do_gc(std::unique_lock<std::mutex> &lk) {
+	printf("\n** DO_GC **\n");
+	gc_cycles++;
 	int max_obj = 0;
 
 	std::vector<std::pair<int,int>> objs_to_clean; // obj#, #sectors
 	for (auto p : object_info) 
-	    if (1.0 * p.second.live / p.second.data < 0.4) {
+	    if (1.0 * p.second.live / p.second.data < 0.5) {
 		objs_to_clean.emplace_back(p.first, p.second.hdr+p.second.data);
 		max_obj = std::max(max_obj, p.first);
 	    }
@@ -608,6 +617,7 @@ class translate {
 	char *buf = (char*)malloc(10*1024*1024);
 	for (auto [i,sectors] : objs_to_clean) {
 	    io->read_numbered_object(i, buf, sectors*512, 0);
+	    gc_sectors_read += sectors;
 	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
 	    file_map.update(_base, _limit, offset);
 	    write(fd, buf, sectors*512);
@@ -658,9 +668,10 @@ class translate {
 	    int32_t seq = batch_seq++;
 	    lk.unlock();
 
+	    gc_sectors_written += data_sectors;
+	    
 	    int hdr_sectors = make_gc_hdr(hdr, seq, data_sectors,
 					  obj_extents->data(), obj_extents->size());
-
 	    auto iovs = new smartiov;
 	    iovs->push_back((iovec){hdr, (size_t)hdr_sectors*512});
 	    iovs->push_back((iovec){buf, (size_t)byte_offset});
@@ -688,59 +699,35 @@ class translate {
 		    do_completions(seq, closure);
 		    return true;
 		});
+	    printf("\ngc write %d (%d)\n", seq, iovs->size() / 512);
 	    io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
 					  call_wrapped, closure2);
 	}
 
 	close(fd);
 	free(buf);
-    }
 
-#if 0
-    void send_batch(std::unique_lock<std::mutex> &lk, batch *b) {
-	uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
-	object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
-					 .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
-	lk.unlock();
-
-	char *hdr = (char*)calloc(hdr_sectors*512, 1);
-	make_hdr(hdr, b);
-	auto iovs = new smartiov;
-	iovs->push_back((iovec){hdr, (size_t)(hdr_sectors*512)});
-	iovs->push_back((iovec){b->buf, b->len});
-
-	/* Note that we've already decremented object live counts when we copied the data
-	 * into the batch buffer.
-	 */
-	auto closure = wrap([this, hdr_sectors, hdr, iovs, b]{
-		std::unique_lock lk(m);
-		std::unique_lock objlock(map->m);
-		
-		auto offset = hdr_sectors;
-		for (auto e : b->entries) {
-		    extmap::obj_offset oo = {b->seq, offset};
-		    map->map.update(e.lba, e.lba+e.len, oo, NULL);
-		    offset += e.len;
-		}
-
-		last_written = std::max(last_written, b->seq); // for flush()
-		cv.notify_all();
-
-		in_mem_objects.erase(b->seq);
-		batches.push(b);
-		objlock.unlock();
-		free(hdr);
-		delete iovs;
-		puts_outstanding--;
-		cv.notify_all();
-		return true;
-	    });
-	puts_outstanding++;
-	io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
-				      call_wrapped, closure);
 	lk.lock();
     }
-#endif
+
+    void gc_thread(thread_pool<int> *p) {
+	auto interval = std::chrono::milliseconds(100);
+	sector_t one_GB = 1024 * 1024 * 2;
+	const char *name = "gc";
+	pthread_setname_np(pthread_self(), name);
+	
+	while (p->running) {
+	    std::unique_lock lk(m);
+	    p->cv.wait_for(lk, interval);
+	    if (!p->running)
+		return;
+	    if (total_sectors - total_live_sectors < one_GB)
+		continue;
+	    if (((double)total_live_sectors / total_sectors) > 0.5)
+		continue;
+	    do_gc(lk);
+	}
+    }
     
     void worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
@@ -751,6 +738,8 @@ class translate {
 	    uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
 	    object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
 					     .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
+	    total_sectors += b->len/512;
+	    total_live_sectors += b->len/512;
 	    lk.unlock();
 
 	    char *hdr = (char*)calloc(hdr_sectors*512, 1);
@@ -848,6 +837,7 @@ public:
 	printf("xl: batches %ld (8MiB)\n", batches.size());
 	printf("xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
 	printf("omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));
+	printf("gc %d read %d write %d\n", gc_cycles, gc_sectors_read, gc_sectors_written);
 #endif
 	while (!batches.empty()) {
 	    auto b = batches.top();
@@ -912,7 +902,8 @@ public:
 	    for (auto o : objects) {
 		object_info[o.seq] = (obj_info){.hdr = o.hdr_sectors, .data = o.data_sectors,
 					.live = o.live_sectors, .type = LSVD_DATA};
-
+		total_sectors += o.data_sectors;
+		total_live_sectors += o.live_sectors;
 	    }
 	    for (auto m : entries) {
 		map->map.update(m.lba, m.lba + m.len,
@@ -931,11 +922,19 @@ public:
 		break;
 	    object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
 					.live = h.data_sectors, .type = LSVD_DATA};
+	    total_sectors += h.data_sectors;
+	    total_live_sectors += h.data_sectors;
 	    int offset = 0, hdr_len = h.hdr_sectors;
 	    for (auto m : entries) {
-		map->map.update(m.lba, m.lba + m.len,
-				(extmap::obj_offset){.obj = i, .offset = offset + hdr_len});
+		std::vector<extmap::lba2obj> deleted;
+		extmap::obj_offset oo = {i, offset + hdr_len};
+		map->map.update(m.lba, m.lba + m.len, oo, &deleted);
 		offset += m.len;
+		for (auto d : deleted) {
+		    auto [base, limit, ptr] = d.vals();
+		    object_info[ptr.obj].live -= (limit - base);
+		    total_live_sectors -= (limit - base);
+		}
 	    }
 	}
 	next_completion = batch_seq;
@@ -945,7 +944,8 @@ public:
 	misc_threads.pool.push(std::thread(&translate::ckpt_thread, this, &misc_threads));
 	if (timedflush)
 	    misc_threads.pool.push(std::thread(&translate::flush_thread, this, &misc_threads));
-
+	misc_threads.pool.push(std::thread(&translate::gc_thread, this, &misc_threads));
+	
 	return bytes;
     }
 
@@ -988,52 +988,11 @@ public:
 	for (auto d : deleted) {
 	    auto [base, limit, ptr] = d.vals();
 	    object_info[ptr.obj].live -= (limit - base);
+	    total_live_sectors -= (limit - base);
 	}
 	
 	return len;
     }
-
-#if 0
-    ssize_t writev2(size_t offset, iovec *iov, int iovcnt) {
-	std::unique_lock<std::mutex> lk(m);
-	size_t len = iov_sum(iov, iovcnt);
-
-	while (puts_outstanding >= 32)
-	    cv.wait(lk);
-
-	if (current_batch && current_batch->len + len > current_batch->max) {
-	    last_pushed = current_batch->seq;
-	    send_batch(lk, current_batch);
-	    current_batch = NULL;
-	}
-	if (current_batch == NULL) {
-	    if (batches.empty()) 
-		current_batch = new batch(BATCH_SIZE);
-	    else {
-		current_batch = batches.top();
-		batches.pop();
-	    }
-	    current_batch->reset();
-	    in_mem_objects[current_batch->seq] = current_batch->buf;
-	}
-
-	int64_t sector_offset = current_batch->len / 512,
-	    lba = offset/512, limit = (offset+len)/512;
-	current_batch->append_iov(offset / 512, iov, iovcnt);
-
-	std::vector<extmap::lba2obj> deleted;
-	extmap::obj_offset oo = {current_batch->seq, sector_offset};
-	std::unique_lock objlock(map->m);
-
-	map->map.update(lba, limit, oo, &deleted);
-	for (auto d : deleted) {
-	    auto [base, limit, ptr] = d.vals();
-	    object_info[ptr.obj].live -= (limit - base);
-	}
-
-	return len;
-    }
-#endif
 
     ssize_t readv(size_t offset, iovec *iov, int iovcnt) {
 	smartiov iovs(iov, iovcnt);
