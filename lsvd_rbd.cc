@@ -164,6 +164,7 @@ public:
     virtual ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) = 0;
     virtual ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt,
 					  size_t offset) = 0;
+    virtual void    delete_numbered_object(int seq) = 0;
     virtual ssize_t read_numbered_object(int seq, char *buf, size_t len,
 					 size_t offset) = 0;
     virtual int aio_read_num_object(int seq, char *buf, size_t len, size_t offset,
@@ -287,6 +288,7 @@ void throw_fs_error(std::string msg) {
 }
 
 class translate {
+    FILE *fp;
     // mutex protects batch, thread pools, object_info, in_mem_objects
     std::mutex   m;
     objmap      *map;
@@ -329,6 +331,7 @@ class translate {
     int gc_cycles = 0;
     int gc_sectors_read = 0;
     int gc_sectors_written = 0;
+    int gc_deleted = 0;
     
     char *read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
@@ -578,17 +581,31 @@ class translate {
     }
     
     void do_gc(std::unique_lock<std::mutex> &lk) {
-	printf("\n** DO_GC **\n");
+	//printf("\n** DO_GC **\n");
 	gc_cycles++;
-	int max_obj = 0;
+	int max_obj = batch_seq;
 
-	std::vector<std::pair<int,int>> objs_to_clean; // obj#, #sectors
-	for (auto p : object_info) 
-	    if (1.0 * p.second.live / p.second.data < 0.7) {
-		objs_to_clean.emplace_back(p.first, p.second.hdr+p.second.data);
-		max_obj = std::max(max_obj, p.first);
-	    }
+	std::set<std::tuple<double,int,int>> utilization;
+	for (auto p : object_info)  {
+	    if (in_mem_objects.find(p.first) != in_mem_objects.end())
+		continue;
+	    double rho = 1.0 * p.second.live / p.second.data;
+	    sector_t sectors = p.second.hdr + p.second.data;
+	    utilization.insert(std::make_tuple(rho, p.first, sectors));
+	}
 
+	const double threshold = 0.55;
+	std::vector<std::pair<int,int>> objs_to_clean;
+	for (auto [u, o, n] : utilization) {
+	    if (u > threshold)
+		break;
+	    if (objs_to_clean.size() > 32)
+		break;
+	    objs_to_clean.push_back(std::make_pair(o, n));
+	}
+	if (objs_to_clean.size() == 0) 
+	    return;
+	
 	/* find all live extents in objects listed in objs_to_clean
 	 */
 	std::vector<bool> bitmap(max_obj+1);
@@ -603,121 +620,143 @@ class translate {
 	}
 	lk.unlock();
 
-	/* temporary file, delete on close. Should use mkstemp().
-	 * need a proper config file so we can configure all this crap...
-	 */
-	int fd = open("/mnt/nvme/lsvd/_tmp", O_RDWR | O_CREAT, 0777);
-	unlink("/mnt/nvme/lsvd/_tmp");
-
-	/* read all objects in completely. Someday we can check to see whether
-	 * (a) data is already in cache, or (b) sparse reading would be quicker
-	 */
-	extmap::cachemap file_map;
-	sector_t offset = 0;
-	char *buf = (char*)malloc(10*1024*1024);
-	for (auto [i,sectors] : objs_to_clean) {
-	    io->read_numbered_object(i, buf, sectors*512, 0);
-	    gc_sectors_read += sectors;
-	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
-	    file_map.update(_base, _limit, offset);
-	    write(fd, buf, sectors*512);
-	    offset += sectors;
-	}
-	free(buf);
-
-	while (live_extents.size() > 0) {
-	    sector_t sectors = 0, max = 16 * 1024;
-	    // 8MB / 4KB = 2K extents = 16KB
-	    char *hdr = (char*)malloc(1024*32);
-	    std::vector<std::tuple<int64_t,int64_t,extmap::obj_offset>> extents;
-
-	    sector_t lba_min = 0x7fffffff;
-	    sector_t lba_max = 0;
-	    for (auto it = live_extents.begin(); it != live_extents.end() && sectors < max; it++) {
-		auto [base, limit, ptr] = it->vals();
-		lba_min = std::min(base, lba_min);
-		lba_max = std::max(limit, lba_max);
-		sectors += (limit - base);
-		extents.emplace_back(base, limit, ptr);
-	    }
-	    live_extents.trim(lba_min, lba_max);
-	    
-	    /* TODO: the simple way to do it, where we lock the map while we read
-	     * from the file. The better way is to read everything in, put it in a 
-	     * bufmap, and then go back and construct an iovec for the subset that's 
-	     * still valid.
+	if (live_extents.size() > 0) {
+	    /* temporary file, delete on close. Should use mkstemp().
+	     * need a proper config file so we can configure all this crap...
 	     */
-	    char *buf = (char*)malloc(sectors * 512);
-	    lk.lock();
-	    off_t byte_offset = 0;
-	    sector_t data_sectors = 0;
-	    auto obj_extents = new std::vector<data_map>();
-	    
-	    for (auto [base, limit, ptr] : extents) {
-		for (auto it2 = map->map.lookup(base);
-		     limit < it2->base() && it2 != map->map.end(); it2++) {
-		    auto [_base, _limit, _ptr] = it2->vals(base, limit);
-		    sector_t _sectors = _limit - _base;
-		    size_t bytes = _sectors*512;
-		    auto it3 = file_map.lookup(_ptr);
-		    auto file_sector = it3->ptr();
+	    char temp[] = "/mnt/nvme/lsvd/gc.XXXXXX";
+	    int fd = mkstemp(temp);
+	    unlink(temp);
 
-		    if (pread(fd, buf+byte_offset, bytes, file_sector*512) != (ssize_t)bytes)
-			throw_fs_error("gc");
-		    obj_extents->push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
-
-		    data_sectors += _sectors;
-		    byte_offset += bytes;
-		}
+	    /* read all objects in completely. Someday we can check to see whether
+	     * (a) data is already in cache, or (b) sparse reading would be quicker
+	     */
+	    extmap::cachemap file_map;
+	    sector_t offset = 0;
+	    char *buf = (char*)malloc(10*1024*1024);
+	    for (auto [i,sectors] : objs_to_clean) {
+		//printf("\ngc read %d\n", i);
+		io->read_numbered_object(i, buf, sectors*512, 0);
+		gc_sectors_read += sectors;
+		extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
+		file_map.update(_base, _limit, offset);
+		write(fd, buf, sectors*512);
+		offset += sectors;
 	    }
-	    int32_t seq = batch_seq++;
-	    lk.unlock();
+	    free(buf);
 
-	    gc_sectors_written += data_sectors;
+	    struct _extent {
+		int64_t base;
+		int64_t limit;
+		extmap::obj_offset ptr;
+	    };
+	    std::vector<_extent> all_extents;
+	    for (auto it = live_extents.begin(); it != live_extents.end(); it++) {
+		auto [base, limit, ptr] = it->vals();
+		all_extents.push_back((_extent){base, limit, ptr});
+	    }
+	    //live_extents.reset();	// give up memory early
+	    //printf("\ngc: to clean: %ld extents\n", all_extents.size());
+	
+	    while (all_extents.size() > 0) {
+		sector_t sectors = 0, max = 16 * 1024; // 8MB
+		char *hdr = (char*)malloc(1024*32);	// 8MB / 4KB = 2K extents = 16KB
+
+		auto it = all_extents.begin();
+		while (it != all_extents.end() && sectors < max) {
+		    auto [base, limit, ptr] = *it++;
+		    sectors += (limit - base);
+		}
+		std::vector<_extent> extents(std::make_move_iterator(all_extents.begin()),
+					     std::make_move_iterator(it));
+		all_extents.erase(all_extents.begin(), it);
 	    
-	    int hdr_sectors = make_gc_hdr(hdr, seq, data_sectors,
-					  obj_extents->data(), obj_extents->size());
-	    auto iovs = new smartiov;
-	    iovs->push_back((iovec){hdr, (size_t)hdr_sectors*512});
-	    iovs->push_back((iovec){buf, (size_t)byte_offset});
+		/* lock the map while we read from the file. 
+		 * TODO: read everything in, put it in a bufmap, and then go back and construct
+		 * an iovec for the subset that's still valid.
+		 */
+		char *buf = (char*)malloc(sectors * 512);
 
-	    auto closure = wrap([this, hdr_sectors, obj_extents, buf, hdr, seq, iovs]{
-		    std::unique_lock lk(m);
-		    std::unique_lock objlock(map->m);
-		    auto offset = hdr_sectors;
-		    for (auto e : *obj_extents) {
-			extmap::obj_offset oo = {seq, offset};
-			map->map.update(e.lba, e.lba+e.len, oo, NULL);
-			offset += e.len;
+		lk.lock();
+		off_t byte_offset = 0;
+		sector_t data_sectors = 0;
+		auto obj_extents = new std::vector<data_map>();
+	    
+		for (auto [base, limit, ptr] : extents) {
+		    for (auto it2 = map->map.lookup(base);
+			 it2->base() < limit && it2 != map->map.end(); it2++) {
+			auto [_base, _limit, _ptr] = it2->vals(base, limit);
+			if (_ptr.obj != ptr.obj)
+			    continue;
+			sector_t _sectors = _limit - _base;
+			size_t bytes = _sectors*512;
+			auto it3 = file_map.lookup(_ptr);
+			auto file_sector = it3->ptr();
+
+			auto err = pread(fd, buf+byte_offset, bytes, file_sector*512);
+			if (err != (ssize_t)bytes) {
+			    printf("\n\n");
+			    printf("%ld != %ld, obj=%ld end=%s\n", err, bytes, _ptr.obj,
+				   it3 == file_map.end() ? "Y" : "n");
+			    throw_fs_error("gc");
+			}
+			obj_extents->push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
+
+			data_sectors += _sectors;
+			byte_offset += bytes;
 		    }
+		}
+		int32_t seq = batch_seq++;
+		lk.unlock();
+
+		gc_sectors_written += data_sectors;
+	    
+		int hdr_sectors = make_gc_hdr(hdr, seq, data_sectors,
+					      obj_extents->data(), obj_extents->size());
+		auto iovs = new smartiov;
+		iovs->push_back((iovec){hdr, (size_t)hdr_sectors*512});
+		iovs->push_back((iovec){buf, (size_t)byte_offset});
+		//printf("\ngc write %d (%d)\n", seq, iovs->size() / 512);
+
+		auto closure = wrap([this, hdr_sectors, obj_extents, buf, hdr, seq, iovs]{
+			std::unique_lock lk(m);
+			std::unique_lock objlock(map->m);
+			auto offset = hdr_sectors;
+			for (auto e : *obj_extents) {
+			    extmap::obj_offset oo = {seq, offset};
+			    map->map.update(e.lba, e.lba+e.len, oo, NULL);
+			    offset += e.len;
+			}
 		    
-		    last_written = std::max(last_written, seq); // is this needed?
-		    cv.notify_all();
+			last_written = std::max(last_written, seq); // is this needed?
+			cv.notify_all();
 
-		    delete obj_extents;
-		    delete iovs;
-		    free(buf);
-		    free(hdr);
-		    return true;
-		});
-	    auto closure2 = wrap([this, closure, seq]{
-		    do_completions(seq, closure);
-		    return true;
-		});
-	    printf("\ngc write %d (%d)\n", seq, iovs->size() / 512);
-	    io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
-					  call_wrapped, closure2);
+			delete obj_extents;
+			delete iovs;
+			free(buf);
+			free(hdr);
+			return true;
+		    });
+		auto closure2 = wrap([this, closure, seq]{
+			do_completions(seq, closure);
+			return true;
+		    });
+		io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
+					      call_wrapped, closure2);
+	    }
+	    close(fd);
 	}
-
-	close(fd);
-	free(buf);
-
+	
+	for (auto [i, _xx] : objs_to_clean) {
+	    io->delete_numbered_object(i);
+	    gc_deleted++;
+	}
 	lk.lock();
     }
 
     void gc_thread(thread_pool<int> *p) {
 	auto interval = std::chrono::milliseconds(100);
-	sector_t one_GB = 1024 * 1024 * 2;
+	sector_t trigger = 128 * 1024 * 2; // 128 MB
 	const char *name = "gc";
 	pthread_setname_np(pthread_self(), name);
 	
@@ -726,9 +765,9 @@ class translate {
 	    p->cv.wait_for(lk, interval);
 	    if (!p->running)
 		return;
-	    if (total_sectors - total_live_sectors < one_GB)
+	    if (total_sectors - total_live_sectors < trigger)
 		continue;
-	    if (((double)total_live_sectors / total_sectors) > 0.7)
+	    if (((double)total_live_sectors / total_sectors) > 0.6)
 		continue;
 	    do_gc(lk);
 	}
@@ -836,13 +875,15 @@ public:
 	map = omap;
 	current_batch = NULL;
 	last_written = last_pushed = 0;
+	fp = fopen("/tmp/xlate.log", "w");
     }
     ~translate() {
 #if 1
-	printf("xl: batches %ld (8MiB)\n", batches.size());
-	printf("xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
-	printf("omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));
-	printf("gc %d read %d write %d\n", gc_cycles, gc_sectors_read, gc_sectors_written);
+	fprintf(fp, "xl: batches %ld (8MiB)\n", batches.size());
+	fprintf(fp, "xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
+	fprintf(fp, "omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));
+	fprintf(fp, "gc %d read %d write %d delete %d\n", gc_cycles, gc_sectors_read, gc_sectors_written,
+	    gc_deleted);
 #endif
 	while (!batches.empty()) {
 	    auto b = batches.top();
@@ -1694,6 +1735,10 @@ public:
 	auto name = std::string(prefix) + "." + hex(seq);
 	return write_object(name.c_str(), iov, iovcnt);
     }
+    void delete_numbered_object(int seq) {
+	auto name = std::string(prefix) + "." + hex(seq);
+	unlink(name.c_str());
+    }
     ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) {
 	int fd = open(name, O_RDONLY);
 	if (fd < 0)
@@ -2443,6 +2488,11 @@ public:
 	sprintf(name, "%s.%08x", prefix, seq);
 	//auto name = std::string(prefix) + "." + hex(seq);
 	return write_object(name, iov, iovcnt);
+    }
+    void delete_numbered_object(int seq) {
+	char name[128];
+	sprintf(name, "%s.%08x", prefix, seq);
+	rados_remove(io_ctx, name);
     }
     ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) {
 	return rados_read(io_ctx, name, buf, len, offset);
