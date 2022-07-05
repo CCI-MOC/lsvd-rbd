@@ -1,0 +1,10 @@
+--- lsvd_rbd.cc
++++ lsvd_rbd.cc
+@@ -967,6 +969,7 @@ class read_cache {
+ 			finish = start + (blk_top_offset - blk_offset);
+ 		    size_t bytes = 512 * (finish - start);
+ 
++		    n_hits += (finish - start) / 8;
+ 		    xprintf("rc: %d+%d in_cache: %d\n", (int)base, (int)bytes/512, (int)start);
+ 		    auto tmp = iovs.slice(buf_offset, buf_offset+bytes);
+ 		    if (preadv(fd, tmp.data(), tmp.size(), 512*start) < 0)

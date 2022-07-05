@@ -633,7 +633,9 @@ class translate {
 	     */
 	    extmap::cachemap file_map;
 	    sector_t offset = 0;
-	    char *buf = (char*)malloc(10*1024*1024);
+	    //char *buf = (char*)malloc(10*1024*1024);
+            char *buf = (char*)aligned_alloc(512, 10*1024*1024);
+
 	    for (auto [i,sectors] : objs_to_clean) {
 		//printf("\ngc read %d\n", i);
 		io->read_numbered_object(i, buf, sectors*512, 0);
@@ -675,7 +677,7 @@ class translate {
 		 * TODO: read everything in, put it in a bufmap, and then go back and construct
 		 * an iovec for the subset that's still valid.
 		 */
-		char *buf = (char*)malloc(sectors * 512);
+		char *buf = (char*)aligned_alloc(512, sectors * 512);
 
 		lk.lock();
 		off_t byte_offset = 0;
@@ -2728,7 +2730,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     char *aligned_buf = buf;
-    assert(aligned(buf, 512));
+    //assert(aligned(buf, 512));
     if (!aligned(buf, 512))
 	aligned_buf = (char*)aligned_alloc(512, len);
     auto p = (lsvd_completion*)c;
@@ -2792,7 +2794,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char
     }
 
     /* ugly - now I have to repeast the closure code to remove the reference
-     * from up top
+     * from up top LOOKUP
      */
     if (0 == --p->n) {
 	if (aligned_buf != buf) 

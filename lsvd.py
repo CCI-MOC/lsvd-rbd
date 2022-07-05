@@ -110,6 +110,9 @@ class write_cache:
         os.close(self.fd)
         lsvd_lib.wcache_close(self.wcache)
 
+    def w_cache_close(self):
+        lsvd_lib.wcache_close(self.wcache)
+
     def read(self, offset, nbytes):
         assert (nbytes % 512) == 0 and (offset % 512) == 0
         buf = (c_char * nbytes)()
