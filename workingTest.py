@@ -135,7 +135,7 @@ class tests(unittest.TestCase):
 		startup()
 		reps = 200
 		arr = [0]*reps
-		numWrites = 100
+		numWrites = 1000
 		t = list(range(reps))
 		for x in range(reps):
 			st = time.time()
