@@ -153,7 +153,7 @@ class tests(unittest.TestCase):
 		plt.xlabel('1000 writes per tick')
 		plt.ylabel('time in seconds')
 		plt.title('Time it takes per 1000 writes')
-		plt.savefig('Time_per_writes.png')
+		plt.savefig('Time_per_writes_2.png')
 		finish()
 
 if __name__ == '__main__':
