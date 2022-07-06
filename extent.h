@@ -22,6 +22,8 @@
 //   set - access() / dirty() - set
 //   get - a() / d()
 // note that D bit is set internally, while A bit is set by the user
+#ifndef EXTENT_H
+#define EXTENT_H
 
 #include <cstddef>
 #include <stdint.h>
@@ -682,3 +684,4 @@ namespace extmap {
     typedef extmap<lba2lba,int64_t,int64_t>    cachemap2;
 }
 
+#endif

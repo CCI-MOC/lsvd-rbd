@@ -1,3 +1,6 @@
+#ifndef LSVD_INCLUDES_H
+#define LSVD_INCLUDES_H
+
 #include "extent.h"
 #include "objects.h"
 #include "journal2.h"
@@ -30,3 +33,5 @@ namespace fs = std::experimental::filesystem;
 #include <string.h>
 #include <errno.h>
 #include <libaio.h>
+
+#endif

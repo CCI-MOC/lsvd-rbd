@@ -1,3 +1,6 @@
+#include "lsvd_includes.h"
+#include "base_functions.h"
+#include "batch.h"
 #include "translate.h"
 
     char *read_object_hdr(const char *name, bool fast) {

@@ -1,3 +1,6 @@
+#ifndef JOURNAL2_H
+#define JOURNAL2_H
+
 #include <stdint.h>
 #include <vector>
 
@@ -169,3 +172,5 @@ struct j_be_rados {
  * - superblock
  * - move volume UUID to superblock??? maybe have it everywhere.
  */
+
+#endif

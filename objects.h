@@ -2,6 +2,8 @@
 // file:        objects.cc
 // description: header, checkpoint etc. objects
 //
+#ifndef OBJECTS_H
+#define OBJECTS_H
 
 #include <cstddef>
 #include <stdint.h>
@@ -118,3 +120,5 @@ struct ckpt_mapentry {
     int32_t obj;
     int32_t offset;
 };
+
+#endif

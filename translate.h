@@ -1,11 +1,8 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
-#include "lsvd_includes.h"
-#include "base_functions.h"
-
 class translate {
-    FILE *fp
+    FILE *fp;
 	
     std::mutex   m;
     objmap      *map;
@@ -132,6 +129,6 @@ public:
     void reset(void);
     int frontier(void);
 
-}
+};
 
 #endif

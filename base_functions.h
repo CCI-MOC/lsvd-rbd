@@ -1,3 +1,6 @@
+#ifndef BASE_FUNCTIONS_H
+#define BASE_FUNCTIONS_H
+
 #include "lsvd_includes.h"
 
 std::mutex printf_m;
@@ -117,3 +120,5 @@ void delete_wrapped(void *ptr)
 }
 
 /* ----- */
+
+#endif

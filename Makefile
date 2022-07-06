@@ -10,11 +10,11 @@ SOFLAGS = -shared -fPIC
 liblsvd.so: refactor_lsvd.cc extent.h journal2.h objects.h translate.o base_functions.h
 	$(CC) -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
-translate.o: translate.h extent.h journal2.h objects.h base_functions.h
-	$(CC) -c -std=c++17 translate.cc $(OPT) $(CXXFLAGS)
+translate.o: translate.h
+	$(CC) -c translate.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 lsvd_rbd.o: lsvd_rbd.cc extent.h journal2.h smartiov.h objects.h
-	$(CC) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS) 
+	$(CC) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)
 
 bdus: bdus.o lsvd_rbd.o extent.h journal2.h
 	$(CC) lsvd_rbd.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados
