@@ -7,7 +7,7 @@
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 
-#include "objects.cc"
+#include "objects.h"
 #include "argparse.hpp"
 
 #include "scandirpp.h"

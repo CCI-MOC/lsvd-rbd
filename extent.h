@@ -1,4 +1,4 @@
-// file:        extent.cc
+// file:        extent.h
 // description: Extent map for S3 Block Device
 // author:      Peter Desnoyers, Northeastern University
 //              Copyright 2021, 2022 Peter Desnoyers

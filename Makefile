@@ -5,25 +5,25 @@ CFLAGS = -ggdb3 -Wall -Wno-psabi
 CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 
-liblsvd.so: lsvd_rbd.cc extent.cc journal2.cc objects.cc
+liblsvd.so: lsvd_rbd.cc extent.h journal2.h objects.h
 	g++ -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
-lsvd_rbd.o: lsvd_rbd.cc extent.cc journal2.cc smartiov.cc objects.cc
+lsvd_rbd.o: lsvd_rbd.cc extent.h journal2.h smartiov.h objects.h
 	g++ -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS) 
 
-bdus: bdus.o lsvd_rbd.o extent.cc journal2.cc
+bdus: bdus.o lsvd_rbd.o extent.h journal2.h
 	g++ lsvd_rbd.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados
 
-mkdisk: mkdisk.cc objects.cc
+mkdisk: mkdisk.cc objects.h
 	g++ mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
 
 clean:
 	rm -f liblsvd.so bdus mkdisk
 
-unit-test: unit-test.cc extent.cc
+unit-test: unit-test.cc extent.h
 	g++ $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs
 
-unit-test-O3: unit-test.cc extent.cc
+unit-test-O3: unit-test.cc extent.h
 	g++ $(CXXFLAGS) -O3 -o $@ unit-test.cc -lstdc++fs
 
 check_lsvd_syms: lsvd.py liblsvd.so
