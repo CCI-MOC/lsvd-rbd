@@ -3,15 +3,15 @@
 #include "batch.h"
 #include "translate.h"
 
-    char *read_object_hdr(const char *name, bool fast) {
+    char *translate::read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
-	if (io->read_object(name, (char*)h, 4096, 0) < 0)
+	if (translate::io->read_object(name, (char*)h, 4096, 0) < 0)
 	    goto fail;
 	if (fast)
 	    return (char*)h;
 	if (h->hdr_sectors > 8) {
 	    h = (hdr*)realloc(h, h->hdr_sectors * 512);
-	    if (io->read_object(name, (char*)h, h->hdr_sectors*512, 0) < 0)
+	    if (translate::io->read_object(name, (char*)h, h->hdr_sectors*512, 0) < 0)
 		goto fail;
 	}
 	return (char*)h;
@@ -20,9 +20,9 @@
 	return NULL;
     }
 
-    ssize_t read_super(const char *name, std::vector<uint32_t> &ckpts,
+    ssize_t translate::read_super(const char *name, std::vector<uint32_t> &ckpts,
 		       std::vector<clone_p> &clones, std::vector<snap_info> &snaps) {
-	super = read_object_hdr(name, false);
+	super = translate::read_object_hdr(name, false);
 	super_h = (hdr*)super;
 	super_len = super_h->hdr_sectors * 512;
 
@@ -45,9 +45,9 @@
 	return super_sh->vol_size * 512;
     }
 
-    ssize_t read_data_hdr(int seq, hdr &h, data_hdr &dh, std::vector<uint32_t> &ckpts,
+    ssize_t translate::read_data_hdr(int seq, hdr &h, data_hdr &dh, std::vector<uint32_t> &ckpts,
 		       std::vector<obj_cleaned> &cleaned, std::vector<data_map> &dmap) {
-	auto name = io->object_name(seq);
+	auto name = translate::io->object_name(seq);
 	char *buf = read_object_hdr(name.c_str(), false);
 	if (buf == NULL)
 	    return -1;
@@ -69,9 +69,9 @@
 	return 0;
     }
 
-    ssize_t read_checkpoint(int seq, std::vector<uint32_t> &ckpts, std::vector<ckpt_obj> &objects, 
+    ssize_t translate::read_checkpoint(int seq, std::vector<uint32_t> &ckpts, std::vector<ckpt_obj> &objects, 
 			    std::vector<deferred_delete> &deletes, std::vector<ckpt_mapentry> &dmap) {
-	auto name = io->object_name(seq);
+	auto name = translate::io->object_name(seq);
 	char *buf = read_object_hdr(name.c_str(), false);
 	if (buf == NULL)
 	    return -1;
@@ -91,7 +91,7 @@
 	return 0;
     }
 
-    void do_completions(int32_t seq, void *closure) {
+    void translate::do_completions(int32_t seq, void *closure) {
 	std::unique_lock lk(m_c);
 	if (seq == next_completion) {
 	    next_completion++;
@@ -109,7 +109,7 @@
 	cv_c.notify_all();
     }
 
-    int write_checkpoint(int seq) {
+    int translate::write_checkpoint(int seq) {
 	std::vector<ckpt_mapentry> entries;
 	std::vector<ckpt_obj> objects;
 	
@@ -163,7 +163,7 @@
 		cv_c.wait(lk_complete);
 	    next_completion++;
 	}
-	io->write_numbered_object(seq, iov, 4);
+	translate::io->write_numbered_object(seq, iov, 4);
 
 	size_t offset = sizeof(*super_h) + sizeof(*super_sh);
 
@@ -172,11 +172,11 @@
 	super_sh->ckpts_len = sizeof(seq);
 	*(int*)(super + offset) = seq;
 	struct iovec iov2 = {super, 4096};
-	io->write_object(super_name, &iov2, 1);
+	translate::io->write_object(super_name, &iov2, 1);
 	return seq;
     }
 
-    int make_hdr(char *buf, batch *b) {
+    int translate::make_hdr(char *buf, batch *b) {
 	hdr *h = (hdr*)buf;
 	data_hdr *dh = (data_hdr*)(h+1);
 	uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
@@ -204,7 +204,7 @@
 	return (char*)dm - (char*)buf;
     }
 
-    sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
+    sector_t translate::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents) {
 	hdr *h = (hdr*)buf;
 	data_hdr *dh = (data_hdr*)(h+1);
@@ -236,7 +236,7 @@
 	return hdr_sectors;
     }
 
-    void do_gc(std::unique_lock<std::mutex> &lk) {
+    void translate::do_gc(std::unique_lock<std::mutex> &lk) {
 	//printf("\n** DO_GC **\n");
 	gc_cycles++;
 	int max_obj = batch_seq;
@@ -294,7 +294,7 @@
 
 	    for (auto [i,sectors] : objs_to_clean) {
 		//printf("\ngc read %d\n", i);
-		io->read_numbered_object(i, buf, sectors*512, 0);
+		translate::io->read_numbered_object(i, buf, sectors*512, 0);
 		gc_sectors_read += sectors;
 		extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
 		file_map.update(_base, _limit, offset);
@@ -399,14 +399,14 @@
 			do_completions(seq, closure);
 			return true;
 		    });
-		io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
+		translate::io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
 					      call_wrapped, closure2);
 	    }
 	    close(fd);
 	}
 	
 	for (auto [i, _xx] : objs_to_clean) {
-	    io->delete_numbered_object(i);
+	    translate::io->delete_numbered_object(i);
 	    gc_deleted++;
 	}
 	lk.lock();
@@ -414,7 +414,7 @@
 
 
 
-    void gc_thread(thread_pool<int> *p) {
+    void translate::gc_thread(thread_pool<int> *p) {
 	auto interval = std::chrono::milliseconds(100);
 	sector_t trigger = 128 * 1024 * 2; // 128 MB
 	const char *name = "gc";
@@ -433,7 +433,7 @@
 	}
     }
     
-    void worker_thread(thread_pool<batch*> *p) {
+    void translate::worker_thread(thread_pool<batch*> *p) {
 	while (p->running) {
 	    std::unique_lock<std::mutex> lk(m);
 	    batch *b;
@@ -484,12 +484,12 @@
 		    return true;
 		});
 	    puts_outstanding++;
-	    io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
+	    translate::io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
 					  call_wrapped, closure2);
 	}
     }
 
-    void ckpt_thread(thread_pool<int> *p) {
+    void translate::ckpt_thread(thread_pool<int> *p) {
 	auto one_second = std::chrono::seconds(1);
 	auto seq0 = batch_seq;
 	const int ckpt_interval = 100;
@@ -505,7 +505,7 @@
 	}
     }
 
-    void flush_thread(thread_pool<int> *p) {
+    void translate::flush_thread(thread_pool<int> *p) {
 	auto wait_time = std::chrono::milliseconds(500);
 	auto timeout = std::chrono::seconds(2);
 	auto t0 = std::chrono::system_clock::now();
@@ -527,7 +527,7 @@
 	}
     }
 
-    int checkpoint(void) {
+    int translate::checkpoint(void) {
 	std::unique_lock<std::mutex> lk(m);
 	if (current_batch && current_batch->len > 0) {
 	    last_pushed = current_batch->seq;
@@ -541,7 +541,7 @@
 	return write_checkpoint(seq);
     }
 
-    int flush(void) {
+    int translate::flush(void) {
 	std::unique_lock<std::mutex> lk(m);
 	int val = 0;
 	if (current_batch && current_batch->len > 0) {
@@ -555,7 +555,7 @@
 	return val;
     }
 
-    ssize_t init(const char *name, int nthreads, bool timedflush) {
+    ssize_t translate::init(const char *name, int nthreads, bool timedflush) {
 	std::vector<uint32_t>  ckpts;
 	std::vector<clone_p>   clones;
 	std::vector<snap_info> snaps;
@@ -624,10 +624,10 @@
 	return bytes;
     }
 
-    void shutdown(void) {
+    void translate::shutdown(void) {
     }
 
-    ssize_t writev(size_t offset, iovec *iov, int iovcnt) {
+    ssize_t translate::writev(size_t offset, iovec *iov, int iovcnt) {
 	std::unique_lock<std::mutex> lk(m);
 	size_t len = iov_sum(iov, iovcnt);
 
@@ -669,7 +669,7 @@
 	return len;
     }
 
-    ssize_t readv(size_t offset, iovec *iov, int iovcnt) {
+    ssize_t translate::readv(size_t offset, iovec *iov, int iovcnt) {
 	smartiov iovs(iov, iovcnt);
 	size_t len = iovs.bytes();
 	int64_t base = offset / 512;
@@ -727,27 +727,27 @@
     }
 
     // debug methods
-    int inmem(int max, int *list) {
+    int translate::inmem(int max, int *list) {
 	int i = 0;
 	for (auto it = in_mem_objects.begin(); i < max && it != in_mem_objects.end(); it++)
 	    list[i++] = it->first;
 	return i;
     }
-    void getmap(int base, int limit, int (*cb)(void *ptr,int,int,int,int), void *ptr) {
+    void translate::getmap(int base, int limit, int (*cb)(void *ptr,int,int,int,int), void *ptr) {
 	for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, oo] = it->vals(base, limit);
 	    if (!cb(ptr, (int)_base, (int)_limit, (int)oo.obj, (int)oo.offset))
 		break;
 	}
     }
-    int mapsize(void) {
+    int translate::mapsize(void) {
 	return map->map.size();
     }
-    void reset(void) {
+    void translate::reset(void) {
 	map->map.reset();
     }
-    int frontier(void) {
-	if (current_batch)
+    int translate::frontier(void) {
+	if (translate::current_batch)
 	    return current_batch->len / 512;
 	return 0;
     }
