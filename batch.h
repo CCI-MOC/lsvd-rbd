@@ -30,30 +30,16 @@ struct batch {
     std::vector<data_map> entries;
 public:
     batch(size_t _max) {
-	buf = (char*)malloc(_max);
-	max = _max;
+        buf = (char*)malloc(_max);
+        max = _max;
     }
-    ~batch(){
-	free((void*)buf);
+    ~batch() {
+        free((void*)buf);
     }
-    void reset(void) {
-	len = 0;
-	entries.resize(0);
-	seq = batch_seq++;
-    }
-    void append_iov(uint64_t lba, iovec *iov, int iovcnt) {
-	char *ptr = buf + len;
-	for (int i = 0; i < iovcnt; i++) {
-	    memcpy(ptr, iov[i].iov_base, iov[i].iov_len);
-	    entries.push_back((data_map){lba, iov[i].iov_len / 512});
-	    ptr += iov[i].iov_len;
-	    len += iov[i].iov_len;
-	    lba += iov[i].iov_len / 512;
-	}
-    }
-    int hdrlen(void) {
-	return sizeof(hdr) + sizeof(data_hdr) + entries.size() * sizeof(data_map);
-    }
+
+    void reset(void);
+    void append_iov(uint64_t lba, iovec *iov, int iovcnt);
+    int hdrlen(void);
 };
 
 template <class T>
@@ -79,50 +65,20 @@ public:
 	    pool.pop();
 	}
     }	
-    bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
-	while (running && q.empty())
-	    cv.wait(lk);
-	if (!running)
-	    return false;
-	val = q.front();
-	q.pop();
-	return val;
-    }
-    bool get(T &val) {
-	std::unique_lock<std::mutex> lk(*m);
-	return get_locked(lk, val);
-    }
-    bool wait_locked(std::unique_lock<std::mutex> &lk) {
-	while (running && q.empty())
-	    cv.wait(lk);
-	return running;
-    }
-    bool get_nowait(T &val) {
-	if (!running || q.empty())
-	    return false;
-	val = q.front();
-	q.pop();
-	return true;
-    }
-    void put_locked(T work) {
-	q.push(work);
-	cv.notify_one();
-    }
-    void put(T work) {
-	std::unique_lock<std::mutex> lk(*m);
-	put_locked(work);
-    }
+    bool get_locked(std::unique_lock<std::mutex> &lk, T &val);
+    bool get(T &val);
+    bool wait_locked(std::unique_lock<std::mutex> &lk);
+    bool get_nowait(T &val);
+    void put_locked(T work);
+    void put(T work);
 };
 
 /* these all should probably be combined with the stuff in objects.cc to create
  * object classes that serialize and de-serialize themselves. Sometime, maybe.
  */
-template <class T>
-void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals) {
-    T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
-    for (; p < end; p++)
-	vals.push_back(*p);
-}
+template<class T>
+void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals);
+
 
 class objmap {
 public:
@@ -130,8 +86,48 @@ public:
     extmap::objmap    map;
 };
 
-void throw_fs_error(std::string msg) {
-    throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
-}
+void throw_fs_error(std::string msg);
+
+struct cache_work {
+public:
+    uint64_t  lba;
+    void    (*callback)(void*);
+    void     *ptr;
+    lba_t     sectors;
+    smartiov  iovs;
+    cache_work(lba_t _lba, const iovec *iov, int iovcnt,
+	       void (*_callback)(void*), void *_ptr) : iovs(iov, iovcnt) {
+	lba = _lba;
+	sectors = iovs.bytes() / 512;
+	callback = _callback;
+	ptr = _ptr;
+    }
+};
+
+/* misc helpers stuff */
+
+static bool aligned(const void *ptr, int a);
+
+
+/* convenience class, because we don't know cache size etc.
+ * at cache object construction time.
+ */
+template <class T>
+class sized_vector {
+    std::vector<T> *elements;
+public:
+    ~sized_vector() {
+        delete elements;
+    }
+    void init(int n) {
+        elements = new std::vector<T>(n);
+    }
+    void init(int n, T val) {
+        elements = new std::vector<T>(n, val);
+    }
+    T &operator[](int index) {
+        return (*elements)[index];
+    }
+};
 
 #endif
