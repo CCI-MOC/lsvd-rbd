@@ -7,7 +7,7 @@ CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 
 # liblsvd.so: lsvd_rbd.cc extent.h journal2.h objects.h
-liblsvd.so: refactor_lsvd.cc extent.h journal2.h objects.h translate.o io.o base_functions.h batch.o read_cache.o
+liblsvd.so: refactor_lsvd.cc extent.h journal2.h objects.h translate.o io.o batch.o read_cache.o write_cache.o
 	$(CC) -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 translate.o: translate.h
@@ -21,6 +21,9 @@ batch.o: batch.h
 
 read_cache.o: read_cache.h
 	$(CC) -c read_cache.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
+
+write_cache.o: write_cache.h
+	$(CC) -c write_cache.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 lsvd_rbd.o: lsvd_rbd.cc extent.h journal2.h smartiov.h objects.h
 	$(CC) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)

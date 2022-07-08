@@ -1,6 +1,8 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
+#include "batch.h"
+
 class translate {
     FILE *fp;
 	
