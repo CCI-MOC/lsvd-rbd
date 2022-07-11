@@ -1,3 +1,12 @@
+/*
+base_functions.h : A lot of base generic functions and minor structures used
+by many portions of the lsvd system:
+	-debug initializations
+	-_log structure
+	-rounding up functions
+	-wrapper functions
+*/
+
 #ifndef BASE_FUNCTIONS_H
 #define BASE_FUNCTIONS_H
 

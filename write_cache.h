@@ -1,3 +1,7 @@
+/*
+write_cache.h : Full include file of the write_cache for lsvd.
+*/
+
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H
 

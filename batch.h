@@ -1,3 +1,14 @@
+/*
+batch.h : include file which contains several of the important classes and structures
+used directly by translate and cache classes:
+	-Entire backend class***
+	-batch class for translate class***
+	-thread_pool class for translate class
+	-cache_work structure for caches
+	-sized_vector for caches
+	-commonly used objmap structure
+*/
+
 #ifndef BATCH_H
 #define BATCH_H
 

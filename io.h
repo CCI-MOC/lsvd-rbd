@@ -1,3 +1,8 @@
+/*
+io.h : include file containing all of the main io functions used by the lsvd system 
+including a base structure for io: e_iocb
+*/
+
 #ifndef IO_H
 #define IO_H
 

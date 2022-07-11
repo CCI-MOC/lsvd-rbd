@@ -1,3 +1,13 @@
+/* 
+read_cache.h : Full include file of the read_class for lsvd. 
+the read cache is:
+ * 1. indexed by obj/offset[*], not LBA
+ * 2. stores aligned 64KB blocks 
+ * [*] offset is in units of 64KB blocks
+
+
+*/
+
 #ifndef READ_CACHE_H
 #define READ_CACHE_H
 
@@ -6,12 +16,6 @@
 #include "base_functions.h"
 #include "translate.h"
 #include "io.h"
-
-/* the read cache is:
- * 1. indexed by obj/offset[*], not LBA
- * 2. stores aligned 64KB blocks 
- * [*] offset is in units of 64KB blocks
- */
 
 class read_cache {
     
