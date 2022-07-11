@@ -751,3 +751,4 @@
 	    return current_batch->len / 512;
 	return 0;
     }
+

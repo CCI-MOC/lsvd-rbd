@@ -151,5 +151,6 @@ public:
     void do_write_checkpoint(void);
 };
 
+static bool aligned(const void *ptr, int a);
 
 #endif

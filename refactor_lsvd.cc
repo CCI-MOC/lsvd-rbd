@@ -11,7 +11,7 @@
 #include "translate.h"
 #include "io.h"
 #include "read_cache.h"
-
+#include "write_cache.h"
 /* the read cache is:
  * 1. indexed by obj/offset[*], not LBA
  * 2. stores aligned 64KB blocks 

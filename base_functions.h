@@ -64,11 +64,11 @@ int last_ckpt;
 const int BATCH_SIZE = 8 * 1024 * 1024;
 uuid_t my_uuid;
 
-static int div_round_up(int n, int m)
+int div_round_up(int n, int m)
 {
     return (n + m - 1) / m;
 }
-static int round_up(int n, int m)
+int round_up(int n, int m)
 {
     return m * div_round_up(n, m);
 }

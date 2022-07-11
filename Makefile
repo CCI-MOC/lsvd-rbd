@@ -35,7 +35,7 @@ mkdisk: mkdisk.cc objects.h
 	$(CC) mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
 
 clean:
-	rm -f liblsvd.so bdus mkdisk
+	rm -f liblsvd.so bdus mkdisk io.o batch.o read_cache.o write_cache.o translate.o
 
 unit-test: unit-test.cc extent.h
 	$(CC) $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs

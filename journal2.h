@@ -1,3 +1,9 @@
+/* 
+This file, journal2.h, features structures which are used for the each of the
+logging systems used in the lsvd system, including structures of superblocks for
+both the write and read caches, and the connecting structures between them and 
+the how they fit together with rados and s3
+*/
 #ifndef JOURNAL2_H
 #define JOURNAL2_H
 

@@ -106,8 +106,9 @@ public:
 
 /* misc helpers stuff */
 
-static bool aligned(const void *ptr, int a);
+// static bool aligned(const void *ptr, int a);
 
+//static int round_up(int n, int m);
 
 /* convenience class, because we don't know cache size etc.
  * at cache object construction time.
