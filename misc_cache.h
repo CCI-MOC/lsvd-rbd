@@ -15,44 +15,6 @@ used directly by translate and cache classes:
 #include "lsvd_includes.h"
 #include "base_functions.h"
 
-class backend {
-public:
-    virtual ssize_t write_object(const char *name, iovec *iov, int iovcnt) = 0;
-    virtual ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) = 0;
-    virtual ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) = 0;
-    virtual ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt,
-					  size_t offset) = 0;
-    virtual void    delete_numbered_object(int seq) = 0;
-    virtual ssize_t read_numbered_object(int seq, char *buf, size_t len,
-					 size_t offset) = 0;
-    virtual int aio_read_num_object(int seq, char *buf, size_t len, size_t offset,
-				    void (*cb)(void*), void *ptr) = 0;
-    virtual int aio_write_numbered_object(int seq, iovec *iov, int iovcnt,
-					  void (*cb)(void*), void *ptr) = 0;
-    virtual std::string object_name(int seq) = 0;
-    virtual ~backend(){}
-};
-
-struct batch {
-    char  *buf;
-    size_t max;
-    size_t len;
-    int    seq;
-    std::vector<data_map> entries;
-public:
-    batch(size_t _max) {
-        buf = (char*)malloc(_max);
-        max = _max;
-    }
-    ~batch() {
-        free((void*)buf);
-    }
-
-    void reset(void);
-    void append_iov(uint64_t lba, iovec *iov, int iovcnt);
-    int hdrlen(void);
-};
-
 template <class T>
 class thread_pool {
 public:
@@ -104,9 +66,9 @@ public:
     uint64_t  lba;
     void    (*callback)(void*);
     void     *ptr;
-    lba_t     sectors;
+    sector_t     sectors;
     smartiov  iovs;
-    cache_work(lba_t _lba, const iovec *iov, int iovcnt,
+    cache_work(sector_t _lba, const iovec *iov, int iovcnt,
 	       void (*_callback)(void*), void *_ptr) : iovs(iov, iovcnt) {
 	lba = _lba;
 	sectors = iovs.bytes() / 512;

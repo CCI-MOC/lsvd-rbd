@@ -74,7 +74,7 @@
 
     std::pair<size_t,size_t> read_cache::async_read(size_t offset, char *buf, size_t len,
                                         void (*cb)(void*), void *ptr) {
-        lba_t base = offset/512, sectors = len/512, limit = base+sectors;
+        sector_t base = offset/512, sectors = len/512, limit = base+sectors;
         size_t skip_len = 0, read_len = 0;
         extmap::obj_offset oo = {0, 0};
 

@@ -63,7 +63,6 @@ std::random_device rd;     // only used once to initialise (seed) engine
 //std::mt19937 rng(rd());  // random-number engine used (Mersenne-Twister in this case)
 std::mt19937 rng(17);      // for deterministic testing
 
-typedef int64_t lba_t;
 typedef int64_t sector_t;
 typedef int page_t;
 

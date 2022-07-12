@@ -1,7 +1,28 @@
 #include "lsvd_includes.h"
 #include "base_functions.h"
-#include "batch.h"
 #include "translate.h"
+#include "io.h"
+
+    void batch::reset(void) {
+        len = 0;
+        entries.resize(0);
+        seq = batch_seq++;
+    }
+
+    void batch::append_iov(uint64_t lba, iovec *iov, int iovcnt) {
+        char *ptr = buf + len;
+        for (int i = 0; i < iovcnt; i++) {
+            memcpy(ptr, iov[i].iov_base, iov[i].iov_len);
+            entries.push_back((data_map){lba, iov[i].iov_len / 512});
+            ptr += iov[i].iov_len;
+            len += iov[i].iov_len;
+            lba += iov[i].iov_len / 512;
+        }
+    }
+
+    int batch::hdrlen(void) {
+        return sizeof(hdr) + sizeof(data_hdr) + entries.size() * sizeof(data_map);
+    }
 
     char *translate::read_object_hdr(const char *name, bool fast) {
 	hdr *h = (hdr*)malloc(4096);
@@ -182,7 +203,7 @@
 	uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
 	    o2 = o1 + l1, l2 = b->entries.size() * sizeof(data_map),
 	    hdr_bytes = o2 + l2;
-	lba_t hdr_sectors = div_round_up(hdr_bytes, 512);
+	sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
 	
 	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_DATA, .seq = (uint32_t)b->seq,
@@ -211,7 +232,7 @@
 	uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
 	    o2 = o1 + l1, l2 = n_extents * sizeof(data_map),
 	    hdr_bytes = o2 + l2;
-	lba_t hdr_sectors = div_round_up(hdr_bytes, 512);
+	sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
 
 	*h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_DATA, .seq = seq,

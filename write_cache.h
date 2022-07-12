@@ -5,12 +5,12 @@ write_cache.h : Full include file of the write_cache for lsvd.
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H
 
-#include "lsvd_includes.h"
-#include "base_functions.h"
+//#include "lsvd_includes.h"
+//#include "base_functions.h"
 #include "translate.h"
-#include "io.h"
-#include "batch.h"
-
+//#include "io.h"
+//#include "batch.h"
+#include "backend.h"
 /* all addresses are in units of 4KB blocks
  */
 class write_cache {

@@ -11,11 +11,11 @@ the read cache is:
 #ifndef READ_CACHE_H
 #define READ_CACHE_H
 
-#include "lsvd_includes.h"
-#include "batch.h"
-#include "base_functions.h"
+//#include "batch.h"
+#include "backend.h"
+//#include "base_functions.h"
 #include "translate.h"
-#include "io.h"
+//#include "io.h"
 
 class read_cache {
     

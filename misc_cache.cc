@@ -1,27 +1,6 @@
 #include "lsvd_includes.h"
 #include "base_functions.h"
-#include "batch.h"
-
-    void batch::reset(void) {
-        len = 0;
-        entries.resize(0);
-        seq = batch_seq++;
-    }
-
-    void batch::append_iov(uint64_t lba, iovec *iov, int iovcnt) {
-        char *ptr = buf + len;
-        for (int i = 0; i < iovcnt; i++) {
-            memcpy(ptr, iov[i].iov_base, iov[i].iov_len);
-            entries.push_back((data_map){lba, iov[i].iov_len / 512});
-            ptr += iov[i].iov_len;
-            len += iov[i].iov_len;
-            lba += iov[i].iov_len / 512;
-        }
-    }
-
-    int batch::hdrlen(void) {
-        return sizeof(hdr) + sizeof(data_hdr) + entries.size() * sizeof(data_map);
-    }
+#include "misc_cache.h"
 
     template<class T>
     bool thread_pool<T>::get_locked(std::unique_lock<std::mutex> &lk, T &val) {

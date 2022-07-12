@@ -52,7 +52,7 @@
                            std::vector<j_extent> &exts_out) {
         std::unique_lock<std::mutex> lk(m);
         for (auto e : exts_in) {
-            lba_t base = e.lba, limit = e.lba + e.len;
+            sector_t base = e.lba, limit = e.lba + e.len;
             for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
                 auto [_base, _limit, ptr] = it->vals(base, limit);
                 if (pg_base*8 <= ptr && ptr < pg_limit*8)
@@ -78,7 +78,7 @@
             auto len = lengths[oldest];
             assert(len > 0);
             lengths.erase(oldest);
-            lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
+            sector_t base = (oldest+1)*8, limit = base + (len-1)*8;
             for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
                 auto [p_base, p_limit, vlba] = it->vals(base, limit);
                 to_delete.push_back((j_extent){(uint64_t)vlba, (uint64_t)p_limit-p_base});
@@ -129,7 +129,7 @@
                     //xprintf("lens[%d] : %d\n", oldest, len);
                     assert(len > 0);
                     lengths.erase(oldest);
-                    lba_t base = (oldest+1)*8, limit = base + (len-1)*8;
+                    sector_t base = (oldest+1)*8, limit = base + (len-1)*8;
                     for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
                         auto [p_base, p_limit, vlba] = it->vals(base, limit);
                         to_delete.push_back((j_extent){(uint64_t)vlba, (uint64_t)p_limit-p_base});
@@ -305,7 +305,7 @@
         j->extent_len = e_bytes;
         memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
 
-        lba_t plba = (blockno+1) * 8;
+        sector_t plba = (blockno+1) * 8;
         auto iovs = new smartiov();
         iovs->push_back((iovec){hdr, 4096});
         for (auto _w : *w) {
@@ -417,7 +417,7 @@
         j->extent_len = e_bytes;
         memcpy((void*)(hdr + sizeof(*j)), &ext, e_bytes);
         
-        lba_t plba = (blockno+1) * 8;
+        sector_t plba = (blockno+1) * 8;
         iovec hdr_iov = (iovec){.iov_base = hdr, .iov_len = 4096};
         auto s_iovs = new smartiov(&hdr_iov, 1);
         s_iovs->ingest(iov, iovcnt);
@@ -455,7 +455,7 @@
      */
     std::pair<size_t,size_t> write_cache::async_read(size_t offset, char *buf, size_t bytes,
                                         void (*cb)(void*), void *ptr) {
-        lba_t base = offset/512, limit = base + bytes/512;
+        sector_t base = offset/512, limit = base + bytes/512;
         std::unique_lock<std::mutex> lk(m);
         off_t nvme_offset = 0;
         size_t skip_len = 0, read_len = 0;

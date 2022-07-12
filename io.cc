@@ -1,5 +1,5 @@
 #include "io.h"
-#include "batch.h"
+#include "misc_cache.h"
 
 
 size_t getsize64(int fd)

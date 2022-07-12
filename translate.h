@@ -1,7 +1,27 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
-#include "batch.h"
+#include "backend.h"
+
+struct batch {
+    char  *buf;
+    size_t max;
+    size_t len;
+    int    seq;
+    std::vector<data_map> entries;
+public:
+    batch(size_t _max) {
+        buf = (char*)malloc(_max);
+        max = _max;
+    }
+    ~batch() {
+        free((void*)buf);
+    }
+
+    void reset(void);
+    void append_iov(uint64_t lba, iovec *iov, int iovcnt);
+    int hdrlen(void);
+};
 
 class translate {
     FILE *fp;

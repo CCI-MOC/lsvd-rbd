@@ -7,7 +7,7 @@ CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 
 # liblsvd.so: lsvd_rbd.cc extent.h journal2.h objects.h
-liblsvd.so: refactor_lsvd.cc extent.h journal2.h objects.h translate.o io.o batch.o read_cache.o write_cache.o file_backend.o
+liblsvd.so: refactor_lsvd.cc extent.h journal2.h objects.h translate.o io.o misc_cache.o read_cache.o write_cache.o backend.o
 	$(CC) -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 translate.o: translate.h
@@ -16,8 +16,8 @@ translate.o: translate.h
 io.o: io.h
 	$(CC) -c io.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
-batch.o: batch.h
-	$(CC) -c batch.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
+misc_cache.o: misc_cache.h
+	$(CC) -c misc_cache.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 read_cache.o: read_cache.h
 	$(CC) -c read_cache.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
@@ -25,8 +25,8 @@ read_cache.o: read_cache.h
 write_cache.o: write_cache.h
 	$(CC) -c write_cache.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
-file_backend.o: file_backend.h
-	$(CC) -c file_backend.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
+backend.o: backend.h
+	$(CC) -c backend.cc $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 lsvd_rbd.o: lsvd_rbd.cc extent.h journal2.h smartiov.h objects.h
 	$(CC) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)
@@ -38,7 +38,7 @@ mkdisk: mkdisk.cc objects.h
 	$(CC) mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
 
 clean:
-	rm -f liblsvd.so bdus mkdisk io.o batch.o read_cache.o write_cache.o translate.o
+	rm -f liblsvd.so bdus mkdisk io.o misc_cache.o read_cache.o write_cache.o translate.o backend.o
 
 unit-test: unit-test.cc extent.h
 	$(CC) $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs
