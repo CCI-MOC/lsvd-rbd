@@ -12,6 +12,7 @@
 #include "io.h"
 #include "read_cache.h"
 #include "write_cache.h"
+#include "file_backend.h"
 /* the read cache is:
  * 1. indexed by obj/offset[*], not LBA
  * 2. stores aligned 64KB blocks 
@@ -22,6 +23,8 @@
 /* simple backend that uses files in a directory. 
  * good for debugging and testing
  */
+
+/*
 class file_backend : public backend {
     char *prefix;
     std::mutex m;
@@ -142,7 +145,7 @@ public:
 	return std::string(prefix) + "." + hex(seq);
     }
 };
-
+*/
 /* -------------- RADOS ------------ */
 
 static std::pair<std::string,std::string> split_string(std::string s, std::string delim)
