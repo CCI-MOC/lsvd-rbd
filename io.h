@@ -6,11 +6,6 @@ including a base structure for io: e_iocb
 #ifndef IO_H
 #define IO_H
 
-#include "lsvd_includes.h"
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <linux/fs.h>
-
 size_t getsize64(int fd);
 
 void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);

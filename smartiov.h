@@ -1,5 +1,9 @@
+#ifndef SMARTIOV_H
+#define SMARTIOV_H
+
 #include <sys/uio.h>
 #include <string.h>
+#include <cassert>
 #include <vector>
 
 /* this makes readv / writev a lot easier...
@@ -112,4 +116,5 @@ int main(int argc, char **argv)
 {
     test1();
 }
+#endif
 #endif

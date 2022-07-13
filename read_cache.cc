@@ -1,3 +1,28 @@
+#include <linux/aio_abi.h>
+#include <uuid/uuid.h>
+#include <queue>
+#include <thread>
+#include <atomic>
+#include <map>
+#include <cassert>
+#include <string>
+#include <shared_mutex>
+#include <stack>
+#include "smartiov.h"
+#include "extent.h"
+
+#include <sys/uio.h>
+#include <string>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+
+#include <unistd.h>
+#include "journal2.h"
+#include "base_functions.h"
+#include "misc_cache.h"
+#include "io.h"
+#include "translate.h"
 #include "read_cache.h"
 
     void read_cache::evict(int n) {

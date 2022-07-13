@@ -527,7 +527,7 @@
             write_checkpoint();
     }
 
-    static bool aligned(const void *ptr, int a)
+bool aligned(const void *ptr, int a)
     {
          return 0 == ((long)ptr & (a-1));
     }

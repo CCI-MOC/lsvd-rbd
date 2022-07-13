@@ -1,8 +1,6 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
-#include "backend.h"
-
 struct batch {
     char  *buf;
     size_t max;

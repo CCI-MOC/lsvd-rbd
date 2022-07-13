@@ -10,7 +10,15 @@ by many portions of the lsvd system:
 #ifndef BASE_FUNCTIONS_H
 #define BASE_FUNCTIONS_H
 
-#include "lsvd_includes.h"
+#include <uuid/uuid.h>
+#include <sys/uio.h>
+
+#include <vector>
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
 
 std::mutex printf_m;
 bool _debug_init_done;

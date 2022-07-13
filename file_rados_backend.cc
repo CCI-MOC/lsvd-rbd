@@ -1,4 +1,5 @@
-#include "backend.h"
+#include <fcntl.h>
+#include "file_rados_backend.h"
 
     int file_backend::get_cached_fd(int seq) {
         std::unique_lock lk(m);

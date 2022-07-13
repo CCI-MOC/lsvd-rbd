@@ -12,9 +12,6 @@ used directly by translate and cache classes:
 #ifndef BATCH_H
 #define BATCH_H
 
-#include "lsvd_includes.h"
-#include "base_functions.h"
-
 template <class T>
 class thread_pool {
 public:

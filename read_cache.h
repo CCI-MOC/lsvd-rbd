@@ -11,12 +11,6 @@ the read cache is:
 #ifndef READ_CACHE_H
 #define READ_CACHE_H
 
-//#include "batch.h"
-#include "backend.h"
-//#include "base_functions.h"
-#include "translate.h"
-//#include "io.h"
-
 class read_cache {
     
     std::mutex m;

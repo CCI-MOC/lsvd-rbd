@@ -1,7 +1,21 @@
-#include "lsvd_includes.h"
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <shared_mutex>
+#include <string>
+#include <unistd.h>
 #include "base_functions.h"
+#include <thread>
+#include "smartiov.h"
+#include "extent.h"
+#include <atomic>
+#include <stack>
+#include <map>
+
+#include "misc_cache.h"
+#include "backend.h"
+#include "objects.h"
 #include "translate.h"
-#include "io.h"
 
     void batch::reset(void) {
         len = 0;

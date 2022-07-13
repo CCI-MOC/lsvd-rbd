@@ -1,3 +1,20 @@
+#include <libaio.h>
+#include <sys/uio.h>
+#include <string>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+
+#include <shared_mutex>
+#include <condition_variable>
+#include <queue>
+#include <thread>
+#include "base_functions.h"
+#include "smartiov.h"
+#include "extent.h"
+#include <mutex>
+
+#include <unistd.h>
 #include "io.h"
 #include "misc_cache.h"
 

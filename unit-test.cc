@@ -5,7 +5,7 @@
 
 #include <stdlib.h>
 #include <assert.h>
-#include "extent.cc"
+#include "extent.h"
 #include <vector>
 
 
