@@ -1,4 +1,4 @@
-#include <libaio.h>
+#include <linux/aio_abi.h>
 #include <uuid/uuid.h>
 #include <queue>
 #include <thread>
@@ -11,17 +11,9 @@
 #include "smartiov.h"
 #include "extent.h"
 
-#include <sys/uio.h>
-#include <string>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <linux/fs.h>
-
 #include <unistd.h>
-#include "objects.h"
 #include "journal2.h"
 #include "base_functions.h"
-#include "backend.h"
 #include "misc_cache.h"
 #include "io.h"
 #include "translate.h"

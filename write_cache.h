@@ -5,11 +5,6 @@ write_cache.h : Full include file of the write_cache for lsvd.
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H
 
-#include <uuid/uuid.h>
-#include <unistd.h>
-#include "journal2.h"
-#include "translate.h"
-#include "io.h"
 /* all addresses are in units of 4KB blocks
  */
 class write_cache {

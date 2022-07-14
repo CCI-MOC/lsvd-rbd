@@ -5,12 +5,39 @@
  * Copyright 2021, 2022 Peter Desnoyers
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
+#include <rados/librados.h>
+#include <libaio.h>
+#include <uuid/uuid.h>
 
+#include <mutex>
+#include <shared_mutex>
+#include <stack>
+#include <queue>
+#include <condition_variable>
+#include <atomic>
+#include <string>
+#include <thread>
+#include <vector>
+#include <string>
+#include <map>
+#include <cassert>
+#include <unistd.h>
 #include <fcntl.h>
+
+#include "journal2.h"
+#include "smartiov.h"
+#include "extent.h"
+#include "objects.h"
+#include "base_functions.h"
+#include "backend.h"
+#include "misc_cache.h"
 #include "translate.h"
+#include "io.h"
 #include "read_cache.h"
 #include "write_cache.h"
-#include "file_rados_backend.h"
+#include "file_backend.h"
+#include "rados_backend.h"
+#include "refactor_lsvd.h"
 /* simple backend that uses files in a directory. 
  * good for debugging and testing
  */
@@ -20,82 +47,17 @@
 /* ------------------- FAKE RBD INTERFACE ----------------------*/
 /* following types are from librados.h
  */
-enum {
-    EVENT_TYPE_PIPE = 1,
-    EVENT_TYPE_EVENTFD = 2
-};
-    
-typedef void *rbd_image_t;
-typedef void *rbd_image_options_t;
-typedef void *rbd_pool_stats_t;
 
-typedef void *rbd_completion_t;
-typedef void (*rbd_callback_t)(rbd_completion_t cb, void *arg);
 
-// typedef void *rados_ioctx_t;
-// typedef void *rados_t;
-// typedef void *rados_config_t;
-
-#define RBD_MAX_BLOCK_NAME_SIZE 24
-#define RBD_MAX_IMAGE_NAME_SIZE 96
-
-/* fio only looks at 'size' */
-typedef struct {
-  uint64_t size;
-  uint64_t obj_size;
-  uint64_t num_objs;
-  int order;
-  char block_name_prefix[RBD_MAX_BLOCK_NAME_SIZE]; /* deprecated */
-  int64_t parent_pool;                             /* deprecated */
-  char parent_name[RBD_MAX_IMAGE_NAME_SIZE];       /* deprecated */
-} rbd_image_info_t;
-
-typedef struct {
-  uint64_t id;
-  uint64_t size;
-  const char *name;
-} rbd_snap_info_t;
-
-/* now our fake implementation
- */
-struct fake_rbd_image {
-    std::mutex   m;
-    backend     *io;
-    objmap      *omap;
-    translate   *lsvd;
-    write_cache *wcache;
-    read_cache  *rcache;
-    ssize_t      size;		// bytes
-    int          fd;		// cache device
-    j_super     *js;		// cache page 0
-    bool         notify;
-    int          eventfd;
-    std::queue<rbd_completion_t> completions;
-};
-
-struct lsvd_completion {
-public:
-    fake_rbd_image *fri;
-    rbd_callback_t cb;
-    void *arg;
-    int retval;
-    bool done = false;
-    std::mutex m;
-    std::condition_variable cv;
-    std::atomic<int> refcount = 0;
-    std::atomic<int> n = 0;
-    iovec iov;			// occasional use only
-    
-    lsvd_completion() {}
-    void get(void) {
+    void lsvd_completion::get(void) {
 	refcount++;
     }
-    void put(void) {
+    void lsvd_completion::put(void) {
 	if (--refcount == 0)
 	    delete this;
     }
     
-    void complete(int val) {
+    void lsvd_completion::complete(int val) {
 	retval = val;
 	std::unique_lock lk(m);
 	done = true;
@@ -109,7 +71,6 @@ public:
 	cv.notify_all();
 	lk.unlock();
     }
-};
 
 extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
 {
@@ -389,7 +350,6 @@ extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
     return 0;
 }
 
-fake_rbd_image *the_fri;	// debug
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
@@ -521,18 +481,6 @@ extern "C" int dbg_lsvd_flush(rbd_image_t image)
     return 0;
 }
 
-struct _dbg {
-public:
-    int type = 0;
-    translate   *lsvd;
-    write_cache *wcache;
-    objmap      *omap;
-    read_cache  *rcache;
-    backend     *io;
-    _dbg(int _t, translate *_l, write_cache *_w, objmap *_o, read_cache *_r, backend *_io) :
-	type(_t), lsvd(_l), wcache(_w), omap(_o), rcache(_r), io(_io) {}
-};
-
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
     auto io = new file_backend(name);
@@ -583,21 +531,7 @@ extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size
     return val < 0 ? -1 : 0;
 }
 
-struct tuple {
-    int base;
-    int limit;
-    int obj;			// object map
-    int offset;
-    int plba;			// write cache map
-};
-
-struct getmap_s {
-    int i;
-    int max;
-    struct tuple *t;
-};
-
-static int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
+int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
 {
     getmap_s *s = (getmap_s*)ptr;
     if (s->i < s->max) 
@@ -731,7 +665,7 @@ extern "C" void wcache_reset(write_cache *wcache)
     wcache->reset();
 }
 
-static int wc_getmap_cb(void *ptr, int base, int limit, int plba)
+int wc_getmap_cb(void *ptr, int base, int limit, int plba)
 {
     getmap_s *s = (getmap_s*)ptr;
     if (s->i < s->max)
