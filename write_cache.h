@@ -35,14 +35,21 @@ class write_cache {
     bool e_io_running = false;
     io_context_t ioctx;
     std::thread e_io_th;
+
+// pages_free :	returns the number of free pages left inside of the write_cache super block
     int pages_free(uint32_t oldest);
+
+// allocate_locked : 	allocates a number of pages n with a mutex lock. If not enough pages are available
+// 			the current super->next pointer is set to &pad, and pages starting with the base
+//			of the write cache super block are allocated. Returns the pointer to the beginning of
+//			allocated data.
     uint32_t allocate_locked(page_t n, page_t &pad,
                              std::unique_lock<std::mutex> &lk);
 
-    uint32_t allocate(page_t n, page_t &pad);
+// mk_header :	sets up a j_hdr structure which functions as a header for the write_cache with the preset of 
+//		the type of header and the number of blocks, returning a pointer 
+//		to that structure, and the set up UUID for the structure inside &uuid
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
-    void get_exts_to_evict(std::vector<j_extent> &exts_in, page_t pg_base, page_t pg_limit, 
-			   std::vector<j_extent> &exts_out);
 
     void evict(void);
     void evict_thread(thread_pool<int> *p);

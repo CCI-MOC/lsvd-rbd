@@ -24,6 +24,8 @@
 
 #include "write_cache.h"
 
+
+
     int write_cache::pages_free(uint32_t oldest) {
         auto size = super->limit - super->base;
         auto tail = (super->next >= oldest) ? oldest + size : oldest;
@@ -51,11 +53,6 @@
         return val;
     }
 
-    uint32_t write_cache::allocate(page_t n, page_t &pad) {
-        std::unique_lock lk(m);
-        return allocate_locked(n, pad, lk);
-    }
-
     j_hdr *write_cache::mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks) {
         memset(buf, 0, 4096);
         j_hdr *h = (j_hdr*)buf;
@@ -72,19 +69,6 @@
      *  oldest == newest : free = N-1
      *  else : free = ((oldest + N) - newest - 1) % N
      */
-    void write_cache::get_exts_to_evict(std::vector<j_extent> &exts_in, page_t pg_base, page_t pg_limit, 
-                           std::vector<j_extent> &exts_out) {
-        std::unique_lock<std::mutex> lk(m);
-        for (auto e : exts_in) {
-            sector_t base = e.lba, limit = e.lba + e.len;
-            for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
-                auto [_base, _limit, ptr] = it->vals(base, limit);
-                if (pg_base*8 <= ptr && ptr < pg_limit*8)
-                    exts_out.push_back((j_extent){.lba = (uint64_t)_base,
-                                .len = (uint64_t)(_limit-_base)});
-            }
-        }
-    }
 
     void write_cache::evict(void) {
         assert(!m.try_lock());  // m must be locked

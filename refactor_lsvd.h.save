@@ -13,10 +13,6 @@ typedef void *rbd_pool_stats_t;
 typedef void *rbd_completion_t;
 typedef void (*rbd_callback_t)(rbd_completion_t cb, void *arg);
 
-// typedef void *rados_ioctx_t;
-// typedef void *rados_t;
-// typedef void *rados_config_t;
-
 #define RBD_MAX_BLOCK_NAME_SIZE 24
 #define RBD_MAX_IMAGE_NAME_SIZE 96
 
@@ -160,7 +156,6 @@ extern "C" void wcache_close(write_cache *wcache);
 extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uint64_t len);
 extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len);
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len);
-
 extern "C" void wcache_reset(write_cache *wcache);
 int wc_getmap_cb(void *ptr, int base, int limit, int plba);
 extern "C" int wcache_getmap(write_cache *wcache, int base, int limit, int max, struct tuple *t);
@@ -181,5 +176,18 @@ extern "C" void rcache_reset(read_cache *rcache);
 
 extern "C" void fakemap_update(_dbg *d, int base, int limit, int obj, int offset);
 extern "C" void fakemap_reset(_dbg *d);
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #endif
