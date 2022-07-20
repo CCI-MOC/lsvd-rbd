@@ -51,12 +51,20 @@ class write_cache {
 //		to that structure, and the set up UUID for the structure inside &uuid
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
 
+// evict :	Checks which pages are free and based on the oldest and deletes them from the cache
     void evict(void);
+
+// ckpt_thread :	Writes a checkpoint if new data has been written to a thread but not recorded in a 
+//			checkpoint within a particular timespan
     void ckpt_thread(thread_pool<int> *p);
     bool ckpt_in_progress = false;
+
+// write_checkpoint : 	writes the super block information and io information back to file, creating 
+//			a save of current write cache metadata and IOPS
     void write_checkpoint(void);
 
 public:
+// constructor for the write cache
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) {
 	super_blkno = blkno;
 	fd = _fd;
@@ -122,6 +130,7 @@ public:
 	const char *name = "write_cache_cb";
 	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
     }
+// deconstructor for the write cache
     ~write_cache() {
 #if 0
 	printf("wc map: %d %d (%ld)\n", map.size(), map.capacity(), sizeof(extmap::lba2lba));
@@ -136,13 +145,26 @@ public:
 	io_queue_release(ioctx);
     }
 
+// send_writes :	clears write_cache work, writes back IOPS, then updates maps, writes the cache
+//			to backend and then clears up all temporary variables
     void send_writes(void);
     bool evicting = false;
+
+// writev :	calls to evict if pages_free > evict trigger, then cachework added to work, and then sends
+//		writes to backend
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr);
+
+// async_read :	
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t bytes,
 					void (*cb)(void*), void *ptr);
+
+// getmap :	
     void getmap(int base, int limit, int (*cb)(void*, int, int, int), void *ptr);
+
+// reset :	resets the map
     void reset(void);
+
+// get_super :	copies the pointer to the write_cache superblock to s
     void get_super(j_write_super *s);
     /* debug:
      * cache eviction - get info from oldest entry in cache. [should be private]
@@ -151,9 +173,13 @@ public:
      *  return value - first page of next record
      */
     page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
+
+// do_write_checkpoint : if map is dirty, writes a checkpoint
     void do_write_checkpoint(void);
 };
 
 bool aligned(const void *ptr, int a);
 
 #endif
+
+

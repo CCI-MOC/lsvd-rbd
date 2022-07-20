@@ -52,10 +52,13 @@ int last_ckpt;
 const int BATCH_SIZE = 8 * 1024 * 1024;
 uuid_t my_uuid;
 
+// div_round_up :	This function simply take two numbers and divides them rounding up.
 int div_round_up(int n, int m)
 {
     return (n + m - 1) / m;
 }
+
+// round_up :	This function rounds up a number n to the nearest multiple of m
 int round_up(int n, int m)
 {
     return m * div_round_up(n, m);
