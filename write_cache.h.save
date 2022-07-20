@@ -51,7 +51,10 @@ class write_cache {
 //		to that structure, and the set up UUID for the structure inside &uuid
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
 
+// evict :	Fully evicts the write_cache, deleting all contents starting with the oldest
     void evict(void);
+
+
     void ckpt_thread(thread_pool<int> *p);
     bool ckpt_in_progress = false;
     void write_checkpoint(void);
@@ -136,6 +139,7 @@ public:
 	io_queue_release(ioctx);
     }
 
+// send_writes :	
     void send_writes(void);
     bool evicting = false;
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr);

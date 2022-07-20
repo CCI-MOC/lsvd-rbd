@@ -23,25 +23,6 @@ namespace fs = std::experimental::filesystem;
         return val;
     }
     template<class T>
-    bool thread_pool<T>::get(T &val) {
-        std::unique_lock<std::mutex> lk(*m);
-        return get_locked(lk, val);
-    }
-    template<class T>
-    bool thread_pool<T>::wait_locked(std::unique_lock<std::mutex> &lk) {
-        while (running && q.empty())
-            cv.wait(lk);
-        return running;
-    }
-    template<class T>
-    bool thread_pool<T>::get_nowait(T &val) {
-        if (!running || q.empty())
-            return false;
-        val = q.front();
-        q.pop();
-        return true;
-    }
-    template<class T>
     void thread_pool<T>::put_locked(T work) {
         q.push(work);
         cv.notify_one();

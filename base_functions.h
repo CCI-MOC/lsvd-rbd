@@ -20,27 +20,7 @@ by many portions of the lsvd system:
 #include <random>
 #include <algorithm>
 
-std::mutex printf_m;
-bool _debug_init_done;
-int  _debug_mask;
 enum {DBG_MAP = 1, DBG_HITS = 2, DBG_AIO = 4};
-
-void debug_init(void)
-{
-    if (getenv("DBG_AIO"))
-	_debug_mask |= DBG_AIO;
-    if (getenv("DBG_HITS"))
-	_debug_mask |= DBG_HITS;
-    if (getenv("DBG_MAP"))
-	_debug_mask |= DBG_MAP;
-}
-    
-#define xprintf(mask, ...) do { \
-    if (!_debug_init_done) debug_init(); \
-    if (mask & _debug_mask) { \
-	std::unique_lock lk(printf_m); \
-	fprintf(stderr, __VA_ARGS__); \
-    }} while (0)
 
 struct _log {
     int l;
@@ -57,14 +37,6 @@ void dbg(int l, long arg)
 }
 //#define DBG(a) dbg(__LINE__, a)
 #define DBG(a) 
-
-void printlog(FILE *fp)
-{
-    while (logbuf != logptr) {
-	fprintf(fp, "%d %lx %lx\n", logbuf->l, logbuf->th, logbuf->arg);
-	logbuf++;
-    }
-}
 
 // https://stackoverflow.com/questions/5008804/generating-random-integer-from-a-range
 std::random_device rd;     // only used once to initialise (seed) engine

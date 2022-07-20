@@ -762,12 +762,6 @@
     }
 
     // debug methods
-    int translate::inmem(int max, int *list) {
-	int i = 0;
-	for (auto it = in_mem_objects.begin(); i < max && it != in_mem_objects.end(); it++)
-	    list[i++] = it->first;
-	return i;
-    }
     void translate::getmap(int base, int limit, int (*cb)(void *ptr,int,int,int,int), void *ptr) {
 	for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
 	    auto [_base, _limit, oo] = it->vals(base, limit);

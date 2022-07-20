@@ -144,7 +144,6 @@ public:
     void shutdown(void);
     ssize_t writev(size_t offset, iovec *iov, int iovcnt);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
-    int inmem(int max, int *list);
     void getmap(int base, int limit, int (*cb)(void *ptr,int,int,int,int), void *ptr);
     int mapsize(void);
     void reset(void);

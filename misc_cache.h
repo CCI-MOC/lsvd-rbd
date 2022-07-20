@@ -36,9 +36,6 @@ public:
 	}
     }	
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val);
-    bool get(T &val);
-    bool wait_locked(std::unique_lock<std::mutex> &lk);
-    bool get_nowait(T &val);
     void put_locked(T work);
     void put(T work);
 };

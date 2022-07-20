@@ -104,93 +104,28 @@
             map.trim(e.lba, e.lba + e.len);
     }
 
-    void write_cache::evict_thread(thread_pool<int> *p) {
-        auto period = std::chrono::milliseconds(10);
-        const int evict_min_pct = 5;
-        const int evict_max_mb = 100;
-        int trigger;
-        {                       // make valgrind happy
-            std::unique_lock lk(m);
-            trigger = std::min((evict_min_pct * (int)(super->limit - super->base) / 100),
-                               evict_max_mb * (1024*1024/4096));
-        }
-        auto t0 = std::chrono::system_clock::now();
-        auto super_timeout = std::chrono::milliseconds(500);
-
-        while (p->running) {
-            std::unique_lock lk(m);
-            p->cv.wait_for(lk, period);
-            if (!p->running)
-                return;
-            int pgs_free = pages_free(super->oldest);
-            if (super->oldest != super->next && pgs_free <= trigger) {
-                auto oldest = super->oldest;
-                std::vector<j_extent> to_delete;
-
-                while (pages_free(oldest) < trigger*3) {
-                    /*
-                     * for each record we trim from the cache, collect the vLBA->pLBA
-                     * mappings that we need to remove. Note that we keep the revers map
-                     * up to date, so we don't need to check them against the forward map.
-                     */
-                    auto len = lengths[oldest];
-                    //xprintf("lens[%d] : %d\n", oldest, len);
-                    assert(len > 0);
-                    lengths.erase(oldest);
-                    sector_t base = (oldest+1)*8, limit = base + (len-1)*8;
-                    for (auto it = rmap.lookup(base); it != rmap.end() && it->base() < limit; it++) {
-                        auto [p_base, p_limit, vlba] = it->vals(base, limit);
-                        to_delete.push_back((j_extent){(uint64_t)vlba, (uint64_t)p_limit-p_base});
-                    }
-                    rmap.trim(base, limit);
-                    oldest += len;
-                    if (oldest >= super->limit)
-                        oldest = super->base;
-                }
-
-                /* TODO: unlock, read the data and add to read cache, re-lock
-                 */
-
-                super->oldest = oldest;         
-                for (auto e : to_delete)
-                    map.trim(e.lba, e.lba + e.len);
-                alloc_cv.notify_all();
-
-                lk.unlock();
-                write_checkpoint();
-
-                auto t = std::chrono::system_clock::now();
-                if (t - t0 >= super_timeout) {
-                    if (pwrite(fd, super, 4096, 4096L*super_blkno) < 0)
-                        throw_fs_error("wsuper_rewrite");
-                    t0 = t;
-                }
-            }
-        }
-    }
-
     void write_cache::ckpt_thread(thread_pool<int> *p) {
-        auto next0 = super->next, N = super->limit - super->base;
-        auto period = std::chrono::milliseconds(100);
-        auto t0 = std::chrono::system_clock::now();
-        auto timeout = std::chrono::seconds(5);
-        const int ckpt_interval = N / 4;
+	auto next0 = super->next, N = super->limit - super->base;
+	auto period = std::chrono::milliseconds(100);
+	auto t0 = std::chrono::system_clock::now();
+	auto timeout = std::chrono::seconds(5);
+	const int ckpt_interval = N / 4;
 
-        while (p->running) {
-            std::unique_lock lk(m);
-            p->cv.wait_for(lk, period);
-            if (!p->running)
-                return;
-            auto t = std::chrono::system_clock::now();
-            bool do_ckpt = (int)((super->next + N - next0) % N) > ckpt_interval ||
-                ((t - t0 > timeout) && map_dirty);
-            if (p->running && do_ckpt) {
-                next0 = super->next;
-                t0 = t;
-                lk.unlock();
-                write_checkpoint();
-            }
-        }
+	while (p->running) {
+	    std::unique_lock lk(m);
+	    p->cv.wait_for(lk, period);
+	    if (!p->running)
+		return;
+	    auto t = std::chrono::system_clock::now();
+	    bool do_ckpt = (int)((super->next + N - next0) % N) > ckpt_interval ||
+		((t - t0 > timeout) && map_dirty);
+	    if (p->running && do_ckpt) {
+		next0 = super->next;
+		t0 = t;
+		lk.unlock();
+		write_checkpoint();
+	    }
+	}
     }
 
     void write_cache::write_checkpoint(void) {
@@ -383,80 +318,6 @@
             lk.unlock();
             send_writes();
         }
-    }
-
-    void write_cache::writev2(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {
-        size_t len = iov_sum(iov, iovcnt);
-        sector_t sectors = len / 512, lba = offset / 512;
-        page_t blocks = div_round_up(sectors, 8);
-        char *pad_hdr = NULL;
-
-        // allocate blocks + 1
-        std::unique_lock lk(m);
-        page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
-
-        if (pad != 0) 
-            lengths[pad] = super->limit - pad;
-        lengths[blockno] = blocks+1;
-        lk.unlock();
-
-        if (pad != 0) {
-            assert((pad+1)*4096UL <= dev_max);
-            pad_hdr = (char*)aligned_alloc(512, 4096);
-            auto closure = wrap([pad_hdr]{
-                    free(pad_hdr);
-                    return true;
-                });
-            mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
-            auto eio = new e_iocb;
-            e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
-            e_io_submit(ioctx, eio);
-        }
-
-        for (int i = 0; i < iovcnt; i++)
-            assert(aligned(iov[i].iov_base, 512));
-
-        char *hdr = (char*)aligned_alloc(512, 4096);
-        j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
-        j_extent ext = {(uint64_t)lba, (uint64_t)sectors};
-
-        j->extent_offset = sizeof(*j);
-        size_t e_bytes = sizeof(j_extent);
-        j->extent_len = e_bytes;
-        memcpy((void*)(hdr + sizeof(*j)), &ext, e_bytes);
-        
-        sector_t plba = (blockno+1) * 8;
-        iovec hdr_iov = (iovec){.iov_base = hdr, .iov_len = 4096};
-        auto s_iovs = new smartiov(&hdr_iov, 1);
-        s_iovs->ingest(iov, iovcnt);
-        
-        auto closure = wrap(
-            [this, hdr, iov, iovcnt, cb, ptr, lba, sectors, plba, j, s_iovs]
-            {
-                /* first update the maps */
-                std::vector<extmap::lba2lba> garbage; 
-                std::unique_lock lk(m);
-                map.update(lba, lba + sectors, plba, &garbage);
-                rmap.update(plba, plba+sectors, lba);
-                for (auto it = garbage.begin(); it != garbage.end(); it++) 
-                    rmap.trim(it->s.base, it->s.base+it->s.len);
-                map_dirty = true;
-                lk.unlock();
-
-                /* then call back, send to backend */
-                be->writev(lba*512, (iovec*)iov, iovcnt);
-                cb(ptr);
-
-                /* and finally clean everything up */
-                free(hdr);
-                delete s_iovs;
-                return true;
-            });
-
-        auto eio = new e_iocb;
-        e_io_prep_pwritev(eio, fd, s_iovs->data(), s_iovs->size(), blockno*4096L,
-                          call_wrapped, closure);
-        e_io_submit(ioctx, eio);
     }
 
     /* returns (number of bytes skipped), (number of bytes read_started)
