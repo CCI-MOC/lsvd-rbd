@@ -64,6 +64,7 @@ int round_up(int n, int m)
     return m * div_round_up(n, m);
 }
 
+// iov_sum :	Takes the sum of lengths of each element in iov
 size_t iov_sum(const iovec *iov, int iovcnt)
 {
     size_t sum = 0;
@@ -72,6 +73,7 @@ size_t iov_sum(const iovec *iov, int iovcnt)
     return sum;
 }
 
+// hex :	Converts uint32_t number to hex
 std::string hex(uint32_t n)
 {
     std::stringstream stream;
