@@ -1,6 +1,19 @@
+/* translate.h: Include file which defines the translate class for lsvd system. As the name suggests
+ *		this class focuses on the implementation of the translation layer to the system with
+ *		and object oriented approach. This file contains the following which things which are
+ *		documented below:
+ *			-batch structure
+ *			-translate class
+ */
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
+// batch:	structure which is used specifically by the translate class, keeping track of
+//		a datamap of a specific part of information currently in the translation layer
+//		with related information to this datamap.
+//		Has its own unique constructure which defines the buffer and max
+//		and deconstructer which frees the buf. Finally has a few functions which perform
+//		modifications on the batch (see below)
 struct batch {
     char  *buf;
     size_t max;
@@ -113,26 +126,32 @@ class translate {
 // write_checkpoint :	Writes checkpoint for the translate layer
     int write_checkpoint(int seq);
 
-// make_hdr :	
+// make_hdr :	typecasts buf to hdr and populates the structure with hdr initialization
+//		creates a data_hdr structure nad then populates it as well, sets a pointer to data map
+//		and increments the pointer based on number of entries in batch and returns a pointer
+// 		to the start of the hdr
     int make_hdr(char *buf, batch *b);
 
-// make_gc_hdr :	
+// make_gc_hdr :	Performs the same operations as make_hdr, except instead of using batches
+//			to define pointers, uses direct information about sequence, sectors, and extents.
+//			Returns the number of hdr_sectors
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
 
 // do_gc :	
     void do_gc(std::unique_lock<std::mutex> &lk);
 
-// gc_thread :	
+// gc_thread :	Calls do_gc when the total_live_sectors goes over a particular amount for the thread_pool
+//		while the thread_pool is running with a unique lock
     void gc_thread(thread_pool<int> *p);
 
 // worker_thread :	
     void worker_thread(thread_pool<batch*> *p);
 
-// ckpt_thread :	
+// ckpt_thread :	sets a checkpoint for the inputted thread_pool
     void ckpt_thread(thread_pool<int> *p);
 
-// flush_thread :	
+// flush_thread :	Tests if thread_pool is running, waits, and then flushes when threads reach timeout
     void flush_thread(thread_pool<int> *p);
 
 public:
@@ -166,13 +185,19 @@ public:
 	if (super)
 	    free(super);
     }
+// checkpoint:	Takes current batch, calls put_locked on it if it is active and length is not zero, resets it
+//		and writes it as a checkpoint
     int checkpoint(void);
+// flush:	Just calls put_locked on current_batch, waits until last_written = last_pushed and then returns
+//		current_batch->seq
     int flush(void);
-// init :	Initializes variables for translate layer including 
+// init :	Initializes variables for translate layer
     ssize_t init(const char *name, int nthreads, bool timedflush);
-// shutdown : empty function definition ***
+// shutdown : 	empty function definition ***
     void shutdown(void);
+// writev : 	Writes at the translation layer using the data in the current batch, and then empties the batch
     ssize_t writev(size_t offset, iovec *iov, int iovcnt);
+// readv :	Simply reads at the translation layer
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
 // getmap :	stores map information in ptr
     void getmap(int base, int limit, int (*cb)(void *ptr,int,int,int,int), void *ptr);

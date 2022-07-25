@@ -1,8 +1,7 @@
 /*
 base_functions.h : A lot of base generic functions and minor structures used
 by many portions of the lsvd system:
-	-debug initializations
-	-_log structure
+	-some base variables
 	-rounding up functions
 	-wrapper functions
 */
@@ -22,20 +21,6 @@ by many portions of the lsvd system:
 
 enum {DBG_MAP = 1, DBG_HITS = 2, DBG_AIO = 4};
 
-struct _log {
-    int l;
-    pthread_t th;
-    long arg;
-} *logbuf, *logptr;
-
-void dbg(int l, long arg)
-{
-    logptr->l = l;
-    logptr->th = pthread_self();
-    logptr->arg = arg;
-    logptr++;
-}
-//#define DBG(a) dbg(__LINE__, a)
 #define DBG(a) 
 
 // https://stackoverflow.com/questions/5008804/generating-random-integer-from-a-range
