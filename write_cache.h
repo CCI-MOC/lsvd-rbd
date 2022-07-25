@@ -155,11 +155,12 @@ public:
 //		writes to backend
     void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr);
 
-// async_read :	
+// async_read :	Performs an asynchronous read similar to the read in read_cache without additional
+//		functionality.
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t bytes,
 					void (*cb)(void*), void *ptr);
 
-// getmap :	
+// getmap :	retrieves information about the map and stores it in separate variables
     void getmap(int base, int limit, int (*cb)(void*, int, int, int), void *ptr);
 
 // reset :	resets the map
@@ -179,6 +180,7 @@ public:
     void do_write_checkpoint(void);
 };
 
+// aligned :	returns if ptr is properly aligned with a-1
 bool aligned(const void *ptr, int a);
 
 #endif
