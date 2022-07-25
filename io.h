@@ -12,6 +12,7 @@ size_t getsize64(int fd);
 // e_iocb_cb :	callback function for the e_iocb structure
 void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
 
+// e_iocb : 	support structure which uses iocb structure, with an extra callback and void pointer
 struct e_iocb {
     iocb io;
     void (*cb)(void*) = NULL;
