@@ -1,3 +1,7 @@
+/* This file is the header file for the backend for lsvd which simply uses definitions from sys/uio.h
+ * in order to have base functions for write and read operations for IO
+ */
+
 #ifndef BACKEND_H
 #define BACKEND_H
 
