@@ -1,3 +1,4 @@
+#include <libaio.h>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -15,6 +16,7 @@
 #include "misc_cache.h"
 #include "backend.h"
 #include "objects.h"
+#include "disk.h"
 #include "translate.h"
 
     void batch::reset(void) {
@@ -663,6 +665,8 @@
     }
 
     ssize_t translate::writev(size_t offset, iovec *iov, int iovcnt) {
+//	return dk->writev(offset, iov, iovcnt, current_batch, batches);
+//    }
 	std::unique_lock<std::mutex> lk(m);
 	size_t len = iov_sum(iov, iovcnt);
 

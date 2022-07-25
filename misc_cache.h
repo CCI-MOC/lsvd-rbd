@@ -34,15 +34,23 @@ public:
 	    pool.front().join();
 	    pool.pop();
 	}
-    }	
+    }
+
+// get_locked :	Returns the value for the front of the thread_pool queue
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val);
+
+// put_locked :	Appends work to the queue
     void put_locked(T work);
+
+// put :	calls put_locjed with an active mutex
     void put(T work);
 };
 
 /* these all should probably be combined with the stuff in objects.cc to create
  * object classes that serialize and de-serialize themselves. Sometime, maybe.
  */
+
+// decode_offset_len :	
 template<class T>
 void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals);
 
@@ -53,6 +61,7 @@ public:
     extmap::objmap    map;
 };
 
+// throw_fs_error :	Throws a file_system error
 void throw_fs_error(std::string msg);
 
 struct cache_work {

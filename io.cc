@@ -18,7 +18,6 @@
 #include "io.h"
 #include "misc_cache.h"
 
-
 size_t getsize64(int fd)
 {
     struct stat sb;

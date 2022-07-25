@@ -93,12 +93,16 @@ struct wrapper {
 /* invoked function returns boolean - if true, delete the wrapper; otherwise
  * keep it around for another invocation
  */
+
+// wrap:	creates a new wrapper for the inputted function
 void *wrap(std::function<bool()> _f)
 {
     auto s = new wrapper(_f);
     return (void*)s;
 }
 
+// call_wrapped:	Invokes a wrapped function stored in location pointed to by pointer and if
+//			the function returns a value of TRUE, the wrapped function is deleted
 void call_wrapped(void *ptr)
 {
     auto s = (wrapper*)ptr;
@@ -106,6 +110,7 @@ void call_wrapped(void *ptr)
 	delete s;
 }
 
+// delete_wrapped:	Wrapped function pointed to by ptr is simply deleted
 void delete_wrapped(void *ptr)
 {
     auto s = (wrapper*)ptr;

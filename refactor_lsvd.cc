@@ -33,6 +33,7 @@
 #include "misc_cache.h"
 #include "translate.h"
 #include "io.h"
+#include "disk.h"
 #include "read_cache.h"
 #include "write_cache.h"
 #include "file_backend.h"

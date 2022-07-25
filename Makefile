@@ -5,7 +5,7 @@ CC = g++
 # note that no-unswitch-loops also gets rid of the segfault
 CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
-OBJS = misc_cache.o translate.o io.o read_cache.o write_cache.o file_backend.o rados_backend.o refactor_lsvd.o
+OBJS = misc_cache.o translate.o io.o disk.o read_cache.o write_cache.o file_backend.o rados_backend.o refactor_lsvd.o
 
 # liblsvd.so: lsvd_rbd.cc extent.h journal2.h objects.h
 liblsvd.so:  $(OBJS)

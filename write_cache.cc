@@ -21,7 +21,7 @@
 #include "backend.h"
 #include "translate.h"
 #include "io.h"
-
+#include "disk.h"
 #include "write_cache.h"
 
 
@@ -231,9 +231,11 @@
                     return true;
                 });
             mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
-            auto eio = new e_iocb;
+            dk->e_io_pwrite_submit(ioctx, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
+
+	    /*auto eio = new e_iocb;
             e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
-            e_io_submit(ioctx, eio);
+            e_io_submit(ioctx, eio);*/
         }
 
         std::vector<j_extent> extents;
@@ -293,11 +295,9 @@
                 return true;
             });
 
-        auto eio = new e_iocb;
         assert(blockno+iovs->bytes()/4096L <= super->limit);
-        e_io_prep_pwritev(eio, fd, iovs->data(), iovs->size(), blockno*4096L,
+        dk->e_io_pwrite_submit(ioctx, fd, iovs->data(), iovs->size(), blockno*4096L,
                           call_wrapped, closure);
-        e_io_submit(ioctx, eio);
     }
 
     void write_cache::writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {

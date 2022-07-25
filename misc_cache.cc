@@ -43,16 +43,3 @@ namespace fs = std::experimental::filesystem;
     void throw_fs_error(std::string msg) {
         throw fs::filesystem_error(msg, std::error_code(errno, std::system_category()));
     }
-/*
-    static int round_up(int n, int m)
-    {
-        return m * div_round_up(n, m);
-    }
-
-
-    static bool aligned(const void *ptr, int a)
-    {
-         return 0 == ((long)ptr & (a-1));
-    }
-
-*/

@@ -105,26 +105,38 @@ class translate {
     int32_t                            next_completion = 0;
     std::mutex                         m_c;
     std::condition_variable            cv_c;
+
+// do_completions :	Wraps closure if seq is next completion, otherwise begins completion, wraps the 
+//			rest of the completions
     void do_completions(int32_t seq, void *closure);
 
+// write_checkpoint :	Writes checkpoint for the translate layer
     int write_checkpoint(int seq);
 
+// make_hdr :	
     int make_hdr(char *buf, batch *b);
 
+// make_gc_hdr :	
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
 
+// do_gc :	
     void do_gc(std::unique_lock<std::mutex> &lk);
 
+// gc_thread :	
     void gc_thread(thread_pool<int> *p);
 
+// worker_thread :	
     void worker_thread(thread_pool<batch*> *p);
 
+// ckpt_thread :	
     void ckpt_thread(thread_pool<int> *p);
 
+// flush_thread :	
     void flush_thread(thread_pool<int> *p);
 
 public:
+//    disk    *dk;
     backend *io;
 // translate :	constructor for translate class
     translate(backend *_io, objmap *omap) : workers(&m), misc_threads(&m) {
