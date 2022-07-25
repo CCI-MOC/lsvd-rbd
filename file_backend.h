@@ -1,4 +1,6 @@
-
+/* File_backend is a class which hosts functions for specifically writing objects to files and managing
+ * data within files instead of the disk.
+ */
 
 #ifndef FILE_BACKEND_H
 #define FILE_BACKEND_H
@@ -42,13 +44,23 @@ public:
 //			value of pread on success.
     ssize_t read_object(const char *name, char *buf, size_t len, size_t offset);
 
-//
+// read_numbered_object :	calls read_numbered_objectv with buf and len contained in an iov
     ssize_t read_numbered_object(int seq, char *buf, size_t len, size_t offset);
+
+// read_numbered_objectv :	calls get_cached_fd to get the file descriptor with seq, then calls
+//				preadv and returns the value of preadv
     ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt, size_t offset);
+
+// aio_read_num_object :	calls get_cached_fd to get the file descriptor with seq, then creates an e_iocb
+//                              then calls the io.h functions of async read and submit functions
     int aio_read_num_object(int seq, char *buf, size_t len,
 			    size_t offset, void (*cb)(void*), void *ptr);
+
+// aio_write_numbered_objects :	Opens a file based on seq, wraps the callback and ptr inputted, and then calls
+//				the async write and submit operation from io.h
     int aio_write_numbered_object(int seq, iovec *iov, int iovcnt,
 				  void (*cb)(void*), void *ptr);
+// ~file_backend :	Deconstructor for file_backend
     ~file_backend() {
 	free((void*)prefix);
 	for (auto it = cached_fds.begin(); it != cached_fds.end(); it++)
@@ -58,6 +70,7 @@ public:
 	e_io_th.join();
 	io_queue_release(ioctx);
     }
+// object_name :	returns the name of the file name based on seq whether it exists or not
     std::string object_name(int seq);
 };
 
