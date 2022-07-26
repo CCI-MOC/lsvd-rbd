@@ -216,7 +216,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char
 	    delete_wrapped(closure);
     }
 
-    /* ugly - now I have to repeast the closure code to remove the reference
+    /* ugly - now I have to repeat the closure code to remove the reference
      * from up top LOOKUP
      */
     if (0 == --p->n) {
@@ -459,6 +459,7 @@ extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
 
 /* debug functions
  */
+/*
 extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
@@ -843,5 +844,5 @@ extern "C" void fakemap_reset(_dbg *d)
 {
     d->omap->map.reset();
 }
-
+*/
     
