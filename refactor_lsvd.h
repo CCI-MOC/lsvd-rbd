@@ -161,16 +161,16 @@ extern "C" void rbd_snap_list_end(rbd_snap_info_t *snaps);
 extern "C" int rbd_snap_remove(rbd_image_t image, const char *snapname);
 extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname);
 
-/* debug functions
- */
 /*
+debug functions
+ */
+
 // dbg_lsvd_write :	do translation layer write
 extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size);
 // dbg_lsvd_read : 	do translation layer read
 extern "C" int dbg_lsvd_read(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size);
 // dbg_lsvd_flush :	Performs translation layer flush
 extern "C" int dbg_lsvd_flush(rbd_image_t image);
-
 // _dbg :	structure used specifically for debugging, creating separate translate layer and caches
 //		to perform functions on
 struct _dbg {
@@ -184,7 +184,6 @@ public:
     _dbg(int _t, translate *_l, write_cache *_w, objmap *_o, read_cache *_r, backend *_io) :
         type(_t), lsvd(_l), wcache(_w), omap(_o), rcache(_r), io(_io) {}
 };
-
 // xlate_open :	sets up new file_backend, objmap, initializes translate layer
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p);
 extern "C" void xlate_close(_dbg *d);
@@ -192,7 +191,6 @@ extern "C" int xlate_flush(_dbg *d);
 extern "C" int xlate_size(_dbg *d);
 extern "C" int xlate_read(_dbg *d, char *buffer, uint64_t offset, uint32_t size);
 extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size);
-
 struct tuple {
     int base;
     int limit;
@@ -200,33 +198,27 @@ struct tuple {
     int offset;
     int plba;                   // write cache map
 };
-
 struct getmap_s {
     int i;
     int max;
     struct tuple *t;
 };
-
 int getmap_cb(void *ptr, int base, int limit, int obj, int offset);
-
 extern "C" int xlate_getmap(_dbg *d, int base, int limit, int max, struct tuple *t);
 extern "C" int xlate_frontier(_dbg *d);
 extern "C" void xlate_reset(_dbg *d);
 extern "C" int xlate_checkpoint(_dbg *d);
-
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p);
 extern "C" void wcache_close(write_cache *wcache);
 extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uint64_t len);
 extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len);
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len);
-
 extern "C" void wcache_reset(write_cache *wcache);
 int wc_getmap_cb(void *ptr, int base, int limit, int plba);
 extern "C" int wcache_getmap(write_cache *wcache, int base, int limit, int max, struct tuple *t);
 extern "C" void wcache_get_super(write_cache *wcache, j_write_super *s);
 extern "C" void wcache_write_ckpt(write_cache *wcache);
 extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, int max, int *p_n);
-
 extern "C" void rcache_init(_dbg *d, uint32_t blkno, int fd, void **val_p);
 extern "C" void rcache_shutdown(read_cache *rcache);
 extern "C" void rcache_evict(read_cache *rcache, int n);
@@ -237,8 +229,7 @@ extern "C" void rcache_getsuper(read_cache *rcache, j_read_super *p_super);
 extern "C" int rcache_getmap(read_cache *rcache, extmap::obj_offset *keys, int *vals, int n);
 extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int n);
 extern "C" void rcache_reset(read_cache *rcache);
-
 extern "C" void fakemap_update(_dbg *d, int base, int limit, int obj, int offset);
 extern "C" void fakemap_reset(_dbg *d);
-*/
+
 #endif

@@ -6,10 +6,11 @@ CC = g++
 CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
 SOFLAGS = -shared -fPIC
 OBJS = misc_cache.o translate.o io.o disk.o read_cache.o write_cache.o file_backend.o rados_backend.o refactor_lsvd.o
+CFILES = misc_cache.cc translate.cc io.cc disk.cc read_cache.cc write_cache.cc file_backend.cc rados_backend.cc refactor_lsvd.cc
 
 # liblsvd.so: lsvd_rbd.cc extent.h journal2.h objects.h
 liblsvd.so:  $(OBJS)
-	$(CC) -std=c++17 lsvd_rbd.cc -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
+	$(CC) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 
 %.o: %.d
@@ -30,7 +31,7 @@ DEPFILES:=$(patsubst %.cc,%.d,$(SOURCES))
 	$(CXX) $(CXXFLAGS) -MM -MT '$(patsubst %.cc,%.o,$<)' $< -MF $@
 
 
-lsvd_rbd.o: lsvd_rbd.cc 
+lsvd_rbd.o: lsvd_rbd.cc read_cache.o
 	$(CC) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)
 
 

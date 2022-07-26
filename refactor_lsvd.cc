@@ -459,7 +459,7 @@ extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
 
 /* debug functions
  */
-/*
+
 extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
@@ -467,7 +467,6 @@ extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, 
     size_t val = fri->lsvd->writev(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
-
 extern "C" int dbg_lsvd_read(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
@@ -475,14 +474,12 @@ extern "C" int dbg_lsvd_read(rbd_image_t image, char *buffer, uint64_t offset, u
     size_t val = fri->lsvd->readv(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
-
 extern "C" int dbg_lsvd_flush(rbd_image_t image)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     fri->lsvd->flush();
     return 0;
 }
-
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
     auto io = new file_backend(name);
@@ -493,7 +490,6 @@ extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
     *p = (void*)d;
     return rv;
 }
-
 extern "C" void xlate_close(_dbg *d)
 {
     assert(d->type == 1);
@@ -503,20 +499,16 @@ extern "C" void xlate_close(_dbg *d)
     delete d->io;
     delete d;
 }
-
 extern "C" int xlate_flush(_dbg *d)
 {
     assert(d->type == 1);
     return d->lsvd->flush();
 }
-
-
 extern "C" int xlate_size(_dbg *d)
 {
     assert(d->type == 1);
     return d->lsvd->mapsize();
 }
-
 extern "C" int xlate_read(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
 {
     assert(d->type == 1);
@@ -524,7 +516,6 @@ extern "C" int xlate_read(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
     size_t val = d->lsvd->readv(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
-
 extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
 {
     assert(d->type == 1);
@@ -532,7 +523,6 @@ extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size
     size_t val = d->lsvd->writev(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
-
 int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
 {
     getmap_s *s = (getmap_s*)ptr;
@@ -540,7 +530,6 @@ int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
 	s->t[s->i++] = (tuple){base, limit, obj, offset, 0};
     return s->i < s->max;
 }
-
 extern "C" int xlate_getmap(_dbg *d, int base, int limit, int max, struct tuple *t)
 {
     assert(d->type == 1);
@@ -548,37 +537,31 @@ extern "C" int xlate_getmap(_dbg *d, int base, int limit, int max, struct tuple 
     d->lsvd->getmap(base, limit, getmap_cb, (void*)&s);
     return s.i;
 }
-
 extern "C" int xlate_frontier(_dbg *d)
 {
     assert(d->type == 1);
     return d->lsvd->frontier();
 }
-
 extern "C" void xlate_reset(_dbg *d)
 {
     assert(d->type == 1);
     d->lsvd->reset();
 }
-
 extern "C" int xlate_checkpoint(_dbg *d)
 {
     assert(d->type == 1);
     return d->lsvd->checkpoint();
 }
-
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p)
 {
     assert(d->type == 1);
     auto wcache = new write_cache(blkno, fd, d->lsvd, 2);
     *p = (void*)wcache;
 }
-
 extern "C" void wcache_close(write_cache *wcache)
 {
     delete wcache;
 }
-
 extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not aligned
@@ -609,7 +592,6 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
     memcpy(buf, buf2, len);
     free(buf2);
 }
-
 extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
 {
     char *aligned_buf = (char*)aligned_alloc(512, len);
@@ -624,15 +606,12 @@ extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, ui
 	    cv.notify_all();
 	    return true;
 	});
-
     std::unique_lock lk(m);
     wcache->writev(offset, &iov, 1, call_wrapped, closure);
-
     while (!done)
         cv.wait(lk);
     free(aligned_buf);
 }
-
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
@@ -646,27 +625,22 @@ extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, 
 	    cv.notify_all();
 	    return true;
 	});
-
     char *aligned_buf = buf;
     if (!aligned(buf, 512)) {
 	aligned_buf = (char*)aligned_alloc(512, len);
 	memcpy(aligned_buf, buf, len);
     }
     iovec iov = {aligned_buf, len};
-
     fri->wcache->writev(offset, &iov, 1, call_wrapped, closure);
     while (!done)
 	cv.wait(lk);
-
     if (aligned_buf != buf)
 	free(aligned_buf);
 }
-
 extern "C" void wcache_reset(write_cache *wcache)
 {
     wcache->reset();
 }
-
 int wc_getmap_cb(void *ptr, int base, int limit, int plba)
 {
     getmap_s *s = (getmap_s*)ptr;
@@ -674,24 +648,20 @@ int wc_getmap_cb(void *ptr, int base, int limit, int plba)
 	s->t[s->i++] = (tuple){base, limit, 0, 0, plba};
     return s->i < s->max;
 }
-
 extern "C" int wcache_getmap(write_cache *wcache, int base, int limit, int max, struct tuple *t)
 {
     getmap_s s = {0, max, t};
     wcache->getmap(base, limit, wc_getmap_cb, (void*)&s);
     return s.i;
 }
-
 extern "C" void wcache_get_super(write_cache *wcache, j_write_super *s)
 {
     wcache->get_super(s);
 }
-
 extern "C" void wcache_write_ckpt(write_cache *wcache)
 {
     wcache->do_write_checkpoint();
 }
-
 extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, int max, int *p_n)
 {
     std::vector<j_extent> exts;
@@ -701,7 +671,6 @@ extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, in
     *p_n = n;
     return next_blk;
 }
-
 extern "C" void rcache_init(_dbg *d,
 			    uint32_t blkno, int fd, void **val_p)
 {
@@ -709,17 +678,14 @@ extern "C" void rcache_init(_dbg *d,
 				 d->lsvd, d->omap, d->io);
     *val_p = (void*)rcache;
 }
-
 extern "C" void rcache_shutdown(read_cache *rcache)
 {
     delete rcache;
 }
-
 extern "C" void rcache_evict(read_cache *rcache, int n)
 {
     rcache->do_evict(n);
 }
-
 extern "C" void rcache_read(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
@@ -752,7 +718,6 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
     memcpy(buf, buf2, len);
     free(buf2);
 }
-
 extern "C" void rcache_read2(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
@@ -777,7 +742,6 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
 	_buf += (skip_len+read_len);
 	_len -= (skip_len+read_len);
 	offset += (skip_len+read_len);
-
 	if (read_len == 0) {
 	    left--;
 	    delete_wrapped(closure);
@@ -786,25 +750,21 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
     std::unique_lock lk(m);
     while (left.load() > 0)
 	cv.wait(lk);
-
     memcpy(buf, buf2, len);
     free(buf2);
 }
-
 extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len)
 {
     assert(len == 65536);
     extmap::obj_offset oo = {object, block};
     rcache->do_add(oo, buf);
 }
-
 extern "C" void rcache_getsuper(read_cache *rcache, j_read_super *p_super)
 {
     j_read_super *p;
     rcache->get_info(&p, NULL, NULL, NULL);
     *p_super = *p;
 }
-
 extern "C" int rcache_getmap(read_cache *rcache,
 			     extmap::obj_offset *keys, int *vals, int n)
 {
@@ -818,7 +778,6 @@ extern "C" int rcache_getmap(read_cache *rcache,
     }
     return i;
 }
-
 extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int n)
 {
     extmap::obj_offset *p;
@@ -828,21 +787,16 @@ extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int
     memcpy(vals, p, n*sizeof(extmap::obj_offset));
     return n;
 }
-
 extern "C" void rcache_reset(read_cache *rcache)
 {
 }
-
 extern "C" void fakemap_update(_dbg *d, int base, int limit,
 			       int obj, int offset)
 {
     extmap::obj_offset oo = {obj,offset};
     d->omap->map.update(base, limit, oo);
 }
-
 extern "C" void fakemap_reset(_dbg *d)
 {
     d->omap->map.reset();
 }
-*/
-    
