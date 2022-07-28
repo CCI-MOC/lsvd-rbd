@@ -1,3 +1,13 @@
+// file:	refactor_lsvd.h
+// description: Core file for the LSVD system which includes the entire set of new implementations of rbd
+//		structures and functions. Currently includes a lot of debugging functions for translate layer
+//		and read and write caches. Some rbd interface functions not yet implemented with lsvd systems
+//		but function headers are present to align with the existing rbd interface
+// author:      Peter Desnoyers, Northeastern University
+//              Copyright 2021, 2022 Peter Desnoyers
+// license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
+
 #ifndef REFACTOR_LSVD_H
 #define REFACTOR_LSVD_H
 
@@ -186,11 +196,19 @@ public:
 };
 // xlate_open :	sets up new file_backend, objmap, initializes translate layer
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p);
+// xlate_close :	calls shutdown on the translate layer and deletes the translate layer, objmap, and backend
+//			in the debug structure
 extern "C" void xlate_close(_dbg *d);
+// xlate_flush :	flushes the translate layer of the debug structure
 extern "C" int xlate_flush(_dbg *d);
+// xlate_size :	returns the mapsize of the translate layer of the debug structure
 extern "C" int xlate_size(_dbg *d);
+// xlate_read :	Performs translation layer read of the debug structure
 extern "C" int xlate_read(_dbg *d, char *buffer, uint64_t offset, uint32_t size);
+// xlate_write :	Performs translation layer write of the debug structure
 extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size);
+
+// tuple :	A helper structure which keeps track of some values for the debug structure
 struct tuple {
     int base;
     int limit;
@@ -198,38 +216,70 @@ struct tuple {
     int offset;
     int plba;                   // write cache map
 };
+// getmap_s :	A helper structure which is used for getmap functions with read and write caches
 struct getmap_s {
     int i;
     int max;
     struct tuple *t;
 };
+// getmap_cb :	
 int getmap_cb(void *ptr, int base, int limit, int obj, int offset);
+// xlate_getmap :	gets the map of the translation layer in the debug structure
 extern "C" int xlate_getmap(_dbg *d, int base, int limit, int max, struct tuple *t);
+// xlate_frontier :	returns the the length of the current batch in the translation layer of the debug structure
 extern "C" int xlate_frontier(_dbg *d);
+// xlate_reset :	resets the translation layer of the debug structure
 extern "C" void xlate_reset(_dbg *d);
+// xlate_checkpoint :	calls the checkpoint function of the translation layer of the debug structure
 extern "C" int xlate_checkpoint(_dbg *d);
+// wcache_open :	Creates a new write cache for the debug structure
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p);
+// wcache_close :	deletes write cache for the debug structure
 extern "C" void wcache_close(write_cache *wcache);
+// wcache_read :	Calls async_read to the inputted buf of the write_cache of the debug structure
 extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uint64_t len);
+// wcache_write :	Calls write of the inputted buf of the write_cache of the debug structure
 extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len);
+// wcache_img_write :	Aligns buffer and calls writev on an rbd image inputted
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len);
+// wcache_reset :	resets the inputted write cache
 extern "C" void wcache_reset(write_cache *wcache);
+// wc_getmap_cb :	
 int wc_getmap_cb(void *ptr, int base, int limit, int plba);
+// wcache_getmap :	gets the map of the write cache inputted
 extern "C" int wcache_getmap(write_cache *wcache, int base, int limit, int max, struct tuple *t);
+// wcache_get_super :	Calls get_super on the inputted write cache and stores it in the j_write_super
 extern "C" void wcache_get_super(write_cache *wcache, j_write_super *s);
+// wcache_write_ckpt :	does write check point of the given write cache
 extern "C" void wcache_write_ckpt(write_cache *wcache);
+// wcache_oldest :	
 extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, int max, int *p_n);
+// rcache_init :	creates a new read cache for the debug structure
 extern "C" void rcache_init(_dbg *d, uint32_t blkno, int fd, void **val_p);
+// rcache_shutdown :	deletes read cache
 extern "C" void rcache_shutdown(read_cache *rcache);
+// rcache_evict :	calls do_evict on the read cache
 extern "C" void rcache_evict(read_cache *rcache, int n);
+// rcache_read :	Calls async read on the read cache until the inputted length is fully read
+//			the read data is stored in buf
 extern "C" void rcache_read(read_cache *rcache, char *buf, uint64_t offset, uint64_t len);
+// rcache_read2 :	A modified version of rcache_read using an atomic variable to wait for a lock to be freed
+//			before cleaning up the same operations of async read as in the first version or rcache_read
 extern "C" void rcache_read2(read_cache *rcache, char *buf, uint64_t offset, uint64_t len);
+// rcache_add :		
 extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len);
+// rcache_getsuper :	
 extern "C" void rcache_getsuper(read_cache *rcache, j_read_super *p_super);
+// rcache_getmap :	
 extern "C" int rcache_getmap(read_cache *rcache, extmap::obj_offset *keys, int *vals, int n);
+// rcache_get_flat :	
 extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int n);
+// rcache_reset: 	Empty function definition
 extern "C" void rcache_reset(read_cache *rcache);
+// fakemap_update :	Creates and extmap obj_offset with obj and offset and updates the objmap
+//			of the debug structure
 extern "C" void fakemap_update(_dbg *d, int base, int limit, int obj, int offset);
+// fakemap_reset :	resets the object map of the debug structure
 extern "C" void fakemap_reset(_dbg *d);
 
 #endif

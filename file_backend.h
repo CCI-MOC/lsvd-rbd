@@ -1,6 +1,10 @@
-/* File_backend is a class which hosts functions for specifically writing objects to files and managing
- * data within files instead of the disk.
- */
+// file:	file_backend.h
+// description: File_backend is a class which hosts functions for specifically writing objects to files and managing
+//		data within files instead of the disk.
+// author:      Peter Desnoyers, Northeastern University
+//              Copyright 2021, 2022 Peter Desnoyers
+// license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
 
 #ifndef FILE_BACKEND_H
 #define FILE_BACKEND_H

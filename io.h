@@ -1,7 +1,10 @@
-/*
-io.h : include file containing all of the main io functions used by the lsvd system 
-including a base structure for io: e_iocb
-*/
+// file:	io.h
+// description: include file containing all of the main io functions used by the lsvd system
+//		including a base structure for io: e_iocb
+// author:      Peter Desnoyers, Northeastern University
+//              Copyright 2021, 2022 Peter Desnoyers
+// license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
 
 #ifndef IO_H
 #define IO_H

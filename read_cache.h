@@ -1,12 +1,13 @@
-/* 
-read_cache.h : Full include file of the read_class for lsvd. 
-the read cache is:
- * 1. indexed by obj/offset[*], not LBA
- * 2. stores aligned 64KB blocks 
- * [*] offset is in units of 64KB blocks
-
-
-*/
+// file:	read_cache.h
+// description: Full include file of the read_class for lsvd.
+//		the read cache is:
+//			 * 1. indexed by obj/offset[*], not LBA
+//			 * 2. stores aligned 64KB blocks
+//			 * [*] offset is in units of 64KB blocks
+// author:      Peter Desnoyers, Northeastern University
+//              Copyright 2021, 2022 Peter Desnoyers
+// license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
 
 #ifndef READ_CACHE_H
 #define READ_CACHE_H

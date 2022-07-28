@@ -1,10 +1,12 @@
-/*
-base_functions.h : A lot of base generic functions and minor structures used
-by many portions of the lsvd system:
-	-some base variables
-	-rounding up functions
-	-wrapper functions
-*/
+// file:	base_functions.h
+// description: General functions and minor structures used by the LSVD file system
+//			-wrapper functions
+//			-rounding functions
+// author:	Peter Desnoyers, Northeastern University
+//              Copyright 2021, 2022 Peter Desnoyers
+// license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
+//
 
 #ifndef BASE_FUNCTIONS_H
 #define BASE_FUNCTIONS_H
@@ -22,10 +24,7 @@ typedef int64_t sector_t;
 typedef int page_t;
 
 /* make this atomic? */
-//extern int batch_seq;
-//extern int last_ckpt;
 const int BATCH_SIZE = 8 * 1024 * 1024;
-//extern uuid_t my_uuid;
 
 // div_round_up :	This function simply take two numbers and divides them rounding up.
 int div_round_up(int n, int m);
@@ -38,8 +37,6 @@ size_t iov_sum(const iovec *iov, int iovcnt);
 
 // hex :	Converts uint32_t number to hex
 std::string hex(uint32_t n);
-
-/* ------- */
 
 /* simple hack so we can pass lambdas through C callback mechanisms
  */
@@ -61,7 +58,5 @@ void call_wrapped(void *ptr);
 
 // delete_wrapped:	Wrapped function pointed to by ptr is simply deleted
 void delete_wrapped(void *ptr);
-
-/* ----- */
 
 #endif

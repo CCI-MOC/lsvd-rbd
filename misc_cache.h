@@ -1,13 +1,15 @@
-/*
-misc_cache.h : include file which contains several of the important classes and structures
-used directly by translate and cache classes. As the name suggests, contains mostly miscellaneous
-functions and class/structure definitions:
-	-thread_pool class for translate class (also utilized by caches)
-	-cache_work structure for caches
-	-sized_vector for caches
-	-commonly used objmap structure modified with mutex from extent.h
-See the documentation below for each specific class and structure
-*/
+// file:	misc_cache.h
+// description: contains several of the important classes and structures used directly by 
+//		translate and cache classes. As the name suggests, contains mostly miscellaneous
+//		functions and class/structure definitions:
+//		        -thread_pool class for translate class (also utilized by caches)
+//		        -cache_work structure for caches
+//		        -sized_vector for caches
+//		        -commonly used objmap structure modified with mutex from extent.h
+// author:      Peter Desnoyers, Northeastern University
+//              Copyright 2021, 2022 Peter Desnoyers
+// license:     GNU LGPL v2.1 or newer
+//              LGPL-2.1-or-later
 
 #ifndef MISC_CACHE_H
 #define MISC_CACHE_H
