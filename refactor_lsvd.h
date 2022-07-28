@@ -222,7 +222,7 @@ struct getmap_s {
     int max;
     struct tuple *t;
 };
-// getmap_cb :	
+// getmap_cb :		?????????????
 int getmap_cb(void *ptr, int base, int limit, int obj, int offset);
 // xlate_getmap :	gets the map of the translation layer in the debug structure
 extern "C" int xlate_getmap(_dbg *d, int base, int limit, int max, struct tuple *t);
@@ -244,7 +244,7 @@ extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, ui
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len);
 // wcache_reset :	resets the inputted write cache
 extern "C" void wcache_reset(write_cache *wcache);
-// wc_getmap_cb :	
+// wc_getmap_cb :	????????
 int wc_getmap_cb(void *ptr, int base, int limit, int plba);
 // wcache_getmap :	gets the map of the write cache inputted
 extern "C" int wcache_getmap(write_cache *wcache, int base, int limit, int max, struct tuple *t);
@@ -252,7 +252,7 @@ extern "C" int wcache_getmap(write_cache *wcache, int base, int limit, int max, 
 extern "C" void wcache_get_super(write_cache *wcache, j_write_super *s);
 // wcache_write_ckpt :	does write check point of the given write cache
 extern "C" void wcache_write_ckpt(write_cache *wcache);
-// wcache_oldest :	
+// wcache_oldest :	Returns the oldest block in the write cache and copies data about extents into j_extent
 extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, int max, int *p_n);
 // rcache_init :	creates a new read cache for the debug structure
 extern "C" void rcache_init(_dbg *d, uint32_t blkno, int fd, void **val_p);
@@ -266,13 +266,14 @@ extern "C" void rcache_read(read_cache *rcache, char *buf, uint64_t offset, uint
 // rcache_read2 :	A modified version of rcache_read using an atomic variable to wait for a lock to be freed
 //			before cleaning up the same operations of async read as in the first version or rcache_read
 extern "C" void rcache_read2(read_cache *rcache, char *buf, uint64_t offset, uint64_t len);
-// rcache_add :		
+// rcache_add :		Performs do_add on the read cache utilizing the inputted object and block number
 extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len);
-// rcache_getsuper :	
+// rcache_getsuper :	Gets info on the super block of the read cache and stores them in p_super
 extern "C" void rcache_getsuper(read_cache *rcache, j_read_super *p_super);
-// rcache_getmap :	
+// rcache_getmap :	Gets info on read_cache extent map and stores the keys and vals extracted and returns
+//			number of keys extracted.
 extern "C" int rcache_getmap(read_cache *rcache, extmap::obj_offset *keys, int *vals, int n);
-// rcache_get_flat :	
+// rcache_get_flat :	Gets info on read_cache and returns the min of p_super->units based on n
 extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int n);
 // rcache_reset: 	Empty function definition
 extern "C" void rcache_reset(read_cache *rcache);
