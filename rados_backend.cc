@@ -9,6 +9,17 @@
 #include "smartiov.h"
 #include "extent.h"
 #include "backend.h"
+
+#include <uuid/uuid.h>
+#include <sys/uio.h>
+
+#include <vector>
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
+
 #include "base_functions.h"
 #include "io.h"
 #include "misc_cache.h"

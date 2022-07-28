@@ -1,10 +1,20 @@
 #include <libaio.h>
 #include <queue>
-#include <mutex>
 #include <condition_variable>
 #include <shared_mutex>
 #include <string>
 #include <unistd.h>
+
+#include <uuid/uuid.h>
+#include <sys/uio.h>
+
+#include <vector>
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
+
 #include "base_functions.h"
 #include <thread>
 #include "smartiov.h"
@@ -18,6 +28,12 @@
 #include "objects.h"
 #include "disk.h"
 #include "translate.h"
+
+extern int batch_seq;
+extern int last_ckpt;
+extern uuid_t my_uuid;
+template class thread_pool<batch*>;
+template class thread_pool<int>;
 
     void batch::reset(void) {
         len = 0;

@@ -28,6 +28,14 @@
 #include "smartiov.h"
 #include "extent.h"
 #include "objects.h"
+
+#include <sys/uio.h>
+
+#include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
+
 #include "base_functions.h"
 #include "backend.h"
 #include "misc_cache.h"

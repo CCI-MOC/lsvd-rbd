@@ -41,19 +41,38 @@ public:
     }
 
 // get_locked :	Returns the value for the front of the thread_pool queue
-    bool get_locked(std::unique_lock<std::mutex> &lk, T &val);
+    bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
+        while (running && q.empty())
+            cv.wait(lk);
+        if (!running)
+            return false;
+        val = q.front();
+        q.pop();
+        return val;
+    }
 
 // put_locked :	Appends work to the queue
-    void put_locked(T work);
+    void put_locked(T work) {
+        q.push(work);
+        cv.notify_one();
+    }
 
 // put :	calls put_locked with an active mutex
-    void put(T work);
+    void put(T work) {
+        std::unique_lock<std::mutex> lk(*m);
+        put_locked(work);
+    }
 };
 
 // decode_offset_len : 	given template T *p which is the sum of buf + offset *p is pushed
 //			back for vals until the defined end which is a sum of the offset, length, and buf
 template<class T>
-void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals);
+    void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals) {
+        T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
+        for (; p < end; p++)
+            vals.push_back(*p);
+    }
+
 
 // objmap:	a modified object map whose only difference is the containment of a mutex to
 //		be used with the extmap::objmap used inside it. For documentation on extmap

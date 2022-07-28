@@ -12,7 +12,6 @@ class write_cache {
     size_t         dev_max;
     uint32_t       super_blkno;
     j_write_super *super;	// 4KB
-    disk	  *dk;
 
     std::atomic<int64_t> sequence; // write sequence #
     

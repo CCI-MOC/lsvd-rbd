@@ -20,6 +20,16 @@
 #include <unistd.h>
 #include "objects.h"
 #include "journal2.h"
+
+#include <uuid/uuid.h>
+
+#include <vector>
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
+
 #include "base_functions.h"
 #include "backend.h"
 #include "misc_cache.h"

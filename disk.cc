@@ -11,6 +11,15 @@
 #include <queue>
 #include <cassert>
 #include <shared_mutex>
+
+#include <sys/uio.h>
+
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
+
 #include "base_functions.h"
 
 #include "journal2.h"
