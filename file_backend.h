@@ -26,6 +26,7 @@ class file_backend : public backend {
     std::thread e_io_th;
 
 public:
+// file_backend :	Constructor for the file_backend
     file_backend(const char *_prefix) {
 	prefix = strdup(_prefix);
 	e_io_running = true;

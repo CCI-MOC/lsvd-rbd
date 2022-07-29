@@ -27,6 +27,8 @@ enum obj_type {
     LSVD_MAGIC = 0x4456534c
 };
 
+// hdr :	header structure used to contain data for separate objects in translation and write cache layers
+//		of the LSVD system
 struct hdr {
     uint32_t magic;
     uint32_t version;		// 1
@@ -37,6 +39,8 @@ struct hdr {
     uint32_t data_sectors;	// hdr_sectors + data_sectors = size
 };
 
+// super_hdr :	super block style structure for the header structure, containing various metadata on the current
+//		header structure it describes including offsets, checkpoint statistics, and size
 /* variable-length fields are identified by offset/length pairs, where both
  * the offset and length are in units of bytes.
  */
@@ -44,7 +48,6 @@ struct super_hdr {
     uint64_t vol_size;
     uint64_t total_sectors;
     uint64_t live_sectors;
-//    uint32_t num_objs;
     uint32_t next_obj;    	// next sequence number
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
@@ -68,6 +71,7 @@ struct snap_info {
     uuid_t   snap_uuid;
     uint32_t seq;
 };
+
 
 struct data_hdr {
     uint32_t last_data_obj;

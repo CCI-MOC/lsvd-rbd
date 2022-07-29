@@ -15,7 +15,7 @@ enum {
     EVENT_TYPE_PIPE = 1,
     EVENT_TYPE_EVENTFD = 2
 };
-    
+
 typedef void *rbd_image_t;
 typedef void *rbd_image_options_t;
 typedef void *rbd_pool_stats_t;
@@ -59,7 +59,8 @@ struct fake_rbd_image {
     int          eventfd;
     std::queue<rbd_completion_t> completions;
 };
-
+// lsvd_completion :	structure which provides functions and variables necessary to write back completions
+//			for the lsvd system
 struct lsvd_completion {
 public:
     fake_rbd_image *fri;
