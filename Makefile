@@ -8,15 +8,10 @@ SOFLAGS = -shared -fPIC
 OBJS = base_functions.o misc_cache.o translate.o io.o read_cache.o write_cache.o file_backend.o rados_backend.o request.o nvme.o refactor_lsvd.o
 CFILES = base_functions.cc misc_cache.cc translate.cc io.cc read_cache.cc write_cache.cc file_backend.cc rados_backend.cc request.cc nvme.cc refactor_lsvd.cc
 
-# liblsvd.so: lsvd_rbd.cc extent.h journal2.h objects.h
 liblsvd.so:  $(OBJS)
 	$(CC) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
-
 %.o: %.d
-
-# %.o : %.cc
-# 	$(CC) $(CXXFLAGS) -o $@ -c $^
 
 # Add .d to Make's recognized suffixes.
 SUFFIXES += .d
@@ -24,7 +19,6 @@ SUFFIXES += .d
 SOURCES:=$(shell find . -name "*.cc")
 #These are the dependency files, which make will clean up after it creates them
 DEPFILES:=$(patsubst %.cc,%.d,$(SOURCES))
-
 
 #This is the rule for creating the dependency files
 %.d: %.cc
