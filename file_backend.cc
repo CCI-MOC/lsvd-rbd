@@ -49,6 +49,15 @@
         return fd;
     }
 
+    file_backend::file_backend(const char *_prefix) {
+        prefix = strdup(_prefix);
+        e_io_running = true;
+        io_queue_init(64, &ioctx);
+        const char *name = "file_backend_cb";
+        e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
+    }
+
+
     ssize_t file_backend::write_object(const char *name, iovec *iov, int iovcnt) {
         int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0777);
         if (fd < 0)
@@ -114,6 +123,16 @@
         e_io_prep_pwritev(eio, fd, iov, iovcnt, offset, call_wrapped, closure);
         e_io_submit(ioctx, eio);
         return 0;
+    }
+
+    file_backend::~file_backend() {
+        free((void*)prefix);
+        for (auto it = cached_fds.begin(); it != cached_fds.end(); it++)
+            close(it->second);
+
+        e_io_running = false;
+        e_io_th.join();
+        io_queue_release(ioctx);
     }
 
     std::string file_backend::object_name(int seq) {

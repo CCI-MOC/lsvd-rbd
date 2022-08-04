@@ -2,9 +2,14 @@
 #define NVME_H
 
 class nvme {
+	FILE *fp;
 public:
-	nvme(char* filename);
-	~nvme();
+	nvme(char* filename) {
+		fopen(filename, "w");
+	}
+	~nvme() {
+		fclose(fp);
+	};
 
 IORequest make_write_request(int offset, iovec iovecs);
 /*

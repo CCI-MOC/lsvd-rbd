@@ -34,6 +34,34 @@ extern uuid_t my_uuid;
 template class thread_pool<batch*>;
 template class thread_pool<int>;
 
+    translate::translate(backend *_io, objmap *omap) : workers(&m), misc_threads(&m) {
+        io = _io;
+        map = omap;
+        current_batch = NULL;
+        last_written = last_pushed = 0;
+        fp = fopen("/tmp/xlate.log", "w");
+    }
+
+    translate::~translate() {
+    #if 1
+        fprintf(fp, "xl: batches %ld (8MiB)\n", batches.size());
+        fprintf(fp, "xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
+        fprintf(fp, "omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));
+        fprintf(fp, "gc %d read %d write %d delete %d\n", gc_cycles, gc_sectors_read, gc_sectors_written,
+            gc_deleted);
+    #endif
+        while (!batches.empty()) {
+            auto b = batches.top();
+            batches.pop();
+            delete b;
+        }
+        if (current_batch)
+            delete current_batch;
+        if (super)
+            free(super);
+    }
+
+
     void batch::reset(void) {
         len = 0;
         entries.resize(0);

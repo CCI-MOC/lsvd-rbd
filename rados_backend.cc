@@ -35,6 +35,21 @@
         return std::pair(s.substr(0,i), s.substr(i+delim.length()));
     }
 
+    rados_backend::rados_backend(const char *_prefix) {
+        int r;
+        auto [_pool, _key] = split_string(std::string(_prefix), "/");
+        if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
+            throw("rados create");
+        if ((r = rados_conf_read_file(cluster, NULL)) < 0)
+            throw("rados conf");
+        if ((r = rados_connect(cluster)) < 0)
+            throw("rados connect");
+        if ((r = rados_ioctx_create(cluster, _pool.c_str(), &io_ctx)) < 0)
+            throw("rados ioctx_create");
+        prefix = strdup(_key.c_str());
+    }
+
+
     ssize_t rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
         smartiov iovs(iov, iovcnt);
         char *buf = (char*)malloc(iovs.bytes());
@@ -97,6 +112,13 @@
         cb(ptr);
         return rv;
     }
+
+    rados_backend::~rados_backend() {
+        free((void*)prefix);
+        rados_ioctx_destroy(io_ctx);
+        rados_shutdown(cluster);
+    }
+
 
     std::string rados_backend::object_name(int seq) {
         return std::string(prefix) + "." + hex(seq);

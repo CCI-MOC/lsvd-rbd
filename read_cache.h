@@ -81,49 +81,7 @@ public:
     std::atomic<int> n_lines_read = 0;
 
 // read_cache : Constructor for the read cache
-    read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io) :
-        omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m), nothreads(nt)
-    {
-        dev_max = getsize64(fd);
-        n_lines_read = 0;
-        char *buf = (char*)aligned_alloc(512, 4096);
-        if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
-            throw_fs_error("rcache3");
-        super = (j_read_super*)buf;
-
-        assert(super->unit_size == 128); // 64KB, in sectors
-        unit_sectors = super->unit_size; // todo: fixme
-
-        int oos_per_pg = 4096 / sizeof(extmap::obj_offset);
-        assert(div_round_up(super->units, oos_per_pg) == super->map_blocks);
-
-        flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
-        if (pread(fd, (char*)flat_map, super->map_blocks*4096, super->map_start*4096L) < 0)
-            throw_fs_error("rcache2");
-
-        for (int i = 0; i < super->units; i++) {
-            if (flat_map[i].obj != 0) 
-                map[flat_map[i]] = i;
-            else 
-                free_blks.push_back(i);
-        }
-
-        in_use.init(super->units);
-        written.init(super->units);
-        buffer.init(super->units);
-        pending.init(super->units);
-        a_bit.init(super->units);
-
-        map_dirty = false;
-
-        misc_threads.pool.push(std::thread(&read_cache::evict_thread, this, &misc_threads));
-
-        io_queue_init(64, &ioctx);
-        e_io_running = true;
-        const char *name = "read_cache_cb";
-        e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
-    }
-
+    read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io);
 
 // get_cacheline_buf :	returns the pointer to the buffer[j] where j = buf_loc.front(),
 //			and then pop and erase buffer[j]
@@ -138,19 +96,8 @@ public:
 
 // write_map : 	writes map back to file
     void write_map(void);
-
-    ~read_cache() {
-#if 1
-	printf("rc: map %ld (%ld)\n", map.size(), sizeof(std::pair<extmap::obj_offset,int>));
-	printf("rc: usecache 1 %d 0 %d (stat.u %ld .b %ld)\n", u1, u0, hit_stats.user, hit_stats.backend);
-#endif
-	free((void*)flat_map);
-	free((void*)super);
-
-	e_io_running = false;
-	e_io_th.join();
-	io_queue_release(ioctx);
-    }
+// ~read_cache :	Deconstructor for the read_cache
+    ~read_cache();
 
     /* debugging. 
      */

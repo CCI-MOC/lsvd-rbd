@@ -22,19 +22,7 @@ class rados_backend : public backend {
 
 public:
 // rados_backend : constructor for the rados_backend class
-    rados_backend(const char *_prefix) {
-        int r;
-        auto [_pool, _key] = split_string(std::string(_prefix), "/");
-        if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
-            throw("rados create");
-        if ((r = rados_conf_read_file(cluster, NULL)) < 0)
-            throw("rados conf");
-        if ((r = rados_connect(cluster)) < 0)
-            throw("rados connect");
-        if ((r = rados_ioctx_create(cluster, _pool.c_str(), &io_ctx)) < 0)
-            throw("rados ioctx_create");
-        prefix = strdup(_key.c_str());
-    }
+    rados_backend(const char *_prefix);
 // write_object :	copies iov and iovcnt to smartiov and writes that to rados_backend and returns
 //			the output of rados_write
     ssize_t write_object(const char *name, iovec *iov, int iovcnt);
@@ -68,11 +56,7 @@ public:
     int aio_write_numbered_object(int seq, iovec *iov, int iovcnt,
                                   void (*cb)(void*), void *ptr);
 // ~rados_backend :	Deconstructor for ~rados_backend
-    ~rados_backend() {
-        free((void*)prefix);
-        rados_ioctx_destroy(io_ctx);
-        rados_shutdown(cluster);
-    }
+    ~rados_backend();
 // object_name :	 returns a file name based on seq
     std::string object_name(int seq);
 };

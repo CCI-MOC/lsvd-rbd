@@ -27,13 +27,7 @@ class file_backend : public backend {
 
 public:
 // file_backend :	Constructor for the file_backend
-    file_backend(const char *_prefix) {
-	prefix = strdup(_prefix);
-	e_io_running = true;
-	io_queue_init(64, &ioctx);
-	const char *name = "file_backend_cb";
-	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
-    }
+    file_backend(const char *_prefix);
 
 // write_object :	Opens a file with the given name, and writes the iov to the file, closes file, returns
 //			the output of the writev operation
@@ -66,15 +60,7 @@ public:
     int aio_write_numbered_object(int seq, iovec *iov, int iovcnt,
 				  void (*cb)(void*), void *ptr);
 // ~file_backend :	Deconstructor for file_backend
-    ~file_backend() {
-	free((void*)prefix);
-	for (auto it = cached_fds.begin(); it != cached_fds.end(); it++)
-	    close(it->second);
-
-	e_io_running = false;
-	e_io_th.join();
-	io_queue_release(ioctx);
-    }
+    ~file_backend();
 // object_name :	returns the name of the file name based on seq whether it exists or not
     std::string object_name(int seq);
 };
