@@ -1,5 +1,5 @@
 // file:	write_cache.h
-// description: Fulle include file of the write_cache for LSVD
+// description: Full include file of the write_cache for LSVD
 // author:      Peter Desnoyers, Northeastern University
 //              Copyright 2021, 2022 Peter Desnoyers
 // license:     GNU LGPL v2.1 or newer

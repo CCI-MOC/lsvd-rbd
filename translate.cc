@@ -26,7 +26,6 @@
 #include "misc_cache.h"
 #include "backend.h"
 #include "objects.h"
-#include "disk.h"
 #include "translate.h"
 
 extern int batch_seq;

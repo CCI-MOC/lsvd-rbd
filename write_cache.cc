@@ -30,7 +30,6 @@
 #include "backend.h"
 #include "translate.h"
 #include "io.h"
-#include "disk.h"
 #include "write_cache.h"
 
 extern uuid_t my_uuid;
