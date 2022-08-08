@@ -40,6 +40,7 @@ class write_cache {
     std::thread e_io_th;
     
     nvme 		      *nvme_w;
+    IORequest 		      *parent_request;
 // pages_free :	returns the number of free pages left inside of the write_cache super block
     int pages_free(uint32_t oldest);
 

@@ -31,16 +31,5 @@
 #include "io.h"
 #include "request.h"
 #include "nvme.h"
-
 #include "request.h"
-
-IORequest::IORequest() {
-        notified = false;
-        done = false;
-}
-IORequest::~IORequest() {}
-
-void IORequest::is_done() {}
-void IORequest::run() {}
-void IORequest::notify() {}
-
+#include "send_request.h"

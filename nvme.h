@@ -5,13 +5,19 @@ class nvme {
 	FILE *fp;
 public:
 	nvme(char* filename) {
-		fopen(filename, "w");
+		fp = fopen(filename, "w");
 	}
 	~nvme() {
 		fclose(fp);
 	};
 
-IORequest make_write_request(int offset, iovec iovecs);
+	IORequest* make_write_request(/*int offset, iovec iovecs*/void) {
+        	IORequest *wr = new IORequest;
+        	return wr;
+	}
+
+
+//IORequest* make_write_request(/*int offset, iovec iovecs*/void);
 /*
 void notify(IORequest *R);
 void wait();

@@ -32,11 +32,10 @@
 #include "request.h"
 #include "nvme.h"
 
-IORequest* make_write_request(int offset, iovec iovecs) {
-	return NULL;
+IORequest* make_write_request(/*int offset, iovec iovecs*/void) {
+	IORequest *wr = new IORequest;
+	return wr;
 }
 
-//void nvme::notify(IORequest *R) {}
-//void nvme::wait() {}
-//void nvme::is_done() {}
+
 

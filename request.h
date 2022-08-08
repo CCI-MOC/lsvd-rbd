@@ -7,11 +7,8 @@ class IORequest {
 
 public:
 
-IORequest() {
-	notified = false;
-	done = false;
-}
-~IORequest() {}
+IORequest();
+~IORequest();
 
 void is_done();
 void run();

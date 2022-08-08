@@ -32,6 +32,7 @@
 #include "io.h"
 #include "request.h"
 #include "nvme.h"
+#include "send_request.h"
 #include "write_cache.h"
 
 extern uuid_t my_uuid;
@@ -275,9 +276,9 @@ extern uuid_t my_uuid;
         const char *name = "write_cache_cb";
         e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
 
-/*      char filename[] = {'/','t','m','p','/','l','s','v','d','_','n','v','m','e'};
-        nvme_w = new nvme(filename);
-*/    }
+      char filename[] = {'/','t','m','p','/','l','s','v','d','_','n','v','m','e'};
+      nvme_w = new nvme(filename);
+    }
 
     write_cache::~write_cache() {
     #if 0
@@ -287,7 +288,7 @@ extern uuid_t my_uuid;
         free(pad_page);
         free(super);
         delete misc_threads;
-//      delete nvme_w;
+        delete nvme_w;
         e_io_running = false;
         e_io_th.join();
         io_queue_release(ioctx);
@@ -306,30 +307,25 @@ extern uuid_t my_uuid;
             sectors += _w->sectors;
             assert(_w->iovs.aligned(512));
         }
-
+	
         page_t blocks = div_round_up(sectors, 8);
         char *pad_hdr = NULL;
         page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
 
-        if (pad != 0) 
-            lengths[pad] = super->limit - pad;
-        lengths[blockno] = blocks+1;
-        lk.unlock();
-
-        if (pad != 0) {
-            assert((pad+1)*4096UL <= dev_max);
-            pad_hdr = (char*)aligned_alloc(512, 4096);
+	IORequest* r_pad = nvme_w->make_write_request();
+	pad_hdr = (char*)aligned_alloc(512, 4096);
             auto closure = wrap([pad_hdr]{
                     free(pad_hdr);
                     return true;
                 });
-            mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
-            //dk->e_io_pwrite_submit(ioctx, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
 
-	    auto eio = new e_iocb;
-            e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
-            e_io_submit(ioctx, eio);
+        if (pad != 0) {
+            lengths[pad] = super->limit - pad;
+            assert((pad+1)*4096UL <= dev_max);
+            mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
         }
+        lengths[blockno] = blocks+1;
+        lk.unlock();
 
         std::vector<j_extent> extents;
         for (auto _w : *w)
@@ -351,7 +347,8 @@ extern uuid_t my_uuid;
             iovs->ingest(iov, iovcnt);
         }
 
-        auto closure = wrap([this, hdr, plba, iovs, w] {
+	IORequest * r_data = nvme_w->make_write_request();
+        auto closure_data = wrap([this, hdr, plba, iovs, w] {
                 /* first update the maps */
                 std::vector<extmap::lba2lba> garbage; 
                 std::unique_lock lk(m);
@@ -386,12 +383,19 @@ extern uuid_t my_uuid;
                     send_writes();
                 }
                 return true;
-            });
+        });
+	send_request * X = new  send_request(r_pad, closure, r_data, closure_data, pad);
+	//X->run(NULL);
+        if (pad != 0) {
+	    auto eio = new e_iocb;
+            e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
+            e_io_submit(ioctx, eio);
+        }
 
 	auto eio = new e_iocb;
 	assert(blockno+iovs->bytes()/4096L <= super->limit);
 	e_io_prep_pwritev(eio, fd, iovs->data(), iovs->size(), blockno*4096L,
-			  call_wrapped, closure);
+			  call_wrapped, closure_data);
 	e_io_submit(ioctx, eio);
     }
 
