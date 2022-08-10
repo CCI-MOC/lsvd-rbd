@@ -33,12 +33,19 @@
 #include "request.h"
 #include "nvme.h"
 #include "write_cache.h"
-/*
-IORequest* make_write_request(int offset, iovec iovecsvoid) {
-	IORequest *wr = new IORequest;
-	return wr;
-}
-*/
+
+        nvme::nvme(char* filename,void* write_c) {
+                fp = fopen(filename, "w");
+                wc = write_c;
+        }
+        nvme::~nvme() {
+                fclose(fp);
+        };
+
+        IORequest* nvme::make_write_request(/*int offset, iovec iovecs*/void) {
+                IORequest *wr = new IORequest(wc);
+                return wr;
+        }
 
 
 

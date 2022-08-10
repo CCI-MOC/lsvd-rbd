@@ -313,13 +313,15 @@ extern uuid_t my_uuid;
         page_t pad;
         blockno = allocate_locked(blocks+1, pad, lk);
 
+	// Request for padded write started and closure written
 	IORequest* r_pad = nvme_w->make_write_request();
 	pad_hdr = (char*)aligned_alloc(512, 4096);
             auto closure = wrap([pad_hdr]{
                     free(pad_hdr);
                     return true;
                 });
-
+	
+	// Setup for closure for data write
         if (pad != 0) {
             lengths[pad] = super->limit - pad;
             assert((pad+1)*4096UL <= dev_max);
@@ -347,8 +349,10 @@ extern uuid_t my_uuid;
             auto [iov, iovcnt] = _w->iovs.c_iov();
             iovs->ingest(iov, iovcnt);
         }
-
+	
+	// Request for data write started
 	IORequest * r_data = nvme_w->make_write_request();
+	// closure for data is declared
         auto closure_data = wrap([this, hdr, plba, iovs, w] {
                 /* first update the maps */
                 std::vector<extmap::lba2lba> garbage; 
