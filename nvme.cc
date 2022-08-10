@@ -29,13 +29,17 @@
 #include "misc_cache.h"
 #include "backend.h"
 #include "io.h"
+#include "translate.h"
 #include "request.h"
 #include "nvme.h"
-
-IORequest* make_write_request(/*int offset, iovec iovecs*/void) {
+#include "write_cache.h"
+/*
+IORequest* make_write_request(int offset, iovec iovecsvoid) {
 	IORequest *wr = new IORequest;
 	return wr;
 }
+*/
+
 
 
 

@@ -277,7 +277,7 @@ extern uuid_t my_uuid;
         e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
 
       char filename[] = {'/','t','m','p','/','l','s','v','d','_','n','v','m','e'};
-      nvme_w = new nvme(filename);
+      nvme_w = new nvme(filename, this);
     }
 
     write_cache::~write_cache() {
@@ -308,9 +308,10 @@ extern uuid_t my_uuid;
             assert(_w->iovs.aligned(512));
         }
 	
-        page_t blocks = div_round_up(sectors, 8);
-        char *pad_hdr = NULL;
-        page_t pad, blockno = allocate_locked(blocks+1, pad, lk);
+        blocks = div_round_up(sectors, 8);
+        char* pad_hdr = NULL;
+        page_t pad;
+        blockno = allocate_locked(blocks+1, pad, lk);
 
 	IORequest* r_pad = nvme_w->make_write_request();
 	pad_hdr = (char*)aligned_alloc(512, 4096);
@@ -384,19 +385,8 @@ extern uuid_t my_uuid;
                 }
                 return true;
         });
-	send_request * X = new  send_request(r_pad, closure, r_data, closure_data, pad);
-	//X->run(NULL);
-        if (pad != 0) {
-	    auto eio = new e_iocb;
-            e_io_prep_pwrite(eio, fd, pad_hdr, 4096, pad*4096L, call_wrapped, closure);
-            e_io_submit(ioctx, eio);
-        }
-
-	auto eio = new e_iocb;
-	assert(blockno+iovs->bytes()/4096L <= super->limit);
-	e_io_prep_pwritev(eio, fd, iovs->data(), iovs->size(), blockno*4096L,
-			  call_wrapped, closure_data);
-	e_io_submit(ioctx, eio);
+	send_request * X = new  send_request(r_pad, closure, r_data, closure_data, pad, iovs, pad_hdr);
+	X->run(NULL);
     }
 
     void write_cache::writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr) {

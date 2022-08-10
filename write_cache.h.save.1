@@ -11,9 +11,10 @@
 /* all addresses are in units of 4KB blocks
  */
 class write_cache {
+    int            fd;
     size_t         dev_max;
     uint32_t       super_blkno;
-    //j_write_super *super;	// 4KB
+    j_write_super *super;	// 4KB
 
     std::atomic<int64_t> sequence; // write sequence #
     
@@ -35,10 +36,11 @@ class write_cache {
     
     char *pad_page;
     bool e_io_running = false;
+    io_context_t ioctx;
     std::thread e_io_th;
     
     page_t blocks;
-    char*  pad_hdr;
+    page_t blockno;
     nvme 		      *nvme_w;
     IORequest 		      *parent_request;
 // pages_free :	returns the number of free pages left inside of the write_cache super block
@@ -69,10 +71,6 @@ class write_cache {
     void write_checkpoint(void);
 
 public:
-    j_write_super *super;
-    int            fd;
-    io_context_t ioctx;
-    page_t blockno;
 // constructor for the write cache
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads);
 // deconstructor for the write cache
