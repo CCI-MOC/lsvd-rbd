@@ -8,7 +8,7 @@ public:
 	nvme(char* filename,void* write_c);
 	~nvme();
 
-	IORequest* make_write_request(/*int offset, iovec iovecs*/void);
+	nvme_request* make_write_request(bool pad);
 };
 
 #endif

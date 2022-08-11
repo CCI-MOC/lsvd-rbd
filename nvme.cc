@@ -31,7 +31,9 @@
 #include "io.h"
 #include "translate.h"
 #include "request.h"
+#include "nvme_request.h"
 #include "nvme.h"
+#include "send_request.h"
 #include "write_cache.h"
 
         nvme::nvme(char* filename,void* write_c) {
@@ -42,8 +44,8 @@
                 fclose(fp);
         };
 
-        IORequest* nvme::make_write_request(/*int offset, iovec iovecs*/void) {
-                IORequest *wr = new IORequest(wc);
+        nvme_request* nvme::make_write_request(bool pad) {
+                nvme_request *wr = new nvme_request(wc, pad);
                 return wr;
         }
 

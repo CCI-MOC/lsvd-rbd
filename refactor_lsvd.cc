@@ -42,6 +42,7 @@
 #include "translate.h"
 #include "io.h"
 #include "request.h"
+#include "nvme_request.h"
 #include "nvme.h"
 #include "read_cache.h"
 #include "write_cache.h"

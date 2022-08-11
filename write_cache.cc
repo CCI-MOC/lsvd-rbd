@@ -31,6 +31,7 @@
 #include "translate.h"
 #include "io.h"
 #include "request.h"
+#include "nvme_request.h"
 #include "nvme.h"
 #include "send_request.h"
 #include "write_cache.h"
@@ -314,7 +315,7 @@ extern uuid_t my_uuid;
         blockno = allocate_locked(blocks+1, pad, lk);
 
 	// Request for padded write started and closure written
-	IORequest* r_pad = nvme_w->make_write_request();
+	nvme_request* r_pad = nvme_w->make_write_request(true);
 	pad_hdr = (char*)aligned_alloc(512, 4096);
             auto closure = wrap([pad_hdr]{
                     free(pad_hdr);
@@ -351,7 +352,7 @@ extern uuid_t my_uuid;
         }
 	
 	// Request for data write started
-	IORequest * r_data = nvme_w->make_write_request();
+	nvme_request * r_data = nvme_w->make_write_request(false);
 	// closure for data is declared
         auto closure_data = wrap([this, hdr, plba, iovs, w] {
                 /* first update the maps */
