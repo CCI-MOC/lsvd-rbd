@@ -36,16 +36,28 @@
 #include "send_request.h"
 #include "write_cache.h"
 
-        nvme::nvme(char* filename,void* write_c) {
-                fp = fopen(filename, "w");
-                wc = write_c;
+        nvme::nvme(int fd, char* name) {
+	        fp = fd;
+                e_io_running = true;
+		io_queue_init(64, &ioctx);
+		e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
+	
         }
         nvme::~nvme() {
-                fclose(fp);
+	  e_io_running = false;
+	  e_io_th.join();
+	  io_queue_release(ioctx);
+
+	 
         };
 
-        nvme_request* nvme::make_write_request(bool pad) {
-                nvme_request *wr = new nvme_request(wc, pad);
+        nvme_request* nvme::make_write_request(smartiov *iov, size_t offset) {
+                nvme_request *wr = new nvme_request(iov, offset, WRITE_REQ, this);
+                return wr;
+        }
+
+        nvme_request* nvme::make_read_request(smartiov *iov, size_t offset) {
+                nvme_request *wr = new nvme_request(iov, offset, READ_REQ, this);
                 return wr;
         }
 

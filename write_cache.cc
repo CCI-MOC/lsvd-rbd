@@ -82,7 +82,7 @@ extern uuid_t my_uuid;
      */
 
     void write_cache::evict(void) {
-        assert(!m.try_lock());  // m must be locked
+        assert(!m.try_lock());  // m must belocked
         auto oldest = super->oldest;
         int pgs_free = pages_free(oldest);
         assert(pgs_free <= evict_trigger);
@@ -272,13 +272,14 @@ extern uuid_t my_uuid;
         misc_threads = new thread_pool<int>(&m);
         misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
 
-        e_io_running = true;
-        io_queue_init(64, &ioctx);
+        //e_io_running = true;
+        //io_queue_init(64, &ioctx);
         const char *name = "write_cache_cb";
-        e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
-
+	//   e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
+	
       char filename[] = {'/','t','m','p','/','l','s','v','d','_','n','v','m','e'};
-      nvme_w = new nvme(filename, this);
+      fp = fopen(filename);
+      nvme_w = new nvme(fd, name);
     }
 
     write_cache::~write_cache() {
@@ -290,9 +291,10 @@ extern uuid_t my_uuid;
         free(super);
         delete misc_threads;
         delete nvme_w;
-        e_io_running = false;
-        e_io_th.join();
-        io_queue_release(ioctx);
+	fclose(fp);
+	//        e_io_running = false;
+        //e_io_th.join();
+        //io_queue_release(ioctx);
     }
 
 
@@ -315,10 +317,14 @@ extern uuid_t my_uuid;
         blockno = allocate_locked(blocks+1, pad, lk);
 
 	// Request for padded write started and closure written
-	nvme_request* r_pad = nvme_w->make_write_request(true);
+	
 	pad_hdr = (char*)aligned_alloc(512, 4096);
-            auto closure = wrap([pad_hdr]{
+	auto one_iovs = new smartiov();
+	one_iovs->push_back((iovec){pad_hdr, 4096});
+	nvme_request* r_pad = nvme_w->make_write_request(one_iovs, pad*4096L);
+	auto closure = wrap([pad_hdr]{
                     free(pad_hdr);
+		    delete one_iovs;
                     return true;
                 });
 	
@@ -352,7 +358,7 @@ extern uuid_t my_uuid;
         }
 	
 	// Request for data write started
-	nvme_request * r_data = nvme_w->make_write_request(false);
+	nvme_request * r_data = nvme_w->make_write_request(iovs, blockno*4096L);
 	// closure for data is declared
         auto closure_data = wrap([this, hdr, plba, iovs, w] {
                 /* first update the maps */
@@ -390,7 +396,7 @@ extern uuid_t my_uuid;
                 }
                 return true;
         });
-	send_request * X = new  send_request(r_pad, closure, r_data, closure_data, pad, iovs, pad_hdr);
+	send_request * X = new  send_request(r_pad, closure, r_data, closure_data);
 	X->run(NULL);
     }
 

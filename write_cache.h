@@ -25,7 +25,7 @@ class write_cache {
 
     std::vector<cache_work*> work;
     int                      writes_outstanding = 0;
-
+    int fp;
     page_t evict_trigger;
     
     thread_pool<int>          *misc_threads;
@@ -34,8 +34,8 @@ class write_cache {
     int                       nfree;
     
     char *pad_page;
-    bool e_io_running = false;
-    std::thread e_io_th;
+  //bool e_io_running = false;
+  //std::thread e_io_th;
     
     page_t blocks;
     char*  pad_hdr;
@@ -71,7 +71,7 @@ class write_cache {
 public:
     j_write_super *super;
     int            fd;
-    io_context_t ioctx;
+  //io_context_t ioctx;
     page_t blockno;
 // constructor for the write cache
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads);
