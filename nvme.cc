@@ -36,7 +36,7 @@
 #include "send_request.h"
 #include "write_cache.h"
 
-        nvme::nvme(int fd, char* name) {
+        nvme::nvme(int fd, const char* name) {
 	        fp = fd;
                 e_io_running = true;
 		io_queue_init(64, &ioctx);

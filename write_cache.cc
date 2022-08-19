@@ -278,7 +278,7 @@ extern uuid_t my_uuid;
 	//   e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
 	
       char filename[] = {'/','t','m','p','/','l','s','v','d','_','n','v','m','e'};
-      fp = fopen(filename);
+      fp = fopen(filename, "w");
       nvme_w = new nvme(fd, name);
     }
 
@@ -322,7 +322,7 @@ extern uuid_t my_uuid;
 	auto one_iovs = new smartiov();
 	one_iovs->push_back((iovec){pad_hdr, 4096});
 	nvme_request* r_pad = nvme_w->make_write_request(one_iovs, pad*4096L);
-	auto closure = wrap([pad_hdr]{
+	auto closure = wrap([pad_hdr, one_iovs]{
                     free(pad_hdr);
 		    delete one_iovs;
                     return true;
@@ -396,7 +396,7 @@ extern uuid_t my_uuid;
                 }
                 return true;
         });
-	send_request * X = new  send_request(r_pad, closure, r_data, closure_data);
+	send_request * X = new  send_request(r_pad, closure, r_data, closure_data, pad);
 	X->run(NULL);
     }
 
@@ -443,9 +443,17 @@ extern uuid_t my_uuid;
         }
         lk.unlock();
         if (read_len) {
-            auto eio = new e_iocb;
+	    /*auto one_iovs = new smartiov();
+	    one_iovs->push_back((iovec){buf, read_len});
+	      auto closure = wrap([one_iovs]{
+                    delete one_iovs;
+                    return true;
+                });
+		nvme_w->make_read_request(one_iovs, nvme_offset
+*/
+	    auto eio = new e_iocb;
             e_io_prep_pread(eio, fd, buf, read_len, nvme_offset, cb, ptr);
-            e_io_submit(ioctx, eio);
+            e_io_submit(nvme_w->ioctx, eio);
         }
         return std::make_pair(skip_len, read_len);
     }

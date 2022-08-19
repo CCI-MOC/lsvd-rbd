@@ -35,14 +35,12 @@
 #include "send_request.h"
 
 
-        send_request::send_request(nvme_request* r1, void* c_pad, nvme_request* r2, void* c_data, page_t p, smartiov* wc_iovs, void* buffer) {
+        send_request::send_request(nvme_request* r1, void* c_pad, nvme_request* r2, void* c_data, page_t p) {
                 r_pad = r1;
                 r_data = r2;
                 closure_pad = c_pad;
                 closure_data = c_data;
-                pad = p;
-                iovs = wc_iovs;
-                buf = buffer;
+		pad = p;
         }
 	bool send_request::is_done() {return true;}
         void send_request::run(void* parent) {

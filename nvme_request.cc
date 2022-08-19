@@ -54,12 +54,8 @@ bool nvme_request::is_done() {
 	return true;
 }
 void nvme_request::run(void* parent) {
-  send_request *sr = (send_request*) parent;
   nvme* disk = (nvme*) nvme_ptr;
-  if(t == WRITE_REQ) {/*
-		e_io_prep_pwrite(eio, write_c->fd, sr->buf, 4096, sr->pad*4096L, call_send_request_notify, parent);
-        	e_io_submit(write_c->ioctx, eio);
-		} else {*/
+  if(t == WRITE_REQ) {
     //assert(ofs+iovs->bytes()/4096L <= write_c->super->limit);
     e_io_prep_pwritev(eio, disk->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, parent);
     e_io_submit(disk->ioctx, eio);
@@ -67,7 +63,7 @@ void nvme_request::run(void* parent) {
   } else if(t == READ_REQ) {
     e_io_prep_preadv(eio, disk->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, parent);
     e_io_submit(disk->ioctx, eio);
-  } else { return NULL;}
+  } else {}
 }
 void nvme_request::notify() {
 }
