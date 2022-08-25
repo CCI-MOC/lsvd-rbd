@@ -11,9 +11,9 @@
 #include <queue>
 #include <cassert>
 #include <shared_mutex>
-
+#include <sys/stat.h>
 #include <sys/uio.h>
-
+#include <fcntl.h>
 #include <mutex>
 #include <sstream>
 #include <iomanip>
@@ -33,7 +33,7 @@
 #include "request.h"
 #include "nvme_request.h"
 #include "nvme.h"
-#include "send_request.h"
+#include "send_write_request.h"
 #include "write_cache.h"
 
 extern uuid_t my_uuid;
@@ -277,8 +277,8 @@ extern uuid_t my_uuid;
         const char *name = "write_cache_cb";
 	//   e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
 	
-      char filename[] = {'/','t','m','p','/','l','s','v','d','_','n','v','m','e'};
-      fp = fopen(filename, "w");
+      
+      
       nvme_w = new nvme(fd, name);
     }
 
@@ -291,7 +291,7 @@ extern uuid_t my_uuid;
         free(super);
         delete misc_threads;
         delete nvme_w;
-	fclose(fp);
+	
 	//        e_io_running = false;
         //e_io_th.join();
         //io_queue_release(ioctx);
@@ -396,7 +396,7 @@ extern uuid_t my_uuid;
                 }
                 return true;
         });
-	send_request * X = new  send_request(r_pad, closure, r_data, closure_data, pad);
+	send_write_request * X = new  send_write_request(r_pad, closure, r_data, closure_data, pad);
 	X->run(NULL);
     }
 

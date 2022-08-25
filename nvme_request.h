@@ -19,7 +19,7 @@ public:
 	bool is_done(void);
 	void run(void *parent);
 	void notify(void);
-	~nvme_request();
+	~nvme_request();3
 
 };
 */
@@ -30,6 +30,7 @@ class nvme_request : public request {
   size_t ofs;
   int t;
   void* nvme_ptr;
+
 public:
   nvme_request(smartiov *iov, size_t offset, int type, void* nvme_w);
 	bool is_done(void);

@@ -32,13 +32,13 @@
 #include "request.h"
 #include "nvme_request.h"
 #include "nvme.h"
-#include "send_request.h"
+#include "send_write_request.h"
 #include "translate.h"
 #include "write_cache.h"
 
 void call_send_request_notify(void *parent)
 {
-    send_request *sr = (send_request*) parent;
+    send_write_request *sr = (send_write_request*) parent;
     sr->notify();
 }
 

@@ -25,7 +25,7 @@ class write_cache {
 
     std::vector<cache_work*> work;
     int                      writes_outstanding = 0;
-    FILE* fp;
+    int fp;
     page_t evict_trigger;
     
     thread_pool<int>          *misc_threads;
