@@ -30,19 +30,19 @@
 #include "backend.h"
 #include "io.h"
 #include "request.h"
-#include "nvme_request.h"
 #include "nvme.h"
+#include "nvme_request.h"
 #include "send_write_request.h"
 #include "translate.h"
 #include "write_cache.h"
 
 void call_send_request_notify(void *parent)
 {
-    send_write_request *sr = (send_write_request*) parent;
-    sr->notify();
+    nvme_request *r = (nvme_request*) parent;
+    r->notify();
 }
 
-nvme_request::nvme_request(smartiov *iov, size_t offset, int type, void* nvme_w) {
+nvme_request::nvme_request(smartiov *iov, size_t offset, int type, nvme* nvme_w) {
 	eio = new e_iocb;
 	iovs = iov;
 	ofs = offset;
@@ -54,18 +54,20 @@ bool nvme_request::is_done() {
 	return true;
 }
 void nvme_request::run(void* parent) {
-  nvme* disk = (nvme*) nvme_ptr;
+  sr = (send_write_request*) parent;
   if(t == WRITE_REQ) {
     //assert(ofs+iovs->bytes()/4096L <= write_c->super->limit);
-    e_io_prep_pwritev(eio, disk->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, parent);
-    e_io_submit(disk->ioctx, eio);
+    e_io_prep_pwritev(eio, nvme_ptr->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, this);
+    e_io_submit(nvme_ptr->ioctx, eio);
 
   } else if(t == READ_REQ) {
-    e_io_prep_preadv(eio, disk->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, parent);
-    e_io_submit(disk->ioctx, eio);
+    e_io_prep_preadv(eio, nvme_ptr->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, this);
+    e_io_submit(nvme_ptr->ioctx, eio);
   } else {}
 }
 void nvme_request::notify() {
+	sr->notify();
+	delete this;
 }
 
 nvme_request::~nvme_request() {

@@ -1,6 +1,8 @@
 #ifndef NVME_H
 #define NVME_H
 
+class nvme_request;
+
 class nvme {
   // FILE *fp;
 public:

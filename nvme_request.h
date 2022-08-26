@@ -3,6 +3,8 @@
 #ifndef NVME_REQUEST_H
 #define NVME_REQUEST_H
 
+class send_write_request;
+
 void call_send_request_notify(void *ptr);
 
 #define WRITE_REQ 1
@@ -29,10 +31,10 @@ class nvme_request : public request {
   smartiov* iovs;
   size_t ofs;
   int t;
-  void* nvme_ptr;
-
+  nvme* nvme_ptr;
+  send_write_request* sr;
 public:
-  nvme_request(smartiov *iov, size_t offset, int type, void* nvme_w);
+  nvme_request(smartiov *iov, size_t offset, int type, nvme* nvme_w);
 	bool is_done(void);
 	void run(void *parent);
 	void notify(void);

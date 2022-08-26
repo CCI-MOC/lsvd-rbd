@@ -5,12 +5,19 @@
 
 # Prerequisites
 *.d
+*.swp
 
 # Compiled Object files
 *.slo
 *.lo
 *.o
 *.obj
+*.save
+*.h#
+*.cc#
+*.1
+*.rej
+*.orig
 
 # Precompiled Headers
 *.gch
