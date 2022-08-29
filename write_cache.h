@@ -55,7 +55,7 @@ class write_cache {
 //		the type of header and the number of blocks, returning a pointer 
 //		to that structure, and the set up UUID for the structure inside &uuid
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
-
+  void append_seq(void);
 // evict :	Checks which pages are free and based on the oldest and deletes them from the cache
     void evict(void);
 

@@ -74,7 +74,9 @@ extern uuid_t my_uuid;
         return h;
     }
 
-
+void write_cache::append_seq(void) {
+  super->seq++;
+}
     /* min free is min(5%, 100MB). Free space:
      *  N = limit - base
      *  oldest == newest : free = N-1
@@ -315,9 +317,15 @@ extern uuid_t my_uuid;
         char* pad_hdr = NULL;
         page_t pad;
         blockno = allocate_locked(blocks+1, pad, lk);
-
-	// Request for padded write started and closure written
+	if (pad) {
+	  lengths[pad] = super->limit - pad;
+	  assert((pad+1)*4096UL <= dev_max);
+	  append_seq();
+	}
 	
+	lk.unlock();
+	// Request for padded write started and closure written
+	/*	
 	pad_hdr = (char*)aligned_alloc(512, 4096);
 	auto one_iovs = new smartiov();
 	one_iovs->push_back((iovec){pad_hdr, 4096});
@@ -327,28 +335,27 @@ extern uuid_t my_uuid;
 		    delete one_iovs;
                     return true;
                 });
-	
+	*/
 	// Setup for closure for data write
-        if (pad != 0) {
-            lengths[pad] = super->limit - pad;
-            assert((pad+1)*4096UL <= dev_max);
-            mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
-        }
-        lengths[blockno] = blocks+1;
-        lk.unlock();
+        /*if (pad != 0) {
 
+            //mk_header(pad_hdr, LSVD_J_PAD, my_uuid, (super->limit - pad));
+	    }*/
+        lengths[blockno] = blocks+1;
+	send_write_request(blocks, blockno, &w, pad, this); 
+	/*
         std::vector<j_extent> extents;
         for (auto _w : *w)
             extents.push_back((j_extent){_w->lba, (uint64_t)_w->sectors});
 
         char *hdr = (char*)aligned_alloc(512, 4096);
         j_hdr *j = mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
-
-        j->extent_offset = sizeof(*j);
+	*/
+	/*        j->extent_offset = sizeof(*j);
         size_t e_bytes = extents.size() * sizeof(j_extent);
         j->extent_len = e_bytes;
         memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
-
+	*//*
         sector_t plba = (blockno+1) * 8;
         auto iovs = new smartiov();
         iovs->push_back((iovec){hdr, 4096});
@@ -356,12 +363,13 @@ extern uuid_t my_uuid;
             auto [iov, iovcnt] = _w->iovs.c_iov();
             iovs->ingest(iov, iovcnt);
         }
-	
+	  */
 	// Request for data write started
+	/*
 	nvme_request * r_data = nvme_w->make_write_request(iovs, blockno*4096L);
 	// closure for data is declared
         auto closure_data = wrap([this, hdr, plba, iovs, w] {
-                /* first update the maps */
+                /* first update the maps 
                 std::vector<extmap::lba2lba> garbage; 
                 std::unique_lock lk(m);
                 auto _plba = plba;
@@ -374,7 +382,7 @@ extern uuid_t my_uuid;
                 for (auto it = garbage.begin(); it != garbage.end(); it++) 
                     rmap.trim(it->s.base, it->s.base+it->s.len);
 
-                /* then call back, send to backend */
+                /* then call back, send to backend 
 
                 lk.unlock();
                 for (auto _w : *w) {
@@ -383,7 +391,7 @@ extern uuid_t my_uuid;
                     delete _w;
                 }
 
-                /* and finally clean everything up */
+                /* and finally clean everything up 
                 free(hdr);
                 delete iovs;
                 delete w;
@@ -396,6 +404,7 @@ extern uuid_t my_uuid;
                 }
                 return true;
         });
+*/
 	send_write_request * X = new  send_write_request(r_pad, closure, r_data, closure_data, pad);
 	X->run(NULL);
     }
