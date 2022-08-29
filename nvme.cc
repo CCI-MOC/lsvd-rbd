@@ -34,8 +34,9 @@
 
 #include "nvme.h"
 #include "nvme_request.h"
-#include "send_write_request.h"
 #include "write_cache.h"
+#include "send_write_request.h"
+
 
         nvme::nvme(int fd, const char* name) {
 	        fp = fd;

@@ -16,7 +16,7 @@ class write_cache {
     //j_write_super *super;	// 4KB
 
     std::atomic<int64_t> sequence; // write sequence #
-    
+public:    
     extmap::cachemap2 map;
     extmap::cachemap2 rmap;
     std::map<page_t,int> lengths;
@@ -37,9 +37,8 @@ class write_cache {
   //bool e_io_running = false;
   //std::thread e_io_th;
     
-    page_t blocks;
-    char*  pad_hdr;
-    nvme 		      *nvme_w;
+
+
     nvme_request 	      *parent_request;
 // pages_free :	returns the number of free pages left inside of the write_cache super block
     int pages_free(uint32_t oldest);
@@ -68,11 +67,15 @@ class write_cache {
 //			a save of current write cache metadata and IOPS
     void write_checkpoint(void);
 
-public:
+
+    
+    
+    nvme 		      *nvme_w;
+
     j_write_super *super;
     int            fd;
   //io_context_t ioctx;
-    page_t blockno;
+    
 // constructor for the write cache
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads);
 // deconstructor for the write cache
