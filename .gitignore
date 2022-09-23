@@ -18,6 +18,15 @@
 *.1
 *.rej
 *.orig
+*.log
+d1
+d2
+d3
+d4
+d5
+b
+typescript
+xx
 
 # Precompiled Headers
 *.gch
