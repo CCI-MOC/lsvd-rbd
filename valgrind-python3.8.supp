@@ -88,3 +88,18 @@
    obj:/usr/bin/python3.8
 }
 
+{
+   s30
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   obj:/usr/bin/python3.8
+}
+
+{
+   s31
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:realloc
+   obj:/usr/bin/python3.8
+}
