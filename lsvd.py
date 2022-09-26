@@ -110,9 +110,6 @@ class write_cache:
         os.close(self.fd)
         lsvd_lib.wcache_close(self.wcache)
 
-    def w_cache_close(self):
-        lsvd_lib.wcache_close(self.wcache)
-
     def read(self, offset, nbytes):
         assert (nbytes % 512) == 0 and (offset % 512) == 0
         buf = (c_char * nbytes)()
@@ -125,9 +122,6 @@ class write_cache:
         nbytes = len(data)
         assert (nbytes % 512) == 0 and (offset % 512) == 0
         val = lsvd_lib.wcache_write(self.wcache, data, c_ulong(offset), c_uint(nbytes))
-
-    def wcache_reset(self):
-        lsvd_lib.wcache_reset(self.wcache)
 
     def getmap(self, base, limit):
         n_tuples = 128
