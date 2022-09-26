@@ -48,42 +48,119 @@
 #include "write_cache.h"
 #include "file_backend.h"
 #include "rados_backend.h"
-#include "refactor_lsvd.h"
-/* simple backend that uses files in a directory. 
- * good for debugging and testing
+
+#include "fake_rbd.h"
+#include "lsvd_debug.h"
+
+/* RBD "image" and completions are only used in this file, so we
+ * don't break them out into a .h
  */
 
-/* ------------------- DEBUGGING ----------------------*/
+/* fake RBD image */
 
-/* ------------------- FAKE RBD INTERFACE ----------------------*/
-/* following types are from librados.h
- */
+struct lsvd_completion;
 
-
-    void lsvd_completion::get(void) {
-	refcount++;
+struct event_socket {
+    int socket;
+    int type;
+public:
+    event_socket(): socket(-1), type(0) {}
+    bool is_valid() const { return socket != -1; }
+    int init(int fd, int t) {
+	socket = fd;
+	type = t;
+	return 0;
     }
-    void lsvd_completion::put(void) {
-	if (--refcount == 0)
-	    delete this;
-    }
-    
-    void lsvd_completion::complete(int val) {
-	retval = val;
-	std::unique_lock lk(m);
-	done = true;
-	cb((rbd_completion_t)this, arg);
-	if (fri->notify) {
-	    fri->completions.push((rbd_completion_t)this);
-	    uint64_t value = 1;
-	    if (write(fri->eventfd, &value, sizeof (value)) < 0)
-		throw_fs_error("eventfd");
+    int notify() {
+	int rv;
+	switch (type) {
+	case EVENT_TYPE_PIPE:
+	{
+	    char buf[1] = {'i'}; // why 'i'???
+	    rv = write(socket, buf, 1);
+	    rv = (rv < 0) ? -errno : 0;
+	    break;
 	}
-	cv.notify_all();
-	lk.unlock();
+	case EVENT_TYPE_EVENTFD:
+	{
+	    uint64_t value = 1;
+	    rv = write(socket, &value, sizeof (value));
+	    rv = (rv < 0) ? -errno : 0;
+	    break;
+	}
+	default:
+	    rv = -1;
+	}
+	return rv;
+    }
+};
+
+struct fake_rbd_image {
+    std::mutex   m;
+    backend     *io;
+    objmap      *omap;
+    translate   *lsvd;
+    write_cache *wcache;
+    read_cache  *rcache;
+    ssize_t      size;          // bytes
+    int          fd;            // cache device
+    j_super     *js;            // cache page 0
+
+    event_socket ev;
+    std::queue<rbd_completion_t> completions;
+};
+
+/* RBD-level completion structure 
+ */
+struct lsvd_completion {
+public:
+    fake_rbd_image *fri;
+    rbd_callback_t cb;
+    void *arg;
+    int retval;
+    bool done = false;
+    std::atomic<bool> released {false};
+    std::mutex m;
+    std::condition_variable cv;
+
+    std::atomic<int> n = 0;
+    iovec iov;                  // occasional use only
+    
+    lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
+
+    /* see Ceph AioCompletion::complete
+     */
+    void complete(int val) {
+	retval = val;
+	if (cb)
+	    cb((rbd_completion_t)this, arg);
+	if (fri->ev.is_valid()) {
+	    {
+		std::unique_lock lk(fri->m);
+		fri->completions.push(this);
+	    }
+	    fri->ev.notify();
+	}
+	
+	done = true;
+	{
+	    std::unique_lock lk(m);
+	    cv.notify_all();
+	}
     }
 
-extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps, int numcomp)
+    /* the Ceph folks *really* want to make sure users don't
+     * release twice
+     */
+    void release() {
+	bool old_released = released.exchange(true);
+	assert(!old_released);
+	delete this;
+    }
+};
+
+extern "C" int rbd_poll_io_events(rbd_image_t image,
+				  rbd_completion_t *comps, int numcomp)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     std::unique_lock lk(fri->m);
@@ -99,33 +176,33 @@ extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     assert(type == EVENT_TYPE_EVENTFD);
-    fri->notify = true;
-    fri->eventfd = fd;
-    return 0;
+    return fri->ev.init(fd, type);
 }
 
 extern "C" int rbd_aio_create_completion(void *cb_arg,
-					 rbd_callback_t complete_cb, rbd_completion_t *c)
+					 rbd_callback_t complete_cb,
+					 rbd_completion_t *c)
 {
-    lsvd_completion *p = new lsvd_completion;
-    p->cb = complete_cb;
-    p->arg = cb_arg;
-    p->refcount = 1;
+    lsvd_completion *p = new lsvd_completion(complete_cb, cb_arg);
     *c = (rbd_completion_t)p;
-    DBG((long)p);
     return 0;
 }
 
 extern "C" void rbd_aio_release(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
-    p->put();
+    p->release();
 }
 
-extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len, rbd_completion_t c)
+extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
+			       uint64_t len, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     p->fri = (fake_rbd_image*)image;
+
+    /* TODO: implement
+     */
+
     p->complete(0);
     return 0;
 }
@@ -134,6 +211,10 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     p->fri = (fake_rbd_image*)image;
+
+    /* TODO: implement
+     */
+
     p->complete(0);
     return 0;
 }
@@ -158,129 +239,201 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len, char *buf,
-			    rbd_completion_t c)
+/* aio_read_req - state machine for rbd_aio_read
+ */
+class aio_read_req {
+    fake_rbd_image   *img;
+    lsvd_completion  *p;
+    char             *buf;
+    char             *aligned_buf;
+    uint64_t          offset;
+    size_t            len;
+    std::atomic<int>  n_req = 0;
+    std::atomic<bool> finished = false;
+
+    std::mutex        m;
+    std::condition_variable cv;
+    
+public:
+    aio_read_req(fake_rbd_image *img_, lsvd_completion *p_,
+		 char *buf_, uint64_t offset_, size_t len_) :
+	img(img_), p(p_), buf(buf_), offset(offset_), len(len_) {
+	aligned_buf = buf;
+    }
+
+    void complete() {
+	if (--n_req > 0)
+	    return;
+	if (!finished)
+	    return;
+	
+	if (aligned_buf != buf) {
+	    memcpy(buf, aligned_buf, len);
+	    free(aligned_buf);
+	}
+	if (p != NULL) {
+	    p->complete(0);
+	    delete this;
+	} else {
+	    std::unique_lock lk(m);
+	    cv.notify_all();
+	}
+    }
+
+    void wait() {
+	std::unique_lock lk(m);
+	while (!finished || n_req > 0)
+	    cv.wait(lk);
+	lk.unlock();
+	delete this;
+    }
+    
+    void exec() {
+	if (!aligned(buf, 512))
+	    aligned_buf = (char*)aligned_alloc(512, len);
+
+	/* we're not done until n_req == 0 && finished == true
+	 */
+	char *_buf = aligned_buf;	// read and increment this
+	size_t _len = len;		// and this
+
+	while (_len > 0) {
+	    n_req++;
+	    auto [skip,wait] =
+		img->wcache->async_read(offset, _buf, _len,
+					aio_read_cb, (void*)this);
+	    if (wait == 0)
+		n_req--;
+
+	    _len -= skip;
+	    while (skip > 0) {
+		n_req++;
+		auto [skip2, wait2] =
+		    img->rcache->async_read(offset, _buf, skip,
+					    aio_read_cb, (void*)this);
+		if (wait2 == 0)
+		    n_req--;
+
+		memset(_buf, 0, skip2);
+		skip -= (skip2 + wait2);
+		_buf += (skip2 + wait2);
+		offset += (skip2 + wait2);
+	    }
+	    _buf += wait;
+	    _len -= wait;
+	    offset += wait;
+	}
+
+	finished.store(true);
+	if (n_req == 0)
+	    complete();
+    }
+
+    static void aio_read_cb(void *ptr) {
+	auto req = (aio_read_req *)ptr;
+	req->complete();
+    }
+};
+
+
+extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
+			    size_t len, char *buf, rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
-    char *aligned_buf = buf;
-    //assert(aligned(buf, 512));
-    if (!aligned(buf, 512))
-	aligned_buf = (char*)aligned_alloc(512, len);
     auto p = (lsvd_completion*)c;
     p->fri = fri;
 
-    assert(p != NULL);
-
-    /* god, I've got to straighten out all the reference counting stuff.
-     * put a reference on, so that we can get through the loops without 
-     * completing prematurely
-     */
-    p->n.store(1);
-    char *_buf = aligned_buf;	// read and increment these ones
-    size_t _len = len;
-    
-    while (_len > 0) {
-	/* this is ugly. Need to put the closure here, to capture the proper values
-	 * of 'buf' and 'len'.
-	 */
-	auto closure = wrap([p, aligned_buf, buf, len]{
-		if (0 == --p->n) {
-		    if (aligned_buf != buf) 
-			memcpy(buf, aligned_buf, len);
-		    p->get();
-		    p->complete(0);
-		    p->put();
-		    if (aligned_buf != buf) 
-			free(aligned_buf);
-		    return true;
-		}
-		return false;
-	    });
-
-	bool closure_used = false;
-	p->n++;
-	auto [skip,wait] =
-	    fri->wcache->async_read(offset, _buf, _len, call_wrapped, closure);
-	if (wait == 0)
-	    p->n--;
-	else
-	    closure_used = true;
-	_len -= skip;
-	while (skip > 0) {
-	    p->n++;
-	    auto [skip2, wait2] =
-		fri->rcache->async_read(offset, _buf, skip, call_wrapped, closure);
-	    if (wait2 == 0)
-		p->n--;
-	    else
-		closure_used = true;
-	    memset(_buf, 0, skip2);
-	    skip -= (skip2 + wait2);
-	    _buf += (skip2 + wait2);
-	    offset += (skip2 + wait2);
-	}
-	_buf += wait;
-	_len -= wait;
-	offset += wait;
-	if (!closure_used)
-	    delete_wrapped(closure);
-    }
-
-    /* ugly - now I have to repeat the closure code to remove the reference
-     * from up top LOOKUP
-     */
-    if (0 == --p->n) {
-	if (aligned_buf != buf) 
-	    memcpy(buf, aligned_buf, len);
-	p->get();
-	p->complete(0);
-	p->put();
-	if (aligned_buf != buf) 
-	    free(aligned_buf);
-    }
-    
+    auto req = new aio_read_req(fri, p, buf, offset, len);
+    req->exec();
     return 0;
 }
 
-/* TODO - add optional buffer to lsvd_completion, 
- *   completion copies (for read) and frees 
- */
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t off, rbd_completion_t c)
 {
+    /* TODO */
     return 0;
 }
 
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 			      int iovcnt, uint64_t off, rbd_completion_t c)
 {
+    /* TODO */
     return 0;
 }
 
-extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len, const char *buf,
-			     rbd_completion_t c)
+/* aio_write_req - state machine for rbd_aio_write
+ */
+class aio_write_req {
+    fake_rbd_image   *img;
+    lsvd_completion  *p;
+    const char       *buf;
+    char             *aligned_buf = NULL;
+    uint64_t          offset;
+    size_t            len;
+    iovec             iov;
+    bool              finished = false;
+    std::mutex        m;
+    std::condition_variable cv;
+    
+public:
+    aio_write_req(fake_rbd_image *img_, lsvd_completion *p_,
+		  const char *buf_, uint64_t offset_, size_t len_) :
+	img(img_), p(p_), buf(buf_), offset(offset_), len(len_) {
+	aligned_buf = (char*)buf;
+    }
+
+    void complete() {
+	if (aligned_buf != buf)
+	    free(aligned_buf);
+	if (p != NULL) {
+	    p->complete(0);
+	    delete this;
+	} else {
+	    std::unique_lock lk(m);
+	    finished = true;
+	    cv.notify_all();
+	}
+    }
+
+    /* for synchronous writes
+     */
+    void wait() {
+	std::unique_lock lk(m);
+	while (!finished)
+	    cv.wait(lk);
+	lk.unlock();
+	delete this;
+    }
+
+    /* note that this is a lot simpler than read, because
+     * the write cache takes everything in a single chunk.
+     */
+    void exec() {
+	if (!aligned(buf, 512)) {
+	    aligned_buf = (char*)aligned_alloc(512, len);
+	    memcpy(aligned_buf, buf, len);
+	}
+	iov.iov_base = aligned_buf;
+	iov.iov_len = len;
+	img->wcache->writev(offset, &iov, 1, aio_write_cb, (void*)this);
+    }
+
+    static void aio_write_cb(void *ptr) {
+	auto req = (aio_write_req *)ptr;
+	req->complete();
+    }
+};
+
+extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
+			     const char *buf, rbd_completion_t c)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     p->fri = fri;
 
-    char *aligned_buf = (char*)buf;
-    if (!aligned(buf, 512)) {
-	aligned_buf = (char*)aligned_alloc(512, len);
-	memcpy(aligned_buf, buf, len);
-    }
-    
-    auto closure = wrap([p, buf, aligned_buf]{
-	    p->get();
-	    p->complete(0);
-	    p->put();
-	    if (aligned_buf != buf)
-		free(aligned_buf);
-	    return true;
-	});
-    p->iov = (iovec){aligned_buf, len};
-    fri->wcache->writev(off, &p->iov, 1, call_wrapped, closure);
-
+    auto req = new aio_write_req(fri, p, buf, offset, len);
+    req->exec();
     return 0;
 }
 
@@ -293,57 +446,28 @@ void rbd_call_wrapped(rbd_completion_t c, void *ptr)
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
-    rbd_completion_t c;
-    std::mutex m;
-    std::condition_variable cv;
-    bool done = false;
-    void *closure = wrap([&m, &cv, &done]{
-	    done = true;
-	    cv.notify_all();
-	    return true;
-	});
-    rbd_aio_create_completion(closure, rbd_call_wrapped, &c);
-
-    std::unique_lock lk(m);
-    rbd_aio_read(image, off, len, buf, c);
-    while (!done)
-	cv.wait(lk);
-    auto val = rbd_aio_get_return_value(c);
-    rbd_aio_release(c);
-    return val;
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto req = new aio_read_req(fri, NULL, buf, off, len);
+    req->exec();
+    req->wait();
+    return 0;
 }
 
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char *buf)
 {
-    rbd_completion_t c;
-    std::mutex m;
-    std::condition_variable cv;
-    bool done = false;
-    void *closure = wrap([&m, &cv, &done]{
-	    std::unique_lock lk(m);
-	    done = true;
-	    cv.notify_all();
-	    return true;
-	});
-    rbd_aio_create_completion(closure, rbd_call_wrapped, &c);
-
-    std::unique_lock lk(m);
-    rbd_aio_write(image, off, len, buf, c);
-    while (!done)
-	cv.wait(lk);
-    auto val = rbd_aio_get_return_value(c);
-    rbd_aio_release(c);
-    return val;
+    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto req = new aio_write_req(fri, NULL, buf, off, len);
+    req->exec();
+    req->wait();
+    return 0;
 }
 
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     std::unique_lock lk(p->m);
-    p->get();
     while (!p->done)
 	p->cv.wait(lk);
-    p->put();
     return 0;
 }
 
@@ -402,9 +526,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     
     fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
     fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
-    fri->notify = false;
 
-    the_fri = fri;
     *image = (void*)fri;
     return 0;
 }
@@ -422,6 +544,8 @@ extern "C" int rbd_close(rbd_image_t image)
     delete fri->lsvd;
     delete fri->omap;
     delete fri->io;
+    free(fri->js);
+    delete fri;
     
     return 0;
 }
@@ -796,9 +920,6 @@ extern "C" int rcache_get_flat(read_cache *rcache, extmap::obj_offset *vals, int
     n = std::min(n, p_super->units);
     memcpy(vals, p, n*sizeof(extmap::obj_offset));
     return n;
-}
-extern "C" void rcache_reset(read_cache *rcache)
-{
 }
 extern "C" void fakemap_update(_dbg *d, int base, int limit,
 			       int obj, int offset)

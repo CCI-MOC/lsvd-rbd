@@ -38,19 +38,26 @@
 
 extern uuid_t my_uuid;
 
-send_write_request::send_write_request(std::vector<cache_work*> *w, page_t blocks, page_t blockno, page_t p, write_cache* wcache)  {
+send_write_request::send_write_request(std::vector<cache_work*> *w,
+				       page_t blocks, page_t blockno,
+				       page_t pad_pgs, write_cache* wcache)  {
 
-  pad = p;
+  pad = pad_pgs;
   char * pad_hdr = NULL;
-  pad_hdr = (char*)aligned_alloc(512, 4096);
-  auto one_iovs = new smartiov();
-  one_iovs->push_back((iovec){pad_hdr, 4096});
-  r_pad = wcache->nvme_w->make_write_request(one_iovs, pad*4096L);
-  closure_pad = wrap([pad_hdr, one_iovs]{
-			free(pad_hdr);
-			delete one_iovs;
-			return true;
-		      });
+
+  if (pad > 0) {
+      pad_hdr = (char*)aligned_alloc(512, 4096);
+      memset(pad_hdr, 0, 4096);
+  
+      auto one_iovs = new smartiov();
+      one_iovs->push_back((iovec){pad_hdr, 4096});
+      r_pad = wcache->nvme_w->make_write_request(one_iovs, pad*4096L);
+      closure_pad = wrap([pad_hdr, one_iovs]{
+	      free(pad_hdr);
+	      delete one_iovs;
+	      return true;
+	  });
+  }
   
   std::vector<j_extent> extents;
   for (auto _w : *w)

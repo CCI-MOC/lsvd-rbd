@@ -85,12 +85,19 @@
         printf("rc: map %ld (%ld)\n", map.size(), sizeof(std::pair<extmap::obj_offset,int>));
         printf("rc: usecache 1 %d 0 %d (stat.u %ld .b %ld)\n", u1, u0, hit_stats.user, hit_stats.backend);
     #endif
+
+	misc_threads.stop();	// before we free anything threads might touch
+	
         free((void*)flat_map);
+	for (auto i = 0; i < super->units; i++)
+	    if (buffer[i] != NULL)
+		free(buffer[i]);
         free((void*)super);
 
         e_io_running = false;
         e_io_th.join();
         io_queue_release(ioctx);
+
     }
 
 
@@ -269,7 +276,7 @@
             off_t buf_offset = blk_offset * 512L;
             off_t bytes = 512L * sectors;
 
-            auto write_done = wrap([this, n]{
+            auto write_done = wrap([this, n, _buf]{
                     written[n] = true;
                     return true;
                 });

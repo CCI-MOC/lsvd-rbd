@@ -59,6 +59,7 @@ template class thread_pool<int>;
             delete current_batch;
         if (super)
             free(super);
+	free(super_name);
     }
 
 
@@ -244,7 +245,8 @@ template class thread_pool<int>;
 	    next_completion++;
 	}
 	translate::io->write_numbered_object(seq, iov, 4);
-
+	free(buf);
+	
 	size_t offset = sizeof(*super_h) + sizeof(*super_sh);
 
 	lk2.lock();

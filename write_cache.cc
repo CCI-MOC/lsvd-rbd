@@ -289,9 +289,12 @@ void write_cache::append_seq(void) {
         printf("wc map: %d %d (%ld)\n", map.size(), map.capacity(), sizeof(extmap::lba2lba));
         printf("wc rmap: %d %d (%ld)\n", rmap.size(), rmap.capacity(), sizeof(extmap::lba2lba));
     #endif
+
+        delete misc_threads;
+	
         free(pad_page);
         free(super);
-        delete misc_threads;
+
         delete nvme_w;
 	
 	//        e_io_running = false;
@@ -426,6 +429,7 @@ void write_cache::append_seq(void) {
         if (h->type == LSVD_J_DATA)
             decode_offset_len<j_extent>(buf, h->extent_offset, h->extent_len, extents);
 
+	free(buf);
         return next_blk;
     }
     

@@ -31,7 +31,8 @@ public:
 	running = true;
 	m = _m;
     }
-    ~thread_pool() {
+
+    void stop() {
 	std::unique_lock lk(*m);
 	running = false;
 	cv.notify_all();
@@ -40,6 +41,9 @@ public:
 	    pool.front().join();
 	    pool.pop();
 	}
+    }
+    ~thread_pool() {
+        stop();
     }
 
 // get_locked :	Returns the value for the front of the thread_pool queue
