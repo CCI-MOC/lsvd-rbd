@@ -14,10 +14,11 @@
 #ifndef MISC_CACHE_H
 #define MISC_CACHE_H
 
-// thread_pool:	A helper class that is used by translate and cache layers to keep
-//		track of which pool of threads is being used with its own mutex
-//		Contains a template T queue, mutex, template std::thread queue, condition_variable,
-//		and its own constructer and deconstructer.
+/* implements a thread pool with a work queue of type T
+ * to use, push threads onto thread_pool.pool
+ * - get(), get_locked() - used by worker threads to receive work
+ * - put(), put_locked() - submit work
+ */
 template <class T>
 class thread_pool {
 public:
@@ -46,7 +47,6 @@ public:
         stop();
     }
 
-// get_locked :	Returns the value for the front of the thread_pool queue
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
         while (running && q.empty())
             cv.wait(lk);
@@ -57,21 +57,20 @@ public:
         return val;
     }
 
-// put_locked :	Appends work to the queue
     void put_locked(T work) {
         q.push(work);
         cv.notify_one();
     }
 
-// put :	calls put_locked with an active mutex
     void put(T work) {
         std::unique_lock<std::mutex> lk(*m);
         put_locked(work);
     }
 };
 
-// decode_offset_len : 	given template T *p which is the sum of buf + offset *p is pushed
-//			back for vals until the defined end which is a sum of the offset, length, and buf
+/* if buf[offset]...buf[offset+len] contains an array of type T,
+ * copy them into the provided output vector
+ */
 template<class T>
 void decode_offset_len(char *buf, size_t offset, size_t len,
                        std::vector<T> &vals) {
@@ -90,8 +89,14 @@ public:
     extmap::objmap    map;
 };
 
-// throw_fs_error :	Throws a file_system error with the inputted message
-void throw_fs_error(std::string msg);
+/* nice error messages
+ */
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+static inline void throw_fs_error(std::string msg) {
+    throw fs::filesystem_error(msg, std::error_code(errno,
+                                                    std::system_category()));
+}
 
 // cache_work:	This is a structure for support in using the read_cache and write_cache objects
 //		It contains callback to function, sectors for the caches, smartiov (see smartiov.h

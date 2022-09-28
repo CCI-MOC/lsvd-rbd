@@ -1,13 +1,17 @@
-CFLAGS = -ggdb3 -Wall -Wno-psabi
 CXX = g++
 CC = g++
+
 # no-psabi - disable warnings for changes in aa64 ABI
 # no-tree-sra - tree-sra causes unit-test to segfault on x86-64, not on aa64
 # note that no-unswitch-loops also gets rid of the segfault
-CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra
+CFLAGS = -ggdb3 -Wall -Wno-psabi $(OPT)
+CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra $(OPT)
 SOFLAGS = -shared -fPIC
-OBJS = base_functions.o misc_cache.o translate.o io.o read_cache.o nvme_request.o nvme.o send_write_request.o write_cache.o file_backend.o rados_backend.o refactor_lsvd.o
-CFILES = base_functions.cc misc_cache.cc translate.cc io.cc read_cache.cc nvme_request.cc nvme.cc send_write_request.cc write_cache.cc file_backend.cc rados_backend.cc refactor_lsvd.cc
+
+OBJS = base_functions.o translate.o io.o read_cache.o nvme_request.o \
+	nvme.o send_write_request.o write_cache.o file_backend.o \
+	rados_backend.o refactor_lsvd.o
+CFILES = $(OBJS:.o=.cc)
 
 liblsvd.so:  $(OBJS)
 	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
