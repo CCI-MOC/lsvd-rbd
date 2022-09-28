@@ -32,7 +32,6 @@
 #include "io.h"
 #include "request.h"
 #include "nvme.h"
-#include "nvme_request.h"
 #include "send_write_request.h"
 #include "write_cache.h"
 
@@ -304,7 +303,7 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
     misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
 
     const char *name = "write_cache_cb";
-    nvme_w = new nvme(fd, name);
+    nvme_w = make_nvme(fd, name);
 }
 
 write_cache::~write_cache() {
@@ -355,6 +354,30 @@ void write_cache::writev(request *req) {
 	send_writes(lk);
 }
 
+/* this will eventually become a proper write cache read request 
+ */
+class wcache_read_req : public request {
+    void (*cb)(void*);
+    void *ptr;
+    smartiov *_iovs;
+    
+public:
+    wcache_read_req(void (*cb_)(void*), void *ptr_, smartiov *iovs_) :
+	cb(cb_), ptr(ptr_), _iovs(iovs_) {}
+
+    void notify(void) {
+	cb(ptr);
+	delete _iovs;
+	delete this;
+    }
+
+    void run(request *parent) {}
+    sector_t lba() { return 0; }
+    smartiov *iovs() { return NULL; }
+    bool is_done(void) { return true; }
+    virtual ~wcache_read_req(){}
+};
+
 /* returns (number of bytes skipped), (number of bytes read_started)
  */
 std::pair<size_t,size_t> write_cache::async_read(size_t offset, char *buf,
@@ -378,18 +401,19 @@ std::pair<size_t,size_t> write_cache::async_read(size_t offset, char *buf,
 	    nvme_offset = 512L * plba;
     }
     lk.unlock();
+
     if (read_len) {
-	/*auto one_iovs = new smartiov();
-	  one_iovs->push_back((iovec){buf, read_len});
-	  auto closure = wrap([one_iovs]{
-	  delete one_iovs;
-	  return true;
-	  });
-	  nvme_w->make_read_request(one_iovs, nvme_offset
-	*/
+	iovec iov = {buf, read_len};
+	auto s_iov = new smartiov(&iov, 1);
+	auto parent = new wcache_read_req(cb, ptr, s_iov);
+	auto req = nvme_w->make_read_request(s_iov, nvme_offset);
+	req->run(parent);
+	
+#if 0
 	auto eio = new e_iocb;
 	e_io_prep_pread(eio, fd, buf, read_len, nvme_offset, cb, ptr);
 	e_io_submit(nvme_w->ioctx, eio);
+#endif
     }
     return std::make_pair(skip_len, read_len);
 }

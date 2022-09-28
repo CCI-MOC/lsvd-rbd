@@ -1,23 +1,20 @@
 #ifndef NVME_H
 #define NVME_H
 
-class nvme_request;
-
 class nvme {
-  // FILE *fp;
 public:
-  int fp;
-  bool e_io_running = false;
-  std::thread e_io_th;
-  io_context_t ioctx;
-
-
-  nvme(int fd, const char* name);
-  ~nvme();
-
-  nvme_request* make_write_request(smartiov *iov, size_t offset);
-  nvme_request* make_read_request(smartiov *iov, size_t offset);
-
+    nvme() {};
+    virtual ~nvme() {};
+    
+    virtual request* make_write_request(smartiov *iov, size_t offset) = 0;
+    virtual request* make_read_request(smartiov *iov, size_t offset) = 0;
 };
+
+enum {
+    WRITE_REQ = 1,
+    READ_REQ = 3
+};
+
+nvme *make_nvme(int fd, const char* name);
 
 #endif

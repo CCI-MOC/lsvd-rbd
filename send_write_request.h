@@ -8,11 +8,11 @@ class send_write_request : public request {
 
     sector_t      plba;
     std::vector<request*> *work = NULL;
-    nvme_request *r_data = NULL;
+    request      *r_data = NULL;
     char         *hdr = NULL;
     smartiov     *data_iovs = NULL;
 
-    nvme_request *r_pad = NULL;
+    request      *r_pad = NULL;
     char         *pad_hdr = NULL;
     smartiov     *pad_iov = NULL;
 
