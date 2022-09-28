@@ -1,4 +1,5 @@
 CFLAGS = -ggdb3 -Wall -Wno-psabi
+CXX = g++
 CC = g++
 # no-psabi - disable warnings for changes in aa64 ABI
 # no-tree-sra - tree-sra causes unit-test to segfault on x86-64, not on aa64
@@ -9,7 +10,7 @@ OBJS = base_functions.o misc_cache.o translate.o io.o read_cache.o nvme_request.
 CFILES = base_functions.cc misc_cache.cc translate.cc io.cc read_cache.cc nvme_request.cc nvme.cc send_write_request.cc write_cache.cc file_backend.cc rados_backend.cc refactor_lsvd.cc
 
 liblsvd.so:  $(OBJS)
-	$(CC) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
+	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
 
 %.o: %.d
 
@@ -26,20 +27,20 @@ DEPFILES:=$(patsubst %.cc,%.d,$(SOURCES))
 
 
 lsvd_rbd.o: lsvd_rbd.cc read_cache.o
-	$(CC) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)
+	$(CXX) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)
 
 
-bdus: bdus.o lsvd_rbd.o extent.h journal2.h
-	$(CC) lsvd_rbd.o bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados
+bdus: bdus.o $(OBJS)
+	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio
 
 mkdisk: mkdisk.cc objects.h
-	$(CC) mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
+	$(CXX) mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
 
 clean:
 	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d
 
 unit-test: unit-test.cc extent.h
-	$(CC) $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs
+	$(CXX) $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs
 
 unit-test-O3: unit-test.cc extent.h
 	$(CC) $(CXXFLAGS) -O3 -o $@ unit-test.cc -lstdc++fs

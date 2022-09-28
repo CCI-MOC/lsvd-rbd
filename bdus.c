@@ -2,6 +2,11 @@
 #include <stdio.h>
 #include <argp.h>
 
+#include <sys/uio.h>
+#include <rados/librados.h>
+#include <stdlib.h>
+#include <stdlib.h>
+
 #include "fake_rbd.h"
 
 extern int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
@@ -41,21 +46,38 @@ int do_flush(struct bdus_ctx *ctx)
     return rbd_flush(img);
 }
 
+/* including all the members in case we compile as C++
+ */
 static const struct bdus_ops device_ops =
 {
+    .initialize = do_init,
+    .on_device_available = NULL,
+    .terminate  = do_terminate,
     .read       = do_read,
     .write      = do_write,
-    .initialize = do_init,
+    .write_same = NULL,
+    .write_zeros = NULL,
+    .fua_write = NULL,
     .flush      = do_flush,
-    .terminate  = do_terminate,
+    .discard = NULL,
+    .secure_erase = NULL,
+    .ioctl = NULL
 };
 
 static struct bdus_attrs device_attrs =
 {
-    .size               = 1 << 30, // 1 GiB
     .logical_block_size = 512,
-    .dont_daemonize     = 1,
+    /* physical_block_size */
+    .size               = 1 << 30, // 1 GiB
     .max_concurrent_callbacks = 0,
+    /* max_read_write_size */
+    /* max_write_same_size */
+    /* max_write_zeros_size */
+    /* max_discard_erase_size */
+    /* disable_partition_scanning */
+    /* recoverable */
+    .dont_daemonize     = 1,
+    /* log */
 };
 
 
