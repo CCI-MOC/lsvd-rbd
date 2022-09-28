@@ -98,6 +98,13 @@ read_cache::~read_cache() {
 
 }
 
+#if 0
+static std::random_device rd; // to initialize RNG
+static std::mt19937 rng(rd());
+#else
+static std::mt19937 rng(17);      // for deterministic testing
+#endif
+
 /* evict 'n' blocks from cache, using random eviction
  */
 void read_cache::evict(int n) {

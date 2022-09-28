@@ -16,9 +16,7 @@ enum {DBG_MAP = 1, DBG_HITS = 2, DBG_AIO = 4};
 #define DBG(a) 
 
 // https://stackoverflow.com/questions/5008804/generating-random-integer-from-a-range
-extern std::random_device rd;     // only used once to initialise (seed) engine
-//std::mt19937 rng(rd());  // random-number engine used (Mersenne-Twister in this case)
-extern std::mt19937 rng;      // for deterministic testing
+
 
 typedef int64_t sector_t;
 typedef int page_t;
