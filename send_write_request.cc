@@ -38,100 +38,104 @@
 
 extern uuid_t my_uuid;
 
-send_write_request::send_write_request(std::vector<cache_work*> *w,
-				       page_t blocks, page_t blockno,
-				       page_t pad_pgs, write_cache* wcache)  {
-
-  pad = pad_pgs;
-  char * pad_hdr = NULL;
-
-  if (pad > 0) {
-      pad_hdr = (char*)aligned_alloc(512, 4096);
-      memset(pad_hdr, 0, 4096);
-  
-      auto one_iovs = new smartiov();
-      one_iovs->push_back((iovec){pad_hdr, 4096});
-      r_pad = wcache->nvme_w->make_write_request(one_iovs, pad*4096L);
-      closure_pad = wrap([pad_hdr, one_iovs]{
-	      free(pad_hdr);
-	      delete one_iovs;
-	      return true;
-	  });
-  }
-  
-  std::vector<j_extent> extents;
-  for (auto _w : *w)
-    extents.push_back((j_extent){_w->lba, (uint64_t)_w->sectors});
-  
-  char *hdr = (char*)aligned_alloc(512, 4096);
-  j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, my_uuid, 1+blocks);
-
-  j->extent_offset = sizeof(*j);
-  size_t e_bytes = extents.size() * sizeof(j_extent);
-  j->extent_len = e_bytes;
-  memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
-
-  sector_t plba = (blockno+1) * 8;
-  auto iovs = new smartiov();
-  iovs->push_back((iovec){hdr, 4096});
-  for (auto _w : *w) {
-    auto [iov, iovcnt] = _w->iovs.c_iov();
-    iovs->ingest(iov, iovcnt);
-  }
-  r_data = wcache->nvme_w->make_write_request(iovs, blockno*4096L);
-  // closure for data is declared
-  closure_data = wrap([this, wcache, hdr, plba, iovs, w] {
-			     /* first update the maps */
-			     std::vector<extmap::lba2lba> garbage; 
-			     std::unique_lock lk(wcache->m);
-			     auto _plba = plba;
-			     for (auto _w : *w) {
-			       wcache->map.update(_w->lba, _w->lba + _w->sectors, _plba, &garbage);
-			       wcache->rmap.update(plba, _plba+_w->sectors, _w->lba);
-			       _plba += _w->sectors;
-			       wcache->map_dirty = true;
-			     }
-			     for (auto it = garbage.begin(); it != garbage.end(); it++) 
-			       wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
-			     lk.unlock();
-			     for (auto _w : *w) {
-			       wcache->be->writev(_w->lba*512, _w->iovs.data(), _w->iovs.size());
-			       _w->callback(_w->ptr);
-			       delete _w;
-			     }
-			     
-			     /* and finally clean everything up */
-			     free(hdr);
-			     delete iovs;
-			     delete w;
-			     
-			     lk.lock();
-			     --(wcache->writes_outstanding);
-			     if (wcache->work.size() > 0) {
-			       lk.unlock();
-			       wcache->send_writes();
-			     }
-			     return true;
-		      });
-}
-bool send_write_request::is_done() {return true;}
-void send_write_request::run(void* parent) {
-  reqs++;
-  if(pad) {
-    reqs++;
-    r_pad->run(this);
-  }
-  r_data->run(this);
-}
-
 void send_write_request::notify() {
-  if(--reqs == 0) {
-    if(pad) {
-      call_wrapped(closure_pad);
+    if(--reqs > 0)
+	return;
+    
+    {
+	std::unique_lock lk(wcache->m);
+	std::vector<extmap::lba2lba> garbage; 
+	auto _plba = plba;
+
+	/* update the write cache forward and reverse maps
+	 */
+	for (auto _w : *work) {
+	    wcache->map.update(_w->lba, _w->lba + _w->sectors,
+			       _plba, &garbage);
+	    wcache->rmap.update(_plba, _plba+_w->sectors, _w->lba);
+	    _plba += _w->sectors;
+	    wcache->map_dirty = true;
+	}
+
+	/* remove reverse mappings for old versions of data
+	 */
+	for (auto it = garbage.begin(); it != garbage.end(); it++) 
+	    wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
     }
-    call_wrapped(closure_data);
+
+    /* send data to backend, invoke callbacks, then clean up
+     */
+    for (auto _w : *work) {
+	wcache->be->writev(_w->lba*512, _w->iovs.data(),
+			   _w->iovs.size());
+	_w->callback(_w->ptr);
+	delete _w;
+    }
+    free(hdr);
+    if (pad_hdr) 
+	free(pad_hdr);
+    delete iovs;
+    if (pad_iov)
+	delete pad_iov;
+    delete work;
     delete this;
-  }
+}
+
+
+/* n_pages: number of 4KB data pages (not counting header)
+ * page:    page number to begin writing 
+ * n_pad:   number of pages to skip (not counting header)
+ * pad:     page number for pad entry (0 if none)
+ */
+send_write_request::send_write_request(std::vector<cache_work*> *work_,
+				       page_t n_pages, page_t page,
+				       page_t n_pad, page_t pad,
+				       write_cache* wcache_)  {
+    wcache = wcache_;
+    work = work_;
+    
+    if (pad != 0) {
+	pad_hdr = (char*)aligned_alloc(512, 4096);
+	wcache->mk_header(pad_hdr, LSVD_J_PAD, my_uuid, n_pad+1);
+	pad_iov = new smartiov();
+	pad_iov->push_back((iovec){pad_hdr, 4096});
+	reqs++;
+	r_pad = wcache->nvme_w->make_write_request(pad_iov, pad*4096L);
+    }
+  
+    std::vector<j_extent> extents;
+    for (auto _w : *work)
+	extents.push_back((j_extent){_w->lba, (uint64_t)_w->sectors});
+  
+    hdr = (char*)aligned_alloc(512, 4096);
+    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, my_uuid, 1+n_pages);
+
+    j->extent_offset = sizeof(*j);
+    size_t e_bytes = extents.size() * sizeof(j_extent);
+    j->extent_len = e_bytes;
+    memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
+
+    plba = (page+1) * 8;
+    iovs = new smartiov();
+    iovs->push_back((iovec){hdr, 4096});
+    for (auto _w : *work) {
+	auto [iov, iovcnt] = _w->iovs.c_iov();
+	iovs->ingest(iov, iovcnt);
+    }
+    r_data = wcache->nvme_w->make_write_request(iovs, page*4096L);
+}
+
+/* TODO: NO, NO, NO!!!!
+ */
+bool send_write_request::is_done() {return true;}
+
+void send_write_request::run(void* parent) {
+    reqs++;
+    if(r_pad) {
+	reqs++;
+	r_pad->run(this);
+    }
+    r_data->run(this);
 }
 
 send_write_request::~send_write_request() {}

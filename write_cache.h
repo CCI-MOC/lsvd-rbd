@@ -13,50 +13,56 @@
 class write_cache {
     size_t         dev_max;
     uint32_t       super_blkno;
-    //j_write_super *super;	// 4KB
 
     std::atomic<int64_t> sequence; // write sequence #
-public:    
+
+    /* bookkeeping for write throttle
+     */
+    int total_write_pages = 0;
+    int max_write_pages = 0;
+    std::condition_variable write_cv;
+
+    void evict(page_t base, page_t len);
+
+    /* initialization stuff
+     */
+    void read_map_entries();
+    void roll_log_forward();
+
+public:
+
+    /* throttle writes with window of max_write_pages
+     */
+    void get_room(int blks); 
+    void release_room(int blks);
+    
     extmap::cachemap2 map;
     extmap::cachemap2 rmap;
+
+    /* track the length of each journal record in cache
+     */
     std::map<page_t,int> lengths;
+
     translate        *be;
+
     bool              map_dirty;
 
     std::vector<cache_work*> work;
-    int                      writes_outstanding = 0;
-    int fp;
-    page_t evict_trigger;
-    
+
     thread_pool<int>          *misc_threads;
     std::mutex                m;
-    std::condition_variable   alloc_cv;
     int                       nfree;
     
     char *pad_page;
-  //bool e_io_running = false;
-  //std::thread e_io_th;
-    
-
 
     nvme_request 	      *parent_request;
-// pages_free :	returns the number of free pages left inside of the write_cache super block
     int pages_free(uint32_t oldest);
 
-// allocate_locked : 	allocates a number of pages n with a mutex lock. If not enough pages are available
-// 			the current super->next pointer is set to &pad, and pages starting with the base
-//			of the write cache super block are allocated. Returns the pointer to the beginning of
-//			allocated data.
-    uint32_t allocate_locked(page_t n, page_t &pad,
-                             std::unique_lock<std::mutex> &lk);
-
-// mk_header :	sets up a j_hdr structure which functions as a header for the write_cache with the preset of 
-//		the type of header and the number of blocks, returning a pointer 
-//		to that structure, and the set up UUID for the structure inside &uuid
+    /* allocate journal entry, create a header
+     */
+    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
-  void append_seq(void);
-// evict :	Checks which pages are free and based on the oldest and deletes them from the cache
-    void evict(void);
+
 
 // ckpt_thread :	Writes a checkpoint if new data has been written to a thread but not recorded in a 
 //			checkpoint within a particular timespan
@@ -66,15 +72,11 @@ public:
 // write_checkpoint : 	writes the super block information and io information back to file, creating 
 //			a save of current write cache metadata and IOPS
     void write_checkpoint(void);
-
-
-    
     
     nvme 		      *nvme_w;
 
     j_write_super *super;
     int            fd;
-  //io_context_t ioctx;
     
 // constructor for the write cache
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads);
@@ -83,35 +85,29 @@ public:
 
 // send_writes :	clears write_cache work, writes back IOPS, then updates maps, writes the cache
 //			to backend and then clears up all temporary variables
-    void send_writes(void);
+    void send_writes(std::unique_lock<std::mutex> &lk);
     bool evicting = false;
 
-// writev :	calls to evict if pages_free > evict trigger, then cachework added to work, and then sends
-//		writes to backend
-    void writev(size_t offset, const iovec *iov, int iovcnt, void (*cb)(void*), void *ptr);
+    void writev(size_t offset, const iovec *iov, int iovcnt,
+                void (*cb)(void*), void *ptr);
 
-// async_read :	Performs an asynchronous read similar to the read in read_cache without additional
-//		functionality.
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t bytes,
 					void (*cb)(void*), void *ptr);
 
-// getmap :	retrieves information about the map and stores it in separate variables
-    void getmap(int base, int limit, int (*cb)(void*, int, int, int), void *ptr);
+    /* debug functions */
 
-// reset :	resets the map
+    /* getmap callback(ptr, base, limit, phys_lba)
+     */
+    void getmap(int base, int limit, int (*cb)(void*,int,int,int), void *ptr);
+
     void reset(void);
+    void get_super(j_write_super *s); /* copies superblock */
 
-// get_super :	copies the pointer to the write_cache superblock to s
-    void get_super(j_write_super *s);
-    /* debug:
-     * cache eviction - get info from oldest entry in cache. [should be private]
-     *  @blk - header to read
+    /*  @blk - header to read
      *  @extents - data to move. empty if J_PAD or J_CKPT
      *  return value - first page of next record
      */
     page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
-
-// do_write_checkpoint : if map is dirty, writes a checkpoint
     void do_write_checkpoint(void);
 };
 

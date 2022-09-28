@@ -44,28 +44,32 @@ void call_send_request_notify(void *parent)
 }
 
 nvme_request::nvme_request(smartiov *iov, size_t offset, int type, nvme* nvme_w) {
-	eio = new e_iocb;
-	iovs = iov;
-	ofs = offset;
-	t = type;
-	nvme_ptr = nvme_w;
+    eio = new e_iocb;
+    iovs = iov;
+    ofs = offset;
+    t = type;
+    nvme_ptr = nvme_w;
 }
 
 bool nvme_request::is_done() {
-	return true;
+    return true;
 }
-void nvme_request::run(void* parent) {
-  sr = (send_write_request*) parent;
-  if(t == WRITE_REQ) {
-    //assert(ofs+iovs->bytes()/4096L <= write_c->super->limit);
-    e_io_prep_pwritev(eio, nvme_ptr->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, this);
-    e_io_submit(nvme_ptr->ioctx, eio);
 
-  } else if(t == READ_REQ) {
-    e_io_prep_preadv(eio, nvme_ptr->fp, iovs->data(), iovs->size(), ofs, call_send_request_notify, this);
-    e_io_submit(nvme_ptr->ioctx, eio);
-  } else {}
+void nvme_request::run(void* parent) {
+    sr = (send_write_request*) parent;
+    if(t == WRITE_REQ) {
+	//assert(ofs+iovs->bytes()/4096L <= write_c->super->limit);
+	e_io_prep_pwritev(eio, nvme_ptr->fp, iovs->data(), iovs->size(),
+			  ofs, call_send_request_notify, this);
+	e_io_submit(nvme_ptr->ioctx, eio);
+
+    } else if(t == READ_REQ) {
+	e_io_prep_preadv(eio, nvme_ptr->fp, iovs->data(), iovs->size(),
+			 ofs, call_send_request_notify, this);
+	e_io_submit(nvme_ptr->ioctx, eio);
+    } else {}
 }
+
 void nvme_request::notify() {
 	sr->notify();
 	delete this;

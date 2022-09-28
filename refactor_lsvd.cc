@@ -143,7 +143,9 @@ public:
 	}
 	
 	done = true;
-	{
+	if (released)
+	    delete this;
+	else {
 	    std::unique_lock lk(m);
 	    cv.notify_all();
 	}
@@ -153,9 +155,11 @@ public:
      * release twice
      */
     void release() {
+	//printf("release %p\n", this);
 	bool old_released = released.exchange(true);
 	assert(!old_released);
-	delete this;
+	if (done)
+	    delete this;
     }
 };
 
@@ -272,7 +276,7 @@ public:
 	    free(aligned_buf);
 	}
 	if (p != NULL) {
-	    p->complete(0);
+	    p->complete(len);
 	    delete this;
 	} else {
 	    std::unique_lock lk(m);
@@ -384,10 +388,14 @@ public:
     }
 
     void complete() {
+	int blocks = div_round_up(len, 4096);
+	img->wcache->release_room(blocks);
+	
 	if (aligned_buf != buf)
 	    free(aligned_buf);
 	if (p != NULL) {
-	    p->complete(0);
+	    //printf("complete %p\n", p);
+	    p->complete(len);
 	    delete this;
 	} else {
 	    std::unique_lock lk(m);
@@ -416,6 +424,8 @@ public:
 	}
 	iov.iov_base = aligned_buf;
 	iov.iov_len = len;
+	int blocks = div_round_up(len, 4096);
+	img->wcache->get_room(blocks);
 	img->wcache->writev(offset, &iov, 1, aio_write_cb, (void*)this);
     }
 

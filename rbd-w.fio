@@ -1,20 +1,21 @@
 [global]
 #logging
-write_iops_log=write_iops_log
-write_bw_log=write_bw_log
-write_lat_log=write_lat_log
+#write_iops_log=write_iops_log
+#write_bw_log=write_bw_log
+#write_lat_log=write_lat_log
 ioengine=rbd
 clientname=admin
 pool=rbd
-#rbdname=/mnt/nvme/cache.img,rados:rbd/obj_B
-#rbdname=/dev/nvme0n1p1,rados:rbd/obj_B
-rbdname=/tmp/x/nvme.img,rados:rbd/obj_B
+#rbdname=/mnt/nvme/lsvd/SSD,/mnt/nvme/lsvd/obj
+rbdname=/mnt/nvme/lsvd/SSD,rados:rbd/obj_B
+#rbdname=/mnt/nvme/lsvd/SSD,rados:ec_lsvd/obj_B
 rw=randwrite
 #rw=randread
 bs=4k
-runtime=60
+#runtime=90
+runtime=15
 time_based
 
 [rbd_iodepth32]
-iodepth=32
+iodepth=16
 

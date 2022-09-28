@@ -5,20 +5,27 @@ class write_cache;
 
 class send_write_request : public request {
 public:
-	nvme_request* r_pad;
-	nvme_request* r_data;
-	void* 	closure_pad;
-	void* 	closure_data;
-	page_t pad;
+    std::atomic<int> reqs = 0;
 
-	std::atomic<int> reqs = 0;
+    sector_t      plba;
+    std::vector<cache_work*> *work = NULL;
+    nvme_request *r_data = NULL;
+    char         *hdr = NULL;
+    smartiov     *iovs = NULL;
 
-  send_write_request(std::vector<cache_work*> *w, page_t blocks, page_t blockno, page_t p, write_cache* wcache);
-	bool is_done();
-	void run(void* parent);
-	void notify();
-	~send_write_request();
+    nvme_request *r_pad = NULL;
+    char         *pad_hdr = NULL;
+    smartiov     *pad_iov = NULL;
 
+    write_cache  *wcache = NULL;
+    
+    send_write_request(std::vector<cache_work*> *w, page_t n_pages, page_t page,
+                       page_t n_pad, page_t pad, write_cache *wcache);
+
+    bool is_done();
+    void run(void* parent);
+    void notify();
+    ~send_write_request();
 };
 
 #endif

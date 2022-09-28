@@ -72,12 +72,13 @@ struct j_write_super {
     
     /* FIFO range is [base,limit), 
      *  valid range accounting for wraparound is [oldest,next)
+     *  'wrapped' 
      */
     uint32_t base;
     uint32_t limit;
     uint32_t next;
     uint32_t oldest;
-
+    
     /* to checkpoint the map:
      * - allocate enough blocks at the write frontiers
      * - write LSVD_J_CKPT header + map entries

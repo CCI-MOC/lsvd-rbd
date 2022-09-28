@@ -43,7 +43,7 @@ template class thread_pool<int>;
     }
 
     translate::~translate() {
-    #if 1
+    #if 0
         fprintf(fp, "xl: batches %ld (8MiB)\n", batches.size());
         fprintf(fp, "xl: in_mem %ld (%ld)\n", in_mem_objects.size(), sizeof(std::pair<int,char*>));
         fprintf(fp, "omap: %d %d (%ld)\n", map->map.size(), map->map.capacity(), sizeof(extmap::lba2obj));

@@ -14,7 +14,9 @@ import blkdev
 def div_round_up(n, m):
     return (n + m - 1) // m
 
-def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=125, rblks=16*16):
+# backend batch size is 8MB, write cache should be >= 2 batches
+# 
+def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=4096, rblks=4096):
     fd = os.open(name, os.O_RDWR | os.O_CREAT, 0o777)
 
     sup = lsvd.j_super(magic=lsvd.LSVD_MAGIC, type=lsvd.LSVD_J_SUPER,

@@ -50,6 +50,9 @@ class tests(unittest.TestCase):
         self.assertEqual(d, b'\0'*(3*512))
         finish()
 
+    # for this and following tests, note that the default test
+    # read cache (from mkcache.py) is 4K *4KB = 256 blocks
+    
     def test_2_read_fake(self):
         #print('Test 2')
         startup()
@@ -63,7 +66,7 @@ class tests(unittest.TestCase):
         time.sleep(0.1)                   # wait for async add()
         m = rcache.getmap()
         self.assertEqual(d, expected)
-        self.assertEqual(m, [([1,0],15)])
+        self.assertEqual(m, [([1,0],255)])
 
         d = rcache.read(0, 4096)
         self.assertEqual(d, expected)
@@ -75,7 +78,7 @@ class tests(unittest.TestCase):
 
         time.sleep(0.1)
         m = rcache.getmap()
-        self.assertEqual(m, [([1, 0], 15), ([1, 1], 14), ([1, 2], 13)])
+        self.assertEqual(m, [([1, 0], 255), ([1, 1], 254), ([1, 2], 253)])
         finish()
 
     def test_3_add_fake(self):
@@ -91,11 +94,11 @@ class tests(unittest.TestCase):
         self.assertEqual(d, data[0:4096])
         d = rcache.read((128+24-8)*512, 8192)
         self.assertEqual(d, b'A'*4096 + b'\0'*4096)
-        self.assertEqual(rcache.flatmap(), [[0,0]] * 15 + [[2, 0]])
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 255 + [[2, 0]])
 
         rcache.add(2,128,b'B'*65536)
         rcache.add(2,256,b'C'*65536)
-        self.assertEqual(rcache.flatmap(), [[0,0]] * 13 + [[2,256], [2,128],[2, 0]])
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 253 + [[2,256], [2,128],[2, 0]])
 
         finish()
 
@@ -113,11 +116,11 @@ class tests(unittest.TestCase):
         self.assertEqual(d, data[0:4096])
         d = rcache.read2((128+24-8)*512, 8192)
         self.assertEqual(d, b'A'*4096 + b'\0'*4096)
-        self.assertEqual(rcache.flatmap(), [[0,0]] * 15 + [[2, 0]])
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 255 + [[2, 0]])
 
         rcache.add(2,128,b'B'*65536)
         rcache.add(2,256,b'C'*65536)
-        self.assertEqual(rcache.flatmap(), [[0,0]] * 13 + [[2,256], [2,128],[2, 0]])
+        self.assertEqual(rcache.flatmap(), [[0,0]] * 253 + [[2,256], [2,128],[2, 0]])
 
         finish()
         
@@ -128,7 +131,7 @@ class tests(unittest.TestCase):
         for i in range(16):
             rcache.add(i, 0, data)
         m = map_tuples(rcache.getmap())
-        self.assertEqual(m, [(i,0,15-i) for i in range(16)])
+        self.assertEqual(m, [(i,0,255-i) for i in range(16)])
         s1 = set(m)
 
         rcache.evict(4)
