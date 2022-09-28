@@ -245,7 +245,7 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
 
 /* aio_read_req - state machine for rbd_aio_read
  */
-class aio_read_req {
+class aio_read_req : public request {
     fake_rbd_image   *img;
     lsvd_completion  *p;
     char             *buf;
@@ -265,7 +265,11 @@ public:
 	aligned_buf = buf;
     }
 
-    void complete() {
+    bool is_done() { return finished && n_req <= 0; }
+    sector_t lba() { return 0; }
+    smartiov *iovs() { return NULL; }
+    
+    void notify() {
 	if (--n_req > 0)
 	    return;
 	if (!finished)
@@ -292,7 +296,7 @@ public:
 	delete this;
     }
     
-    void exec() {
+    void run(request *parent /* unused */) {
 	if (!aligned(buf, 512))
 	    aligned_buf = (char*)aligned_alloc(512, len);
 
@@ -330,12 +334,12 @@ public:
 
 	finished.store(true);
 	if (n_req == 0)
-	    complete();
+	    notify();
     }
 
     static void aio_read_cb(void *ptr) {
 	auto req = (aio_read_req *)ptr;
-	req->complete();
+	req->notify();
     }
 };
 
@@ -348,7 +352,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
     p->fri = fri;
 
     auto req = new aio_read_req(fri, p, buf, offset, len);
-    req->exec();
+    req->run(NULL);
     return 0;
 }
 
@@ -368,14 +372,14 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 
 /* aio_write_req - state machine for rbd_aio_write
  */
-class aio_write_req {
+class aio_write_req : public request {
     fake_rbd_image   *img;
     lsvd_completion  *p;
     const char       *buf;
     char             *aligned_buf = NULL;
     uint64_t          offset;
     size_t            len;
-    iovec             iov;
+    smartiov          data_iovs;
     bool              finished = false;
     std::mutex        m;
     std::condition_variable cv;
@@ -387,7 +391,7 @@ public:
 	aligned_buf = (char*)buf;
     }
 
-    void complete() {
+    void notify() {
 	int blocks = div_round_up(len, 4096);
 	img->wcache->release_room(blocks);
 	
@@ -414,24 +418,22 @@ public:
 	delete this;
     }
 
+    bool is_done() { return finished; }
+    sector_t lba() { return offset / 512; }
+    smartiov *iovs() { return &data_iovs; }
+    
     /* note that this is a lot simpler than read, because
      * the write cache takes everything in a single chunk.
      */
-    void exec() {
+    void run(request *parent /* unused */) {
 	if (!aligned(buf, 512)) {
 	    aligned_buf = (char*)aligned_alloc(512, len);
 	    memcpy(aligned_buf, buf, len);
 	}
-	iov.iov_base = aligned_buf;
-	iov.iov_len = len;
+	data_iovs.push_back((iovec){aligned_buf, len});
 	int blocks = div_round_up(len, 4096);
 	img->wcache->get_room(blocks);
-	img->wcache->writev(offset, &iov, 1, aio_write_cb, (void*)this);
-    }
-
-    static void aio_write_cb(void *ptr) {
-	auto req = (aio_write_req *)ptr;
-	req->complete();
+	img->wcache->writev(this);
     }
 };
 
@@ -443,7 +445,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     p->fri = fri;
 
     auto req = new aio_write_req(fri, p, buf, offset, len);
-    req->exec();
+    req->run(NULL);
     return 0;
 }
 
@@ -458,7 +460,7 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     auto req = new aio_read_req(fri, NULL, buf, off, len);
-    req->exec();
+    req->run(NULL);
     req->wait();
     return 0;
 }
@@ -467,7 +469,7 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
     auto req = new aio_write_req(fri, NULL, buf, off, len);
-    req->exec();
+    req->run(NULL);
     req->wait();
     return 0;
 }
@@ -713,73 +715,39 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
     std::condition_variable cv;
     std::mutex m;
     for (char *_buf = buf2; _len > 0; ) {
-	std::unique_lock lk(m);
-	bool done = false;
-	void *closure = wrap([&done, &cv, &m]{
-		std::unique_lock lk(m);
-		done = true;
-		cv.notify_all();
-		return true;
-	    });
-	auto [skip_len, read_len] = wcache->async_read(offset, _buf, _len,
-						       call_wrapped, closure);
-	memset(_buf, 0, skip_len);
-	_buf += (skip_len + read_len);
-	_len -= (skip_len + read_len);
-	offset += (skip_len + read_len);
-	if (read_len > 0)
-	    while (!done)
-		cv.wait(lk);
-	else
-	    delete_wrapped(closure);
+        std::unique_lock lk(m);
+        bool done = false;
+        void *closure = wrap([&done, &cv, &m]{
+                std::unique_lock lk(m);
+                done = true;
+                cv.notify_all();
+                return true;
+            });
+        auto [skip_len, read_len] = wcache->async_read(offset, _buf, _len,
+                                                       call_wrapped, closure);
+        memset(_buf, 0, skip_len);
+        _buf += (skip_len + read_len);
+        _len -= (skip_len + read_len);
+        offset += (skip_len + read_len);
+        if (read_len > 0)
+            while (!done)
+                cv.wait(lk);
+        else
+            delete_wrapped(closure);
     }
     memcpy(buf, buf2, len);
     free(buf2);
 }
-extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
-{
-    char *aligned_buf = (char*)aligned_alloc(512, len);
-    memcpy(aligned_buf, buf, len);
-    iovec iov = {aligned_buf, len};
-    std::condition_variable cv;
-    std::mutex m;
-    bool done = false;
-    void *closure = wrap([&done, &cv, &m]{
-	    std::unique_lock lk(m);
-	    done = true;
-	    cv.notify_all();
-	    return true;
-	});
-    std::unique_lock lk(m);
-    wcache->writev(offset, &iov, 1, call_wrapped, closure);
-    while (!done)
-        cv.wait(lk);
-    free(aligned_buf);
-}
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len)
 {
-    fake_rbd_image *fri = (fake_rbd_image*)image;
-    std::mutex m;
-    std::condition_variable cv;
-    std::unique_lock lk(m);
-    bool done = false;
-    void *closure = wrap([&done, &cv, &m]{
-	    std::unique_lock lk(m);
-	    done = true;
-	    cv.notify_all();
-	    return true;
-	});
-    char *aligned_buf = buf;
-    if (!aligned(buf, 512)) {
-	aligned_buf = (char*)aligned_alloc(512, len);
-	memcpy(aligned_buf, buf, len);
-    }
-    iovec iov = {aligned_buf, len};
-    fri->wcache->writev(offset, &iov, 1, call_wrapped, closure);
-    while (!done)
-	cv.wait(lk);
-    if (aligned_buf != buf)
-	free(aligned_buf);
+    rbd_write((rbd_image_t)image, offset, len, buf);
+}
+extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
+{
+    fake_rbd_image *fri = new fake_rbd_image;
+    fri->wcache = wcache;
+    wcache_img_write(fri, buf, offset, len);
+    delete fri;
 }
 extern "C" void wcache_reset(write_cache *wcache)
 {

@@ -57,12 +57,6 @@ void write_cache::release_room(int pages) {
 	write_cv.notify_one();
 }
 
-int write_cache::pages_free(uint32_t oldest) {
-    auto size = super->limit - super->base;
-    auto tail = (super->next >= oldest) ? oldest + size : oldest;
-    return tail - super->next - 1;
-}
-
 /* circular buffer logic - returns true if any [p..p+len) is in the
  * range [oldest..newest) modulo [base,limit)
  */
@@ -294,8 +288,6 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
 	throw_fs_error("wcache");
     
     super = (j_write_super*)buf;
-    pad_page = (char*)aligned_alloc(512, 4096);
-    memset(pad_page, 0, 4096);
     map_dirty = false;
 
     if (super->map_entries)
@@ -304,11 +296,6 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
     roll_log_forward();
 
     auto N = super->limit - super->base;
-    if (super->oldest == super->next)
-	nfree = N - 1;
-    else
-	nfree = (super->oldest + N - super->next) % N;
-
     max_write_pages = N/2;
     
     // https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
@@ -322,21 +309,20 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
 
 write_cache::~write_cache() {
     delete misc_threads;
-    free(pad_page);
     free(super);
     delete nvme_w;
 }
 
 
 void write_cache::send_writes(std::unique_lock<std::mutex> &lk) {
-    auto w = new std::vector<cache_work*>(std::make_move_iterator(work.begin()),
+    auto w = new std::vector<request*>(std::make_move_iterator(work.begin()),
 					  std::make_move_iterator(work.end()));
     work.erase(work.begin(), work.end());
 
     sector_t sectors = 0;
     for (auto _w : *w) {
-	sectors += _w->sectors;
-	assert(_w->iovs.aligned(512));
+	sectors += _w->iovs()->bytes() / 512;
+	assert(_w->iovs()->aligned(512));
     }
     
     page_t pages = div_round_up(sectors, 8);
@@ -359,11 +345,9 @@ void write_cache::send_writes(std::unique_lock<std::mutex> &lk) {
     req->run(NULL);
 }
 
-void write_cache::writev(size_t offset, const iovec *iov, int iovcnt,
-			 void (*cb)(void*), void *ptr) {
-    auto w = new cache_work(offset/512L, iov, iovcnt, cb, ptr);
+void write_cache::writev(request *req) {
     std::unique_lock lk(m);
-    work.push_back(w);
+    work.push_back(req);
 
     // if we're not under write pressure, send writes immediately; else
     // batch them

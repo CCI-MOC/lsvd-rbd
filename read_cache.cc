@@ -81,7 +81,7 @@
         e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
     }
     read_cache::~read_cache() {
-    #if 1
+    #if 0
         printf("rc: map %ld (%ld)\n", map.size(), sizeof(std::pair<extmap::obj_offset,int>));
         printf("rc: usecache 1 %d 0 %d (stat.u %ld .b %ld)\n", u1, u0, hit_stats.user, hit_stats.backend);
     #endif
@@ -102,7 +102,6 @@
 
 
     void read_cache::evict(int n) {
-        printf("\nEVICTING %d\n", n);
         // assert(!m.try_lock());       // m must be locked
         std::uniform_int_distribution<int> uni(0,super->units - 1);
         for (int i = 0; i < n; i++) {

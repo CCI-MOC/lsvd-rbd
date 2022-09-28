@@ -23,74 +23,58 @@ class write_cache {
     std::condition_variable write_cv;
 
     void evict(page_t base, page_t len);
+    void send_writes(std::unique_lock<std::mutex> &lk);
 
     /* initialization stuff
      */
     void read_map_entries();
     void roll_log_forward();
 
+    /* track length of each journal record in cache
+     */
+    std::map<page_t,int> lengths;
+
+    thread_pool<int>          *misc_threads;
+
+    void ckpt_thread(thread_pool<int> *p);
+    bool ckpt_in_progress = false;
+    void write_checkpoint(void);
+    
 public:
+
+    /* locks all data structures in this instance
+     */
+    std::mutex                m;
 
     /* throttle writes with window of max_write_pages
      */
     void get_room(int blks); 
     void release_room(int blks);
-    
+
+    /* these need to be public because they're used by
+     * send_write_requests
+     */
     extmap::cachemap2 map;
     extmap::cachemap2 rmap;
-
-    /* track the length of each journal record in cache
-     */
-    std::map<page_t,int> lengths;
-
+    bool              map_dirty;
     translate        *be;
 
-    bool              map_dirty;
-
-    std::vector<cache_work*> work;
-
-    thread_pool<int>          *misc_threads;
-    std::mutex                m;
-    int                       nfree;
+    std::vector<request*> work;
     
-    char *pad_page;
-
-    nvme_request 	      *parent_request;
-    int pages_free(uint32_t oldest);
-
     /* allocate journal entry, create a header
      */
     uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
 
-
-// ckpt_thread :	Writes a checkpoint if new data has been written to a thread but not recorded in a 
-//			checkpoint within a particular timespan
-    void ckpt_thread(thread_pool<int> *p);
-    bool ckpt_in_progress = false;
-
-// write_checkpoint : 	writes the super block information and io information back to file, creating 
-//			a save of current write cache metadata and IOPS
-    void write_checkpoint(void);
-    
     nvme 		      *nvme_w;
 
     j_write_super *super;
-    int            fd;
+    int            fd;          /* TODO: remove, use sync NVME */
     
-// constructor for the write cache
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads);
-// deconstructor for the write cache
     ~write_cache();
 
-// send_writes :	clears write_cache work, writes back IOPS, then updates maps, writes the cache
-//			to backend and then clears up all temporary variables
-    void send_writes(std::unique_lock<std::mutex> &lk);
-    bool evicting = false;
-
-    void writev(size_t offset, const iovec *iov, int iovcnt,
-                void (*cb)(void*), void *ptr);
-
+    void writev(request *req);
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t bytes,
 					void (*cb)(void*), void *ptr);
 

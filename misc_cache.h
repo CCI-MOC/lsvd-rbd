@@ -73,11 +73,12 @@ public:
 // decode_offset_len : 	given template T *p which is the sum of buf + offset *p is pushed
 //			back for vals until the defined end which is a sum of the offset, length, and buf
 template<class T>
-    void decode_offset_len(char *buf, size_t offset, size_t len, std::vector<T> &vals) {
-        T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
-        for (; p < end; p++)
-            vals.push_back(*p);
-    }
+void decode_offset_len(char *buf, size_t offset, size_t len,
+                       std::vector<T> &vals) {
+    T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
+    for (; p < end; p++)
+        vals.push_back(*p);
+}
 
 
 // objmap:	a modified object map whose only difference is the containment of a mutex to

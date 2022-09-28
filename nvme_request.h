@@ -26,19 +26,22 @@ public:
 };
 */
 class nvme_request : public request {
+    e_iocb* eio;
+    smartiov* _iovs;
+    size_t ofs;
+    int t;
+    nvme* nvme_ptr;
+    request* parent;
 
-  e_iocb* eio;
-  smartiov* iovs;
-  size_t ofs;
-  int t;
-  nvme* nvme_ptr;
-  send_write_request* sr;
 public:
-  nvme_request(smartiov *iov, size_t offset, int type, nvme* nvme_w);
-	bool is_done(void);
-	void run(void *parent);
-	void notify(void);
-	~nvme_request();
+    nvme_request(smartiov *iov, size_t offset, int type, nvme* nvme_w);
+    ~nvme_request();
+
+    sector_t lba();
+    smartiov *iovs();
+    bool is_done(void);
+    void run(request *parent);
+    void notify(void);
 };
 
 #endif

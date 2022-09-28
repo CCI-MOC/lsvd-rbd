@@ -38,6 +38,10 @@
 
 extern uuid_t my_uuid;
 
+static uint64_t sectors(request *req) {
+    return req->iovs()->bytes() / 512;
+}
+
 void send_write_request::notify() {
     if(--reqs > 0)
 	return;
@@ -50,10 +54,10 @@ void send_write_request::notify() {
 	/* update the write cache forward and reverse maps
 	 */
 	for (auto _w : *work) {
-	    wcache->map.update(_w->lba, _w->lba + _w->sectors,
+	    wcache->map.update(_w->lba(), _w->lba() + sectors(_w),
 			       _plba, &garbage);
-	    wcache->rmap.update(_plba, _plba+_w->sectors, _w->lba);
-	    _plba += _w->sectors;
+	    wcache->rmap.update(_plba, _plba+sectors(_w), _w->lba());
+	    _plba += sectors(_w);
 	    wcache->map_dirty = true;
 	}
 
@@ -66,28 +70,26 @@ void send_write_request::notify() {
     /* send data to backend, invoke callbacks, then clean up
      */
     for (auto _w : *work) {
-	wcache->be->writev(_w->lba*512, _w->iovs.data(),
-			   _w->iovs.size());
-	_w->callback(_w->ptr);
-	delete _w;
+	auto [iov, iovcnt] = _w->iovs()->c_iov();
+	wcache->be->writev(_w->lba()*512, iov, iovcnt);
+	_w->notify();
     }
     free(hdr);
     if (pad_hdr) 
 	free(pad_hdr);
-    delete iovs;
+    delete data_iovs;
     if (pad_iov)
 	delete pad_iov;
     delete work;
     delete this;
 }
 
-
 /* n_pages: number of 4KB data pages (not counting header)
  * page:    page number to begin writing 
  * n_pad:   number of pages to skip (not counting header)
  * pad:     page number for pad entry (0 if none)
  */
-send_write_request::send_write_request(std::vector<cache_work*> *work_,
+send_write_request::send_write_request(std::vector<request*> *work_,
 				       page_t n_pages, page_t page,
 				       page_t n_pad, page_t pad,
 				       write_cache* wcache_)  {
@@ -105,7 +107,7 @@ send_write_request::send_write_request(std::vector<cache_work*> *work_,
   
     std::vector<j_extent> extents;
     for (auto _w : *work)
-	extents.push_back((j_extent){_w->lba, (uint64_t)_w->sectors});
+	extents.push_back((j_extent){(uint64_t)_w->lba(), sectors(_w)});
   
     hdr = (char*)aligned_alloc(512, 4096);
     j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, my_uuid, 1+n_pages);
@@ -116,20 +118,22 @@ send_write_request::send_write_request(std::vector<cache_work*> *work_,
     memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
 
     plba = (page+1) * 8;
-    iovs = new smartiov();
-    iovs->push_back((iovec){hdr, 4096});
+    data_iovs = new smartiov();
+    data_iovs->push_back((iovec){hdr, 4096});
     for (auto _w : *work) {
-	auto [iov, iovcnt] = _w->iovs.c_iov();
-	iovs->ingest(iov, iovcnt);
+	auto [iov, iovcnt] = _w->iovs()->c_iov();
+	data_iovs->ingest(iov, iovcnt);
     }
-    r_data = wcache->nvme_w->make_write_request(iovs, page*4096L);
+    r_data = wcache->nvme_w->make_write_request(data_iovs, page*4096L);
 }
 
 /* TODO: NO, NO, NO!!!!
  */
 bool send_write_request::is_done() {return true;}
+sector_t send_write_request::lba() {return 0;}
+smartiov *send_write_request::iovs() {return NULL;}
 
-void send_write_request::run(void* parent) {
+void send_write_request::run(request *parent /* unused */) {
     reqs++;
     if(r_pad) {
 	reqs++;
