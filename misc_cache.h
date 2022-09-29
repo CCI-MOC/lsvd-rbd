@@ -79,10 +79,8 @@ void decode_offset_len(char *buf, size_t offset, size_t len,
         vals.push_back(*p);
 }
 
-
-// objmap:	a modified object map whose only difference is the containment of a mutex to
-//		be used with the extmap::objmap used inside it. For documentation on extmap
-//		see extent.h
+/* object map, shared between translate and read_cache
+ */
 class objmap {
 public:
     std::shared_mutex m;

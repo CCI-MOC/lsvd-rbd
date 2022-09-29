@@ -23,29 +23,30 @@
 #include <stack>
 #include <map>
 
-#include "misc_cache.h"
 #include "backend.h"
 #include "objects.h"
+#include "misc_cache.h"
 #include "translate.h"
 
 /* TODO: MAKE THESE INSTANCE VARIABLES */
 extern int batch_seq;
 extern int last_ckpt;
 extern uuid_t my_uuid;
+class batch;
 template class thread_pool<batch*>;
 template class thread_pool<int>;
 
 /* batch: a bunch of writes being accumulated, waiting to be
  * written to the backend. 
  */
-struct batch {
+class batch {
+public:
     char  *buf;			// data goes here
     size_t len;			// current data size
     size_t max;			// done when len hits here
-    int    seq;			// sequence number for backend
     std::vector<data_map> entries;
+    int    seq;			// sequence number for backend
 
-public:
     batch(size_t _max) {
         buf = (char*)malloc(_max);
         max = _max;
@@ -90,15 +91,135 @@ int batch::hdrlen(void) {
 
 /* ----------- Object translation layer -------------- */
 
-translate::translate(backend *_io, objmap *omap) :
+class translate_impl : public translate {
+    std::mutex   m;
+    objmap      *map; /* map shared between read cache and translate */
+    
+    batch              *current_batch = NULL;
+    std::stack<batch*>  batches;
+    std::map<int,char*> in_mem_objects;
+
+    /* info on all live objects - all sizes in sectors */
+    struct obj_info {
+	uint32_t hdr;
+	uint32_t data;
+	uint32_t live;
+	int      type;
+    };
+    std::map<int,obj_info> object_info;
+
+    char      *super_name;
+    char      *super_buf;
+    hdr       *super_h;
+    super_hdr *super_sh;
+    size_t     super_len;
+
+    std::atomic<int> puts_outstanding = 0;
+    
+    thread_pool<batch*> workers;
+    thread_pool<int>    misc_threads;
+
+    /* for flush()
+     */
+    int last_written = 0;
+    int last_pushed = 0;
+    std::condition_variable cv;
+
+    /* for triggering GC
+     */
+    sector_t total_sectors = 0;
+    sector_t total_live_sectors = 0;
+    int gc_cycles = 0;
+    int gc_sectors_read = 0;
+    int gc_sectors_written = 0;
+    int gc_deleted = 0;
+
+
+    /* various methods to read:
+     * - header from an object (returns pointer that must be freed)
+     * - superblock object (returns size in bytes)
+     * - header from a data object
+     * - checkpoint object
+     */
+    char *read_object_hdr(const char *name, bool fast);
+
+    typedef clone_info *clone_p;
+    ssize_t read_super(const char *name, std::vector<uint32_t> &ckpts,
+		       std::vector<clone_p> &clones, std::vector<snap_info> &snaps);
+
+    ssize_t read_data_hdr(int seq, hdr &h, data_hdr &dh,
+                          std::vector<uint32_t> &ckpts,
+                          std::vector<obj_cleaned> &cleaned,
+                          std::vector<data_map> &dmap);
+
+    ssize_t read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
+                            std::vector<ckpt_obj> &objects, 
+			    std::vector<deferred_delete> &deletes,
+                            std::vector<ckpt_mapentry> &dmap);
+
+    /* maybe use insertion sorted vector?
+     *  https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
+     */
+
+    /* completions may come in out of order; need to update the map in 
+     * order of sequence numbers. 
+     */
+    std::set<std::pair<int32_t,void*>> completions;
+    int32_t                            next_completion = 0;
+    std::mutex                         m_c;
+    std::condition_variable            cv_c;
+
+    void do_completions(int32_t seq, void *closure);
+
+    int write_checkpoint(int seq);
+
+    int make_hdr(char *buf, batch *b);
+    sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
+			 data_map *extents, int n_extents);
+
+    void do_gc(std::unique_lock<std::mutex> &lk);
+    void gc_thread(thread_pool<int> *p);
+    void worker_thread(thread_pool<batch*> *p);
+    void ckpt_thread(thread_pool<int> *p);
+    void flush_thread(thread_pool<int> *p);
+
+    backend *objstore;
+    
+public:
+    translate_impl(backend *_io, objmap *omap);
+    ~translate_impl();
+
+    ssize_t init(const char *name, int nthreads, bool timedflush);
+    void shutdown(void);
+
+    int flush(void);            /* write out current batch */
+    int checkpoint(void);       /* flush, then write checkpoint */
+
+    ssize_t writev(size_t offset, iovec *iov, int iovcnt);
+    ssize_t readv(size_t offset, iovec *iov, int iovcnt);
+
+    /* debug functions
+     */
+    void getmap(int base, int limit,
+                int (*cb)(void *ptr,int,int,int,int), void *ptr);
+    int mapsize(void);
+    void reset(void);
+    int frontier(void);
+};
+
+translate_impl::translate_impl(backend *_io, objmap *omap) :
     workers(&m), misc_threads(&m) {
-    io = _io;
+    objstore = _io;
     map = omap;
     current_batch = NULL;
     last_written = last_pushed = 0;
 }
 
-translate::~translate() {
+translate *make_translate(backend *_io, objmap *omap) {
+    return (translate*) new translate_impl(_io, omap);
+}
+
+translate_impl::~translate_impl() {
     while (!batches.empty()) {
 	auto b = batches.top();
 	batches.pop();
@@ -106,12 +227,12 @@ translate::~translate() {
     }
     if (current_batch)
 	delete current_batch;
-    if (super)
-	free(super);
+    if (super_buf)
+	free(super_buf);
     free(super_name);
 }
 
-ssize_t translate::init(const char *name, int nthreads, bool timedflush) {
+ssize_t translate_impl::init(const char *name, int nthreads, bool timedflush) {
     std::vector<uint32_t>  ckpts;
     std::vector<clone_p>   clones;
     std::vector<snap_info> snaps;
@@ -174,30 +295,33 @@ ssize_t translate::init(const char *name, int nthreads, bool timedflush) {
     next_completion = batch_seq;
 
     for (int i = 0; i < nthreads; i++) 
-	workers.pool.push(std::thread(&translate::worker_thread, this, &workers));
-    misc_threads.pool.push(std::thread(&translate::ckpt_thread, this, &misc_threads));
+	workers.pool.push(std::thread(&translate_impl::worker_thread,
+				      this, &workers));
+    misc_threads.pool.push(std::thread(&translate_impl::ckpt_thread,
+				       this, &misc_threads));
     if (timedflush)
-	misc_threads.pool.push(std::thread(&translate::flush_thread, this, &misc_threads));
-    misc_threads.pool.push(std::thread(&translate::gc_thread, this, &misc_threads));
+	misc_threads.pool.push(std::thread(&translate_impl::flush_thread,
+					   this, &misc_threads));
+    misc_threads.pool.push(std::thread(&translate_impl::gc_thread,
+				       this, &misc_threads));
 	
     return bytes;
 }
 
-void translate::shutdown(void) {
+void translate_impl::shutdown(void) {
 }
-
 
 /* ----------- parsing and serializing various objects -------------*/
 
-char *translate::read_object_hdr(const char *name, bool fast) {
+char *translate_impl::read_object_hdr(const char *name, bool fast) {
     hdr *h = (hdr*)malloc(4096);
-    if (translate::io->read_object(name, (char*)h, 4096, 0) < 0)
+    if (objstore->read_object(name, (char*)h, 4096, 0) < 0)
 	goto fail;
     if (fast)
 	return (char*)h;
     if (h->hdr_sectors > 8) {
 	h = (hdr*)realloc(h, h->hdr_sectors * 512);
-	if (translate::io->read_object(name, (char*)h, h->hdr_sectors*512, 0) < 0)
+	if (objstore->read_object(name, (char*)h, h->hdr_sectors*512, 0) < 0)
 	    goto fail;
     }
     return (char*)h;
@@ -209,11 +333,12 @@ fail:
 /* read all info from superblock, returns volume size in bytes
  * (or -1 on failure)
  */
-ssize_t translate::read_super(const char *name, std::vector<uint32_t> &ckpts,
-			      std::vector<clone_p> &clones,
-			      std::vector<snap_info> &snaps) {
-    super = translate::read_object_hdr(name, false);
-    super_h = (hdr*)super;
+ssize_t translate_impl::read_super(const char *name,
+				   std::vector<uint32_t> &ckpts,
+				   std::vector<clone_p> &clones,
+				   std::vector<snap_info> &snaps) {
+    super_buf = read_object_hdr(name, false);
+    super_h = (hdr*)super_buf;
     super_len = super_h->hdr_sectors * 512;
 
     if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
@@ -223,16 +348,16 @@ ssize_t translate::read_super(const char *name, std::vector<uint32_t> &ckpts,
 
     super_sh = (super_hdr*)(super_h+1);
 
-    decode_offset_len<uint32_t>(super, super_sh->ckpts_offset,
+    decode_offset_len<uint32_t>(super_buf, super_sh->ckpts_offset,
 				super_sh->ckpts_len, ckpts);
-    decode_offset_len<snap_info>(super, super_sh->snaps_offset,
+    decode_offset_len<snap_info>(super_buf, super_sh->snaps_offset,
 				 super_sh->snaps_len, snaps);
 
     /* iterate through list of variable-length structures, storing
      * pointers (note - underlying memory never gets freed)
      */
-    clone_info *p_clone = (clone_info*)(super + super_sh->clones_offset),
-	*end_clone = (clone_info*)(super + super_sh->clones_offset +
+    clone_info *p_clone = (clone_info*)(super_buf + super_sh->clones_offset),
+	*end_clone = (clone_info*)(super_buf + super_sh->clones_offset +
 				   super_sh->clones_len);
     for (; p_clone < end_clone; ) {
 	clones.push_back(p_clone);
@@ -245,11 +370,11 @@ ssize_t translate::read_super(const char *name, std::vector<uint32_t> &ckpts,
 
 /* read and decode the header of an object identified by sequence number
  */
-ssize_t translate::read_data_hdr(int seq, hdr &h, data_hdr &dh,
-				 std::vector<uint32_t> &ckpts,
-				 std::vector<obj_cleaned> &cleaned,
-				 std::vector<data_map> &dmap) {
-    auto name = translate::io->object_name(seq);
+ssize_t translate_impl::read_data_hdr(int seq, hdr &h, data_hdr &dh,
+				      std::vector<uint32_t> &ckpts,
+				      std::vector<obj_cleaned> &cleaned,
+				      std::vector<data_map> &dmap) {
+    auto name = objstore->object_name(seq);
     char *buf = read_object_hdr(name.c_str(), false);
     if (buf == NULL)
 	return -1;
@@ -275,11 +400,11 @@ ssize_t translate::read_data_hdr(int seq, hdr &h, data_hdr &dh,
 
 /* read and decode a checkpoint object identified by sequence number
  */
-ssize_t translate::read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
-				   std::vector<ckpt_obj> &objects, 
-				   std::vector<deferred_delete> &deletes,
-				   std::vector<ckpt_mapentry> &dmap) {
-    auto name = translate::io->object_name(seq);
+ssize_t translate_impl::read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
+					std::vector<ckpt_obj> &objects, 
+					std::vector<deferred_delete> &deletes,
+					std::vector<ckpt_mapentry> &dmap) {
+    auto name = objstore->object_name(seq);
     char *buf = read_object_hdr(name.c_str(), false);
     if (buf == NULL)
 	return -1;
@@ -302,7 +427,7 @@ ssize_t translate::read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
 
 /* create header for a data object
  */
-int translate::make_hdr(char *buf, batch *b) {
+int translate_impl::make_hdr(char *buf, batch *b) {
     hdr *h = (hdr*)buf;
     data_hdr *dh = (data_hdr*)(h+1);
     uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
@@ -333,8 +458,8 @@ int translate::make_hdr(char *buf, batch *b) {
 
 /* create header for a GC object
  */
-sector_t translate::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
-				data_map *extents, int n_extents) {
+sector_t translate_impl::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
+				     data_map *extents, int n_extents) {
     hdr *h = (hdr*)buf;
     data_hdr *dh = (data_hdr*)(h+1);
     uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
@@ -379,7 +504,7 @@ sector_t translate::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
  * toss it to the worker thread pool if it's full
  * NOTE: offset is in bytes
  */
-ssize_t translate::writev(size_t offset, iovec *iov, int iovcnt) {
+ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     std::unique_lock<std::mutex> lk(m);
     size_t len = iov_sum(iov, iovcnt);
 
@@ -426,7 +551,7 @@ ssize_t translate::writev(size_t offset, iovec *iov, int iovcnt) {
 
 /* worker: pull batches from queue and write them out
  */
-void translate::worker_thread(thread_pool<batch*> *p) {
+void translate_impl::worker_thread(thread_pool<batch*> *p) {
     while (p->running) {
 	std::unique_lock<std::mutex> lk(m);
 	batch *b;
@@ -476,8 +601,8 @@ void translate::worker_thread(thread_pool<batch*> *p) {
 		return true;
 	    });
 	puts_outstanding++;
-	translate::io->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
-						 call_wrapped, closure2);
+	objstore->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
+				      call_wrapped, closure2);
     }
 }
 
@@ -488,7 +613,7 @@ void translate::worker_thread(thread_pool<batch*> *p) {
  * note that we use a separate mutex for the completion queue so 
  * that we can safely hold it through the callback
  */
-void translate::do_completions(int32_t seq, void *closure) {
+void translate_impl::do_completions(int32_t seq, void *closure) {
     std::unique_lock lk(m_c);
     if (seq == next_completion) { /* am I next? */
 	next_completion++;
@@ -509,7 +634,7 @@ void translate::do_completions(int32_t seq, void *closure) {
     cv_c.notify_all();
 }
 
-int translate::flush(void) {
+int translate_impl::flush(void) {
     std::unique_lock<std::mutex> lk(m);
     int val = 0;
     if (current_batch && current_batch->len > 0) {
@@ -523,7 +648,7 @@ int translate::flush(void) {
     return val;
 }
 
-void translate::flush_thread(thread_pool<int> *p) {
+void translate_impl::flush_thread(thread_pool<int> *p) {
     auto wait_time = std::chrono::milliseconds(500);
     auto timeout = std::chrono::seconds(2);
     auto t0 = std::chrono::system_clock::now();
@@ -549,7 +674,7 @@ void translate::flush_thread(thread_pool<int> *p) {
 /* synchronous read from offset
  * NOTE: offset is in bytes
  */
-ssize_t translate::readv(size_t offset, iovec *iov, int iovcnt) {
+ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
     smartiov iovs(iov, iovcnt);
     size_t len = iovs.bytes();
     int64_t base = offset / 512;
@@ -600,7 +725,7 @@ ssize_t translate::readv(size_t offset, iovec *iov, int iovcnt) {
 	else if (obj == -2)
 	    /* skip */;
 	else
-	    io->read_numbered_objectv(obj, slice.data(), slice.size(), _offset);
+	    objstore->read_numbered_objectv(obj, slice.data(), slice.size(), _offset);
 	iov_offset += _len;
     }
 
@@ -609,7 +734,7 @@ ssize_t translate::readv(size_t offset, iovec *iov, int iovcnt) {
 
 /* -------------- Checkpointing -------------- */
 
-int translate::write_checkpoint(int seq) {
+int translate_impl::write_checkpoint(int seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
@@ -677,7 +802,7 @@ int translate::write_checkpoint(int seq) {
 	    cv_c.wait(lk_complete);
 	next_completion++;
     }
-    translate::io->write_numbered_object(seq, iov, 4);
+    objstore->write_numbered_object(seq, iov, 4);
     free(buf);
 
     /* Now re-write the superblock with the new list of checkpoints
@@ -687,13 +812,13 @@ int translate::write_checkpoint(int seq) {
     // lk2.lock(); TODO: WTF???
     super_sh->ckpts_offset = offset;
     super_sh->ckpts_len = sizeof(seq);
-    *(int*)(super + offset) = seq;
-    struct iovec iov2 = {super, 4096};
-    translate::io->write_object(super_name, &iov2, 1);
+    *(int*)(super_buf + offset) = seq;
+    struct iovec iov2 = {super_buf, 4096};
+    objstore->write_object(super_name, &iov2, 1);
     return seq;
 }
 
-void translate::ckpt_thread(thread_pool<int> *p) {
+void translate_impl::ckpt_thread(thread_pool<int> *p) {
     auto one_second = std::chrono::seconds(1);
     auto seq0 = batch_seq;
     const int ckpt_interval = 100;
@@ -709,7 +834,7 @@ void translate::ckpt_thread(thread_pool<int> *p) {
     }
 }
 
-int translate::checkpoint(void) {
+int translate_impl::checkpoint(void) {
     std::unique_lock<std::mutex> lk(m);
     if (current_batch && current_batch->len > 0) {
 	last_pushed = current_batch->seq;
@@ -726,7 +851,7 @@ int translate::checkpoint(void) {
 
 /* -------------- Garbage collection ---------------- */
 
-void translate::do_gc(std::unique_lock<std::mutex> &lk) {
+void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     assert(!m.try_lock());	// must be locked
     gc_cycles++;
     int max_obj = batch_seq;
@@ -797,7 +922,7 @@ void translate::do_gc(std::unique_lock<std::mutex> &lk) {
 	char *buf = (char*)aligned_alloc(512, 10*1024*1024); // TODO: WHY??
 
 	for (auto [i,sectors] : objs_to_clean) {
-	    translate::io->read_numbered_object(i, buf, sectors*512, 0);
+	    objstore->read_numbered_object(i, buf, sectors*512, 0);
 	    gc_sectors_read += sectors;
 	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
 	    file_map.update(_base, _limit, offset);
@@ -902,21 +1027,21 @@ void translate::do_gc(std::unique_lock<std::mutex> &lk) {
 		    do_completions(seq, closure);
 		    return true;
 		});
-	    translate::io->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
+	    objstore->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
 						     call_wrapped, closure2);
 	}
 	close(fd);
     }
 	
     for (auto [i, _xx] : objs_to_clean) {
-	translate::io->delete_numbered_object(i);
+	objstore->delete_numbered_object(i);
 	gc_deleted++;
     }
     lk.lock();
 }
 
 
-void translate::gc_thread(thread_pool<int> *p) {
+void translate_impl::gc_thread(thread_pool<int> *p) {
     auto interval = std::chrono::milliseconds(100);
     sector_t trigger = 128 * 1024 * 2; // 128 MB
     const char *name = "gc";
@@ -939,7 +1064,7 @@ void translate::gc_thread(thread_pool<int> *p) {
 
 /* debug methods
  */
-void translate::getmap(int base, int limit,
+void translate_impl::getmap(int base, int limit,
 		       int (*cb)(void *ptr,int,int,int,int), void *ptr) {
     for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
 	auto [_base, _limit, oo] = it->vals(base, limit);
@@ -947,14 +1072,14 @@ void translate::getmap(int base, int limit,
 	    break;
     }
 }
-int translate::mapsize(void) {
+int translate_impl::mapsize(void) {
     return map->map.size();
 }
-void translate::reset(void) {
+void translate_impl::reset(void) {
     map->map.reset();
 }
-int translate::frontier(void) {
-    if (translate::current_batch)
+int translate_impl::frontier(void) {
+    if (current_batch)
 	return current_batch->len / 512;
     return 0;
 }

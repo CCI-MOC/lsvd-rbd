@@ -12,6 +12,8 @@
 #ifndef READ_CACHE_H
 #define READ_CACHE_H
 
+#include "translate.h"
+
 class read_cache {
     
     std::mutex m;

@@ -43,7 +43,6 @@
 #include "io.h"
 #include "request.h"
 #include "nvme.h"
-#include "nvme_request.h"
 #include "read_cache.h"
 #include "write_cache.h"
 #include "file_backend.h"
@@ -510,7 +509,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     else
 	fri->io = new file_backend(obj.c_str());
     fri->omap = new objmap();
-    fri->lsvd = new translate(fri->io, fri->omap);
+    fri->lsvd = make_translate(fri->io, fri->omap);
     int n_xlate_threads = 3;
     char *nxt = getenv("N_XLATE");
     if (nxt) {
@@ -628,9 +627,9 @@ extern "C" int dbg_lsvd_flush(rbd_image_t image)
 }
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
-    auto io = new file_backend(name);
-    auto omap = new objmap();
-    auto lsvd = new translate(io, omap);
+    backend *io = new file_backend(name);
+    objmap *omap = new objmap();
+    translate *lsvd = make_translate(io, omap);
     auto rv = lsvd->init(name, n, flushthread);
     auto d = new _dbg(1, lsvd, NULL, omap, NULL, io);
     *p = (void*)d;
