@@ -1,6 +1,11 @@
 #ifndef __FAKE_RBD_H__
 #define __FAKE_RBD_H__
 
+#include <stdint.h>
+#include <stddef.h>
+#include <sys/uio.h>
+#include <rados/librados.h>
+
 /* the following types have to be compatible with the real librbd.h
  */
 enum {

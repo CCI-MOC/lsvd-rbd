@@ -1,22 +1,28 @@
-// file:	base_functions.h
-// description: General functions and minor structures used by the LSVD file system
-//			-wrapper functions
-//			-rounding functions
-// author:	Peter Desnoyers, Northeastern University
-//              Copyright 2021, 2022 Peter Desnoyers
-// license:     GNU LGPL v2.1 or newer
-//              LGPL-2.1-or-later
-//
+/*
+ * file:	base_functions.h
+ * description: General functions and minor structures for LSVD
+ *			-wrapper functions
+ *			-rounding functions
+ * author:	Peter Desnoyers, Northeastern University
+ *              Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
 
 #ifndef BASE_FUNCTIONS_H
 #define BASE_FUNCTIONS_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/uio.h>
+#include <string>
+#include <algorithm>
 
 enum {DBG_MAP = 1, DBG_HITS = 2, DBG_AIO = 4};
 
 #define DBG(a) 
 
 // https://stackoverflow.com/questions/5008804/generating-random-integer-from-a-range
-
 
 typedef int64_t sector_t;
 typedef int page_t;

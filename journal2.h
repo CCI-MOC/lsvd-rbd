@@ -9,6 +9,7 @@ the how they fit together with rados and s3
 
 #include <stdint.h>
 #include <vector>
+#include <uuid/uuid.h>
 
 //enum { LSVD_MAGIC = 0x4456534c };
 

@@ -1,6 +1,27 @@
 #ifndef __LSVD_DEBUG_H__
 #define __LSVD_DEBUG_H__
 
+#include <queue>
+#include <mutex>
+#include <shared_mutex>
+#include <condition_variable>
+#include <thread>
+#include <atomic>
+#include <map>
+#include <libaio.h>
+
+#include "lsvd_types.h"
+#include "extent.h"
+#include "fake_rbd.h"
+#include "smartiov.h"
+#include "misc_cache.h"
+#include "backend.h"
+#include "translate.h"
+#include "journal2.h"
+#include "nvme.h"
+#include "write_cache.h"
+#include "read_cache.h"
+
 /*
 debug functions
  */
