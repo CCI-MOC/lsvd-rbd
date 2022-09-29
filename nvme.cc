@@ -39,6 +39,7 @@
 class nvme_impl;
 
 class nvme_request : public request {
+public:
     e_iocb     *eio;		// this is self-deleting. TODO: fix?
     smartiov   *_iovs;
     size_t      ofs;
@@ -119,7 +120,6 @@ nvme_request::nvme_request(smartiov *iov, size_t offset,
 
 void nvme_request::run(request* parent_) {
     parent = parent_;
-
     if (t == WRITE_REQ) {
 	e_io_prep_pwritev(eio, nvme_ptr->fd, _iovs->data(), _iovs->size(),
 			  ofs, call_send_request_notify, this);
@@ -135,12 +135,12 @@ void nvme_request::run(request* parent_) {
 
 void nvme_request::notify(request *child) {
     parent->notify(this);
-    std::unique_lock lk(m);
     complete = true;
+    {   std::unique_lock lk(m);
+	cv.notify_one();
+    }
     if (released)
 	delete this;
-    else
-	cv.notify_one();
 }
 
 void nvme_request::wait() {
