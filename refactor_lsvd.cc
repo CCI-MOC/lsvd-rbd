@@ -252,8 +252,11 @@ class aio_read_req : public request {
     uint64_t          offset;
     size_t            len;
     std::atomic<int>  n_req = 0;
-    std::atomic<bool> finished = false;
 
+    std::atomic<bool> launched = false;
+    bool              released = false;
+    /* note - 'complete' = (n_req == 0) */
+    
     std::mutex        m;
     std::condition_variable cv;
     
@@ -264,42 +267,54 @@ public:
 	aligned_buf = buf;
     }
 
-    bool is_done() { return finished && n_req <= 0; }
+    bool is_done() { return launched && n_req <= 0; }
     sector_t lba() { return 0; }
     smartiov *iovs() { return NULL; }
-    
-    void notify() {
+
+    /* note that there's no child request until read cache is updated
+     * to use request/notify model.
+     */
+    void notify(request *child /* not used */) {
 	if (--n_req > 0)
 	    return;
-	if (!finished)
+	if (!launched)
 	    return;
 	
 	if (aligned_buf != buf) {
 	    memcpy(buf, aligned_buf, len);
 	    free(aligned_buf);
 	}
-	if (p != NULL) {
+	if (p != NULL) 
 	    p->complete(len);
+
+	if (released)
 	    delete this;
-	} else {
-	    std::unique_lock lk(m);
+	else 
 	    cv.notify_all();
-	}
     }
 
+    /* TODO: this is really gross. To properly fix it I need to integrate this
+     * with rbd_aio_completion and use its release() method
+     */
     void wait() {
-	std::unique_lock lk(m);
-	while (!finished || n_req > 0)
-	    cv.wait(lk);
-	lk.unlock();
-	delete this;
+	{   std::unique_lock lk(m);
+	    while (!launched || n_req > 0)
+		cv.wait(lk);
+	}
+	release();
     }
-    
+
+    void release() {
+	released = true;
+	if (n_req == 0)
+	    delete this;
+    }
+
     void run(request *parent /* unused */) {
 	if (!aligned(buf, 512))
 	    aligned_buf = (char*)aligned_alloc(512, len);
 
-	/* we're not done until n_req == 0 && finished == true
+	/* we're not done until n_req == 0 && launched == true
 	 */
 	char *_buf = aligned_buf;	// read and increment this
 	size_t _len = len;		// and this
@@ -331,14 +346,14 @@ public:
 	    offset += wait;
 	}
 
-	finished.store(true);
+	launched.store(true);
 	if (n_req == 0)
-	    notify();
+	    notify(NULL);
     }
 
     static void aio_read_cb(void *ptr) {
 	auto req = (aio_read_req *)ptr;
-	req->notify();
+	req->notify(NULL);
     }
 };
 
@@ -379,7 +394,9 @@ class aio_write_req : public request {
     uint64_t          offset;
     size_t            len;
     smartiov          data_iovs;
-    bool              finished = false;
+
+    bool              released = false;
+    bool              complete = false;
     std::mutex        m;
     std::condition_variable cv;
     
@@ -390,34 +407,46 @@ public:
 	aligned_buf = (char*)buf;
     }
 
-    void notify() {
+    ~aio_write_req() {
+	if (aligned_buf != buf)
+	    free(aligned_buf);
+    }
+    
+    /* note that there's no child request until write cache is updated
+     * to use request/notify model.
+     */
+    void notify(request *child /* not used */) {
 	int blocks = div_round_up(len, 4096);
 	img->wcache->release_room(blocks);
 	
-	if (aligned_buf != buf)
-	    free(aligned_buf);
-	if (p != NULL) {
-	    //printf("complete %p\n", p);
+	complete = true;
+	if (p != NULL) 
 	    p->complete(len);
+
+	if (released)
 	    delete this;
-	} else {
-	    std::unique_lock lk(m);
-	    finished = true;
+	else
 	    cv.notify_all();
-	}
     }
 
-    /* for synchronous writes
+    /* TODO: this is really gross. To properly fix it I need to integrate this
+     * with rbd_aio_completion and use its release() method
      */
     void wait() {
-	std::unique_lock lk(m);
-	while (!finished)
-	    cv.wait(lk);
-	lk.unlock();
-	delete this;
+	{   std::unique_lock lk(m);
+	    while (!complete)
+		cv.wait(lk);
+	}
+	release();
     }
 
-    bool is_done() { return finished; }
+    void release() {
+	released = true;
+	if (complete)
+	    delete this;
+    }
+
+    bool is_done() { return complete; }
     sector_t lba() { return offset / 512; }
     smartiov *iovs() { return &data_iovs; }
     

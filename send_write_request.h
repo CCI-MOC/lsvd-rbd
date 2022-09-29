@@ -17,7 +17,7 @@ class send_write_request : public request {
     smartiov     *pad_iov = NULL;
 
     write_cache  *wcache = NULL;
-
+    
 public:
     send_write_request(std::vector<request*> *w, page_t n_pages, page_t page,
                        page_t n_pad, page_t pad, write_cache *wcache);
@@ -26,8 +26,10 @@ public:
     sector_t lba();
     smartiov *iovs();
     bool is_done(void);
+    void wait();
     void run(request *parent);
-    void notify(void);
+    void notify(request *child);
+    void release();
 };
 
 #endif

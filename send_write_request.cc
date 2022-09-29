@@ -41,10 +41,10 @@ static uint64_t sectors(request *req) {
     return req->iovs()->bytes() / 512;
 }
 
-void send_write_request::notify() {
+void send_write_request::notify(request *child) {
+    child->release();
     if(--reqs > 0)
 	return;
-    
     {
 	std::unique_lock lk(wcache->m);
 	std::vector<extmap::lba2lba> garbage; 
@@ -71,8 +71,15 @@ void send_write_request::notify() {
     for (auto _w : *work) {
 	auto [iov, iovcnt] = _w->iovs()->c_iov();
 	wcache->be->writev(_w->lba()*512, iov, iovcnt);
-	_w->notify();
+	_w->notify(NULL);	// don't release multiple times
     }
+
+    /* we don't implement release or wait - just delete ourselves.
+     */
+    delete this;
+}
+
+send_write_request::~send_write_request() {
     free(hdr);
     if (pad_hdr) 
 	free(pad_hdr);
@@ -80,7 +87,6 @@ void send_write_request::notify() {
     if (pad_iov)
 	delete pad_iov;
     delete work;
-    delete this;
 }
 
 /* n_pages: number of 4KB data pages (not counting header)
@@ -126,12 +132,6 @@ send_write_request::send_write_request(std::vector<request*> *work_,
     r_data = wcache->nvme_w->make_write_request(data_iovs, page*4096L);
 }
 
-/* TODO: NO, NO, NO!!!!
- */
-bool send_write_request::is_done() {return true;}
-sector_t send_write_request::lba() {return 0;}
-smartiov *send_write_request::iovs() {return NULL;}
-
 void send_write_request::run(request *parent /* unused */) {
     reqs++;
     if(r_pad) {
@@ -141,5 +141,10 @@ void send_write_request::run(request *parent /* unused */) {
     r_data->run(this);
 }
 
-send_write_request::~send_write_request() {}
+bool      send_write_request::is_done() {return true;}
+void      send_write_request::wait() {}
+sector_t  send_write_request::lba() {return 0;}
+smartiov *send_write_request::iovs() {return NULL;}
+void      send_write_request::release() {}
+
 

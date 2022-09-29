@@ -39,13 +39,18 @@
 class nvme_impl;
 
 class nvme_request : public request {
-    e_iocb* eio;
-    smartiov* _iovs;
-    size_t ofs;
-    int t;
-    nvme_impl * nvme_ptr;
-    request* parent;
+    e_iocb     *eio;		// this is self-deleting. TODO: fix?
+    smartiov   *_iovs;
+    size_t      ofs;
+    int         t;
+    nvme_impl  *nvme_ptr;
+    request    *parent;
 
+    bool        released = false;
+    bool        complete = false;
+    std::mutex  m;
+    std::condition_variable cv;
+    
 public:
     nvme_request(smartiov *iov, size_t offset, int type, nvme_impl* nvme_w);
     ~nvme_request();
@@ -53,8 +58,10 @@ public:
     sector_t lba();
     smartiov *iovs();
     bool is_done(void);
+    void wait();
     void run(request *parent);
-    void notify(void);
+    void notify(request *child);
+    void release();
 };
 
 class nvme_impl : public nvme {
@@ -98,7 +105,7 @@ nvme *make_nvme(int fd, const char* name) {
 void call_send_request_notify(void *parent)
 {
     nvme_request *r = (nvme_request*) parent;
-    r->notify();
+    r->notify(NULL);
 }
 
 nvme_request::nvme_request(smartiov *iov, size_t offset,
@@ -114,7 +121,6 @@ void nvme_request::run(request* parent_) {
     parent = parent_;
 
     if (t == WRITE_REQ) {
-	//assert(ofs+iovs->bytes()/4096L <= write_c->super->limit);
 	e_io_prep_pwritev(eio, nvme_ptr->fd, _iovs->data(), _iovs->size(),
 			  ofs, call_send_request_notify, this);
 	e_io_submit(nvme_ptr->ioctx, eio);
@@ -127,14 +133,31 @@ void nvme_request::run(request* parent_) {
 	assert(false);
 }
 
-void nvme_request::notify() {
-    parent->notify();
-    delete this;
+void nvme_request::notify(request *child) {
+    parent->notify(this);
+    std::unique_lock lk(m);
+    complete = true;
+    if (released)
+	delete this;
+    else
+	cv.notify_one();
+}
+
+void nvme_request::wait() {
+    std::unique_lock lk(m);
+    while (!complete)
+	cv.wait(lk);
+}
+
+void nvme_request::release() {
+    released = true;
+    if (complete)		// TODO: atomic swap?
+	delete this;
 }
 
 nvme_request::~nvme_request() {}
 
-bool nvme_request::is_done() { return true; }
+bool nvme_request::is_done() { return complete; }
 sector_t nvme_request::lba() { return 0; } // no one needs this
 smartiov *nvme_request::iovs() { return NULL; }
 

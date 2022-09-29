@@ -360,22 +360,33 @@ class wcache_read_req : public request {
     void (*cb)(void*);
     void *ptr;
     smartiov *_iovs;
+
+    bool       complete;
+    bool       released;
+    std::mutex m;
+    std::condition_variable cv;
     
 public:
     wcache_read_req(void (*cb_)(void*), void *ptr_, smartiov *iovs_) :
 	cb(cb_), ptr(ptr_), _iovs(iovs_) {}
 
-    void notify(void) {
+    void notify(request *child) {
 	cb(ptr);
-	delete _iovs;
+	child->release();
+	delete _iovs;		// allocated in write_cache::async_read
 	delete this;
     }
 
-    void run(request *parent) {}
+    /* for now this exists only for the notify() method
+     */
     sector_t lba() { return 0; }
     smartiov *iovs() { return NULL; }
     bool is_done(void) { return true; }
-    virtual ~wcache_read_req(){}
+    void wait() {}
+    void run(request *parent) {}
+    void release(){}
+    
+    ~wcache_read_req(){}
 };
 
 /* returns (number of bytes skipped), (number of bytes read_started)
@@ -408,12 +419,6 @@ std::pair<size_t,size_t> write_cache::async_read(size_t offset, char *buf,
 	auto parent = new wcache_read_req(cb, ptr, s_iov);
 	auto req = nvme_w->make_read_request(s_iov, nvme_offset);
 	req->run(parent);
-	
-#if 0
-	auto eio = new e_iocb;
-	e_io_prep_pread(eio, fd, buf, read_len, nvme_offset, cb, ptr);
-	e_io_submit(nvme_w->ioctx, eio);
-#endif
     }
     return std::make_pair(skip_len, read_len);
 }

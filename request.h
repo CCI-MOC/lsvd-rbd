@@ -15,9 +15,11 @@ public:
     virtual sector_t lba() = 0;
     virtual smartiov *iovs() = 0;
     
-    virtual bool is_done(void) = 0;
+    virtual bool is_done() = 0;
+    virtual void wait() = 0;
     virtual void run(request *parent) = 0;
-    virtual void notify(void) = 0;
+    virtual void notify(request *child) = 0;
+    virtual void release() = 0;
     virtual ~request(){}
 };
 
