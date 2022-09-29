@@ -75,49 +75,32 @@ class read_cache {
 // evict :	Frees n number of blocks and erases oo from the map
     void evict(int n);
 
-// evict_thread :	Frees used units/4 - size of free blocks and evicts n. Writes map after evicting
-//			or when the map is dirty
     void evict_thread(thread_pool<int> *p);
     
+    char *get_cacheline_buf(int n); /* TODO: document this */
+
 public:
-    std::atomic<int> n_lines_read = 0;
 
-// read_cache : Constructor for the read cache
-    read_cache(uint32_t blkno, int _fd, bool nt, translate *_be, objmap *_om, backend *_io);
-
-// get_cacheline_buf :	returns the pointer to the buffer[j] where j = buf_loc.front(),
-//			and then pop and erase buffer[j]
-    char *get_cacheline_buf(int n);
+    read_cache(uint32_t blkno, int _fd, bool nt,
+               translate *_be, objmap *_om, backend *_io);
+    ~read_cache();
     
-    int u1 = 0;
-    int u0 = 0;
-
-// async_read :
     std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t len,
 					void (*cb)(void*), void *ptr);
 
-// write_map : 	writes map back to file
-    void write_map(void);
-// ~read_cache :	Deconstructor for the read_cache
-    ~read_cache();
-
     /* debugging. 
      */
-// get_info :	sets p_super, p_flat, p_free_blks, p_map to point at super, flat_map, &free_blks, &map, respectively
-//		if those are not NULL
+
+    /* get superblock, flattened map, vector of free blocks, extent map
+     * only returns ones where ptr!=NULL
+     */
     void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, 
-		  std::vector<int> **p_free_blks, std::map<extmap::obj_offset,int> **p_map);
+		  std::vector<int> **p_free_blks,
+                  std::map<extmap::obj_offset,int> **p_map);
 
-// do_add :	adds unit to the free_block back index of flat map and writes map
-    void do_add(extmap::obj_offset unit, char *buf); 
-
-// do_evict :	calls the evict function to evict n number of blocks with a lock
-    void do_evict(int n);
-
-// reset : 	Empty function definition
-    void reset(void);
-
-
+    void do_add(extmap::obj_offset unit, char *buf); /* TODO: document */
+    void do_evict(int n);       /* TODO: document */
+    void write_map(void);
 };
 
     /* state machine for block obj,offset can be represented by the tuple:

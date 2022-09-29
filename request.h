@@ -5,6 +5,9 @@
 #ifndef REQUEST_H
 #define REQUEST_H
 
+#include "lsvd_types.h"
+#include "smartiov.h"
+
 /* generic interface for requests.
  *  - run(parent): begin execution
  *  - notify(rv): notification of completion
@@ -21,6 +24,27 @@ public:
     virtual void notify(request *child) = 0;
     virtual void release() = 0;
     virtual ~request(){}
+};
+
+/* total hack, for converting current code based on callbacks
+ */
+class callback_req : public request {
+    void (*cb)(void*);
+    void *ptr;
+
+public:
+    callback_req(void (*cb_)(void*), void *ptr_) : cb(cb_), ptr(ptr_) {}
+    ~callback_req() {}
+    void run(request *parent) {}
+    void notify(request *unused) {
+	cb(ptr);
+	delete this;
+    }
+    sector_t lba() { return 0;}
+    smartiov *iovs() { return NULL; }
+    bool is_done() { return false; }
+    void release() {}
+    void wait() {}
 };
 
 #endif

@@ -7,23 +7,25 @@
 
 #include <sys/uio.h>
 #include <string>
+#include "request.h"
 
 class backend {
 public:
-    virtual ssize_t write_object(const char *name, iovec *iov, int iovcnt) = 0;
-    virtual ssize_t write_numbered_object(int seq, iovec *iov, int iovcnt) = 0;
-    virtual ssize_t read_object(const char *name, char *buf, size_t len, size_t offset) = 0;
-    virtual ssize_t read_numbered_objectv(int seq, iovec *iov, int iovcnt,
-                                          size_t offset) = 0;
-    virtual void    delete_numbered_object(int seq) = 0;
-    virtual ssize_t read_numbered_object(int seq, char *buf, size_t len,
-                                         size_t offset) = 0;
-    virtual int aio_read_num_object(int seq, char *buf, size_t len, size_t offset,
-                                    void (*cb)(void*), void *ptr) = 0;
-    virtual int aio_write_numbered_object(int seq, iovec *iov, int iovcnt,
-                                          void (*cb)(void*), void *ptr) = 0;
-    virtual std::string object_name(int seq) = 0;
     virtual ~backend(){}
+    
+    /* synchronous I/O methods, return 0 / -1 for success/error
+     */
+    virtual int write_object(const char *name, iovec *iov, int iovcnt) = 0;
+    virtual int read_object(const char *name, iovec *iov, int iovcnt,
+                            size_t offset) = 0;
+    virtual int delete_object(const char *name) = 0;
+    
+    /* async I/O
+     */
+    virtual request *make_write_req(const char *name,
+                                    iovec *iov, int iovcnt) = 0;
+    virtual request *make_read_req(const char *name, size_t offset,
+                                    iovec *iov, int iovcnt) = 0;
 };
 
 #endif

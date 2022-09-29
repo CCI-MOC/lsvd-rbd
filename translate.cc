@@ -27,6 +27,7 @@
 #include "objects.h"
 #include "misc_cache.h"
 #include "translate.h"
+#include "objname.h"
 
 /* TODO: MAKE THESE INSTANCE VARIABLES */
 extern int batch_seq;
@@ -107,6 +108,8 @@ class translate_impl : public translate {
 	int      type;
     };
     std::map<int,obj_info> object_info;
+
+    char      *single_prefix;
 
     char      *super_name;
     char      *super_buf;
@@ -198,6 +201,8 @@ public:
     ssize_t writev(size_t offset, iovec *iov, int iovcnt);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
 
+    const char *prefix() { return single_prefix; }
+    
     /* debug functions
      */
     void getmap(int base, int limit,
@@ -229,16 +234,22 @@ translate_impl::~translate_impl() {
 	delete current_batch;
     if (super_buf)
 	free(super_buf);
+    free(single_prefix);
     free(super_name);
 }
 
-ssize_t translate_impl::init(const char *name, int nthreads, bool timedflush) {
+ssize_t translate_impl::init(const char *prefix_,
+			     int nthreads, bool timedflush) {
     std::vector<uint32_t>  ckpts;
     std::vector<clone_p>   clones;
     std::vector<snap_info> snaps;
 
-    super_name = strdup(name);
-    ssize_t bytes = read_super(name, ckpts, clones, snaps);
+    /* note prefix = superblock name
+     */
+    super_name = strdup(prefix_);
+    single_prefix = strdup(prefix_);
+    
+    ssize_t bytes = read_super(super_name, ckpts, clones, snaps);
     if (bytes < 0)
 	return bytes;
     batch_seq = super_sh->next_obj;
@@ -313,15 +324,22 @@ void translate_impl::shutdown(void) {
 
 /* ----------- parsing and serializing various objects -------------*/
 
+/* read object header
+ *  fast: just read first 4KB
+ *  !fast: read first 4KB, resize and read again if >4KB
+ */
 char *translate_impl::read_object_hdr(const char *name, bool fast) {
     hdr *h = (hdr*)malloc(4096);
-    if (objstore->read_object(name, (char*)h, 4096, 0) < 0)
+    iovec iov = {(char*)h, 4096};
+    if (objstore->read_object(name, &iov, 1, 0) < 0)
 	goto fail;
     if (fast)
 	return (char*)h;
     if (h->hdr_sectors > 8) {
-	h = (hdr*)realloc(h, h->hdr_sectors * 512);
-	if (objstore->read_object(name, (char*)h, h->hdr_sectors*512, 0) < 0)
+	size_t len = h->hdr_sectors * 512;
+	h = (hdr*)realloc(h, len);
+	iovec iov = {(char*)h, len};
+	if (objstore->read_object(name, &iov, 1, 0) < 0)
 	    goto fail;
     }
     return (char*)h;
@@ -374,7 +392,7 @@ ssize_t translate_impl::read_data_hdr(int seq, hdr &h, data_hdr &dh,
 				      std::vector<uint32_t> &ckpts,
 				      std::vector<obj_cleaned> &cleaned,
 				      std::vector<data_map> &dmap) {
-    auto name = objstore->object_name(seq);
+    objname name(prefix(), seq);
     char *buf = read_object_hdr(name.c_str(), false);
     if (buf == NULL)
 	return -1;
@@ -404,7 +422,7 @@ ssize_t translate_impl::read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
 					std::vector<ckpt_obj> &objects, 
 					std::vector<deferred_delete> &deletes,
 					std::vector<ckpt_mapentry> &dmap) {
-    auto name = objstore->object_name(seq);
+    objname name(prefix(), seq);
     char *buf = read_object_hdr(name.c_str(), false);
     if (buf == NULL)
 	return -1;
@@ -601,8 +619,12 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 		return true;
 	    });
 	puts_outstanding++;
-	objstore->aio_write_numbered_object(b->seq, iovs->data(), iovs->size(),
-				      call_wrapped, closure2);
+
+	objname name(prefix(), b->seq);
+	auto cb_req = new callback_req(call_wrapped, closure2);
+	auto req = objstore->make_write_req(name.c_str(), iovs->data(),
+					    iovs->size());
+	req->run(cb_req);
     }
 }
 
@@ -724,8 +746,11 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 	    slice.zero();
 	else if (obj == -2)
 	    /* skip */;
-	else
-	    objstore->read_numbered_objectv(obj, slice.data(), slice.size(), _offset);
+	else {
+	    objname name(prefix(), obj);
+	    auto [iov,iovcnt] = slice.c_iov();
+	    objstore->read_object(name.c_str(), iov, iovcnt, _offset);
+	}
 	iov_offset += _len;
     }
 
@@ -734,6 +759,8 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 
 /* -------------- Checkpointing -------------- */
 
+/* synchronously write a checkpoint
+ */
 int translate_impl::write_checkpoint(int seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
@@ -802,7 +829,9 @@ int translate_impl::write_checkpoint(int seq) {
 	    cv_c.wait(lk_complete);
 	next_completion++;
     }
-    objstore->write_numbered_object(seq, iov, 4);
+
+    objname name(prefix(), seq);
+    objstore->write_object(name.c_str(), iov, 4);
     free(buf);
 
     /* Now re-write the superblock with the new list of checkpoints
@@ -851,6 +880,9 @@ int translate_impl::checkpoint(void) {
 
 /* -------------- Garbage collection ---------------- */
 
+/* Needs a lot of work. Note that all reads/writes are synchronous
+ * for now...
+ */
 void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     assert(!m.try_lock());	// must be locked
     gc_cycles++;
@@ -922,7 +954,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	char *buf = (char*)aligned_alloc(512, 10*1024*1024); // TODO: WHY??
 
 	for (auto [i,sectors] : objs_to_clean) {
-	    objstore->read_numbered_object(i, buf, sectors*512, 0);
+	    objname name(prefix(), i);
+	    iovec iov = {buf, (size_t)(sectors*512)};
+	    objstore->read_object(name.c_str(), &iov, 1, /*offset=*/ 0);
 	    gc_sectors_read += sectors;
 	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
 	    file_map.update(_base, _limit, offset);
@@ -1027,14 +1061,18 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 		    do_completions(seq, closure);
 		    return true;
 		});
-	    objstore->aio_write_numbered_object(seq, iovs->data(), iovs->size(),
-						     call_wrapped, closure2);
+	    objname name(prefix(), seq);
+	    auto cb_req = new callback_req(call_wrapped, closure2);
+	    auto [iov,iovcnt] = iovs->c_iov();
+	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
+	    req->run(cb_req);
 	}
 	close(fd);
     }
 	
     for (auto [i, _xx] : objs_to_clean) {
-	objstore->delete_numbered_object(i);
+	objname name(prefix(), i);
+	objstore->delete_object(name.c_str());
 	gc_deleted++;
     }
     lk.lock();

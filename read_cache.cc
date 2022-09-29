@@ -36,13 +36,13 @@
 #include "io.h"
 #include "translate.h"
 #include "read_cache.h"
+#include "objname.h"
 
 // Placing constructor and destructor first, other functions in the same order as in the include file
 read_cache::read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
 		       objmap *_om, backend *_io) :
     omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m), nothreads(nt) {
     dev_max = getsize64(fd);
-    n_lines_read = 0;
     char *buf = (char*)aligned_alloc(512, 4096);
     if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
 	throw_fs_error("rcache3");
@@ -261,7 +261,6 @@ std::pair<size_t,size_t> read_cache::async_read(size_t offset, char *buf,
 	read_len = bytes;
     }
     else if (use_cache) {
-	u1++;
 	/* assign a location in cache before we start reading (and while we're
 	 * still holding the lock)
 	 */
@@ -311,16 +310,25 @@ std::pair<size_t,size_t> read_cache::async_read(size_t offset, char *buf,
 		     return true;
 		 });
 
-	io->aio_read_num_object(unit.obj, _buf, 512L*unit_sectors,
-				512L*blk_base, call_wrapped, read_done);
+	objname name(be->prefix(), unit.obj);
+	auto cb_req = new callback_req(call_wrapped, read_done);
+	iovec iov = {_buf, (size_t)(512L*unit_sectors)};
+	auto req = io->make_read_req(name.c_str(), 512L*blk_base, &iov, 1);
+	req->run(cb_req);
+
 	read_len = bytes;
     }
     else {
-	u0++;
 	hit_stats.user += read_len / 512;
 	hit_stats.backend += read_len / 512;
 	lk2.unlock();
-	io->aio_read_num_object(oo.obj, buf, read_len, 512L*oo.offset, cb, ptr);
+
+	objname name(be->prefix(), oo.obj);
+	auto cb_req = new callback_req(cb, ptr);
+	iovec iov = {buf, read_len};
+	auto req = io->make_read_req(name.c_str(), 512L*oo.offset, &iov, 1);
+	req->run(cb_req);
+
 	// read_len unchanged
     }
     return std::make_pair(skip_len, read_len);
@@ -365,6 +373,4 @@ void read_cache::do_evict(int n) {
     evict(n);
 }
 
-void read_cache::reset(void) {
-}
 

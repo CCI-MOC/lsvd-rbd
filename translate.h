@@ -28,6 +28,8 @@ public:
     virtual ssize_t writev(size_t offset, iovec *iov, int iovcnt) = 0;
     virtual ssize_t readv(size_t offset, iovec *iov, int iovcnt) = 0;
 
+    virtual const char *prefix() = 0; /* for read cache */
+    
     /* debug functions
      */
     virtual void getmap(int base, int limit,

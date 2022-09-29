@@ -525,6 +525,12 @@ extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
     return 0;
 }
 
+std::pair<std::string,std::string> split_string(std::string s,
+						std::string delim) {
+    auto i = s.find(delim);
+    return std::pair(s.substr(0,i), s.substr(i+delim.length()));
+}
+
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 			const char *snap_name)
 {
@@ -534,11 +540,12 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     auto fri = new fake_rbd_image;
     
     if (rados)
-	fri->io = new rados_backend(obj.c_str()+6);
+	fri->io = make_rados_backend();
     else
-	fri->io = new file_backend(obj.c_str());
+	fri->io = new file_backend();
     fri->omap = new objmap();
     fri->lsvd = make_translate(fri->io, fri->omap);
+
     int n_xlate_threads = 3;
     char *nxt = getenv("N_XLATE");
     if (nxt) {
@@ -656,7 +663,7 @@ extern "C" int dbg_lsvd_flush(rbd_image_t image)
 }
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
-    backend *io = new file_backend(name);
+    backend *io = new file_backend();
     objmap *omap = new objmap();
     translate *lsvd = make_translate(io, omap);
     auto rv = lsvd->init(name, n, flushthread);
@@ -776,10 +783,6 @@ extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, ui
     fri->wcache = wcache;
     wcache_img_write(fri, buf, offset, len);
     delete fri;
-}
-extern "C" void wcache_reset(write_cache *wcache)
-{
-    wcache->reset();
 }
 int wc_getmap_cb(void *ptr, int base, int limit, int plba)
 {
