@@ -134,10 +134,9 @@ class rados_be_request : public request {
     rados_completion_t c;
 
 public:
-    enum rbr_op { OP_READ = 2, OP_WRITE = 4 };
-    enum rbr_op    op;
+    enum lsvd_op   op;
 
-    rados_be_request(enum rbr_op op, char *obj_name,
+    rados_be_request(enum lsvd_op op, char *obj_name,
 		     iovec *iov, int niov, size_t offset_,
 		     rados_ioctx_t io_ctx_) : _iovs(iov, niov) {
 	offset = offset_;
@@ -192,15 +191,13 @@ request *rados_backend::make_write_req(const char *name, iovec *iov,
 				       int iovcnt) {
     auto [pool,oid] = split_name((char*)name);
     pool_create(pool);
-    return new rados_be_request(rados_be_request::OP_WRITE, oid,
-				iov, iovcnt, 0, io_ctx);
+    return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx);
 }
 
 request *rados_backend::make_read_req(const char *name, size_t offset,
 				      iovec *iov, int iovcnt) {
     auto [pool,oid] = split_name((char*)name);
     pool_create(pool);
-    return new rados_be_request(rados_be_request::OP_READ, oid,
-				iov, iovcnt, offset, io_ctx);
+    return new rados_be_request(OP_READ, oid, iov, iovcnt, offset, io_ctx);
 }
 

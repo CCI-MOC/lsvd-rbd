@@ -73,13 +73,8 @@ int file_backend::delete_object(const char *name) {
     return 0;
 }
 
-enum file_be_op {
-    OP_READ = 2,
-    OP_WRITE = 3
-};
-
 class file_backend_req : public request {
-    enum file_be_op op;
+    enum lsvd_op    op;
     smartiov        _iovs;
     size_t          offset;
     std::string     name;
@@ -89,7 +84,7 @@ class file_backend_req : public request {
     int             fd;
     
 public:
-    file_backend_req(enum file_be_op op_, const char *name_,
+    file_backend_req(enum lsvd_op op_, const char *name_,
 		     iovec *iov, int iovcnt, size_t offset_,
 		     io_context_t ioctx_) : _iovs(iov, iovcnt), name(name_) {
 	op = op_;

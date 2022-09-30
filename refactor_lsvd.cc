@@ -109,7 +109,7 @@ struct fake_rbd_image {
     std::queue<rbd_completion_t> completions;
 };
 
-/* RBD-level completion structure 
+/* RBD-level completion structure
  */
 struct lsvd_completion {
 public:
@@ -123,7 +123,6 @@ public:
     std::condition_variable cv;
 
     std::atomic<int> n = 0;
-    iovec iov;                  // occasional use only
     
     lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
 
@@ -242,121 +241,182 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-/* aio_read_req - state machine for rbd_aio_read
+/* rbd_aio_req - state machine for rbd_aio_read, rbd_aio_write
+ *
+ * TODO: fix this. I merged separate read & write classes in the
+ * ugliest possible way, but it works...
  */
-class aio_read_req : public request {
+class rbd_aio_req : public request {
     fake_rbd_image   *img;
     lsvd_completion  *p;
     char             *buf;
     char             *aligned_buf;
     uint64_t          offset;
     size_t            len;
-    std::atomic<int>  n_req = 0;
+    lsvd_op           op;
+    smartiov          data_iovs;
 
+    /* note - 'complete' = (n_req == 0) */
+    std::atomic<int>  n_req = 0;
     std::atomic<bool> launched = false;
     bool              released = false;
-    /* note - 'complete' = (n_req == 0) */
     
+    bool              complete = false; // write only
+
     std::mutex        m;
     std::condition_variable cv;
+
+    void notify_w() {
+        int blocks = div_round_up(len, 4096);
+        img->wcache->release_room(blocks);
+        
+        complete = true;
+        if (p != NULL) 
+            p->complete(len);
+
+        if (released)
+            delete this;
+        else
+            cv.notify_all();
+    }
+    
+    void notify_r() {
+        if (--n_req > 0)
+            return;
+        if (!launched)
+            return;
+        
+        if (aligned_buf != buf) {
+            memcpy(buf, aligned_buf, len);
+            free(aligned_buf);
+        }
+        if (p != NULL) 
+            p->complete(len);
+
+        if (released)
+            delete this;
+        else 
+            cv.notify_all();
+    }
+    
+    void run_w() {
+        if (!aligned(buf, 512)) {
+            aligned_buf = (char*)aligned_alloc(512, len);
+            memcpy(aligned_buf, buf, len);
+        }
+        data_iovs.push_back((iovec){aligned_buf, len});
+        int blocks = div_round_up(len, 4096);
+        img->wcache->get_room(blocks);
+        img->wcache->writev(this);
+    }
+    
+    void run_r() {
+        if (!aligned(buf, 512))
+            aligned_buf = (char*)aligned_alloc(512, len);
+
+        /* we're not done until n_req == 0 && launched == true
+         */
+        char *_buf = aligned_buf;       // read and increment this
+        size_t _len = len;              // and this
+
+        while (_len > 0) {
+            n_req++;
+            auto [skip,wait] =
+                img->wcache->async_read(offset, _buf, _len,
+                                        aio_read_cb, (void*)this);
+            if (wait == 0)
+                n_req--;
+
+            _len -= skip;
+            while (skip > 0) {
+                n_req++;
+                auto [skip2, wait2] =
+                    img->rcache->async_read(offset, _buf, skip,
+                                            aio_read_cb, (void*)this);
+                if (wait2 == 0)
+                    n_req--;
+
+                memset(_buf, 0, skip2);
+                skip -= (skip2 + wait2);
+                _buf += (skip2 + wait2);
+                offset += (skip2 + wait2);
+            }
+            _buf += wait;
+            _len -= wait;
+            offset += wait;
+	}
+        launched.store(true);
+        if (n_req == 0)
+            notify(NULL);
+    }
     
 public:
-    aio_read_req(fake_rbd_image *img_, lsvd_completion *p_,
-		 char *buf_, uint64_t offset_, size_t len_) :
-	img(img_), p(p_), buf(buf_), offset(offset_), len(len_) {
+    rbd_aio_req(lsvd_op op_, fake_rbd_image *img_, lsvd_completion *p_,
+		char *buf_, uint64_t offset_, size_t len_) {
+	op = op_;
+	img = img_;
+	p = p_;
+	buf = buf_;
+	offset = offset_;
+	len = len_;
 	aligned_buf = buf;
     }
+    ~rbd_aio_req() {
+	if (aligned_buf != buf)
+	    free(aligned_buf);
+    }
 
-    bool is_done() { return launched && n_req <= 0; }
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
+    sector_t lba() { return offset / 512; }
+    smartiov *iovs() { return &data_iovs; }
 
     /* note that there's no child request until read cache is updated
      * to use request/notify model.
      */
     void notify(request *child /* not used */) {
-	if (--n_req > 0)
-	    return;
-	if (!launched)
-	    return;
-	
-	if (aligned_buf != buf) {
-	    memcpy(buf, aligned_buf, len);
-	    free(aligned_buf);
-	}
-	if (p != NULL) 
-	    p->complete(len);
+	if (op == OP_READ)
+	    notify_r();
+	else
+	    notify_w();
+    }
 
-	if (released)
-	    delete this;
-	else 
-	    cv.notify_all();
+    bool is_done() {
+	if (op == OP_READ)
+	    return launched && n_req <= 0;
+	else
+	    return complete;
     }
 
     /* TODO: this is really gross. To properly fix it I need to integrate this
      * with rbd_aio_completion and use its release() method
      */
     void wait() {
-	{   std::unique_lock lk(m);
-	    while (!launched || n_req > 0)
-		cv.wait(lk);
-	}
+	std::unique_lock lk(m);
+	while ((op == OP_READ && (!launched || n_req > 0)) ||
+	       (op == OP_WRITE && !complete))
+	    cv.wait(lk);
+	lk.unlock();
 	release();
     }
 
     void release() {
 	released = true;
-	if (n_req == 0)
-	    delete this;
+	if ((op == OP_READ && n_req == 0) ||
+	    (op == OP_WRITE && complete))
+		delete this;
     }
 
     void run(request *parent /* unused */) {
-	if (!aligned(buf, 512))
-	    aligned_buf = (char*)aligned_alloc(512, len);
-
-	/* we're not done until n_req == 0 && launched == true
-	 */
-	char *_buf = aligned_buf;	// read and increment this
-	size_t _len = len;		// and this
-
-	while (_len > 0) {
-	    n_req++;
-	    auto [skip,wait] =
-		img->wcache->async_read(offset, _buf, _len,
-					aio_read_cb, (void*)this);
-	    if (wait == 0)
-		n_req--;
-
-	    _len -= skip;
-	    while (skip > 0) {
-		n_req++;
-		auto [skip2, wait2] =
-		    img->rcache->async_read(offset, _buf, skip,
-					    aio_read_cb, (void*)this);
-		if (wait2 == 0)
-		    n_req--;
-
-		memset(_buf, 0, skip2);
-		skip -= (skip2 + wait2);
-		_buf += (skip2 + wait2);
-		offset += (skip2 + wait2);
-	    }
-	    _buf += wait;
-	    _len -= wait;
-	    offset += wait;
-	}
-
-	launched.store(true);
-	if (n_req == 0)
-	    notify(NULL);
+	if (op == OP_READ)
+	    run_r();
+	else
+	    run_w();
     }
 
     static void aio_read_cb(void *ptr) {
-	auto req = (aio_read_req *)ptr;
+	auto req = (rbd_aio_req *)ptr;
 	req->notify(NULL);
     }
 };
-
 
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
 			    size_t len, char *buf, rbd_completion_t c)
@@ -365,7 +425,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
     auto p = (lsvd_completion*)c;
     p->fri = fri;
 
-    auto req = new aio_read_req(fri, p, buf, offset, len);
+    auto req = new rbd_aio_req(OP_READ, fri, p, buf, offset, len);
     req->run(NULL);
     return 0;
 }
@@ -384,87 +444,6 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     return 0;
 }
 
-/* aio_write_req - state machine for rbd_aio_write
- */
-class aio_write_req : public request {
-    fake_rbd_image   *img;
-    lsvd_completion  *p;
-    const char       *buf;
-    char             *aligned_buf = NULL;
-    uint64_t          offset;
-    size_t            len;
-    smartiov          data_iovs;
-
-    bool              released = false;
-    bool              complete = false;
-    std::mutex        m;
-    std::condition_variable cv;
-    
-public:
-    aio_write_req(fake_rbd_image *img_, lsvd_completion *p_,
-		  const char *buf_, uint64_t offset_, size_t len_) :
-	img(img_), p(p_), buf(buf_), offset(offset_), len(len_) {
-	aligned_buf = (char*)buf;
-    }
-
-    ~aio_write_req() {
-	if (aligned_buf != buf)
-	    free(aligned_buf);
-    }
-    
-    /* note that there's no child request until write cache is updated
-     * to use request/notify model.
-     */
-    void notify(request *child /* not used */) {
-	int blocks = div_round_up(len, 4096);
-	img->wcache->release_room(blocks);
-	
-	complete = true;
-	if (p != NULL) 
-	    p->complete(len);
-
-	if (released)
-	    delete this;
-	else
-	    cv.notify_all();
-    }
-
-    /* TODO: this is really gross. To properly fix it I need to integrate this
-     * with rbd_aio_completion and use its release() method
-     */
-    void wait() {
-	{   std::unique_lock lk(m);
-	    while (!complete)
-		cv.wait(lk);
-	}
-	release();
-    }
-
-    void release() {
-	released = true;
-	if (complete)
-	    delete this;
-    }
-
-    bool is_done() { return complete; }
-    sector_t lba() { return offset / 512; }
-    smartiov *iovs() { return &data_iovs; }
-    
-    /* note that this is a lot simpler than read, because
-     * the write cache takes everything in a single chunk.
-     */
-    void run(request *parent /* unused */) {
-	if (!aligned(buf, 512)) {
-	    aligned_buf = (char*)aligned_alloc(512, len);
-	    memcpy(aligned_buf, buf, len);
-	}
-	data_iovs.push_back((iovec){aligned_buf, len});
-	int blocks = div_round_up(len, 4096);
-	img->wcache->get_room(blocks);
-	img->wcache->writev(this);
-    }
-};
-
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 			     const char *buf, rbd_completion_t c)
 {
@@ -472,14 +451,9 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     lsvd_completion *p = (lsvd_completion *)c;
     p->fri = fri;
 
-    auto req = new aio_write_req(fri, p, buf, offset, len);
+    auto req = new rbd_aio_req(OP_WRITE, fri, p, (char*)buf, offset, len);
     req->run(NULL);
     return 0;
-}
-
-void rbd_call_wrapped(rbd_completion_t c, void *ptr)
-{
-    call_wrapped(ptr);
 }
 
 /* note that rbd_aio_read handles aligned bounce buffers for us
@@ -487,7 +461,7 @@ void rbd_call_wrapped(rbd_completion_t c, void *ptr)
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
-    auto req = new aio_read_req(fri, NULL, buf, off, len);
+    auto req = new rbd_aio_req(OP_READ, fri, NULL, buf, off, len);
     req->run(NULL);
     req->wait();
     return 0;
@@ -496,7 +470,7 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char *buf)
 {
     fake_rbd_image *fri = (fake_rbd_image*)image;
-    auto req = new aio_write_req(fri, NULL, buf, off, len);
+    auto req = new rbd_aio_req(OP_WRITE, fri, NULL, (char*)buf, off, len);
     req->run(NULL);
     req->wait();
     return 0;
