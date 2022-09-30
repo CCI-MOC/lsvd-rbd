@@ -26,7 +26,7 @@
 
 #include "base_functions.h"
 
-#include "journal2.h"
+#include "journal.h"
 #include "smartiov.h"
 #include "extent.h"
 #include "misc_cache.h"

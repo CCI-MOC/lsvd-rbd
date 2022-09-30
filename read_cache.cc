@@ -31,7 +31,7 @@
 #include "smartiov.h"
 #include "extent.h"
 
-#include "journal2.h"
+#include "journal.h"
 
 #include "base_functions.h"
 #include "backend.h"

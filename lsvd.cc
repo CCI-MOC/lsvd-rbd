@@ -29,7 +29,7 @@
 #include <string>
 #include <cassert>
 
-#include "journal2.h"
+#include "journal.h"
 #include "smartiov.h"
 #include "extent.h"
 

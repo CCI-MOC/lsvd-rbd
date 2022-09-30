@@ -26,7 +26,7 @@
 #include "misc_cache.h"
 #include "backend.h"
 #include "translate.h"
-#include "journal2.h"
+#include "journal.h"
 #include "nvme.h"
 #include "write_cache.h"
 #include "read_cache.h"
