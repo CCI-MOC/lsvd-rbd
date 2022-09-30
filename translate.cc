@@ -118,9 +118,9 @@ class translate_impl : public translate {
     char      *single_prefix;
 
     char      *super_name;
-    char      *super_buf;
-    hdr       *super_h;
-    super_hdr *super_sh;
+    char      *super_buf = NULL;
+    hdr       *super_h = NULL;
+    super_hdr *super_sh = NULL;
     size_t     super_len;
 
     std::atomic<int> puts_outstanding = 0;
@@ -143,29 +143,8 @@ class translate_impl : public translate {
     int gc_sectors_written = 0;
     int gc_deleted = 0;
 
-
-    /* various methods to read:
-     * - header from an object (returns pointer that must be freed)
-     * - superblock object (returns size in bytes)
-     * - header from a data object
-     * - checkpoint object
-     */
-    char *read_object_hdr(const char *name, bool fast);
-
-    typedef clone_info *clone_p;
-    ssize_t read_super(const char *name, std::vector<uint32_t> &ckpts,
-		       std::vector<clone_p> &clones, std::vector<snap_info> &snaps);
-
-    ssize_t read_data_hdr(int seq, hdr &h, data_hdr &dh,
-                          std::vector<uint32_t> &ckpts,
-                          std::vector<obj_cleaned> &cleaned,
-                          std::vector<data_map> &dmap);
-
-    ssize_t read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
-                            std::vector<ckpt_obj> &objects, 
-			    std::vector<deferred_delete> &deletes,
-                            std::vector<ckpt_mapentry> &dmap);
-
+    object_reader *parser;
+    
     /* maybe use insertion sorted vector?
      *  https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
      */
@@ -221,6 +200,7 @@ public:
 translate_impl::translate_impl(backend *_io, objmap *omap) :
     workers(&m), misc_threads(&m) {
     objstore = _io;
+    parser = new object_reader(objstore);
     map = omap;
     current_batch = NULL;
     last_written = last_pushed = 0;
@@ -238,6 +218,7 @@ translate_impl::~translate_impl() {
     }
     if (current_batch)
 	delete current_batch;
+    delete parser;
     if (super_buf)
 	free(super_buf);
     free(single_prefix);
@@ -246,18 +227,24 @@ translate_impl::~translate_impl() {
 
 ssize_t translate_impl::init(const char *prefix_,
 			     int nthreads, bool timedflush) {
-    std::vector<uint32_t>  ckpts;
-    std::vector<clone_p>   clones;
-    std::vector<snap_info> snaps;
+    std::vector<uint32_t>    ckpts;
+    std::vector<clone_info*> clones;
+    std::vector<snap_info>   snaps;
 
     /* note prefix = superblock name
      */
     super_name = strdup(prefix_);
     single_prefix = strdup(prefix_);
-    
-    ssize_t bytes = read_super(super_name, ckpts, clones, snaps);
+
+    auto [_buf, bytes] = parser->read_super(super_name, ckpts, clones,
+					    snaps, my_uuid);
     if (bytes < 0)
 	return bytes;
+    super_buf = _buf;
+    super_h = (hdr*)super_buf;
+    super_len = super_h->hdr_sectors * 512;
+    super_sh = (super_hdr*)(super_h+1);
+    
     batch_seq = super_sh->next_obj;
 
     int _ckpt = 1;
@@ -266,7 +253,9 @@ ssize_t translate_impl::init(const char *prefix_,
 	std::vector<ckpt_obj> objects;
 	std::vector<deferred_delete> deletes;
 	std::vector<ckpt_mapentry> entries;
-	if (read_checkpoint(ck, ckpts, objects, deletes, entries) < 0)
+	objname name(prefix(), ck);
+	if (parser->read_checkpoint(name.c_str(), ckpts, objects,
+				    deletes, entries) < 0)
 	    return -1;
 	for (auto o : objects) {
 	    object_info[o.seq] = (obj_info){.hdr = o.hdr_sectors,
@@ -290,7 +279,9 @@ ssize_t translate_impl::init(const char *prefix_,
 	std::vector<data_map>    entries;
 	hdr h; data_hdr dh;
 	batch_seq = i;
-	if (read_data_hdr(i, h, dh, ckpts, cleaned, entries) < 0)
+	objname name(prefix(), i);
+	if (parser->read_data_hdr(name.c_str(), h, dh, ckpts,
+				  cleaned, entries) < 0)
 	    break;
 	object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
 				    .live = h.data_sectors, .type = LSVD_DATA};
@@ -334,120 +325,7 @@ void translate_impl::shutdown(void) {
  *  fast: just read first 4KB
  *  !fast: read first 4KB, resize and read again if >4KB
  */
-char *translate_impl::read_object_hdr(const char *name, bool fast) {
-    hdr *h = (hdr*)malloc(4096);
-    iovec iov = {(char*)h, 4096};
-    if (objstore->read_object(name, &iov, 1, 0) < 0)
-	goto fail;
-    if (fast)
-	return (char*)h;
-    if (h->hdr_sectors > 8) {
-	size_t len = h->hdr_sectors * 512;
-	h = (hdr*)realloc(h, len);
-	iovec iov = {(char*)h, len};
-	if (objstore->read_object(name, &iov, 1, 0) < 0)
-	    goto fail;
-    }
-    return (char*)h;
-fail:
-    free((char*)h);
-    return NULL;
-}
 
-/* read all info from superblock, returns volume size in bytes
- * (or -1 on failure)
- */
-ssize_t translate_impl::read_super(const char *name,
-				   std::vector<uint32_t> &ckpts,
-				   std::vector<clone_p> &clones,
-				   std::vector<snap_info> &snaps) {
-    super_buf = read_object_hdr(name, false);
-    super_h = (hdr*)super_buf;
-    super_len = super_h->hdr_sectors * 512;
-
-    if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
-	super_h->type != LSVD_SUPER)
-	return -1;
-    memcpy(my_uuid, super_h->vol_uuid, sizeof(uuid_t));
-
-    super_sh = (super_hdr*)(super_h+1);
-
-    decode_offset_len<uint32_t>(super_buf, super_sh->ckpts_offset,
-				super_sh->ckpts_len, ckpts);
-    decode_offset_len<snap_info>(super_buf, super_sh->snaps_offset,
-				 super_sh->snaps_len, snaps);
-
-    /* iterate through list of variable-length structures, storing
-     * pointers (note - underlying memory never gets freed)
-     */
-    clone_info *p_clone = (clone_info*)(super_buf + super_sh->clones_offset),
-	*end_clone = (clone_info*)(super_buf + super_sh->clones_offset +
-				   super_sh->clones_len);
-    for (; p_clone < end_clone; ) {
-	clones.push_back(p_clone);
-	p_clone = (clone_info*)(p_clone->name_len +
-				sizeof(clone_info) + (char *)p_clone);
-    }
-
-    return super_sh->vol_size * 512;
-}
-
-/* read and decode the header of an object identified by sequence number
- */
-ssize_t translate_impl::read_data_hdr(int seq, hdr &h, data_hdr &dh,
-				      std::vector<uint32_t> &ckpts,
-				      std::vector<obj_cleaned> &cleaned,
-				      std::vector<data_map> &dmap) {
-    objname name(prefix(), seq);
-    char *buf = read_object_hdr(name.c_str(), false);
-    if (buf == NULL)
-	return -1;
-    hdr      *tmp_h = (hdr*)buf;
-    data_hdr *tmp_dh = (data_hdr*)(tmp_h+1);
-    if (tmp_h->type != LSVD_DATA) {
-	free(buf);
-	return -1;
-    }
-
-    h = *tmp_h;
-    dh = *tmp_dh;
-
-    decode_offset_len<uint32_t>(buf, tmp_dh->ckpts_offset,
-				tmp_dh->ckpts_len, ckpts);
-    decode_offset_len<obj_cleaned>(buf, tmp_dh->objs_cleaned_offset,
-				   tmp_dh->objs_cleaned_len, cleaned);
-    decode_offset_len<data_map>(buf, tmp_dh->map_offset, tmp_dh->map_len, dmap);
-
-    free(buf);
-    return 0;
-}
-
-/* read and decode a checkpoint object identified by sequence number
- */
-ssize_t translate_impl::read_checkpoint(int seq, std::vector<uint32_t> &ckpts,
-					std::vector<ckpt_obj> &objects, 
-					std::vector<deferred_delete> &deletes,
-					std::vector<ckpt_mapentry> &dmap) {
-    objname name(prefix(), seq);
-    char *buf = read_object_hdr(name.c_str(), false);
-    if (buf == NULL)
-	return -1;
-    hdr      *h = (hdr*)buf;
-    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
-    if (h->type != LSVD_CKPT) {
-	free(buf);
-	return -1;
-    }
-
-    decode_offset_len<uint32_t>(buf, ch->ckpts_offset, ch->ckpts_len, ckpts);
-    decode_offset_len<ckpt_obj>(buf, ch->objs_offset, ch->objs_len, objects);
-    decode_offset_len<deferred_delete>(buf, ch->deletes_offset,
-				       ch->deletes_len, deletes);
-    decode_offset_len<ckpt_mapentry>(buf, ch->map_offset, ch->map_len, dmap);
-
-    free(buf);
-    return 0;
-}
 
 /* create header for a data object
  */

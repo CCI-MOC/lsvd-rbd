@@ -282,10 +282,9 @@ class rbd_aio_req : public request {
         if (!launched)
             return;
         
-        if (aligned_buf != buf) {
+        if (aligned_buf != buf) 
             memcpy(buf, aligned_buf, len);
-            free(aligned_buf);
-        }
+
         if (p != NULL) 
             p->complete(len);
 

@@ -1,7 +1,12 @@
-//
-// file:        objects.cc
-// description: header, checkpoint etc. objects
-//
+/*
+ * file:        objects.h
+ * description: back-end object format definitions and helper functions
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #ifndef OBJECTS_H
 #define OBJECTS_H
 
@@ -122,6 +127,32 @@ struct ckpt_mapentry {
     int64_t len : 28;
     int32_t obj;
     int32_t offset;
+};
+
+class object_reader {
+    backend *objstore;
+
+public:
+    object_reader(backend *be) : objstore(be) {}
+
+    char *read_object_hdr(const char *name, bool fast);
+
+    std::pair<char*,ssize_t> read_super(const char *name,
+					std::vector<uint32_t> &ckpts,
+					std::vector<clone_info*> &clones,
+					std::vector<snap_info> &snaps,
+					uuid_t &uuid);
+
+    ssize_t read_data_hdr(const char *name, hdr &h, data_hdr &dh,
+			  std::vector<uint32_t> &ckpts,
+			  std::vector<obj_cleaned> &cleaned,
+			  std::vector<data_map> &dmap);
+
+    ssize_t read_checkpoint(const char *name,
+			    std::vector<uint32_t> &ckpts,
+			    std::vector<ckpt_obj> &objects, 
+			    std::vector<deferred_delete> &deletes,
+			    std::vector<ckpt_mapentry> &dmap);
 };
 
 #endif

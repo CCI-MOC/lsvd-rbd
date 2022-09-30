@@ -1,15 +1,16 @@
-// file:	misc_cache.h
-// description: contains several of the important classes and structures used directly by 
-//		translate and cache classes. As the name suggests, contains mostly miscellaneous
-//		functions and class/structure definitions:
-//		        -thread_pool class for translate class (also utilized by caches)
-//		        -cache_work structure for caches
-//		        -sized_vector for caches
-//		        -commonly used objmap structure modified with mutex from extent.h
-// author:      Peter Desnoyers, Northeastern University
-//              Copyright 2021, 2022 Peter Desnoyers
-// license:     GNU LGPL v2.1 or newer
-//              LGPL-2.1-or-later
+/*
+ * file:        misc_cache.h
+ * description: grab-bag of various classes and structures:
+ *              -thread_pool
+ *		-sized_vector for caches
+ *		-objmap (map shared by translate, read_cache)
+ *
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 
 #ifndef MISC_CACHE_H
 #define MISC_CACHE_H
@@ -72,17 +73,6 @@ public:
         put_locked(work);
     }
 };
-
-/* if buf[offset]...buf[offset+len] contains an array of type T,
- * copy them into the provided output vector
- */
-template<class T>
-void decode_offset_len(char *buf, size_t offset, size_t len,
-                       std::vector<T> &vals) {
-    T *p = (T*)(buf + offset), *end = (T*)(buf + offset + len);
-    for (; p < end; p++)
-        vals.push_back(*p);
-}
 
 /* object map, shared between translate and read_cache
  */
