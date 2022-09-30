@@ -1,9 +1,12 @@
-// file:	write_cache.h
-// description: Full include file of the write_cache for LSVD
-// author:      Peter Desnoyers, Northeastern University
-//              Copyright 2021, 2022 Peter Desnoyers
-// license:     GNU LGPL v2.1 or newer
-//              LGPL-2.1-or-later
+/*
+ * file:        write_cache.h
+ * description: full structure for write cache
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
 
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H

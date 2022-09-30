@@ -1,30 +1,36 @@
-#include <libaio.h>
-#include <uuid/uuid.h>
+/*
+ * file:        send_write_request.cc
+ * description: write logic for write_cache 
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #include <unistd.h>
-#include <string>
-#include <vector>
+#include <sys/uio.h>
+
+#include <uuid/uuid.h>
+
 #include <atomic>
-#include <map>
 #include <condition_variable>
 #include <thread>
+#include <shared_mutex>
+#include <mutex>
+
+#include <vector>
+#include <map>
 #include <stack>
 #include <queue>
 #include <cassert>
-#include <shared_mutex>
 
-#include <sys/uio.h>
-
-#include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <random>
 #include <algorithm>
 
 #include "base_functions.h"
 
 #include "journal2.h"
 #include "smartiov.h"
-#include "objects.h"
 #include "extent.h"
 #include "misc_cache.h"
 #include "backend.h"

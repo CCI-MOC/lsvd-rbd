@@ -1,3 +1,12 @@
+/*
+ * file:        lsvd_debug.h
+ * description: debug function declarations
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #ifndef __LSVD_DEBUG_H__
 #define __LSVD_DEBUG_H__
 
@@ -22,8 +31,7 @@
 #include "write_cache.h"
 #include "read_cache.h"
 
-/*
-debug functions
+/* TODO: do I need prototypes for all these functions?
  */
 
 // dbg_lsvd_write :     do translation layer write

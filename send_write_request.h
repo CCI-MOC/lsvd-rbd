@@ -1,3 +1,13 @@
+/*
+ * file:        send_write_request.h
+ * description: write logic for write_cache 
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #ifndef SEND_WRITE_REQUEST_H
 #define SEND_WRITE_REQUEST_H
 

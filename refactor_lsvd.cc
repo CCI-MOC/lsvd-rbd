@@ -1,46 +1,42 @@
 /*
- * file:        lsvd_rbd.cc
+ * file:        lsvd.cc
  * description: userspace block-on-object layer with librbd interface
  * 
+ * author:      Peter Desnoyers, Northeastern University
  * Copyright 2021, 2022 Peter Desnoyers
- * SPDX-License-Identifier: GPL-2.0-or-later
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
  */
-#include <rados/librados.h>
-#include <libaio.h>
+
+#include <unistd.h>
+#include <fcntl.h>
+
 #include <uuid/uuid.h>
 
 #include <mutex>
 #include <shared_mutex>
-#include <stack>
-#include <queue>
 #include <condition_variable>
 #include <atomic>
-#include <string>
 #include <thread>
+
+#include <algorithm>
+
+#include <stack>
+#include <queue>
 #include <vector>
-#include <string>
 #include <map>
+
+#include <string>
 #include <cassert>
-#include <unistd.h>
-#include <fcntl.h>
 
 #include "journal2.h"
 #include "smartiov.h"
 #include "extent.h"
-#include "objects.h"
-
-#include <sys/uio.h>
-
-#include <sstream>
-#include <iomanip>
-#include <random>
-#include <algorithm>
 
 #include "base_functions.h"
 #include "backend.h"
 #include "misc_cache.h"
 #include "translate.h"
-#include "io.h"
 #include "request.h"
 #include "nvme.h"
 #include "read_cache.h"
@@ -546,7 +542,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     }
     
     fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
-    fri->rcache = new read_cache(js->read_super, fd, false, fri->lsvd, fri->omap, fri->io);
+    fri->rcache = make_read_cache(js->read_super, fd, false,
+				  fri->lsvd, fri->omap, fri->io);
 
     *image = (void*)fri;
     return 0;
@@ -791,8 +788,8 @@ extern "C" int wcache_oldest(write_cache *wcache, int blk, j_extent *extents, in
 extern "C" void rcache_init(_dbg *d,
 			    uint32_t blkno, int fd, void **val_p)
 {
-    auto rcache = new read_cache(blkno, fd, false,
-				 d->lsvd, d->omap, d->io);
+    auto rcache = make_read_cache(blkno, fd, false,
+				  d->lsvd, d->omap, d->io);
     *val_p = (void*)rcache;
 }
 extern "C" void rcache_shutdown(read_cache *rcache)

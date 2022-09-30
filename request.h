@@ -1,6 +1,12 @@
-// file:	request.h
-// description:	This file contains the request interface used by all other request classes in the LSVD system
-// 
+/*
+ * file:        request.h
+ * description: generic inter-layer request mechanism
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
 
 #ifndef REQUEST_H
 #define REQUEST_H

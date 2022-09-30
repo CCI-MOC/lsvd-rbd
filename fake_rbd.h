@@ -1,3 +1,12 @@
+/*
+ * file:        fake_rbd.h
+ * description: replacement for <rbd/librbd.h>
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #ifndef __FAKE_RBD_H__
 #define __FAKE_RBD_H__
 

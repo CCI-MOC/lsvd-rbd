@@ -1,13 +1,12 @@
-// file:	translate.h
-// description: this class focuses on the implementation of the translation layer to the system with
-//              an object oriented approach. This file contains the following which things which are
-//              documented below:
-//                      -batch structure
-//                      -translate class
-// author:      Peter Desnoyers, Northeastern University
-//              Copyright 2021, 2022 Peter Desnoyers
-// license:     GNU LGPL v2.1 or newer
-//              LGPL-2.1-or-later
+/*
+ * file:        translate.h
+ * description: core translation layer - interface
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
 
 #ifndef TRANSLATE_H
 #define TRANSLATE_H

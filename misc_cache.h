@@ -14,6 +14,11 @@
 #ifndef MISC_CACHE_H
 #define MISC_CACHE_H
 
+#include <thread>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+
 /* implements a thread pool with a work queue of type T
  * to use, push threads onto thread_pool.pool
  * - get(), get_locked() - used by worker threads to receive work

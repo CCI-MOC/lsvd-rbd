@@ -1,27 +1,33 @@
-#include <libaio.h>
-#include <queue>
-#include <condition_variable>
-#include <shared_mutex>
-#include <string>
+/*
+ * file:        translate.cc
+ * description: core translation layer - implementation
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #include <unistd.h>
+#include <sys/uio.h>
 
 #include <uuid/uuid.h>
-#include <sys/uio.h>
 
 #include <vector>
 #include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <random>
+#include <condition_variable>
+#include <shared_mutex>
+#include <atomic>
+
+#include <stack>
+#include <map>
+
 #include <algorithm>
 
 #include "base_functions.h"
 #include <thread>
 #include "smartiov.h"
 #include "extent.h"
-#include <atomic>
-#include <stack>
-#include <map>
 
 #include "backend.h"
 #include "objects.h"

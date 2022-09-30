@@ -1,23 +1,21 @@
+/*
+ * file:        io.cc
+ * description: implementation of libaio-based async I/O
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #include <libaio.h>
 #include <sys/uio.h>
-#include <string>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 
 #include <shared_mutex>
 #include <condition_variable>
-#include <queue>
 #include <thread>
-
-#include <uuid/uuid.h>
-
-#include <vector>
-#include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <random>
-#include <algorithm>
 
 #include "base_functions.h"
 #include "smartiov.h"

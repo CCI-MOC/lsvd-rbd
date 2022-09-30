@@ -1,30 +1,23 @@
-#include <libaio.h>
-#include <uuid/uuid.h>
-#include <unistd.h>
-#include <string>
-#include <vector>
-#include <atomic>
-#include <map>
-#include <condition_variable>
-#include <thread>
-#include <stack>
-#include <queue>
-#include <cassert>
-#include <shared_mutex>
+/*
+ * file:        nvme.cc
+ * description: implementation of read/write requests to local SSD
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
 
+#include <libaio.h>
+#include <unistd.h>
 #include <sys/uio.h>
 
 #include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <random>
-#include <algorithm>
+#include <shared_mutex>
+#include <condition_variable>
+#include <thread>
 
 #include "base_functions.h"
-
-#include "journal2.h"
 #include "smartiov.h"
-#include "objects.h"
 #include "extent.h"
 #include "misc_cache.h"
 #include "backend.h"
@@ -33,8 +26,6 @@
 #include "request.h"
 
 #include "nvme.h"
-#include "write_cache.h"
-#include "send_write_request.h"
 
 class nvme_impl;
 

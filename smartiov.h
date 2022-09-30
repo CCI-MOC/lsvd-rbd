@@ -1,3 +1,13 @@
+/*
+ * file:        smartiov.h
+ * description: iovec-based buffer list
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #ifndef SMARTIOV_H
 #define SMARTIOV_H
 

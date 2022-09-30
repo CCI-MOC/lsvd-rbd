@@ -23,8 +23,7 @@
 enum obj_type {
     LSVD_SUPER = 1,
     LSVD_DATA = 2,
-    LSVD_CKPT = 3,
-    LSVD_MAGIC = 0x4456534c
+    LSVD_CKPT = 3
 };
 
 // hdr :	header structure used to contain data for separate objects in translation and write cache layers

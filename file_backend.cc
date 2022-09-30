@@ -18,18 +18,6 @@
 #include "file_backend.h"
 #include "io.h"
 
-//#include <uuid/uuid.h>
-//#include <sys/uio.h>
-
-//#include <vector>
-//#include <sstream>
-//#include <iomanip>
-//#include <algorithm>
-
-//#include "base_functions.h"
-//#include "io.h"
-//#include "misc_cache.h"
-
 
 file_backend::file_backend() {
     e_io_running = true;

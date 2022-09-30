@@ -11,8 +11,6 @@ the how they fit together with rados and s3
 #include <vector>
 #include <uuid/uuid.h>
 
-//enum { LSVD_MAGIC = 0x4456534c };
-
 struct j_extent {
     uint64_t lba : 40;		// volume LBA (in sectors)
     uint64_t len : 24;		// length (sectors)

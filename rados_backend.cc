@@ -1,6 +1,13 @@
-#include <rados/librados.h>
-//#include <map>
+/*
+ * file:        rados_backend.cc
+ * description: backend interface using RADOS objects
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
 
+#include <rados/librados.h>
 
 #include "smartiov.h"
 #include "extent.h"
@@ -13,12 +20,9 @@
 #include <algorithm>		// needed for wrap()
 #include "base_functions.h"
 
-//#include "io.h"
-
 #include <condition_variable>
 #include <queue>
 #include <thread>
-//#include "misc_cache.h"
 
 #include "rados_backend.h"
 

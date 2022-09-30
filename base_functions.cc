@@ -1,3 +1,14 @@
+/*
+ * file:	base_functions.cc
+ * description: General functions and minor structures for LSVD
+ *			-wrapper functions
+ *			-rounding functions
+ * author:	Peter Desnoyers, Northeastern University
+ *              Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #include <uuid/uuid.h>
 #include <sys/uio.h>
 

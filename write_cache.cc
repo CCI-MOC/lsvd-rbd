@@ -1,30 +1,33 @@
-#include <libaio.h>
+/*
+ * file:        write_cache.cc
+ * description: write_cache implementation
+ * 
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #include <uuid/uuid.h>
-#include <unistd.h>
-#include <string>
-#include <vector>
+#include <unistd.h>		// TODO: pread -> nvme
+
 #include <atomic>
+
+#include <vector>
 #include <map>
+#include <stack>
+
+#include <mutex>
+#include <shared_mutex>
 #include <condition_variable>
 #include <thread>
-#include <stack>
-#include <queue>
 #include <cassert>
-#include <shared_mutex>
-#include <sys/stat.h>
-#include <sys/uio.h>
-#include <fcntl.h>
-#include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <random>
 #include <algorithm>
 
 #include "base_functions.h"
 
 #include "journal2.h"
 #include "smartiov.h"
-#include "objects.h"
 #include "extent.h"
 #include "misc_cache.h"
 #include "backend.h"

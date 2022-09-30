@@ -1,34 +1,37 @@
-#include <libaio.h>
-#include <uuid/uuid.h>
-#include <queue>
+/*
+ * file:        read_cache.cc
+ * description: implementation of read cache
+ *              the read cache is:
+ *                       * 1. indexed by obj/offset[*], not LBA
+ *                       * 2. stores aligned 64KB blocks
+ *                       * [*] offset is in units of 64KB blocks
+ * author:      Peter Desnoyers, Northeastern University
+ *              Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
+#include <unistd.h>
+#include <stdint.h>
+
+#include <shared_mutex>
+#include <mutex>
 #include <thread>
 #include <atomic>
-#include <map>
 #include <cassert>
-#include <string>
-#include <shared_mutex>
+
+
+#include <queue>
+#include <map>
 #include <stack>
+#include <vector>
+
+#include <random>
+
 #include "smartiov.h"
 #include "extent.h"
 
-#include <sys/uio.h>
-#include <string>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <linux/fs.h>
-
-#include <unistd.h>
-#include "objects.h"
 #include "journal2.h"
-
-#include <uuid/uuid.h>
-
-#include <vector>
-#include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <random>
-#include <algorithm>
 
 #include "base_functions.h"
 #include "backend.h"
@@ -38,10 +41,112 @@
 #include "read_cache.h"
 #include "objname.h"
 
-// Placing constructor and destructor first, other functions in the same order as in the include file
-read_cache::read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
-		       objmap *_om, backend *_io) :
-    omap(_om), be(_be), fd(_fd), io(_io), misc_threads(&m), nothreads(nt) {
+class read_cache_impl : public read_cache {
+    
+    std::mutex m;
+    std::map<extmap::obj_offset,int> map;
+
+    j_read_super       *super;
+    extmap::obj_offset *flat_map;
+    objmap             *omap;
+    translate          *be;
+    int                 fd;
+    size_t              dev_max;
+    backend            *io;
+    
+    int               unit_sectors;
+    std::vector<int>  free_blks;
+    bool              map_dirty = false;
+
+
+    // new idea for hit rate - require that sum(backend reads) is no
+    // more than 2 * sum(read sectors) (or 3x?), using 64bit counters 
+    //
+    struct {
+	int64_t       user = 1000; // hack to get test4/test_2_fakemap to work
+	int64_t       backend = 0;
+    } hit_stats;
+    
+    thread_pool<int> misc_threads; // eviction thread, for now
+    bool             nothreads = false;	// for debug
+
+    /* if map[obj,offset] = n:
+     *   in_use[n] - not eligible for eviction
+     *   written[n] - safe to read from cache
+     *   buffer[n] - in-memory data for block n
+     *   pending[n] - continuations to invoke when buffer[n] becomes valid
+     * buf_loc - FIFO queue of {n | buffer[n] != NULL}
+     */
+    sized_vector<std::atomic<int>>   in_use;
+    sized_vector<char>               written; // can't use vector<bool> here
+    sized_vector<char*>              buffer;
+    sized_vector<std::vector<void*>> pending;
+    std::queue<int>    buf_loc;
+    
+    io_context_t ioctx;
+    std::thread e_io_th;
+    bool e_io_running = false;
+    
+    /* possible CLOCK implementation - queue holds <block,ojb/offset> 
+     * pairs so that we can evict blocks without having to remove them 
+     * from the CLOCK queue
+     */
+    sized_vector<char> a_bit;
+#if 0
+    sized_vector<int>  block_version;
+    std::queue<std::pair<int,extmap::obj_offset>> clock_queue;
+#endif
+    
+    /* evict 'n' blocks - random replacement
+     */
+// evict :	Frees n number of blocks and erases oo from the map
+    void evict(int n);
+
+    void evict_thread(thread_pool<int> *p);
+    
+    char *get_cacheline_buf(int n); /* TODO: document this */
+
+public:
+    read_cache_impl(uint32_t blkno, int _fd, bool nt,
+		    translate *_be, objmap *_om, backend *_io);
+    ~read_cache_impl();
+    
+    std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t len,
+					void (*cb)(void*), void *ptr);
+
+    /* debugging. 
+     */
+
+    /* get superblock, flattened map, vector of free blocks, extent map
+     * only returns ones where ptr!=NULL
+     */
+    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, 
+		  std::vector<int> **p_free_blks,
+                  std::map<extmap::obj_offset,int> **p_map);
+
+    void do_add(extmap::obj_offset unit, char *buf); /* TODO: document */
+    void do_evict(int n);       /* TODO: document */
+    void write_map(void);
+};
+
+/* factory function so we can hide implementation
+ */
+read_cache *make_read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
+			    objmap *_om, backend *_io) {
+    return new read_cache_impl(blkno, _fd, nt, _be, _om, _io);
+}
+
+/* constructor - allocate, read the superblock and map, start threads
+ */
+read_cache_impl::read_cache_impl(uint32_t blkno, int _fd, bool nt,
+				 translate *_be, objmap *_om,
+				 backend *_io) : misc_threads(&m) {
+    omap = _om;
+    be = _be;
+    fd = _fd;
+    io = _io;
+    nothreads = nt;
+    
     dev_max = getsize64(fd);
     char *buf = (char*)aligned_alloc(512, 4096);
     if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
@@ -74,8 +179,8 @@ read_cache::read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
 
     map_dirty = false;
 
-    misc_threads.pool.push(std::thread(&read_cache::evict_thread, this,
-				       &misc_threads));
+    misc_threads.pool.push(std::thread(&read_cache_impl::evict_thread,
+				       this, &misc_threads));
 
     io_queue_init(64, &ioctx);
     e_io_running = true;
@@ -83,7 +188,7 @@ read_cache::read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
     e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
 }
 
-read_cache::~read_cache() {
+read_cache_impl::~read_cache_impl() {
     misc_threads.stop();	// before we free anything threads might touch
 	
     free((void*)flat_map);
@@ -95,7 +200,6 @@ read_cache::~read_cache() {
     e_io_running = false;
     e_io_th.join();
     io_queue_release(ioctx);
-
 }
 
 #if 0
@@ -107,7 +211,7 @@ static std::mt19937 rng(17);      // for deterministic testing
 
 /* evict 'n' blocks from cache, using random eviction
  */
-void read_cache::evict(int n) {
+void read_cache_impl::evict(int n) {
     // assert(!m.try_lock());       // m must be locked
     std::uniform_int_distribution<int> uni(0,super->units - 1);
     for (int i = 0; i < n; i++) {
@@ -121,7 +225,7 @@ void read_cache::evict(int n) {
     }
 }
 
-void read_cache::evict_thread(thread_pool<int> *p) {
+void read_cache_impl::evict_thread(thread_pool<int> *p) {
     auto wait_time = std::chrono::milliseconds(500);
     auto t0 = std::chrono::system_clock::now();
     auto timeout = std::chrono::seconds(2);
@@ -156,9 +260,37 @@ void read_cache::evict_thread(thread_pool<int> *p) {
     }
 }
 
-/* WTF is this?
+    /* state machine for block obj,offset can be represented by the tuple:
+     *  map=n - i.e. exists(n) | map[obj,offset] = n
+     *  in_use[n] - 0 / >0
+     *  written[n] - n/a, F, T
+     *  buffer[n] - n/a, NULL, <p>
+     *  pending[n] - n/a, [], [...]
+     *
+     * if not cached                          -> {!map, n/a}
+     * first read will:
+     *   - add to map
+     *   - increment in_use
+     *   - launch read                        -> {map=n, >0, F, NULL, []}
+     * following reads will 
+     *   queue lambdas to copy from buffer[n] -> {map=n, >0, F, NULL, [..]}
+     * read complete will:
+     *   - set buffer[n]
+     *   - invoke lambdas from pending[*]
+     *   - launch write                       -> {map=n, >0, F, <p>, []}
+     * write complete will:
+     *   - set 'written' to true              -> {map=n, >0, T, <p>, []}
+     * eviction of buffer will:
+     *   - decr in_use
+     *   - remove buffer                      -> {map=n, 0, NULL, []}
+     * further reads will temporarily increment in_use
+     * eviction will remove from map:         -> {!map, n/a}
+     */
+
+
+/* TODO: WTF is this?
  */
-char *read_cache::get_cacheline_buf(int n) {
+char *read_cache_impl::get_cacheline_buf(int n) {
     char *buf;
     int len = 65536;
     const int maxbufs = 48;
@@ -180,9 +312,9 @@ char *read_cache::get_cacheline_buf(int n) {
     return buf;
 }
 
-std::pair<size_t,size_t> read_cache::async_read(size_t offset, char *buf,
-						size_t len,
-						void (*cb)(void*), void *ptr) {
+std::pair<size_t,size_t>
+read_cache_impl::async_read(size_t offset, char *buf, size_t len,
+			    void (*cb)(void*), void *ptr) {
     sector_t base = offset/512, sectors = len/512, limit = base+sectors;
     size_t skip_len = 0, read_len = 0;
     extmap::obj_offset oo = {0, 0};
@@ -334,15 +466,16 @@ std::pair<size_t,size_t> read_cache::async_read(size_t offset, char *buf,
     return std::make_pair(skip_len, read_len);
 }
 
-void read_cache::write_map(void) {
+void read_cache_impl::write_map(void) {
     pwrite(fd, flat_map, 4096 * super->map_blocks, 4096L * super->map_start);
 }
 
 /* --------- Debug methods ----------- */
 
-void read_cache::get_info(j_read_super **p_super, extmap::obj_offset **p_flat, 
-			  std::vector<int> **p_free_blks,
-			  std::map<extmap::obj_offset,int> **p_map) {
+void read_cache_impl::get_info(j_read_super **p_super,
+			       extmap::obj_offset **p_flat, 
+			       std::vector<int> **p_free_blks,
+			       std::map<extmap::obj_offset,int> **p_map) {
     if (p_super != NULL)
 	*p_super = super;
     if (p_flat != NULL)
@@ -353,7 +486,7 @@ void read_cache::get_info(j_read_super **p_super, extmap::obj_offset **p_flat,
 	*p_map = &map;
 }
 
-void read_cache::do_add(extmap::obj_offset unit, char *buf) {
+void read_cache_impl::do_add(extmap::obj_offset unit, char *buf) {
     std::unique_lock lk(m);
     char *_buf = (char*)aligned_alloc(512, 65536);
     memcpy(_buf, buf, 65536);
@@ -368,9 +501,8 @@ void read_cache::do_add(extmap::obj_offset unit, char *buf) {
     free(_buf);
 }
 
-void read_cache::do_evict(int n) {
+void read_cache_impl::do_evict(int n) {
     std::unique_lock lk(m);
     evict(n);
 }
-
 

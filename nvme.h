@@ -1,3 +1,12 @@
+/*
+ * file:        nvme.h
+ * description: interface for request-driven interface to local SSD
+ * author:      Peter Desnoyers, Northeastern University
+ * Copyright 2021, 2022 Peter Desnoyers
+ * license:     GNU LGPL v2.1 or newer
+ *              LGPL-2.1-or-later
+ */
+
 #ifndef NVME_H
 #define NVME_H
 
