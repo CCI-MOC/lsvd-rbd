@@ -10,7 +10,7 @@ SOFLAGS = -shared -fPIC
 
 OBJS = base_functions.o translate.o io.o read_cache.o  \
 	nvme.o send_write_request.o write_cache.o file_backend.o \
-	rados_backend.o refactor_lsvd.o
+	rados_backend.o lsvd.o
 CFILES = $(OBJS:.o=.cc)
 
 liblsvd.so:  $(OBJS)
@@ -30,15 +30,8 @@ DEPFILES:=$(patsubst %.cc,%.d,$(SOURCES))
 	$(CXX) $(CXXFLAGS) -MM -MT '$(patsubst %.cc,%.o,$<)' $< -MF $@
 
 
-lsvd_rbd.o: lsvd_rbd.cc read_cache.o
-	$(CXX) -c -std=c++17 lsvd_rbd.cc $(OPT) $(CXXFLAGS)
-
-
 bdus: bdus.o $(OBJS)
 	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio
-
-mkdisk: mkdisk.cc objects.h
-	$(CXX) mkdisk.cc -o mkdisk $(CXXFLAGS) -luuid -lstdc++fs
 
 clean:
 	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d
@@ -48,10 +41,5 @@ unit-test: unit-test.cc extent.h
 
 unit-test-O3: unit-test.cc extent.h
 	$(CC) $(CXXFLAGS) -O3 -o $@ unit-test.cc -lstdc++fs
-
-check_lsvd_syms: lsvd.py liblsvd.so
-	fgrep 'lsvd_lib.' lsvd.py | sed -e 's/.*lsvd_lib.//' -e 's/(.*//' > /tmp/_syms
-	nm liblsvd.so | grep U | if fgrep -f /tmp/_syms; then false; else true; fi
-	rm -f /tmp/_syms
 
 -include $(DEPFILES)
