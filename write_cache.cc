@@ -213,6 +213,9 @@ void write_cache::write_checkpoint(void) {
     j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
     memcpy(super_copy, super, 4096);
 
+    /* TODO: super_copy->next needs to point just past the most 
+     * completed journal write recorded in the map
+     */
     super_copy->map_start = super->map_start = blockno;
     super_copy->map_blocks = super->map_blocks = map_pages;
     super_copy->map_entries = super->map_entries = n_extents;
