@@ -148,8 +148,8 @@ Two possible solutions:
 1. delay out-of-order completions, so that we update the map (and ack writes back to the client) strictly in journal order
 2. record completion order in the log - e.g. add an array to the journal header giving sequence numbers for the last N completions
 
-I kind of like (2) better, because it doesn't delay any completions to the user, but (1) is probably simpler to implement.
-In addition  (2) isn't fool-proof, as it doesn't preserve ordering of the last few journal write completions before a crash.
+I kind of like (2) better, because it doesn't delay any completions to the user, but (1) is a lot simpler to implement so I'll do it instead.
+In addition  (2) isn't totally fool-proof, as it doesn't preserve ordering of the last few journal write completions before a crash.
 
 ## Read Cache 
 
@@ -176,12 +176,42 @@ Note - for another project I've been spending a lot of time lately looking at th
 The translation layer is write-only, as all data fetching is done by the read cache.
 (not quite - there's a debug read function)
 
-I'm getting tired of writing this, so I'll refer you to the paper for now, which does a fairly good job of describing it.
+At this moment [9/30/22] the code is quite messy - it hasn't been converted from closures to requests, GC hasn't been split out, and there's still some serialization code that should probably be pushed into `objects.cc`.
+It basically copies writes into a batch buffer, then when the batch is big enough it updates the map and dispatches a write to the backend.
+
+The rest of this section is mostly concerns about things that may need to be changed.
+
+**write interface** - currently the write cache is responsible for passing writes to the translation layer.
+I think this should be done from the high-level write request, after completing the request back to the client.
+
+**thread pool** - currently the translation layer uses a thread pool, although I'm not sure how necessary that is now that backend writes are asynchronous.
+
+**checkpoints** - currently checkpoints are done from a separate thread.
+I think after writing a batch we should check whether it's time to write a checkpoint, and then do it.
+
+**write coalescing** - the current code just concatenates all the writes in the order received.
+We should get a significant boost in performance if we coalesce writes within a batch, as it reduces write traffic, reduces map fragmentation, and makes GC more efficient.
+This won't be too hard, as most of the work can be done by a map variant in extent.h.
+(it maps LBA->char\*, so you can enter the writes (in order) and their buffer locations, then read them out)
 
 **locking** - the object map is guarded by a reader/writer lock.
+Note that updates are fairly infrequent - a burst for every batch written to the backend for either data or GC.
+If we order the updates by LBA (see "write coalescing") they should have very good cache behavior.
+
+**memory usage** - it's possible that a highly fragmented map for a large volume will use lots of memory.
+Memory usage is about 24 bytes per extent - 16 bytes with ~1.5x expansion - so a 1TB volume fragmented into 16KB extents would be 61M extents or about 1.5GB.
+For typical use I think defragmentation will keep the map to a feasible size, however we may need to look at strategies to make sure sustained random writes don't mess things up.
+
+**incremental checkpoints** - the periodic checkpoint process serializes the entire map to a single object.
+For bigger instances this might be a problem: (1) it will be inefficient, since it re-writes unmodified entries, and (2) it will create huge objects.
+I'm not sure how big a problem (2) is - it's not too much of an issue with S3, but I don't know about RADOS. (especially 3-replicated disk-based)
+
+The solution is to do incremental checkpoints, keeping the last N - each contains any new entries since the last checkpoint, plus any remaining entries from the old checkpoint that just rolled out of the N-checkpoint window.
+Support is already there: the extent map keeps D bits, and the object format allows specifying more than one checkpoint which must be loaded before rolling the log forward.
 
 ****stalling** - for consistency the map needs to be updated in write order. This can be done after an object write completes, but this is complicated, especially in the case of GC writes. 
 It's a lot easier to do the update when launching the write, but this raises the possibility of a read before the write is complete.
+(see GC for discussion of a fix)
 
 Solutions: (1) ignore it, since the write cache should prevent this from ever happening. (2) provide a mechanism to stall reads if there are writes outstanding to those addresses.
 In the long run we probably need to do (2), since GC means that the data may not actually be in the write cache.
@@ -200,6 +230,19 @@ Then we assemble the GC object, write it to the backend, and continue.
 
 This defragments the address space, avoids holding locks for too long, and seems to give good write amplification in simulation. It needs more testing and tuning, though.
 
+**read/GC interference** - if we update the object map when we start writing out a GC object, there's a chance that an incoming read will come in for data that's getting copied.
+There are a few ways to deal with this:
+1. deferred map updates. Really hard, because other write batches are going to follow the GC write, and we have to keep proper ordering
+2. redirect reads to the in-memory copy. Hard for accidental reasons - it crosses boundaries of the abstractions the code has been split into.
+3. stall reads to data that's being garbage collected
+
+I think (3) is the most reasonable choice - keep a map (in the top-level object) of blocked LBA ranges, and a condition variable to wait until the read isn't interfering with GC anymore.
+The map will be smaller and simpler if we just block out the entire LBA range that's currently being cleaned.
+
+**cleaner/translation split** - I haven't started this yet, and I'm starting to think that it might be a bad idea.
+In particular we need to keep track of when object writes complete, because (I think) we need to know when all objects up to sequence N have been successfully written, but GC, checkpoints, and data all share the same sequence number space.
+I think it makes sense to have a single object instance, but maybe split the method implementations into multiple files.
+
 ## To do
 
 **async requests** - The read cache, translation layer, and some debug functions still use a closure mechanism that's in the process of being replaced by request instances.
@@ -209,6 +252,9 @@ This defragments the address space, avoids holding locks for too long, and seems
 **Image create/delete** - this is currently handled outside of the library by some of the test Python code; obviously it needs to be moved into the library itself
 
 **Config file** - it's reached the point where it needs a simple config file reader, which will be throw-away code since I assume we'll use Ceph config when upstreamed.
+
+**Split translation, cleaning** - GC is currently part of the translation layer module.
+I think it would be best to factor this out, as it's a significant piece of complexity in its own right, however the two are going to need to share some common functions for handling sequence numbers and completions, since the objects they write are ordered by a single sequence of sequence numbers.
 
 **Snapshot, clone** - these need to be implemented and tested
 
