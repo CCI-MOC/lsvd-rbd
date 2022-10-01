@@ -29,6 +29,8 @@ DEPFILES:=$(patsubst %.cc,%.d,$(SOURCES))
 %.d: %.cc
 	$(CXX) $(CXXFLAGS) -MM -MT '$(patsubst %.cc,%.o,$<)' $< -MF $@
 
+sources:
+	@echo $(CFILES)
 
 bdus: bdus.o $(OBJS)
 	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio

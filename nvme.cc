@@ -76,6 +76,22 @@ public:
 	io_queue_release(ioctx);
     }
 
+    int read(void *buf, size_t count, off_t offset) {
+	return pread(fd, buf, count, offset);
+    }
+    
+    int write(const void *buf, size_t count, off_t offset) {
+	return pwrite(fd, buf, count, offset);
+    }
+
+    int writev(const struct iovec *iov, int iovcnt, off_t offset) {
+	return pwritev(fd, iov, iovcnt, offset);
+    }
+    
+    int readv(const struct iovec *iov, int iovcnt, off_t offset) {
+	return preadv(fd, iov, iovcnt, offset);
+    }
+
     request* make_write_request(smartiov *iov, size_t offset) {
 	assert(offset != 0);
 	auto req = new nvme_request(iov, offset, WRITE_REQ, this);

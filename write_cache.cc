@@ -9,7 +9,6 @@
  */
 
 #include <uuid/uuid.h>
-#include <unistd.h>		// TODO: pread -> nvme
 
 #include <atomic>
 
@@ -230,9 +229,9 @@ void write_cache::write_checkpoint(void) {
     iovec iov[] = {{e_buf, map_pages*4096UL},
 		   {l_buf, len_pages*4096UL}};
 
-    if (pwritev(fd, iov, 2, 4096L*blockno) < 0)
+    if (nvme_w->writev(iov, 2, 4096L*blockno) < 0)
 	throw_fs_error("wckpt_e");
-    if (pwrite(fd, (char*)super_copy, 4096, 4096L*super_blkno) < 0)
+    if (nvme_w->write((char*)super_copy, 4096, 4096L*super_blkno) < 0)
 	throw_fs_error("wckpt_s");
 
     free(super_copy);
@@ -245,13 +244,13 @@ void write_cache::write_checkpoint(void) {
 
 void write_cache::read_map_entries() {
     size_t map_bytes = super->map_entries * sizeof(j_map_extent),
-	map_bytes_rounded = round_up(map_bytes, 4096);
-    char *map_buf = (char*)aligned_alloc(512, map_bytes_rounded);
+	map_bytes_4k = round_up(map_bytes, 4096);
+    char *map_buf = (char*)aligned_alloc(512, map_bytes_4k);
     std::vector<j_map_extent> extents;
 
     // TODO: use nvme
     //
-    if (pread(fd, map_buf, map_bytes_rounded, 4096L * super->map_start) < 0)
+    if (nvme_w->read(map_buf, map_bytes_4k, 4096L * super->map_start) < 0)
 	throw_fs_error("wcache_map");
     decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
 
@@ -262,11 +261,11 @@ void write_cache::read_map_entries() {
     free(map_buf);
 
     size_t len_bytes = super->len_entries * sizeof(j_length),
-	len_bytes_rounded = round_up(len_bytes, 4096);
-    char *len_buf = (char*)aligned_alloc(512, len_bytes_rounded);
+	len_bytes_4k = round_up(len_bytes, 4096);
+    char *len_buf = (char*)aligned_alloc(512, len_bytes_4k);
     std::vector<j_length> _lengths;
 
-    if (pread(fd, len_buf, len_bytes_rounded, 4096L * super->len_start) < 0)
+    if (nvme_w->read(len_buf, len_bytes_4k, 4096L * super->len_start) < 0)
 	throw_fs_error("wcache_len");
     decode_offset_len<j_length>(len_buf, 0, len_bytes, _lengths);
 
@@ -288,8 +287,11 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
     dev_max = getsize64(fd);
     be = _be;
     
+    const char *name = "write_cache_cb";
+    nvme_w = make_nvme(fd, name);
+
     char *buf = (char*)aligned_alloc(512, 4096);
-    if (pread(fd, buf, 4096, 4096L*blkno) < 4096)
+    if (nvme_w->read(buf, 4096, 4096L*blkno) < 4096)
 	throw_fs_error("wcache");
     
     super = (j_write_super*)buf;
@@ -307,9 +309,6 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
 
     misc_threads = new thread_pool<int>(&m);
     misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
-
-    const char *name = "write_cache_cb";
-    nvme_w = make_nvme(fd, name);
 }
 
 write_cache::~write_cache() {
@@ -458,7 +457,7 @@ page_t write_cache::get_oldest(page_t blk, std::vector<j_extent> &extents) {
     char *buf = (char*)aligned_alloc(512, 4096);
     j_hdr *h = (j_hdr*)buf;
 
-    if (pread(fd, buf, 4096, blk*4096) < 0)
+    if (nvme_w->read(buf, 4096, blk*4096) < 0)
 	throw_fs_error("wcache");
     if (h->magic != LSVD_MAGIC) {
 	printf("bad block: %d\n", blk);

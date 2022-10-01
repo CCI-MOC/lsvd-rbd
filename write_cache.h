@@ -43,11 +43,14 @@ class write_cache {
     bool ckpt_in_progress = false;
     void write_checkpoint(void);
     
-public:
-
-    /* locks all data structures in this instance
+    /* allocate journal entry, create a header
      */
-    std::mutex                m;
+    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
+    std::vector<request*> work;
+    j_write_super *super;
+    int            fd;          /* TODO: remove, use sync NVME */
+
+public:
 
     /* throttle writes with window of max_write_pages
      */
@@ -57,23 +60,15 @@ public:
     /* these need to be public because they're used by
      * send_write_requests
      */
+    std::mutex                m;
     extmap::cachemap2 map;
     extmap::cachemap2 rmap;
     bool              map_dirty;
     translate        *be;
-
-    std::vector<request*> work;
-    
-    /* allocate journal entry, create a header
-     */
-    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
     j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
-
-    nvme 		      *nvme_w;
-
-    j_write_super *super;
-    int            fd;          /* TODO: remove, use sync NVME */
     
+    nvme 		      *nvme_w = NULL;
+
     write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads);
     ~write_cache();
 
