@@ -488,7 +488,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 	n_wc_threads = atoi(nwt);
     }
     
-    fri->wcache = new write_cache(js->write_super, fd, fri->lsvd, n_wc_threads);
+    fri->wcache = make_write_cache(js->write_super, fd, fri->lsvd,
+				   n_wc_threads);
     fri->rcache = make_read_cache(js->read_super, fd, false,
 				  fri->lsvd, fri->omap, fri->io);
 

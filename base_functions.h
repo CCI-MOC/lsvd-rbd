@@ -63,4 +63,7 @@ void call_wrapped(void *ptr);
 // delete_wrapped:	Wrapped function pointed to by ptr is simply deleted
 void delete_wrapped(void *ptr);
 
+// aligned :	returns if ptr is properly aligned with a-1
+bool aligned(const void *ptr, int a);
+
 #endif

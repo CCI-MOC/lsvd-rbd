@@ -69,3 +69,7 @@ void delete_wrapped(void *ptr)
     delete s;
 }
 
+bool aligned(const void *ptr, int a) {
+    return 0 == ((long)ptr & (a-1));
+}
+

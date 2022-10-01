@@ -34,15 +34,17 @@
 #include "io.h"
 #include "request.h"
 #include "nvme.h"
-#include "send_write_request.h"
+
 #include "write_cache.h"
+#include "write_cache_impl.h"
+#include "send_write_request.h"
 
 extern uuid_t my_uuid;
 
 /* stall write requests using window of max_write_blocks, which should
  * be <= 0.5 * write cache size.
  */
-void write_cache::get_room(int pages) {
+void write_cache_impl::get_room(int pages) {
     std::unique_lock lk(m);
     while (total_write_pages + pages > max_write_pages)
 	write_cv.wait(lk);
@@ -51,7 +53,7 @@ void write_cache::get_room(int pages) {
 	write_cv.notify_one();
 }
 
-void write_cache::release_room(int pages) {
+void write_cache_impl::release_room(int pages) {
     std::unique_lock lk(m);
     total_write_pages -= pages;
     if (total_write_pages < max_write_pages)
@@ -78,7 +80,7 @@ static bool in_range(page_t p, page_t len, page_t oldest, page_t newest) {
 /* call this BEFORE writing to cache, guarantees that we don't have any 
  * old map entries pointing to the locations being written to.
  */
-void write_cache::evict(page_t page, page_t len) {
+void write_cache_impl::evict(page_t page, page_t len) {
     assert(!m.try_lock());  // m must be locked
 
     auto oldest = super->oldest,
@@ -110,7 +112,7 @@ void write_cache::evict(page_t page, page_t len) {
  * pad:      page number for pad header (or 0)
  * n_pad:    total pages for pad
  */
-uint32_t write_cache::allocate(page_t n, page_t &pad, page_t &n_pad) {
+uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     assert(!m.try_lock());
     pad = n_pad = 0;
     if (super->limit - super->next < (uint32_t)n) {
@@ -131,7 +133,7 @@ uint32_t write_cache::allocate(page_t n, page_t &pad, page_t &n_pad) {
 
 /* call with lock held
  */
-j_hdr *write_cache::mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks) {
+j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks) {
     assert(!m.try_lock());
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr*)buf;
@@ -142,7 +144,7 @@ j_hdr *write_cache::mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blk
     return h;
 }
 
-void write_cache::ckpt_thread(thread_pool<int> *p) {
+void write_cache_impl::ckpt_thread(thread_pool<int> *p) {
     auto next0 = super->next, N = super->limit - super->base;
     auto period = std::chrono::milliseconds(100);
     auto t0 = std::chrono::system_clock::now();
@@ -166,7 +168,7 @@ void write_cache::ckpt_thread(thread_pool<int> *p) {
     }
 }
 
-void write_cache::write_checkpoint(void) {
+void write_cache_impl::write_checkpoint(void) {
     std::unique_lock<std::mutex> lk(m);
     if (ckpt_in_progress)
 	return;
@@ -242,7 +244,7 @@ void write_cache::write_checkpoint(void) {
     ckpt_in_progress = false;
 }
 
-void write_cache::read_map_entries() {
+void write_cache_impl::read_map_entries() {
     size_t map_bytes = super->map_entries * sizeof(j_map_extent),
 	map_bytes_4k = round_up(map_bytes, 4096);
     char *map_buf = (char*)aligned_alloc(512, map_bytes_4k);
@@ -276,11 +278,12 @@ void write_cache::read_map_entries() {
     free(len_buf);
 }
 
-void write_cache::roll_log_forward() {
+void write_cache_impl::roll_log_forward() {
     // TODO TODO TODO
 }
     
-write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads) {
+write_cache_impl::write_cache_impl(uint32_t blkno, int _fd,
+				   translate *_be, int n_threads) {
 
     super_blkno = blkno;
     fd = _fd;
@@ -308,17 +311,21 @@ write_cache::write_cache(uint32_t blkno, int _fd, translate *_be, int n_threads)
     // https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 
     misc_threads = new thread_pool<int>(&m);
-    misc_threads->pool.push(std::thread(&write_cache::ckpt_thread, this, misc_threads));
+    misc_threads->pool.push(std::thread(&write_cache_impl::ckpt_thread, this, misc_threads));
 }
 
-write_cache::~write_cache() {
+write_cache *make_write_cache(uint32_t blkno, int fd,
+			      translate *be, int n_threads) {
+    return new write_cache_impl(blkno, fd, be, n_threads);
+}
+
+write_cache_impl::~write_cache_impl() {
     delete misc_threads;
     free(super);
     delete nvme_w;
 }
 
-
-void write_cache::send_writes(std::unique_lock<std::mutex> &lk) {
+void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
     auto w = new std::vector<request*>(std::make_move_iterator(work.begin()),
 					  std::make_move_iterator(work.end()));
     work.erase(work.begin(), work.end());
@@ -349,7 +356,7 @@ void write_cache::send_writes(std::unique_lock<std::mutex> &lk) {
     req->run(NULL);
 }
 
-void write_cache::writev(request *req) {
+void write_cache_impl::writev(request *req) {
     std::unique_lock lk(m);
     work.push_back(req);
 
@@ -378,7 +385,7 @@ public:
     void notify(request *child) {
 	cb(ptr);
 	child->release();
-	delete _iovs;		// allocated in write_cache::async_read
+	delete _iovs;		// allocated in write_cache_impl::async_read
 	delete this;
     }
 
@@ -396,7 +403,7 @@ public:
 
 /* returns (number of bytes skipped), (number of bytes read_started)
  */
-std::pair<size_t,size_t> write_cache::async_read(size_t offset, char *buf,
+std::pair<size_t,size_t> write_cache_impl::async_read(size_t offset, char *buf,
 						 size_t bytes, void (*cb)(void*),
 						 void *ptr) {
     sector_t base = offset/512, limit = base + bytes/512;
@@ -429,7 +436,7 @@ std::pair<size_t,size_t> write_cache::async_read(size_t offset, char *buf,
 }
 
 // debugging
-void write_cache::getmap(int base, int limit, int (*cb)(void*, int, int, int),
+void write_cache_impl::getmap(int base, int limit, int (*cb)(void*, int, int, int),
 			 void *ptr) {
     for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
 	auto [_base, _limit, plba] = it->vals(base, limit);
@@ -438,11 +445,11 @@ void write_cache::getmap(int base, int limit, int (*cb)(void*, int, int, int),
     }
 }
 
-void write_cache::reset(void) {
+void write_cache_impl::reset(void) {
     map.reset();
 }
 
-void write_cache::get_super(j_write_super *s) {
+void write_cache_impl::get_super(j_write_super *s) {
     *s = *super;
 }
 
@@ -453,7 +460,7 @@ void write_cache::get_super(j_write_super *s) {
  *  return value - first page of next record
  */
 
-page_t write_cache::get_oldest(page_t blk, std::vector<j_extent> &extents) {
+page_t write_cache_impl::get_oldest(page_t blk, std::vector<j_extent> &extents) {
     char *buf = (char*)aligned_alloc(512, 4096);
     j_hdr *h = (j_hdr*)buf;
 
@@ -474,12 +481,8 @@ page_t write_cache::get_oldest(page_t blk, std::vector<j_extent> &extents) {
     return next_blk;
 }
     
-void write_cache::do_write_checkpoint(void) {
+void write_cache_impl::do_write_checkpoint(void) {
     if (map_dirty)
 	write_checkpoint();
-}
-
-bool aligned(const void *ptr, int a) {
-    return 0 == ((long)ptr & (a-1));
 }
 

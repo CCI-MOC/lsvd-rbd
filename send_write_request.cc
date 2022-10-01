@@ -39,6 +39,7 @@
 #include "request.h"
 #include "nvme.h"
 #include "write_cache.h"
+#include "write_cache_impl.h"
 #include "send_write_request.h"
 
 extern uuid_t my_uuid;
@@ -104,7 +105,7 @@ send_write_request::send_write_request(std::vector<request*> *work_,
 				       page_t n_pages, page_t page,
 				       page_t n_pad, page_t pad,
 				       write_cache* wcache_)  {
-    wcache = wcache_;
+    wcache = (write_cache_impl*)wcache_;
     work = work_;
     
     if (pad != 0) {

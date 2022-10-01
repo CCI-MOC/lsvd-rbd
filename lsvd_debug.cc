@@ -157,7 +157,7 @@ extern "C" int xlate_checkpoint(_dbg *d)
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p)
 {
     assert(d->type == 1);
-    auto wcache = new write_cache(blkno, fd, d->lsvd, 2);
+    auto wcache = make_write_cache(blkno, fd, d->lsvd, 2);
     *p = (void*)wcache;
 }
 extern "C" void wcache_close(write_cache *wcache)
