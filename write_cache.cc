@@ -36,10 +36,227 @@
 #include "nvme.h"
 
 #include "write_cache.h"
-#include "write_cache_impl.h"
-#include "send_write_request.h"
-
 extern uuid_t my_uuid;
+
+/* ------------- Write cache structure ------------- */
+
+class write_cache_impl : public write_cache {
+    size_t         dev_max;
+    uint32_t       super_blkno;
+
+    std::atomic<int64_t> sequence; // write sequence #
+
+    /* bookkeeping for write throttle
+     */
+    int total_write_pages = 0;
+    int max_write_pages = 0;
+    std::condition_variable write_cv;
+
+    void evict(page_t base, page_t len);
+    void send_writes(std::unique_lock<std::mutex> &lk);
+
+    /* initialization stuff
+     */
+    void read_map_entries();
+    void roll_log_forward();
+
+    /* track length of each journal record in cache
+     */
+    std::map<page_t,int> lengths;
+
+    thread_pool<int>          *misc_threads;
+
+    void ckpt_thread(thread_pool<int> *p);
+    bool ckpt_in_progress = false;
+    void write_checkpoint(void);
+    
+    /* allocate journal entry, create a header
+     */
+    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
+    std::vector<request*> work;
+    j_write_super *super;
+    int            fd;          /* TODO: remove, use sync NVME */
+
+    /* these are used by wcache_write_req
+     */
+    friend class wcache_write_req;
+    std::mutex                m;
+    extmap::cachemap2 map;
+    extmap::cachemap2 rmap;
+    bool              map_dirty;
+    translate        *be;
+    j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
+    nvme 		      *nvme_w = NULL;
+
+public:
+
+    /* throttle writes with window of max_write_pages
+     */
+    void get_room(int blks); 
+    void release_room(int blks);
+
+
+    write_cache_impl(uint32_t blkno, int _fd, translate *_be, int n_threads);
+    ~write_cache_impl();
+
+    void writev(request *req);
+    virtual std::tuple<size_t,size_t,request*> readv(size_t offset,
+                                                     char *buf, size_t bytes);
+
+    /* debug functions */
+
+    /* getmap callback(ptr, base, limit, phys_lba)
+     */
+    void getmap(int base, int limit, int (*cb)(void*,int,int,int), void *ptr);
+
+    void reset(void);
+    void get_super(j_write_super *s); /* copies superblock */
+
+    /*  @blk - header to read
+     *  @extents - data to move. empty if J_PAD or J_CKPT
+     *  return value - first page of next record
+     */
+    page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
+    void do_write_checkpoint(void);
+};
+
+/* ------------- batched write request ------------- */
+
+class wcache_write_req : public request {
+    std::atomic<int> reqs = 0;
+
+    sector_t      plba;
+    std::vector<request*> *work = NULL;
+    request      *r_data = NULL;
+    char         *hdr = NULL;
+    smartiov     *data_iovs = NULL;
+
+    request      *r_pad = NULL;
+    char         *pad_hdr = NULL;
+    smartiov     *pad_iov = NULL;
+
+    write_cache_impl *wcache = NULL;
+    
+public:
+    wcache_write_req(std::vector<request*> *w, page_t n_pages, page_t page,
+		     page_t n_pad, page_t pad,
+		     write_cache *wcache);
+    ~wcache_write_req();
+    void run(request *parent);
+    void notify(request *child);
+
+    sector_t lba() { return 0; }
+    smartiov *iovs() { return NULL; }
+    bool is_done(void) { return true; }
+    void wait() {}
+    void release() {}		// TODO: free properly
+};
+
+static uint64_t sectors(request *req) {
+    return req->iovs()->bytes() / 512;
+}
+
+/* n_pages: number of 4KB data pages (not counting header)
+ * page:    page number to begin writing 
+ * n_pad:   number of pages to skip (not counting header)
+ * pad:     page number for pad entry (0 if none)
+ */
+wcache_write_req::wcache_write_req(std::vector<request*> *work_,
+				       page_t n_pages, page_t page,
+				       page_t n_pad, page_t pad,
+				       write_cache* wcache_)  {
+    wcache = (write_cache_impl*)wcache_;
+    work = work_;
+    
+    if (pad != 0) {
+	pad_hdr = (char*)aligned_alloc(512, 4096);
+	wcache->mk_header(pad_hdr, LSVD_J_PAD, my_uuid, n_pad+1);
+	pad_iov = new smartiov();
+	pad_iov->push_back((iovec){pad_hdr, 4096});
+	reqs++;
+	r_pad = wcache->nvme_w->make_write_request(pad_iov, pad*4096L);
+    }
+  
+    std::vector<j_extent> extents;
+    for (auto _w : *work)
+	extents.push_back((j_extent){(uint64_t)_w->lba(), sectors(_w)});
+  
+    hdr = (char*)aligned_alloc(512, 4096);
+    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, my_uuid, 1+n_pages);
+
+    j->extent_offset = sizeof(*j);
+    size_t e_bytes = extents.size() * sizeof(j_extent);
+    j->extent_len = e_bytes;
+    memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
+
+    plba = (page+1) * 8;
+    data_iovs = new smartiov();
+    data_iovs->push_back((iovec){hdr, 4096});
+    for (auto _w : *work) {
+	auto [iov, iovcnt] = _w->iovs()->c_iov();
+	data_iovs->ingest(iov, iovcnt);
+    }
+    r_data = wcache->nvme_w->make_write_request(data_iovs, page*4096L);
+}
+
+wcache_write_req::~wcache_write_req() {
+    free(hdr);
+    if (pad_hdr) 
+	free(pad_hdr);
+    delete data_iovs;
+    if (pad_iov)
+	delete pad_iov;
+    delete work;
+}
+
+void wcache_write_req::notify(request *child) {
+    child->release();
+    if(--reqs > 0)
+	return;
+    {
+	std::unique_lock lk(wcache->m);
+	std::vector<extmap::lba2lba> garbage; 
+	auto _plba = plba;
+
+	/* update the write cache forward and reverse maps
+	 */
+	for (auto _w : *work) {
+	    wcache->map.update(_w->lba(), _w->lba() + sectors(_w),
+			       _plba, &garbage);
+	    wcache->rmap.update(_plba, _plba+sectors(_w), _w->lba());
+	    _plba += sectors(_w);
+	    wcache->map_dirty = true;
+	}
+
+	/* remove reverse mappings for old versions of data
+	 */
+	for (auto it = garbage.begin(); it != garbage.end(); it++) 
+	    wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
+    }
+
+    /* send data to backend, invoke callbacks, then clean up
+     */
+    for (auto _w : *work) {
+	auto [iov, iovcnt] = _w->iovs()->c_iov();
+	wcache->be->writev(_w->lba()*512, iov, iovcnt);
+	_w->notify(NULL);	// don't release multiple times
+    }
+
+    /* we don't implement release or wait - just delete ourselves.
+     */
+    delete this;
+}
+
+void wcache_write_req::run(request *parent /* unused */) {
+    reqs++;
+    if(r_pad) {
+	reqs++;
+	r_pad->run(this);
+    }
+    r_data->run(this);
+}
+
+/* --------------- Write Cache ------------- */
 
 /* stall write requests using window of max_write_blocks, which should
  * be <= 0.5 * write cache size.
@@ -349,8 +566,7 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
 	assert((pad+pad_len)*4096UL <= dev_max);
     }
 
-    send_write_request *req =
-	new send_write_request(w, pages, page, n_pad-1, pad, this);
+    auto req = new wcache_write_req(w, pages, page, n_pad-1, pad, this);
 
     lk.unlock();
     req->run(NULL);

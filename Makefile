@@ -9,7 +9,7 @@ CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra $(OPT)
 SOFLAGS = -shared -fPIC
 
 OBJS = base_functions.o objects.o translate.o io.o read_cache.o  \
-	nvme.o send_write_request.o write_cache.o file_backend.o \
+	nvme.o write_cache.o file_backend.o \
 	rados_backend.o lsvd_debug.o lsvd.o
 CFILES = $(OBJS:.o=.cc)
 
