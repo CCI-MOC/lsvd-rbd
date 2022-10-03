@@ -172,7 +172,7 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
     std::mutex m;
     for (char *_buf = buf2; _len > 0; ) {
         std::unique_lock lk(m);
-        auto [skip_len, read_len, rreq] = wcache->readv(offset, _buf, _len);
+        auto [skip_len, read_len, rreq] = wcache->async_read(offset, _buf, _len);
 
         memset(_buf, 0, skip_len);
         _buf += (skip_len + read_len);

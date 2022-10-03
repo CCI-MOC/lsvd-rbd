@@ -266,7 +266,7 @@ class rbd_aio_req : public request {
 
         while (_len > 0) {
             auto [skip,wait,rreq] =
-                img->wcache->readv(offset, _buf, _len);
+                img->wcache->async_read(offset, _buf, _len);
 	    if (rreq != NULL) {
 		n_req++;
 		rreq->run(this);

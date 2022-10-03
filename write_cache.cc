@@ -100,8 +100,8 @@ public:
     ~write_cache_impl();
 
     void writev(request *req);
-    virtual std::tuple<size_t,size_t,request*> readv(size_t offset,
-                                                     char *buf, size_t bytes);
+    virtual std::tuple<size_t,size_t,request*> 
+        async_read(size_t offset, char *buf, size_t bytes);
 
     /* debug functions */
 
@@ -589,7 +589,7 @@ void write_cache_impl::writev(request *req) {
 returns (number of bytes skipped), (number of bytes read_started)
  */
 std::tuple<size_t,size_t,request*>
-write_cache_impl::readv(size_t offset, char *buf, size_t bytes) {
+write_cache_impl::async_read(size_t offset, char *buf, size_t bytes) {
     sector_t base = offset/512, limit = base + bytes/512;
     size_t skip_len = 0, read_len = 0;
     request *rreq = NULL;
