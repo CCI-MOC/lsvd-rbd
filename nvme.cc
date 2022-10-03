@@ -32,7 +32,7 @@ class nvme_impl;
 class nvme_request : public request {
 public:
     e_iocb     *eio;		// this is self-deleting. TODO: fix?
-    smartiov   *_iovs;
+    smartiov    _iovs;
     size_t      ofs;
     int         t;
     nvme_impl  *nvme_ptr;
@@ -45,6 +45,8 @@ public:
     
 public:
     nvme_request(smartiov *iov, size_t offset, int type, nvme_impl* nvme_w);
+    nvme_request(char *buf, size_t len, size_t offset, int type,
+		 nvme_impl* nvme_w);
     ~nvme_request();
 
     sector_t lba();
@@ -102,6 +104,11 @@ public:
 	auto req = new nvme_request(iov, offset, READ_REQ, this);
 	return (request*) req;
     }
+
+    request* make_read_request(char *buf, size_t len, size_t offset) {
+	auto req = new nvme_request(buf, len, offset, READ_REQ, this);
+	return (request*) req;
+    }
 };
 
 nvme *make_nvme(int fd, const char* name) {
@@ -117,9 +124,18 @@ void call_send_request_notify(void *parent)
 }
 
 nvme_request::nvme_request(smartiov *iov, size_t offset,
-			   int type, nvme_impl* nvme_w) {
+			   int type, nvme_impl* nvme_w) : _iovs(iov->data(),
+								iov->size()) {
     eio = new e_iocb;
-    _iovs = iov;
+    ofs = offset;
+    t = type;
+    nvme_ptr = nvme_w;
+}
+
+nvme_request::nvme_request(char *buf, size_t len, size_t offset,
+			   int type, nvme_impl* nvme_w) {
+    _iovs.push_back((iovec){buf, len});
+    eio = new e_iocb;
     ofs = offset;
     t = type;
     nvme_ptr = nvme_w;
@@ -128,12 +144,12 @@ nvme_request::nvme_request(smartiov *iov, size_t offset,
 void nvme_request::run(request* parent_) {
     parent = parent_;
     if (t == WRITE_REQ) {
-	e_io_prep_pwritev(eio, nvme_ptr->fd, _iovs->data(), _iovs->size(),
+	e_io_prep_pwritev(eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
 			  ofs, call_send_request_notify, this);
 	e_io_submit(nvme_ptr->ioctx, eio);
 
     } else if (t == READ_REQ) {
-	e_io_prep_preadv(eio, nvme_ptr->fd, _iovs->data(), _iovs->size(),
+	e_io_prep_preadv(eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
 			 ofs, call_send_request_notify, this);
 	e_io_submit(nvme_ptr->ioctx, eio);
     } else
@@ -141,13 +157,16 @@ void nvme_request::run(request* parent_) {
 }
 
 void nvme_request::notify(request *child) {
-    parent->notify(this);
+    if (parent)
+	parent->notify(this);
+
+    std::unique_lock lk(m);
     complete = true;
-    {   std::unique_lock lk(m);
-	cv.notify_one();
-    }
-    if (released)
+    cv.notify_one();
+    if (released) {
+	lk.unlock();
 	delete this;
+    }
 }
 
 void nvme_request::wait() {
@@ -157,9 +176,12 @@ void nvme_request::wait() {
 }
 
 void nvme_request::release() {
+    std::unique_lock lk(m);
     released = true;
-    if (complete)		// TODO: atomic swap?
+    if (complete) {		// TODO: atomic swap?
+	lk.unlock();
 	delete this;
+    }
 }
 
 nvme_request::~nvme_request() {}

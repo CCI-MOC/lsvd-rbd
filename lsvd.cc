@@ -210,7 +210,7 @@ class rbd_aio_req : public request {
     std::mutex        m;
     std::condition_variable cv;
 
-    void notify_w() {
+    void notify_w(request *unused) {
         int blocks = div_round_up(len, 4096);
         img->wcache->release_room(blocks);
         
@@ -224,7 +224,9 @@ class rbd_aio_req : public request {
             cv.notify_all();
     }
     
-    void notify_r() {
+    void notify_r(request *child) {
+	if (child)
+	    child->release();
         if (--n_req > 0)
             return;
         if (!launched)
@@ -263,12 +265,12 @@ class rbd_aio_req : public request {
         size_t _len = len;              // and this
 
         while (_len > 0) {
-            n_req++;
-            auto [skip,wait] =
-                img->wcache->async_read(offset, _buf, _len,
-                                        aio_read_cb, (void*)this);
-            if (wait == 0)
-                n_req--;
+            auto [skip,wait,rreq] =
+                img->wcache->readv(offset, _buf, _len);
+	    if (rreq != NULL) {
+		n_req++;
+		rreq->run(this);
+	    }
 
             _len -= skip;
             while (skip > 0) {
@@ -315,11 +317,11 @@ public:
     /* note that there's no child request until read cache is updated
      * to use request/notify model.
      */
-    void notify(request *child /* not used */) {
+    void notify(request *child) {
 	if (op == OP_READ)
-	    notify_r();
+	    notify_r(child);
 	else
-	    notify_w();
+	    notify_w(child);
     }
 
     bool is_done() {

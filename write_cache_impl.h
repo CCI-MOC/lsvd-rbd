@@ -58,8 +58,8 @@ public:
     ~write_cache_impl();
 
     void writev(request *req);
-    std::pair<size_t,size_t> async_read(size_t offset, char *buf, size_t bytes,
-					void (*cb)(void*), void *ptr);
+    virtual std::tuple<size_t,size_t,request*> readv(size_t offset,
+                                                     char *buf, size_t bytes);
 
     /* debug functions */
 

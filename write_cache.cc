@@ -366,50 +366,20 @@ void write_cache_impl::writev(request *req) {
 	send_writes(lk);
 }
 
-/* this will eventually become a proper write cache read request 
+/* arguments:
+ *  lba to start at
+ *  iov corresponding to lba (iov.bytes() = length to read)
+ *  
+returns (number of bytes skipped), (number of bytes read_started)
  */
-class wcache_read_req : public request {
-    void (*cb)(void*);
-    void *ptr;
-    smartiov *_iovs;
-
-    bool       complete;
-    bool       released;
-    std::mutex m;
-    std::condition_variable cv;
-    
-public:
-    wcache_read_req(void (*cb_)(void*), void *ptr_, smartiov *iovs_) :
-	cb(cb_), ptr(ptr_), _iovs(iovs_) {}
-
-    void notify(request *child) {
-	cb(ptr);
-	child->release();
-	delete _iovs;		// allocated in write_cache_impl::async_read
-	delete this;
-    }
-
-    /* for now this exists only for the notify() method
-     */
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
-    bool is_done(void) { return true; }
-    void wait() {}
-    void run(request *parent) {}
-    void release(){}
-    
-    ~wcache_read_req(){}
-};
-
-/* returns (number of bytes skipped), (number of bytes read_started)
- */
-std::pair<size_t,size_t> write_cache_impl::async_read(size_t offset, char *buf,
-						 size_t bytes, void (*cb)(void*),
-						 void *ptr) {
+std::tuple<size_t,size_t,request*>
+write_cache_impl::readv(size_t offset, char *buf, size_t bytes) {
     sector_t base = offset/512, limit = base + bytes/512;
+    size_t skip_len = 0, read_len = 0;
+    request *rreq = NULL;
+    
     std::unique_lock<std::mutex> lk(m);
     off_t nvme_offset = 0;
-    size_t skip_len = 0, read_len = 0;
 
     auto it = map.lookup(base);
     if (it == map.end() || it->base() >= limit)
@@ -420,19 +390,15 @@ std::pair<size_t,size_t> write_cache_impl::async_read(size_t offset, char *buf,
 	    skip_len = 512 * (_base - base);
 	    buf += skip_len;
 	}
-	read_len = 512 * (_limit - _base),
-	    nvme_offset = 512L * plba;
+	read_len = 512 * (_limit - _base);
+	nvme_offset = 512L * plba;
     }
     lk.unlock();
 
-    if (read_len) {
-	iovec iov = {buf, read_len};
-	auto s_iov = new smartiov(&iov, 1);
-	auto parent = new wcache_read_req(cb, ptr, s_iov);
-	auto req = nvme_w->make_read_request(s_iov, nvme_offset);
-	req->run(parent);
-    }
-    return std::make_pair(skip_len, read_len);
+    if (read_len) 
+	rreq = nvme_w->make_read_request(buf, read_len, nvme_offset);
+
+    return std::make_tuple(skip_len, read_len, rreq);
 }
 
 // debugging

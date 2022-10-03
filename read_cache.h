@@ -10,7 +10,18 @@
 #ifndef READ_CACHE_H
 #define READ_CACHE_H
 
-#include "translate.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#include <vector>
+#include <map>
+
+#include "extent.h"
+#include "journal.h"
+
+class translate;
+class objmap;
+class backend;
 
 class read_cache {
 public:

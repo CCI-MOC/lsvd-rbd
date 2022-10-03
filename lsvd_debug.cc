@@ -172,24 +172,18 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
     std::mutex m;
     for (char *_buf = buf2; _len > 0; ) {
         std::unique_lock lk(m);
-        bool done = false;
-        void *closure = wrap([&done, &cv, &m]{
-                std::unique_lock lk(m);
-                done = true;
-                cv.notify_all();
-                return true;
-            });
-        auto [skip_len, read_len] = wcache->async_read(offset, _buf, _len,
-                                                       call_wrapped, closure);
+        auto [skip_len, read_len, rreq] = wcache->readv(offset, _buf, _len);
+
         memset(_buf, 0, skip_len);
         _buf += (skip_len + read_len);
         _len -= (skip_len + read_len);
         offset += (skip_len + read_len);
-        if (read_len > 0)
-            while (!done)
-                cv.wait(lk);
-        else
-            delete_wrapped(closure);
+
+	if (rreq != NULL) {
+	    rreq->run(NULL);
+	    rreq->wait();
+	    rreq->release();
+	}
     }
     memcpy(buf, buf2, len);
     free(buf2);

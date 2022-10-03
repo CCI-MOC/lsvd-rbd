@@ -21,10 +21,8 @@ public:
     virtual ~write_cache() {}
 
     virtual void writev(request *req) = 0;
-    virtual std::pair<size_t,size_t>
-        async_read(size_t offset, char *buf, size_t bytes,
-                   void (*cb)(void*), void *ptr) = 0;
-
+    virtual std::tuple<size_t,size_t,request*> readv(size_t,char*,size_t) = 0;
+    
     virtual void getmap(int base, int limit, int (*cb)(void*,int,int,int),
                         void *ptr) = 0;
     virtual void reset(void) = 0;
