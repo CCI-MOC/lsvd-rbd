@@ -304,12 +304,25 @@ char *read_cache_impl::get_cacheline_buf(int n) {
 
 enum req_type {
     RCACHE_NONE = 0,
-    RCACHE_LINE_372 = 1,	// memcpy
-    RCACHE_LINE_375 = 2,	// read from nvme
-    RCACHE_LINE_386 = 3,	// pending prior read
-    RCACHE_LINE_418 = 4,	// cache block write (async)
-    RCACHE_LINE_423 = 5,	// backend cache block read
-    RCACHE_LINE_459 = 6,	// backend - direct read
+
+    // we found an in-memory copy of the cache block,
+    // complete immediately
+    RCACHE_LOCAL_BUFFER = 1,
+
+    // waiting for read from block already in NVME cache
+    RCACHE_SSD_READ = 2,
+
+    // waiting for someone else to read my cache block:
+    RCACHE_QUEUED = 3,
+
+    // waiting for backend read of full cache block
+    RCACHE_BACKEND_WAIT = 5,	// backend cache block read
+
+    // waiting for block write to cache (async)
+    RCACHE_BLOCK_WRITE = 4,
+
+    // cache readaround - waiting for backend
+    RCACHE_DIRECT_READ = 6,
     RCACHE_DONE = 7
 };
 
@@ -365,21 +378,21 @@ void rcache_req::notify(request *child) {
     
     /* direct read from nvme, line 375
      */
-    if (state == RCACHE_LINE_375) {
+    if (state == RCACHE_SSD_READ) {
 	rci->in_use[n]--;
 	next_state = RCACHE_DONE;
 	notify_parent = true;
     }
     /* completion of a pending prior read
      */
-    else if (state == RCACHE_LINE_386) { 
+    else if (state == RCACHE_QUEUED) { 
 	memcpy(buf, rci->buffer[n] + blk_offset*512, bytes);
 	notify_parent = true;
 	next_state = RCACHE_DONE;
     }
     /* cache block read completion
      */
-    else if (state == RCACHE_LINE_423) { 
+    else if (state == RCACHE_BACKEND_WAIT) { 
 	 memcpy(buf, _buf + buf_offset, bytes);
 
 	 std::unique_lock lk(rci->m);
@@ -398,14 +411,14 @@ void rcache_req::notify(request *child) {
 
 	 sub_req = rci->ssd->make_write_request(_buf, rci->unit_sectors*512L,
 						nvme_offset);
-	 next_state = RCACHE_LINE_418; // write_done closure
+	 next_state = RCACHE_BLOCK_WRITE; // write_done closure
 	 sub_req->run(this);
     }
-    else if (state == RCACHE_LINE_418) { // use_cache/write_done
+    else if (state == RCACHE_BLOCK_WRITE) {
 	rci->written[n] = true;
 	next_state = RCACHE_DONE;
     }
-    else if (state == RCACHE_LINE_459) { // direct read from backend
+    else if (state == RCACHE_DIRECT_READ) {
 	notify_parent = true;
 	next_state = RCACHE_DONE;
     }
@@ -423,15 +436,15 @@ void rcache_req::notify(request *child) {
 void rcache_req::run(request *parent_) {
     parent = parent_;
 
-    if (state == RCACHE_LINE_386)
+    if (state == RCACHE_QUEUED)
 	/* nothing */ ;
-    else if (state == RCACHE_LINE_372) {
+    else if (state == RCACHE_LOCAL_BUFFER) {
 	parent->notify(this);
 	state = RCACHE_DONE;
     }
-    else if (state == RCACHE_LINE_375 ||
-	     state == RCACHE_LINE_423 ||
-	     state == RCACHE_LINE_459) {
+    else if (state == RCACHE_SSD_READ ||
+	     state == RCACHE_BACKEND_WAIT ||
+	     state == RCACHE_DIRECT_READ) {
 	sub_req->run(this);
     }
     else
@@ -497,15 +510,15 @@ read_cache_impl::async_read(size_t offset, char *buf, size_t len) {
 	if (buffer[n] != NULL) {
 	    lk2.unlock();
 	    memcpy(buf, buffer[n] + blk_offset*512, bytes);
-	    r->state = RCACHE_LINE_372;
+	    r->state = RCACHE_LOCAL_BUFFER;
 	}
 	else if (written[n]) {
 	    in_use[n]++;
 	    r->sub_req = ssd->make_read_request(buf, bytes, 512L*start);
-	    r->state = RCACHE_LINE_375;
+	    r->state = RCACHE_SSD_READ;
 	}
 	else {              // prior read is pending
-	    r->state = RCACHE_LINE_386;
+	    r->state = RCACHE_QUEUED;
 	    r->buf = buf;
 	    r->blk_offset = blk_offset;
 	    r->bytes = bytes;
@@ -537,7 +550,7 @@ read_cache_impl::async_read(size_t offset, char *buf, size_t len) {
 
 	r->_buf = _buf;
 	r->buf = buf;
-	r->state = RCACHE_LINE_423;
+	r->state = RCACHE_BACKEND_WAIT;
 
 	objname name(be->prefix(), unit.obj);
 	r->sub_req = io->make_read_req(name.c_str(), 512L*blk_base,
@@ -552,7 +565,7 @@ read_cache_impl::async_read(size_t offset, char *buf, size_t len) {
 	objname name(be->prefix(), oo.obj);
 	r->sub_req = io->make_read_req(name.c_str(), 512L*oo.offset,
 				       buf, read_len);
-	r->state = RCACHE_LINE_459;
+	r->state = RCACHE_DIRECT_READ;
 	// read_len unchanged
     }
     return std::make_tuple(skip_len, read_len, r);
