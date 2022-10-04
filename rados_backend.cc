@@ -28,12 +28,13 @@
 
 class rados_backend : public backend {
     std::mutex m;
-    char *pool = NULL;
+    char pool[128];
+    int  pool_len = 0;
     char *prefix = NULL;
     rados_t cluster;
     rados_ioctx_t io_ctx;
 
-    void pool_create(char *pool_);
+    char *pool_init(const char *pool_);
     
 public:
     rados_backend();
@@ -79,15 +80,20 @@ rados_backend::~rados_backend() {
 /* TODO: make rados_backend take an io_ctx, dispense with all this
  * pool nonsense. Means all images go in the same pool
  */
-void rados_backend::pool_create(char *pool_) {
-    if (pool != NULL)
-	assert(!strcmp(pool, pool_));
-    else {
-	pool = strdup(pool_);
+char* rados_backend::pool_init(const char *pool_) {
+    if (pool_len == 0) {
+	char *dst = pool;
+	const char *src = pool_;
+	while (*src && *src != '/')
+	    *dst++ = *src++;
+	*dst = 0;
+	pool_len = dst - pool;
 	int r = rados_ioctx_create(cluster, pool, &io_ctx);
 	if (r < 0)
 	    throw("rados pool open");
     }
+    assert(!memcmp(pool, pool_, pool_len));
+    return (char*)pool_ + pool_len + 1;
 }
 
 /* really gross, just special case of strtok. 
@@ -99,11 +105,8 @@ std::pair<char*,char*> split_name(char *name) {
 }
 
 int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
-    char name_buf[128];
-    strcpy(name_buf, name);
-    auto [pool,oname] = split_name(name_buf);
-    pool_create(pool);
-    
+    auto oname = pool_init(name);
+
     smartiov iovs(iov, iovcnt);
     char *buf = (char*)malloc(iovs.bytes());
     iovs.copy_out(buf);
@@ -116,11 +119,7 @@ int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
 
 int rados_backend::read_object(const char *name, iovec *iov,
 				   int iovcnt, size_t offset) {
-
-    char name_buf[128];
-    strcpy(name_buf, name);
-    auto [pool,oname] = split_name(name_buf);
-    pool_create(pool);
+    auto oname = pool_init(name);
     
     smartiov iovs(iov, iovcnt);
     char *buf = (char*)malloc(iovs.bytes());
@@ -133,10 +132,7 @@ int rados_backend::read_object(const char *name, iovec *iov,
 }
 
 int rados_backend::delete_object(const char *name) {
-    char name_buf[128];
-    strcpy(name_buf, name);
-    auto [pool,oname] = split_name(name_buf);
-    pool_create(pool);
+    auto oname = pool_init(name);
     return rados_remove(io_ctx, oname);
 }
 
@@ -205,28 +201,19 @@ public:
 
 request *rados_backend::make_write_req(const char *name, iovec *iov,
 				       int iovcnt) {
-    char name_buf[128];
-    strcpy(name_buf, name);
-    auto [pool,oid] = split_name(name_buf);
-    pool_create(pool);
+    auto oid = pool_init(name);
     return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx);
 }
 
 request *rados_backend::make_read_req(const char *name, size_t offset,
 				      iovec *iov, int iovcnt) {
-    char name_buf[128];
-    strcpy(name_buf, name);
-    auto [pool,oid] = split_name(name_buf);
-    pool_create(pool);
+    auto oid = pool_init(name);
     return new rados_be_request(OP_READ, oid, iov, iovcnt, offset, io_ctx);
 }
 
 request *rados_backend::make_read_req(const char *name, size_t offset,
 				      char *buf, size_t len) {
     iovec iov = {buf, len};
-    char name_buf[128];
-    strcpy(buf, name);
-    auto [pool,oid] = split_name(name_buf);
-    pool_create(pool);
+    auto oid = pool_init(name);
     return new rados_be_request(OP_READ, oid, &iov, 1, offset, io_ctx);
 }
