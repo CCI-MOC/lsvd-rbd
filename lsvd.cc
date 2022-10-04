@@ -469,11 +469,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 	n_xlate_threads = atoi(nxt);
     }
     const char *base = obj.c_str();
-    if (rados) {
-	auto [_tmp, key] = split_string(obj, "/");
-	base = key.c_str();
-	(void)_tmp;		// suppress unused warning
-    }
+    if (rados)
+	base += 6;
     fri->size = fri->lsvd->init(base, n_xlate_threads, true);
     
     int fd = fri->fd = open(nvme.c_str(), O_RDWR | O_DIRECT);
