@@ -17,6 +17,7 @@
 #include <sys/uio.h>
 #include <string>
 #include <algorithm>
+#include <functional>
 
 enum {DBG_MAP = 1, DBG_HITS = 2, DBG_AIO = 4};
 
