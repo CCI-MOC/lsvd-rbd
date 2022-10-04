@@ -5,6 +5,12 @@
 }
 
 {
+   s15
+   Memcheck:Cond
+   fun:malloc
+   obj:/usr/bin/python3.6
+}
+{
    s2
    Memcheck:Cond
    obj:/usr/bin/python3.6
@@ -21,3 +27,180 @@
    Memcheck:Addr4
    obj:/usr/bin/python3.6
 }
+
+{
+   s22
+   Memcheck:Param
+   write(count)
+   fun:__libc_write
+   fun:write
+   obj:/usr/bin/python3.6
+}
+
+{
+   s23
+   Memcheck:Param
+   write(buf)
+   fun:__libc_write
+   fun:write
+   obj:/usr/bin/python3.6
+}
+
+{
+   s24
+   Memcheck:Cond
+   fun:memmove
+   obj:/usr/bin/python3.6
+}
+
+{
+   s25
+   Memcheck:Cond
+   fun:bcmp
+   obj:/usr/bin/python3.6
+}
+
+{
+   s26
+   Memcheck:Value8
+   fun:memmove
+   obj:/usr/bin/python3.6
+}
+
+{
+   s27
+   Memcheck:Value8
+   fun:memset
+   obj:/usr/bin/python3.6
+}
+
+{
+   s28
+   Memcheck:Cond
+   fun:memset
+   obj:/usr/bin/python3.6
+}
+
+{
+   s29
+   Memcheck:Cond
+   fun:memchr
+   obj:/usr/bin/python3.6
+}
+
+{
+   s30
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   obj:/usr/bin/python3.6
+}
+
+{
+   s31
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:realloc
+   obj:/usr/bin/python3.6
+}
+
+{
+   s32
+   Memcheck:Cond
+   fun:__wcsnlen_avx2
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:PyUnicode_FSConverter
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   fun:_PyObject_FastCallKeywords
+   obj:/usr/bin/python3.6
+   fun:_PyEval_EvalFrameDefault
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+}
+
+{
+   s33
+   Memcheck:Cond
+   fun:internal_utf8_loop
+   fun:__gconv_transform_internal_utf8
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:_Py_stat
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   fun:_PyObject_FastCallKeywords
+   obj:/usr/bin/python3.6
+   fun:_PyEval_EvalFrameDefault
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+}
+{
+   s34
+   Memcheck:Cond
+   fun:internal_utf8_loop
+   fun:__gconv_transform_internal_utf8
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:_Py_wreadlink
+   obj:/usr/bin/python3.6
+   fun:Py_GetProgramFullPath
+   fun:_PySys_Init
+   fun:_Py_InitializeEx_Private
+   fun:Py_Main
+   fun:main
+}
+
+{
+   s35
+   Memcheck:Cond
+   fun:__wcsnlen_avx2
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:_Py_stat
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   fun:_PyObject_FastCallKeywords
+   obj:/usr/bin/python3.6
+   fun:_PyEval_EvalFrameDefault
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+}
+
+{
+   s36
+   Memcheck:Cond
+   fun:__wcsnlen_avx2
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:_Py_wreadlink
+   obj:/usr/bin/python3.6
+   fun:Py_GetProgramFullPath
+   fun:_PySys_Init
+   fun:_Py_InitializeEx_Private
+   fun:Py_Main
+   fun:main
+}
+
+{
+   s37
+   Memcheck:Cond
+   fun:__wcsnlen_avx2
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:_Py_wfopen
+   obj:/usr/bin/python3.6
+   fun:Py_GetProgramFullPath
+   fun:_PySys_Init
+   fun:_Py_InitializeEx_Private
+   fun:Py_Main
+   fun:main
+}
+
