@@ -244,6 +244,10 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
 {
     rcache->do_evict(n);
 }
+
+/* note that this leaks read cache request structures, because it 
+ * doesn't call req->release()
+ */
 extern "C" void rcache_read(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
@@ -259,16 +263,20 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
 		cv.notify_all();
 		return true;
 	    });
-	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
-						       call_wrapped, closure);
+	auto cb_req = new callback_req(call_wrapped, closure);
+	auto [skip_len, read_len, r_req] =
+	    rcache->async_read(offset, _buf, _len);
+	
 	memset(_buf, 0, skip_len);
 	_buf += (skip_len+read_len);
 	_len -= (skip_len+read_len);
 	offset += (skip_len+read_len);
-	if (read_len > 0) {
+	if (r_req != NULL) {
+	    r_req->run(cb_req);
 	    std::unique_lock lk(m);
 	    while (!done)
 		cv.wait(lk);
+	    r_req->release();
 	}
 	else
 	    delete_wrapped(closure);
@@ -276,6 +284,10 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
     memcpy(buf, buf2, len);
     free(buf2);
 }
+
+/* note that this leaks read cache request structures, because it 
+ * doesn't call req->release()
+ */
 extern "C" void rcache_read2(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
@@ -294,13 +306,18 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
 		return false;
 	    });
 	left++;
-	auto [skip_len, read_len] = rcache->async_read(offset, _buf, _len,
-						       call_wrapped, closure);
+	auto cb_req = new callback_req(call_wrapped, closure);
+	auto [skip_len, read_len, r_req] =
+	    rcache->async_read(offset, _buf, _len);
+	
 	memset(_buf, 0, skip_len);
 	_buf += (skip_len+read_len);
 	_len -= (skip_len+read_len);
 	offset += (skip_len+read_len);
-	if (read_len == 0) {
+	
+	if (r_req != NULL)
+	    r_req->run(cb_req);
+	else {
 	    left--;
 	    delete_wrapped(closure);
 	}
@@ -311,6 +328,7 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
     memcpy(buf, buf2, len);
     free(buf2);
 }
+
 extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len)
 {
     assert(len == 65536);

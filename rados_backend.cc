@@ -49,6 +49,8 @@ public:
     request *make_write_req(const char *name, iovec *iov, int iovcnt);
     request *make_read_req(const char *name, size_t offset,
                            iovec *iov, int iovcnt);
+    request *make_read_req(const char *name, size_t offset,
+                           char *buf, size_t len);
 };    
 
 /* needed for implementation hiding
@@ -205,3 +207,10 @@ request *rados_backend::make_read_req(const char *name, size_t offset,
     return new rados_be_request(OP_READ, oid, iov, iovcnt, offset, io_ctx);
 }
 
+request *rados_backend::make_read_req(const char *name, size_t offset,
+				      char *buf, size_t len) {
+    iovec iov = {buf, len};
+    auto [pool,oid] = split_name((char*)name);
+    pool_create(pool);
+    return new rados_be_request(OP_READ, oid, &iov, 1, offset, io_ctx);
+}

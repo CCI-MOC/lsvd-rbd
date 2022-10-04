@@ -97,7 +97,6 @@ public:
      * release twice
      */
     void release() {
-	//printf("release %p\n", this);
 	bool old_released = released.exchange(true);
 	assert(!old_released);
 	if (done)
@@ -263,7 +262,7 @@ class rbd_aio_req : public request {
          */
         char *_buf = aligned_buf;       // read and increment this
         size_t _len = len;              // and this
-
+	
         while (_len > 0) {
             auto [skip,wait,rreq] =
                 img->wcache->async_read(offset, _buf, _len);
@@ -274,13 +273,12 @@ class rbd_aio_req : public request {
 
             _len -= skip;
             while (skip > 0) {
-                n_req++;
-                auto [skip2, wait2] =
-                    img->rcache->async_read(offset, _buf, skip,
-                                            aio_read_cb, (void*)this);
-                if (wait2 == 0)
-                    n_req--;
-
+                auto [skip2, wait2, req] =
+                    img->rcache->async_read(offset, _buf, skip);
+		if (req) {
+		    n_req++;
+		    req->run(this);
+		}
                 memset(_buf, 0, skip2);
                 skip -= (skip2 + wait2);
                 _buf += (skip2 + wait2);
@@ -474,6 +472,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
     if (rados) {
 	auto [_tmp, key] = split_string(obj, "/");
 	base = key.c_str();
+	(void)_tmp;		// suppress unused warning
     }
     fri->size = fri->lsvd->init(base, n_xlate_threads, true);
     

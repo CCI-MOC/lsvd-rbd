@@ -37,6 +37,8 @@ public:
     request *make_write_req(const char *name, iovec *iov, int iovcnt);
     request *make_read_req(const char *name, size_t offset,
                            iovec *iov, int iovcnt);
+    request *make_read_req(const char *name, size_t offset,
+                           char *buf, size_t len);
 };
 
 #endif

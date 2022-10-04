@@ -195,7 +195,38 @@
    fun:wcsrtombs
    fun:wcstombs
    obj:/usr/bin/python3.6
-   fun:_Py_wfopen
+   fun:_Py_wreadlink
+   obj:/usr/bin/python3.6
+   fun:Py_Main
+   fun:main
+}
+
+{
+   s38
+   Memcheck:Cond
+   fun:__wcsnlen_avx2
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   fun:PyUnicode_FSConverter
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   fun:_PyArg_ParseStack_SizeT
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   fun:_PyEval_EvalFrameDefault
+}
+
+{
+   s39
+   Memcheck:Cond
+   fun:internal_utf8_loop
+   fun:__gconv_transform_internal_utf8
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
    obj:/usr/bin/python3.6
    fun:Py_GetProgramFullPath
    fun:_PySys_Init
@@ -204,3 +235,18 @@
    fun:main
 }
 
+{
+   s40
+   Memcheck:Cond
+   fun:__wcsnlen_avx2
+   fun:wcsrtombs
+   fun:wcstombs
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   obj:/usr/bin/python3.6
+   fun:Py_GetProgramFullPath
+   fun:_PySys_Init
+   fun:_Py_InitializeEx_Private
+   fun:Py_Main
+   fun:main
+}

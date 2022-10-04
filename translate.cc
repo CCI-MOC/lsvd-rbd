@@ -801,8 +801,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     /* find all live extents in objects listed in objs_to_clean
      */
     std::vector<bool> bitmap(max_obj+1);
-    for (auto [i,_xx] : objs_to_clean)
-	bitmap[i] = true;
+    for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++)
+	bitmap[it->first] = true;
 
     /* TODO: I think we need to hold the objmap lock here...
      */
@@ -870,6 +870,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    while (it != all_extents.end() && sectors < max) {
 		auto [base, limit, ptr] = *it++;
 		sectors += (limit - base);
+		(void)ptr;	// suppress warning
 	    }
 	    std::vector<_extent> extents(std::make_move_iterator(all_extents.begin()),
 					 std::make_move_iterator(it));
@@ -954,8 +955,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	close(fd);
     }
 	
-    for (auto [i, _xx] : objs_to_clean) {
-	objname name(prefix(), i);
+    for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
+	objname name(prefix(), it->first);
 	objstore->delete_object(name.c_str());
 	gc_deleted++;
     }

@@ -30,6 +30,7 @@ public:
     virtual void notify(request *child) = 0;
     virtual void release() = 0;
     virtual ~request(){}
+    request() {}
 };
 
 /* total hack, for converting current code based on callbacks

@@ -100,6 +100,12 @@ public:
 	return (request*) req;
     }
 
+    request* make_write_request(char *buf, size_t len, size_t offset) {
+	assert(offset != 0);
+	auto req = new nvme_request(buf, len, offset, WRITE_REQ, this);
+	return (request*) req;
+    }
+    
     request* make_read_request(smartiov *iov, size_t offset) {
 	auto req = new nvme_request(iov, offset, READ_REQ, this);
 	return (request*) req;

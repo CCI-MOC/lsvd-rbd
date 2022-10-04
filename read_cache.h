@@ -22,15 +22,15 @@
 class translate;
 class objmap;
 class backend;
+class nvme;
 
 class read_cache {
 public:
 
     virtual ~read_cache() {};
     
-    virtual std::pair<size_t,size_t>
-        async_read(size_t offset, char *buf, size_t len,
-                   void (*cb)(void*), void *ptr) = 0;
+    virtual std::tuple<size_t,size_t,request*>
+        async_read(size_t offset, char *buf, size_t len) = 0;
 
     /* debugging. 
      * TODO: document the first three methods

@@ -131,3 +131,9 @@ request *file_backend::make_read_req(const char *name, size_t offset,
 				     iovec *iov, int iovcnt) {
     return new file_backend_req(OP_READ, name, iov, iovcnt, offset, ioctx);
 }
+
+request *file_backend::make_read_req(const char *name, size_t offset,
+				     char *buf, size_t len) {
+    iovec iov = {buf, len};
+    return new file_backend_req(OP_READ, name, &iov, 1, offset, ioctx);
+}

@@ -38,6 +38,9 @@ def rbd_finish(_img):
 
 class tests(unittest.TestCase):
 
+    def test_0_null(self):
+        pass
+    
     def test_1_wcache_holes(self):
         _img = rbd_startup()
         lsvd.img_write(_img, 0, b'A'*20*1024)
