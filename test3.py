@@ -140,6 +140,7 @@ class tests(unittest.TestCase):
         wcache.write(4096, b'X'*4096)
         wcache.write(8192, b'Y'*4096)
         time.sleep(0.1)
+        xlate.flush()
         d = xlate.read(0, 4096*3)
         self.assertEqual(d, b'W'*4096 + b'X'*4096 + b'Y'*4096)
 
@@ -151,6 +152,7 @@ class tests(unittest.TestCase):
         wcache.write(4096, b'X'*4096)
         wcache.write(8192, b'Y'*4096)
         time.sleep(0.1)
+        xlate.flush()
 
         m1 = wcache.getmap(0, 1000)
         wcache.checkpoint()
