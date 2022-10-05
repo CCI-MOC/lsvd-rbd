@@ -349,11 +349,13 @@ namespace extmap {
 //	    }
 	};
 	
+	extent_vector _tmp; // HACK! HACK!
 	iterator begin() {
+            if (lists.size() == 0)
+                return iterator(this, 0, _tmp.begin());
 	    return iterator(this, 0, lists[0]->begin());
 	}
 
-	extent_vector _tmp; // HACK! HACK!
 	iterator end() {
 	    if (lists.size() == 0) 
 		return iterator(this, 0, _tmp.end());
