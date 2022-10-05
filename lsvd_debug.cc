@@ -144,6 +144,11 @@ extern "C" int xlate_frontier(_dbg *d)
     assert(d->type == 1);
     return d->lsvd->frontier();
 }
+extern "C" int xlate_seq(_dbg *d)
+{
+    extern int batch_seq(void*);
+    return batch_seq(d->lsvd);
+}
 extern "C" void xlate_reset(_dbg *d)
 {
     assert(d->type == 1);

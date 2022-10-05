@@ -55,7 +55,7 @@ class translate:
         lsvd_lib.xlate_reset(self.lsvd)
 
     def batch_seq(self):
-        return c_int.in_dll(lsvd_lib, 'batch_seq').value
+        return lsvd_lib.xlate_seq(self.lsvd)
 
     def checkpoint(self):
         return lsvd_lib.xlate_checkpoint(self.lsvd)

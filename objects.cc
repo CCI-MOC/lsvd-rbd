@@ -14,7 +14,7 @@
 #include "objects.h"
 
 char *object_reader::read_object_hdr(const char *name, bool fast) {
-    hdr *h = (hdr*)malloc(4096);
+    obj_hdr *h = (obj_hdr*)malloc(4096);
     iovec iov = {(char*)h, 4096};
     if (objstore->read_object(name, &iov, 1, 0) < 0)
 	goto fail;
@@ -22,7 +22,7 @@ char *object_reader::read_object_hdr(const char *name, bool fast) {
 	return (char*)h;
     if (h->hdr_sectors > 8) {
 	size_t len = h->hdr_sectors * 512;
-	h = (hdr*)realloc(h, len);
+	h = (obj_hdr*)realloc(h, len);
 	iovec iov = {(char*)h, len};
 	if (objstore->read_object(name, &iov, 1, 0) < 0)
 	    goto fail;
@@ -45,7 +45,7 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
 			  std::vector<snap_info> &snaps,
 			  uuid_t &my_uuid) {
     char *super_buf = read_object_hdr(name, false);
-    auto super_h = (hdr*)super_buf;
+    auto super_h = (obj_hdr*)super_buf;
 
     if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
 	super_h->type != LSVD_SUPER)
@@ -77,15 +77,16 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
 /* read and decode the header of an object. Copies into arguments,
  * frees all allocated memory
  */
-ssize_t object_reader::read_data_hdr(const char *name, hdr &h, data_hdr &dh,
+ssize_t object_reader::read_data_hdr(const char *name, obj_hdr &h,
+				     obj_data_hdr &dh,
 				     std::vector<uint32_t> &ckpts,
 				     std::vector<obj_cleaned> &cleaned,
 				     std::vector<data_map> &dmap) {
     char *buf = read_object_hdr(name, false);
     if (buf == NULL)
 	return -1;
-    hdr      *tmp_h = (hdr*)buf;
-    data_hdr *tmp_dh = (data_hdr*)(tmp_h+1);
+    auto tmp_h = (obj_hdr*)buf;
+    auto tmp_dh = (obj_data_hdr*)(tmp_h+1);
     if (tmp_h->type != LSVD_DATA) {
 	free(buf);
 	return -1;
@@ -98,7 +99,8 @@ ssize_t object_reader::read_data_hdr(const char *name, hdr &h, data_hdr &dh,
 				tmp_dh->ckpts_len, ckpts);
     decode_offset_len<obj_cleaned>(buf, tmp_dh->objs_cleaned_offset,
 				   tmp_dh->objs_cleaned_len, cleaned);
-    decode_offset_len<data_map>(buf, tmp_dh->map_offset, tmp_dh->map_len, dmap);
+    decode_offset_len<data_map>(buf, tmp_dh->data_map_offset,
+				tmp_dh->data_map_len, dmap);
 
     free(buf);
     return 0;
@@ -114,8 +116,8 @@ ssize_t object_reader::read_checkpoint(const char *name,
     char *buf = read_object_hdr(name, false);
     if (buf == NULL)
 	return -1;
-    hdr      *h = (hdr*)buf;
-    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
+    auto h = (obj_hdr*)buf;
+    auto ch = (obj_ckpt_hdr*)(h+1);
     if (h->type != LSVD_CKPT) {
 	free(buf);
 	return -1;
@@ -125,8 +127,42 @@ ssize_t object_reader::read_checkpoint(const char *name,
     decode_offset_len<ckpt_obj>(buf, ch->objs_offset, ch->objs_len, objects);
     decode_offset_len<deferred_delete>(buf, ch->deletes_offset,
 				       ch->deletes_len, deletes);
-    decode_offset_len<ckpt_mapentry>(buf, ch->map_offset, ch->map_len, dmap);
+    decode_offset_len<ckpt_mapentry>(buf, ch->map_offset,
+				     ch->map_len, dmap);
 
     free(buf);
     return 0;
+}
+
+/* create header for a data object, returns size in bytes
+ */
+size_t make_data_hdr(char *hdr, size_t bytes, uint32_t last_ckpt,
+		     std::vector<data_map> *entries, uint32_t seq,
+		     uuid_t *uuid) {
+    auto h = (obj_hdr*)hdr;
+    auto dh = (obj_data_hdr*)(h+1);
+    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
+	o2 = o1 + l1, l2 = entries->size() * sizeof(data_map),
+	hdr_bytes = o2 + l2;
+    uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
+	
+    *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
+		   .type = LSVD_DATA, .seq = seq,
+		   .hdr_sectors = hdr_sectors,
+		   .data_sectors = (uint32_t)(bytes / 512)};
+    memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
+
+    *dh = (obj_data_hdr){.last_data_obj = seq, .ckpts_offset = o1,
+			 .ckpts_len = l1, .objs_cleaned_offset = 0, .
+			 objs_cleaned_len = 0, .data_map_offset = o2,
+			 .data_map_len = l2};
+
+    uint32_t *p_ckpt = (uint32_t*)(dh+1);
+    *p_ckpt = last_ckpt;
+
+    data_map *dm = (data_map*)(p_ckpt+1);
+    for (auto e : *entries)
+	*dm++ = e;
+
+    return (char*)dm - (char*)hdr;
 }

@@ -31,12 +31,6 @@ typedef int page_t;
 /* make this atomic? */
 const int BATCH_SIZE = 8 * 1024 * 1024;
 
-// div_round_up :	This function simply take two numbers and divides them rounding up.
-int div_round_up(int n, int m);
-
-// round_up :	This function rounds up a number n to the nearest multiple of m
-int round_up(int n, int m);
-
 // iov_sum :	Takes the sum of lengths of each element in iov
 size_t iov_sum(const iovec *iov, int iovcnt);
 

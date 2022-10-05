@@ -33,7 +33,7 @@ enum obj_type {
 
 // hdr :	header structure used to contain data for separate objects in translation and write cache layers
 //		of the LSVD system
-struct hdr {
+struct obj_hdr {
     uint32_t magic;
     uint32_t version;		// 1
     uuid_t   vol_uuid;
@@ -77,14 +77,14 @@ struct snap_info {
 };
 
 
-struct data_hdr {
+struct obj_data_hdr {
     uint32_t last_data_obj;
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
     uint32_t objs_cleaned_offset;
     uint32_t objs_cleaned_len;
-    uint32_t map_offset;
-    uint32_t map_len;
+    uint32_t data_map_offset;
+    uint32_t data_map_len;
 };
 
 struct obj_cleaned {
@@ -99,7 +99,7 @@ struct data_map {
     uint64_t len : 28;
 };
 
-struct ckpt_hdr {
+struct obj_ckpt_hdr {
     uint32_t ckpts_offset;	// list includes self
     uint32_t ckpts_len;
     uint32_t objs_offset;	// objects and sizes
@@ -143,7 +143,7 @@ public:
 					std::vector<snap_info> &snaps,
 					uuid_t &uuid);
 
-    ssize_t read_data_hdr(const char *name, hdr &h, data_hdr &dh,
+    ssize_t read_data_hdr(const char *name, obj_hdr &h, obj_data_hdr &dh,
 			  std::vector<uint32_t> &ckpts,
 			  std::vector<obj_cleaned> &cleaned,
 			  std::vector<data_map> &dmap);
@@ -154,5 +154,9 @@ public:
 			    std::vector<deferred_delete> &deletes,
 			    std::vector<ckpt_mapentry> &dmap);
 };
+
+extern size_t make_data_hdr(char *hdr, size_t bytes, uint32_t last_ckpt, 
+                            std::vector<data_map> *entries, uint32_t seq,
+                            uuid_t *uuid);
 
 #endif

@@ -36,64 +36,16 @@
 #include "objname.h"
 
 /* TODO: MAKE THESE INSTANCE VARIABLES */
-extern int batch_seq;
-extern int last_ckpt;
-extern uuid_t my_uuid;
-class batch;
-template class thread_pool<batch*>;
-template class thread_pool<int>;
+//template class thread_pool<batch*>;
+//template class thread_pool<int>;
 
-/* batch: a bunch of writes being accumulated, waiting to be
- * written to the backend. 
+
+/* How many bytes will we need for an object header if we 
+ * have @n_entries extent entries
  */
-class batch {
-public:
-    char  *buf;			// data goes here
-    size_t len;			// current data size
-    size_t max;			// done when len hits here
-    std::vector<data_map> entries;
-    int    seq;			// sequence number for backend
-
-    batch(size_t _max) {
-        buf = (char*)malloc(_max);
-        max = _max;
-    }
-    ~batch() {
-        free((void*)buf);
-    }
-
-    void reset(void);
-    void append_iov(uint64_t lba, iovec *iov, int iovcnt);
-    int hdrlen(void);
-};
-
-/* recycle a batch object so we can use it again.
- */
-void batch::reset(void) {
-    len = 0;
-    entries.resize(0);
-    seq = batch_seq++;		// TODO: FIX ME PLEASE
-}
-
-/* add a write to the batch. Copies it into the buffer and adds 
- * an extent entry to entries[] 
- */
-void batch::append_iov(uint64_t lba, iovec *iov, int iovcnt) {
-    char *ptr = buf + len;
-    for (int i = 0; i < iovcnt; i++) {
-	memcpy(ptr, iov[i].iov_base, iov[i].iov_len);
-	entries.push_back((data_map){lba, iov[i].iov_len / 512});
-	ptr += iov[i].iov_len;
-	len += iov[i].iov_len;
-	lba += iov[i].iov_len / 512;
-    }
-}
-
-/* How many bytes will we need. 
- * TODO: FIX ME - the 'sizeof(hdr) + sizeof(data_hdr)' is gross
- */
-int batch::hdrlen(void) {
-    return sizeof(hdr) + sizeof(data_hdr) + entries.size() * sizeof(data_map);
+static size_t obj_hdr_len(int n_entries) {
+    return sizeof(obj_hdr) +
+	sizeof(obj_data_hdr) + n_entries * sizeof(data_map);
 }
 
 /* ----------- Object translation layer -------------- */
@@ -101,10 +53,33 @@ int batch::hdrlen(void) {
 class translate_impl : public translate {
     std::mutex   m;
     objmap      *map; /* map shared between read cache and translate */
-    
-    batch              *current_batch = NULL;
-    std::stack<batch*>  batches;
-    std::map<int,char*> in_mem_objects;
+    int          seq;
+
+    class batch {
+    public:
+	char  *buf = NULL;	// data goes here
+	size_t len = 0;		// current data size
+	size_t max;		// done when len hits here
+	std::vector<data_map> entries;
+	int    seq = 0;		// sequence number for backend
+
+	batch(size_t bytes){
+	    buf = (char*)malloc(bytes);
+	    max = bytes;
+	    seq = seq;
+	}
+	~batch(){
+	    free(buf);
+	}
+	void append(uint64_t lba, smartiov *iov) {
+	    auto bytes = iov->bytes();
+	    entries.push_back((data_map){lba, bytes/512});
+	    char *ptr = buf + len;
+	    iov->copy_out(ptr);
+	    len += bytes;
+	}
+    };
+    batch *b = NULL;
 
     /* info on all live objects - all sizes in sectors */
     struct obj_info {
@@ -115,24 +90,28 @@ class translate_impl : public translate {
     };
     std::map<int,obj_info> object_info;
 
-    char      *single_prefix;
+    /* tracking completions for flush()
+     */
+    int       next_compln = -1;
+    int       last_ckpt = -1;	// TODO - initialize
+    std::vector<bool> done;
+    std::condition_variable cv;
 
+    /* various constant state
+     */
+    char      single_prefix[128];
+    uuid_t    uuid;
+
+    /* superblock has two sections: [obj_hdr] [super_hdr]
+     */
     char      *super_name;
     char      *super_buf = NULL;
-    hdr       *super_h = NULL;
+    obj_hdr   *super_h = NULL;
     super_hdr *super_sh = NULL;
     size_t     super_len;
 
-    std::atomic<int> puts_outstanding = 0;
-    
     thread_pool<batch*> workers;
     thread_pool<int>    misc_threads;
-
-    /* for flush()
-     */
-    int last_written = 0;
-    int last_pushed = 0;
-    std::condition_variable cv;
 
     /* for triggering GC
      */
@@ -149,19 +128,8 @@ class translate_impl : public translate {
      *  https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
      */
 
-    /* completions may come in out of order; need to update the map in 
-     * order of sequence numbers. 
-     */
-    std::set<std::pair<int32_t,void*>> completions;
-    int32_t                            next_completion = 0;
-    std::mutex                         m_c;
-    std::condition_variable            cv_c;
-
-    void do_completions(int32_t seq, void *closure);
-
     int write_checkpoint(int seq);
 
-    int make_hdr(char *buf, batch *b);
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
 
@@ -195,15 +163,15 @@ public:
     int mapsize(void);
     void reset(void);
     int frontier(void);
+    int batch_seq(void);
 };
 
 translate_impl::translate_impl(backend *_io, objmap *omap) :
-    workers(&m), misc_threads(&m) {
+    done(128,false), workers(&m), misc_threads(&m) {
     objstore = _io;
     parser = new object_reader(objstore);
     map = omap;
-    current_batch = NULL;
-    last_written = last_pushed = 0;
+    b = new batch(BATCH_SIZE);
 }
 
 translate *make_translate(backend *_io, objmap *omap) {
@@ -211,18 +179,11 @@ translate *make_translate(backend *_io, objmap *omap) {
 }
 
 translate_impl::~translate_impl() {
-    while (!batches.empty()) {
-	auto b = batches.top();
-	batches.pop();
+    if (b)
 	delete b;
-    }
-    if (current_batch)
-	delete current_batch;
     delete parser;
     if (super_buf)
 	free(super_buf);
-    free(single_prefix);
-    free(super_name);
 }
 
 ssize_t translate_impl::init(const char *prefix_,
@@ -233,20 +194,23 @@ ssize_t translate_impl::init(const char *prefix_,
 
     /* note prefix = superblock name
      */
-    super_name = strdup(prefix_);
-    single_prefix = strdup(prefix_);
+    strcpy(single_prefix, prefix_);
+    super_name = single_prefix;
 
     auto [_buf, bytes] = parser->read_super(super_name, ckpts, clones,
-					    snaps, my_uuid);
+					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
     super_buf = _buf;
-    super_h = (hdr*)super_buf;
+    super_h = (obj_hdr*)super_buf;
     super_len = super_h->hdr_sectors * 512;
     super_sh = (super_hdr*)(super_h+1);
-    
-    batch_seq = super_sh->next_obj;
 
+    memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
+    
+    seq = super_sh->next_obj;
+    b = new batch(BATCH_SIZE);
+    
     int _ckpt = 1;
     for (auto ck : ckpts) {
 	ckpts.resize(0);
@@ -277,8 +241,8 @@ ssize_t translate_impl::init(const char *prefix_,
 	std::vector<uint32_t>    ckpts;
 	std::vector<obj_cleaned> cleaned;
 	std::vector<data_map>    entries;
-	hdr h; data_hdr dh;
-	batch_seq = i;
+	obj_hdr h; obj_data_hdr dh;
+	seq = i;
 	objname name(prefix(), i);
 	if (parser->read_data_hdr(name.c_str(), h, dh, ckpts,
 				  cleaned, entries) < 0)
@@ -300,7 +264,6 @@ ssize_t translate_impl::init(const char *prefix_,
 	    }
 	}
     }
-    next_completion = batch_seq;
 
     for (int i = 0; i < nthreads; i++) 
 	workers.pool.push(std::thread(&translate_impl::worker_thread,
@@ -327,57 +290,27 @@ void translate_impl::shutdown(void) {
  */
 
 
-/* create header for a data object
- */
-int translate_impl::make_hdr(char *buf, batch *b) {
-    hdr *h = (hdr*)buf;
-    data_hdr *dh = (data_hdr*)(h+1);
-    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
-	o2 = o1 + l1, l2 = b->entries.size() * sizeof(data_map),
-	hdr_bytes = o2 + l2;
-    sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
-	
-    *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
-	       .type = LSVD_DATA, .seq = (uint32_t)b->seq,
-	       .hdr_sectors = (uint32_t)hdr_sectors,
-	       .data_sectors = (uint32_t)(b->len / 512)};
-    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
-
-    *dh = (data_hdr){.last_data_obj = (uint32_t)b->seq, .ckpts_offset = o1,
-		     .ckpts_len = l1,
-		     .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
-		     .map_offset = o2, .map_len = l2};
-
-    uint32_t *p_ckpt = (uint32_t*)(dh+1);
-    *p_ckpt = last_ckpt;
-
-    data_map *dm = (data_map*)(p_ckpt+1);
-    for (auto e : b->entries)
-	*dm++ = e;
-
-    return (char*)dm - (char*)buf;
-}
-
 /* create header for a GC object
  */
 sector_t translate_impl::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 				     data_map *extents, int n_extents) {
-    hdr *h = (hdr*)buf;
-    data_hdr *dh = (data_hdr*)(h+1);
+    auto h = (obj_hdr*)buf;
+    auto dh = (obj_data_hdr*)(h+1);
     uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
 	o2 = o1 + l1, l2 = n_extents * sizeof(data_map),
 	hdr_bytes = o2 + l2;
     sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
 
-    *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
-	       .type = LSVD_DATA, .seq = seq,
-	       .hdr_sectors = (uint32_t)hdr_sectors,
-	       .data_sectors = (uint32_t)sectors};
-    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
+    *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
+		   .type = LSVD_DATA, .seq = seq,
+		   .hdr_sectors = (uint32_t)hdr_sectors,
+		   .data_sectors = (uint32_t)sectors};
+    memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
-    *dh = (data_hdr){.last_data_obj = seq, .ckpts_offset = o1, .ckpts_len = l1,
-		     .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
-		     .map_offset = o2, .map_len = l2};
+    *dh = (obj_data_hdr){.last_data_obj = seq, .ckpts_offset = o1,
+			 .ckpts_len = l1,
+			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
+			 .data_map_offset = o2, .data_map_len = l2};
 
     uint32_t *p_ckpt = (uint32_t*)(dh+1);
     *p_ckpt = last_ckpt;
@@ -408,46 +341,17 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
  */
 ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     std::unique_lock<std::mutex> lk(m);
-    size_t len = iov_sum(iov, iovcnt);
+    smartiov siov(iov, iovcnt);
+    size_t len = siov.bytes();
 
-    while (puts_outstanding >= 32)
-	cv.wait(lk);
-	
-    if (current_batch && current_batch->len + len > current_batch->max) {
-	last_pushed = current_batch->seq;
-	workers.put_locked(current_batch);
-	current_batch = NULL;
-    }
-    if (current_batch == NULL) {
-	if (batches.empty()) {
-	    current_batch = new batch(BATCH_SIZE);
-	}
-	else {
-	    current_batch = batches.top();
-	    batches.pop();
-	}
-	current_batch->reset();
-	in_mem_objects[current_batch->seq] = current_batch->buf;
+    if (b->len + len > b->max) {
+	b->seq = seq++;
+	workers.put_locked(b);
+	b = new batch(BATCH_SIZE);
     }
 
-    int64_t sector_offset = current_batch->len / 512,
-	lba = offset/512, limit = (offset+len)/512;
-    current_batch->append_iov(offset / 512, iov, iovcnt);
+    b->append(offset / 512, &siov);
 
-    /* TODO: isn't the map updated *after* this the batch is written?
-     * maybe not - need to figure out
-     */
-    std::vector<extmap::lba2obj> deleted;
-    extmap::obj_offset oo = {current_batch->seq, sector_offset};
-    std::unique_lock objlock(map->m);
-
-    map->map.update(lba, limit, oo, &deleted);
-    for (auto d : deleted) {
-	auto [base, limit, ptr] = d.vals();
-	object_info[ptr.obj].live -= (limit - base);
-	total_live_sectors -= (limit - base);
-    }
-	
     return len;
 }
 
@@ -459,206 +363,146 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 	batch *b;
 	if (!p->get_locked(lk, b))
 	    return;
-	uint32_t hdr_sectors = div_round_up(b->hdrlen(), 512);
-	object_info[b->seq] = (obj_info){.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
-					 .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
+
+	/* TODO: coalesce writes: 
+	 *   bufmap m
+	 *   for e in entries
+	 *      m.insert(lba, len, ptr)
+	 *   for e in m:
+	 *      (lba, iovec) -> output
+	 */
+
+	/* make the following updates:
+	 * - object_info - hdrlen, total/live data sectors
+	 * - map->map - LBA to obj/offset map
+	 * - object_info, totals - adjust for new garbage
+	 */
+	size_t hdr_bytes = obj_hdr_len(b->entries.size());
+	uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
+	obj_info oi = {.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
+		       .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
+	object_info[b->seq] = oi;
+
+	/* note that we update the map before the object is written,
+	 * and count on the write cache preventing any reads until
+	 * it's persisted. TODO: verify this
+	 */
+	sector_t sector_offset = hdr_sectors;
+	std::vector<extmap::lba2obj> deleted;
+
+	std::unique_lock objlock(map->m);
+	for (auto e : b->entries) {
+	    extmap::obj_offset oo = {b->seq, sector_offset};
+	    map->map.update(e.lba, e.lba+e.len, oo, &deleted);
+	    sector_offset += e.len;
+	}
+	objlock.unlock();
+
+	for (auto d : deleted) {
+	    auto [base, limit, ptr] = d.vals();
+	    object_info[ptr.obj].live -= (limit - base);
+	    total_live_sectors -= (limit - base);
+	}
+
 	total_sectors += b->len/512;
 	total_live_sectors += b->len/512;
+	if (next_compln == -1)
+	    next_compln = b->seq;
 	lk.unlock();
 
 	char *hdr = (char*)calloc(hdr_sectors*512, 1);
-	make_hdr(hdr, b);
-	auto iovs = new smartiov;
-	iovs->push_back((iovec){hdr, (size_t)(hdr_sectors*512)});
-	iovs->push_back((iovec){b->buf, b->len});
+	make_data_hdr(hdr, b->len, last_ckpt, &b->entries, b->seq, &uuid);
+	iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
+		       {b->buf, b->len}};
 
 	/* Note that we've already decremented object live counts when 
 	 * we copied the data into the batch buffer.
 	 */
-	auto closure = wrap([this, hdr_sectors, hdr, iovs, b]{
+	auto closure = wrap([this, hdr, b]{
+		/* all objects seq<next_compln have been completed
+		 */
 		std::unique_lock lk(m);
-		std::unique_lock objlock(map->m);
-
-		auto offset = hdr_sectors;
-		for (auto e : b->entries) {
-		    extmap::obj_offset oo = {b->seq, offset};
-		    map->map.update(e.lba, e.lba+e.len, oo, NULL);
-		    offset += e.len;
+		done[b->seq % 128] = true;
+		while (done[next_compln % 128]) {
+		    done[next_compln % 128] = false;
+		    next_compln++;
 		}
-
-		last_written = std::max(last_written, b->seq); // for flush()
 		cv.notify_all();
-	    
-		in_mem_objects.erase(b->seq);
-		batches.push(b);
-		objlock.unlock();
+		
 		free(hdr);
-		delete iovs;
-		puts_outstanding--;
-		cv.notify_all();
+		delete b;
+
 		return true;
 	    });
-	auto closure2 = wrap([this, closure, b]{
-		do_completions(b->seq, closure);
-		return true;
-	    });
-	puts_outstanding++;
 
 	objname name(prefix(), b->seq);
-	auto cb_req = new callback_req(call_wrapped, closure2);
-	auto req = objstore->make_write_req(name.c_str(), iovs->data(),
-					    iovs->size());
+	auto cb_req = new callback_req(call_wrapped, closure);
+	auto req = objstore->make_write_req(name.c_str(), iov, 2);
 	req->run(cb_req);
     }
 }
 
-/* need to apply map updates in sequence
- * completions is std::set of std::pair<seq#,closure>, ordered by seq#
- * next_completion steps through sequence numbers
- *
- * note that we use a separate mutex for the completion queue so 
- * that we can safely hold it through the callback
- */
-void translate_impl::do_completions(int32_t seq, void *closure) {
-    std::unique_lock lk(m_c);
-    if (seq == next_completion) { /* am I next? */
-	next_completion++;
-	call_wrapped(closure);	/* if so, just handle it */
-    }
-    else
-	completions.emplace(seq, closure); /* otherwise queue me */
-
-    /* process any more in-order completions
-     */
-    auto it = completions.begin();
-    while (it != completions.end() && it->first == next_completion) {
-	call_wrapped(it->second);
-	it = completions.erase(it);
-	next_completion++;
-    }
-    lk.unlock();
-    cv_c.notify_all();
-}
-
 int translate_impl::flush(void) {
     std::unique_lock<std::mutex> lk(m);
-    int val = 0;
-    if (current_batch && current_batch->len > 0) {
-	val = current_batch->seq;
-	last_pushed = val;
-	workers.put_locked(current_batch);
-	current_batch = NULL;
-    }
-    while (last_written < last_pushed)
+    
+    if (b->len == 0)     /* TODO: fix this */
+	return 0;
+    
+    auto _seq = b->seq = seq++;
+    workers.put_locked(b);
+    b = new batch(BATCH_SIZE);
+
+    while (next_compln <= _seq)
 	cv.wait(lk);
-    return val;
+
+    return _seq;
 }
 
+/* wake up every @wait_time, if data is pending in current batch
+ * for @timeout then write it to backend
+ */
 void translate_impl::flush_thread(thread_pool<int> *p) {
     auto wait_time = std::chrono::milliseconds(500);
     auto timeout = std::chrono::seconds(2);
     auto t0 = std::chrono::system_clock::now();
-    auto seq0 = batch_seq;
+    auto seq0 = seq;
 
+    std::unique_lock<std::mutex> lk(*p->m);
     while (p->running) {
-	std::unique_lock<std::mutex> lk(*p->m);
 	p->cv.wait_for(lk, wait_time);
-	if (p->running && current_batch && seq0 == batch_seq &&
-	    current_batch->len > 0) {
+	if (p->running && seq0 == seq && b->len > 0) {
 	    if (std::chrono::system_clock::now() - t0 > timeout) {
 		lk.unlock();
 		flush();
 	    }
 	}
 	else {
-	    seq0 = batch_seq;
+	    seq0 = seq;
 	    t0 = std::chrono::system_clock::now();
 	}
     }
-}
-
-/* synchronous read from offset
- * NOTE: offset is in bytes
- */
-ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
-    smartiov iovs(iov, iovcnt);
-    size_t len = iovs.bytes();
-    int64_t base = offset / 512;
-    int64_t sectors = len / 512, limit = base + sectors;
-	
-    if (map->map.size() == 0) {
-	iovs.zero();
-	return len;
-    }
-
-    /* object number, offset (bytes), length (bytes) */
-    std::vector<std::tuple<int, size_t, size_t>> regions;
-
-    std::unique_lock lk(m);
-    std::shared_lock slk(map->m);
-	
-    auto prev = base;
-    int iov_offset = 0;
-
-    for (auto it = map->map.lookup(base);
-	 it != map->map.end() && it->base() < limit; it++) {
-	auto [_base, _limit, oo] = it->vals(base, limit);
-	if (_base > prev) {	// unmapped
-	    size_t _len = (_base - prev)*512;
-	    regions.push_back(std::tuple(-1, 0, _len));
-	    iov_offset += _len;
-	}
-	size_t _len = (_limit - _base) * 512,
-	    _offset = oo.offset * 512;
-	int obj = oo.obj;
-	if (in_mem_objects.find(obj) != in_mem_objects.end()) {
-	    iovs.slice(iov_offset, iov_offset+_len).copy_in(
-		in_mem_objects[obj]+_offset);
-	    obj = -2;
-	}
-	regions.push_back(std::tuple(obj, _offset, _len));
-	iov_offset += _len;
-	prev = _limit;
-    }
-    slk.unlock();
-    lk.unlock();
-
-    iov_offset = 0;
-    for (auto [obj, _offset, _len] : regions) {
-	auto slice = iovs.slice(iov_offset, iov_offset + _len);
-	if (obj == -1)
-	    slice.zero();
-	else if (obj == -2)
-	    /* skip */;
-	else {
-	    objname name(prefix(), obj);
-	    auto [iov,iovcnt] = slice.c_iov();
-	    objstore->read_object(name.c_str(), iov, iovcnt, _offset);
-	}
-	iov_offset += _len;
-    }
-
-    return iov_offset;
 }
 
 /* -------------- Checkpointing -------------- */
 
 /* synchronously write a checkpoint
  */
-int translate_impl::write_checkpoint(int seq) {
+int translate_impl::write_checkpoint(int _seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
     /* hold the map lock while we get a copy of the map
      */
-    std::unique_lock lk(map->m);
-    last_ckpt = seq;
-    for (auto it = map->map.begin(); it != map->map.end(); it++) {
-	auto [base, limit, ptr] = it->vals();
-	entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
-		    .obj = (int32_t)ptr.obj, .offset = (int32_t)ptr.offset});
+    {
+	std::unique_lock lk(map->m);
+	last_ckpt = _seq;
+	for (auto it = map->map.begin(); it != map->map.end(); it++) {
+	    auto [base, limit, ptr] = it->vals();
+	    entries.push_back((ckpt_mapentry){.lba = base, .len = limit-base,
+			.obj = (int32_t)ptr.obj, .offset = (int32_t)ptr.offset});
+	}
+	lk.unlock();
     }
-    lk.unlock();
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
 
     /* hold the translation layer lock while we get a copy of object_info
@@ -675,45 +519,42 @@ int translate_impl::write_checkpoint(int seq) {
     /* add object for this checkpoint
      */
     size_t objs_bytes = objects.size() * sizeof(ckpt_obj);
-    size_t hdr_bytes = sizeof(hdr) + sizeof(ckpt_hdr);
-    uint32_t sectors = div_round_up(hdr_bytes + sizeof(seq) + map_bytes +
+    size_t hdr_bytes = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr);
+    uint32_t sectors = div_round_up(hdr_bytes + sizeof(_seq) + map_bytes +
 				    objs_bytes, 512);
-    object_info[seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0,
-				  .type = LSVD_CKPT};
+    object_info[_seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0,
+				   .type = LSVD_CKPT};
+
+    /* wait until all prior objects have been acked by backend
+     */
+    while (next_compln < _seq)
+	cv.wait(lk2);
     lk2.unlock();
 
     /* put it all together in memory
      */
-    char *buf = (char*)calloc(hdr_bytes, 1);
-    hdr *h = (hdr*)buf;
-    *h = (hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
-	       .type = LSVD_CKPT, .seq = (uint32_t)seq,
-	       .hdr_sectors = sectors, .data_sectors = 0};
-    memcpy(h->vol_uuid, my_uuid, sizeof(uuid_t));
-    ckpt_hdr *ch = (ckpt_hdr*)(h+1);
+    auto buf = (char*)calloc(hdr_bytes, 1);
+    auto h = (obj_hdr*)buf;
+    *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
+		   .type = LSVD_CKPT, .seq = (uint32_t)_seq,
+		   .hdr_sectors = sectors, .data_sectors = 0};
+    memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
+    auto ch = (obj_ckpt_hdr*)(h+1);
 
-    uint32_t o1 = sizeof(hdr)+sizeof(ckpt_hdr), o2 = o1 + sizeof(seq),
+    uint32_t o1 = sizeof(obj_hdr)+sizeof(obj_ckpt_hdr), o2 = o1 + sizeof(_seq),
 	o3 = o2 + objs_bytes;
-    *ch = (ckpt_hdr){.ckpts_offset = o1, .ckpts_len = sizeof(seq),
-		     .objs_offset = o2, .objs_len = o3-o2,
-		     .deletes_offset = 0, .deletes_len = 0,
-		     .map_offset = o3, .map_len = (uint32_t)map_bytes};
+    *ch = (obj_ckpt_hdr){.ckpts_offset = o1, .ckpts_len = sizeof(_seq),
+			 .objs_offset = o2, .objs_len = o3-o2,
+			 .deletes_offset = 0, .deletes_len = 0,
+			 .map_offset = o3, .map_len = (uint32_t)map_bytes};
 
     iovec iov[] = {{.iov_base = buf, .iov_len = hdr_bytes},
-		   {.iov_base = (char*)&seq, .iov_len = sizeof(seq)},
+		   {.iov_base = (char*)&_seq, .iov_len = sizeof(_seq)},
 		   {.iov_base = (char*)objects.data(), objs_bytes},
 		   {.iov_base = (char*)entries.data(), map_bytes}};
 
-    /* wait until all objects up through seq-1 have been successfully
-     * written, then write it
+    /* and write it
      */
-    {
-	std::unique_lock lk_complete(m_c);
-	while (next_completion < seq)
-	    cv_c.wait(lk_complete);
-	next_completion++;
-    }
-
     objname name(prefix(), seq);
     objstore->write_object(name.c_str(), iov, 4);
     free(buf);
@@ -724,23 +565,24 @@ int translate_impl::write_checkpoint(int seq) {
 
     // lk2.lock(); TODO: WTF???
     super_sh->ckpts_offset = offset;
-    super_sh->ckpts_len = sizeof(seq);
-    *(int*)(super_buf + offset) = seq;
+    super_sh->ckpts_len = sizeof(_seq);
+    *(int*)(super_buf + offset) = _seq;
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
-    return seq;
+
+    return 0;
 }
 
 void translate_impl::ckpt_thread(thread_pool<int> *p) {
     auto one_second = std::chrono::seconds(1);
-    auto seq0 = batch_seq;
+    auto seq0 = seq;
     const int ckpt_interval = 100;
 
     while (p->running) {
 	std::unique_lock<std::mutex> lk(m);
 	p->cv.wait_for(lk, one_second);
-	if (p->running && batch_seq - seq0 > ckpt_interval) {
-	    seq0 = batch_seq;
+	if (p->running && seq - seq0 > ckpt_interval) {
+	    seq0 = seq;
 	    lk.unlock();
 	    checkpoint();
 	}
@@ -749,16 +591,16 @@ void translate_impl::ckpt_thread(thread_pool<int> *p) {
 
 int translate_impl::checkpoint(void) {
     std::unique_lock<std::mutex> lk(m);
-    if (current_batch && current_batch->len > 0) {
-	last_pushed = current_batch->seq;
-	workers.put_locked(current_batch);
-	current_batch = NULL;
+    if (b->len > 0) {
+	b->seq = seq++;
+	workers.put_locked(b);
+	b = new batch(BATCH_SIZE);
     }
     if (map->map.size() == 0)
 	return 0;
-    int seq = batch_seq++;
+    int _seq = seq++;
     lk.unlock();
-    return write_checkpoint(seq);
+    return write_checkpoint(_seq);
 }
 
 
@@ -770,15 +612,13 @@ int translate_impl::checkpoint(void) {
 void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     assert(!m.try_lock());	// must be locked
     gc_cycles++;
-    int max_obj = batch_seq;
+    int max_obj = seq;
 
     /* create list of object info in increasing order of 
      * utilization, i.e. (live data) / (total size)
      */
     std::set<std::tuple<double,int,int>> utilization;
     for (auto p : object_info)  {
-	if (in_mem_objects.find(p.first) != in_mem_objects.end())
-	    continue;
 	double rho = 1.0 * p.second.live / p.second.data;
 	sector_t sectors = p.second.hdr + p.second.data;
 	utilization.insert(std::make_tuple(rho, p.first, sectors));
@@ -911,29 +751,34 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 		    byte_offset += bytes;
 		}
 	    }
-	    int32_t seq = batch_seq++;
-	    lk.unlock();
+	    int32_t _seq = seq++;	    
 
 	    gc_sectors_written += data_sectors;
-	    
-	    int hdr_sectors = make_gc_hdr(hdr, seq, data_sectors,
+	    int hdr_sectors = make_gc_hdr(hdr, _seq, data_sectors,
 					  obj_extents->data(), obj_extents->size());
+	    auto offset = hdr_sectors;
+	    for (auto e : *obj_extents) {
+		extmap::obj_offset oo = {_seq, offset};
+		map->map.update(e.lba, e.lba+e.len, oo, NULL);
+		offset += e.len;
+	    }
+
+	    lk.unlock();
+
 	    auto iovs = new smartiov;
 	    iovs->push_back((iovec){hdr, (size_t)hdr_sectors*512});
 	    iovs->push_back((iovec){buf, (size_t)byte_offset});
 
-	    auto closure = wrap([this, hdr_sectors, obj_extents, buf, hdr, seq, iovs]{
+	    auto closure = wrap([this, hdr_sectors, obj_extents, buf, hdr, _seq, iovs]{
 		    std::unique_lock lk(m);
-		    std::unique_lock objlock(map->m);
-		    auto offset = hdr_sectors;
-		    for (auto e : *obj_extents) {
-			extmap::obj_offset oo = {seq, offset};
-			map->map.update(e.lba, e.lba+e.len, oo, NULL);
-			offset += e.len;
-		    }
 
-		    // is this (last_written) needed?
-		    last_written = std::max(last_written, seq); 
+		    /* update most recent completion
+		     */
+		    done[_seq % 128] = true;
+		    while (done[next_compln % 128]) {
+			done[next_compln % 128] = false;
+			next_compln++;
+		    }
 		    cv.notify_all();
 
 		    delete obj_extents;
@@ -942,12 +787,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 		    free(hdr);
 		    return true;
 		});
-	    auto closure2 = wrap([this, closure, seq]{
-		    do_completions(seq, closure);
-		    return true;
-		});
-	    objname name(prefix(), seq);
-	    auto cb_req = new callback_req(call_wrapped, closure2);
+
+	    objname name(prefix(), _seq);
+	    auto cb_req = new callback_req(call_wrapped, closure);
 	    auto [iov,iovcnt] = iovs->c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
 	    req->run(cb_req);
@@ -983,10 +825,60 @@ void translate_impl::gc_thread(thread_pool<int> *p) {
     }
 }
     
+/* ---------------- Debug ---------------- */
 
-
-/* debug methods
+/* synchronous read from offset (in bytes)
  */
+ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
+    smartiov iovs(iov, iovcnt);
+    size_t len = iovs.bytes();
+    int64_t base = offset / 512;
+    int64_t sectors = len / 512, limit = base + sectors;
+
+    /* various things break when map size is zero
+     */
+    if (map->map.size() == 0) {
+	iovs.zero();
+	return len;
+    }
+
+    /* object number, offset (bytes), length (bytes) */
+    std::vector<std::tuple<int, size_t, size_t>> regions;
+	
+    auto prev = base;
+    {
+	std::unique_lock lk(m);
+	std::shared_lock slk(map->m);
+
+	for (auto it = map->map.lookup(base);
+	     it != map->map.end() && it->base() < limit; it++) {
+	    auto [_base, _limit, oo] = it->vals(base, limit);
+	    if (_base > prev) {	// unmapped
+		size_t _len = (_base - prev)*512;
+		regions.push_back(std::tuple(-1, 0, _len));
+	    }
+	    size_t _len = (_limit - _base) * 512, _offset = oo.offset * 512;
+	    regions.push_back(std::tuple((int)oo.obj, _offset, _len));
+	    prev = _limit;
+	}
+    }
+
+    off_t iov_offset = 0;
+    for (auto [obj, _offset, _len] : regions) {
+	auto slice = iovs.slice(iov_offset, iov_offset + _len);
+	if (obj == -1)
+	    slice.zero();
+	else {
+	    objname name(prefix(), obj);
+	    auto [iov,iovcnt] = slice.c_iov();
+	    objstore->read_object(name.c_str(), iov, iovcnt, _offset);
+	}
+	iov_offset += _len;
+    }
+
+    return iov_offset;
+}
+
 void translate_impl::getmap(int base, int limit,
 		       int (*cb)(void *ptr,int,int,int,int), void *ptr) {
     for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
@@ -1002,8 +894,13 @@ void translate_impl::reset(void) {
     map->map.reset();
 }
 int translate_impl::frontier(void) {
-    if (current_batch)
-	return current_batch->len / 512;
-    return 0;
+    return b->len / 512;
+}
+int translate_impl::batch_seq(void) {
+    return seq;
 }
 
+extern "C" int batch_seq(void *xlate_) {
+    auto xlate = (translate_impl*)xlate_;
+    return xlate->batch_seq();
+}

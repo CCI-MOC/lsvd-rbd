@@ -26,7 +26,6 @@ enum { LSVD_MAGIC = 0x4456534c };
 /* if buf[offset]...buf[offset+len] contains an array of type T,
  * copy them into the provided output vector
  */
-
 template<class T>
 void decode_offset_len(char *buf, size_t offset, size_t len,
                        std::vector<T> &vals) {
@@ -34,6 +33,9 @@ void decode_offset_len(char *buf, size_t offset, size_t len,
     for (; p < end; p++)
         vals.push_back(*p);
 }
+
+static inline int div_round_up(int n, int m) { return (n + m - 1) / m; }
+static inline int round_up(int n, int m) { return m * div_round_up(n, m); }
 
 #endif
 
