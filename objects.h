@@ -129,6 +129,8 @@ struct ckpt_mapentry {
     int32_t offset;
 };
 
+class backend;
+
 class object_reader {
     backend *objstore;
 

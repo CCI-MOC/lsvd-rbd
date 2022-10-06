@@ -7,7 +7,8 @@
 
 #include <sys/uio.h>
 #include <string>
-#include "request.h"
+
+class request;
 
 class backend {
 public:

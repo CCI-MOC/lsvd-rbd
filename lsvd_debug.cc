@@ -20,11 +20,11 @@
 
 #include "misc_cache.h"
 #include "nvme.h"
-#include "base_functions.h"
 
 #include "translate.h"
 #include "read_cache.h"
 #include "write_cache.h"
+#include "backend.h"
 #include "file_backend.h"
 #include "rados_backend.h"
 

@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 #include <sys/uio.h>
+#include <string.h>
 
 #include <uuid/uuid.h>
 
@@ -24,21 +25,22 @@
 
 #include <algorithm>
 
-#include "base_functions.h"
 #include <thread>
-#include "smartiov.h"
+
 #include "extent.h"
+#include "lsvd_types.h"
+#include "request.h"
+#include "objects.h"
+#include "objname.h"
+#include "translate.h"
 
 #include "backend.h"
-#include "objects.h"
+#include "smartiov.h"
 #include "misc_cache.h"
-#include "translate.h"
-#include "objname.h"
 
-/* TODO: MAKE THESE INSTANCE VARIABLES */
-//template class thread_pool<batch*>;
-//template class thread_pool<int>;
-
+// TODO: fix this
+uuid_t my_uuid;			// used by write cache (read cache?)
+const int BATCH_SIZE = 8 * 1024 * 1024;
 
 /* How many bytes will we need for an object header if we 
  * have @n_entries extent entries
@@ -217,6 +219,8 @@ ssize_t translate_impl::init(const char *prefix_,
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
+    memcpy(my_uuid, uuid, sizeof(uuid));
+    
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
     super_len = super_h->hdr_sectors * 512;

@@ -8,6 +8,7 @@
  */
 
 #include <sys/uio.h>
+#include <string.h>
 
 #include "lsvd_types.h"
 #include "backend.h"

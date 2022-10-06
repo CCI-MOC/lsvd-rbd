@@ -9,20 +9,20 @@
 
 #include <rados/librados.h>
 
-#include "smartiov.h"
-#include "extent.h"
-#include "backend.h"
-
 #include <vector>
 #include <sstream>
 #include <iomanip>
-
-#include "base_functions.h"
 
 #include <condition_variable>
 #include <queue>
 #include <thread>
 
+#include "lsvd_types.h"
+
+#include "smartiov.h"
+#include "extent.h"
+#include "request.h"
+#include "backend.h"
 #include "rados_backend.h"
 
 class rados_backend : public backend {

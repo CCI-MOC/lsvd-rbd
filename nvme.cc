@@ -16,7 +16,7 @@
 #include <condition_variable>
 #include <thread>
 
-#include "base_functions.h"
+#include "lsvd_types.h"
 #include "smartiov.h"
 #include "extent.h"
 #include "misc_cache.h"

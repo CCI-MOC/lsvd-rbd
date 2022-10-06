@@ -7,15 +7,20 @@
  *              LGPL-2.1-or-later
  */
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/uio.h>
+
 #include <map>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
 
-#include <fcntl.h>
-#include <unistd.h>
-
+#include "lsvd_types.h"
+#include "backend.h"
 #include "file_backend.h"
+#include "request.h"
+#include "smartiov.h"
 #include "io.h"
 
 

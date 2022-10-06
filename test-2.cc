@@ -213,7 +213,12 @@ void read_ckpt(const char *img,
 
 }
 
-extern std::string hex(uint32_t n);
+std::string hex(uint32_t n)
+{
+    std::stringstream stream;
+    stream << std::setfill ('0') << std::setw(8) << std::hex << n;
+    return stream.str();
+}
 
 TEST_CASE("Checkpoint") {
     cleanup();

@@ -11,7 +11,9 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
-#include <sys/uio.h>            /* iovec */
+struct iovec;
+class backend;
+class objmap;
 
 class translate {
 public:

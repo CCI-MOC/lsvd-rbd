@@ -12,7 +12,8 @@
 
 #include <libaio.h>
 #include <thread>
-#include "backend.h"
+
+class request;
 
 /* nevermind separating interface and implementation - this
  * is so simple...

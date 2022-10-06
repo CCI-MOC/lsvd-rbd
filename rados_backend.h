@@ -10,8 +10,7 @@
 #ifndef RADOS_BACKEND_H
 #define RADOS_BACKEND_H
 
-#include "backend.h"
-
+class backend;
 extern backend *make_rados_backend();
 
 #endif

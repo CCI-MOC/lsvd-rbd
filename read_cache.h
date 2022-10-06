@@ -16,13 +16,13 @@
 #include <vector>
 #include <map>
 
-#include "extent.h"
-#include "journal.h"
-
 class translate;
 class objmap;
 class backend;
 class nvme;
+
+struct j_read_super;
+#include "extent.h"
 
 class read_cache {
 public:

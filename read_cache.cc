@@ -13,6 +13,7 @@
 
 #include <unistd.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <shared_mutex>
 #include <mutex>
@@ -27,20 +28,26 @@
 #include <vector>
 
 #include <random>
+#include <algorithm>		// std::min
+
+#include "lsvd_types.h"
+#include "backend.h"
 
 #include "smartiov.h"
 #include "extent.h"
-
-#include "journal.h"
-
-#include "base_functions.h"
-#include "backend.h"
 #include "misc_cache.h"
-#include "io.h"
+
+#include "request.h"
+#include "journal.h"
 #include "translate.h"
+#include "nvme.h"
+
 #include "read_cache.h"
 #include "objname.h"
-#include "nvme.h"
+
+#if 0
+#include "io.h"
+#endif
 
 class read_cache_impl : public read_cache {
     

@@ -34,8 +34,17 @@ void decode_offset_len(char *buf, size_t offset, size_t len,
         vals.push_back(*p);
 }
 
-static inline int div_round_up(int n, int m) { return (n + m - 1) / m; }
-static inline int round_up(int n, int m) { return m * div_round_up(n, m); }
+static inline int div_round_up(int n, int m) {
+    return (n + m - 1) / m;
+}
+
+static inline int round_up(int n, int m) {
+    return m * div_round_up(n, m);
+}
+
+static inline bool aligned(const void *ptr, int a) {
+    return 0 == ((long)ptr & (a-1));
+}
 
 #endif
 

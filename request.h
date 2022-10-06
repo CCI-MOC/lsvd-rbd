@@ -11,9 +11,6 @@
 #ifndef REQUEST_H
 #define REQUEST_H
 
-#include "lsvd_types.h"
-#include "smartiov.h"
-
 /* generic interface for requests.
  *  - run(parent): begin execution
  *  - notify(rv): notification of completion

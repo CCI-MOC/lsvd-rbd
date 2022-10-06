@@ -23,7 +23,7 @@
 #include <cassert>
 #include <algorithm>
 
-#include "base_functions.h"
+#include "lsvd_types.h"
 
 #include "journal.h"
 #include "smartiov.h"

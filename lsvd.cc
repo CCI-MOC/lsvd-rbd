@@ -33,7 +33,7 @@
 #include "smartiov.h"
 #include "extent.h"
 
-#include "base_functions.h"
+#include "lsvd_types.h"
 #include "backend.h"
 #include "misc_cache.h"
 #include "translate.h"
