@@ -55,7 +55,7 @@ static size_t obj_hdr_len(int n_entries) {
 class translate_impl : public translate {
     std::mutex   m;
     objmap      *map; /* map shared between read cache and translate */
-    int          seq;
+    std::atomic<int> seq;
 
     friend class translate_req;
     
@@ -70,7 +70,6 @@ class translate_impl : public translate {
 	batch(size_t bytes){
 	    buf = (char*)malloc(bytes);
 	    max = bytes;
-	    seq = seq;
 	}
 	~batch(){
 	    free(buf);
@@ -96,7 +95,7 @@ class translate_impl : public translate {
 
     /* tracking completions for flush()
      */
-    int       next_compln = -1;
+    int       next_compln = 1;
     int       last_ckpt = -1;	// TODO - initialize
     int       last_sent = 0;	// most recent data object
     
@@ -312,7 +311,7 @@ void translate_impl::shutdown(void) {
 
 /* create header for a GC object
  */
-sector_t translate_impl::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
+sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 				     data_map *extents, int n_extents) {
     auto h = (obj_hdr*)buf;
     auto dh = (obj_data_hdr*)(h+1);
@@ -322,12 +321,12 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
     sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
 
     *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
-		   .type = LSVD_DATA, .seq = seq,
+		   .type = LSVD_DATA, .seq = _seq,
 		   .hdr_sectors = (uint32_t)hdr_sectors,
 		   .data_sectors = (uint32_t)sectors};
     memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
-    *dh = (obj_data_hdr){.last_data_obj = seq, .ckpts_offset = o1,
+    *dh = (obj_data_hdr){.last_data_obj = _seq, .ckpts_offset = o1,
 			 .ckpts_len = l1,
 			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
 			 .data_map_offset = o2, .data_map_len = l2};
@@ -395,7 +394,7 @@ public:
 	delete this;
     }
 };
- 
+
 /* worker: pull batches from queue and write them out
  */
 void translate_impl::worker_thread(thread_pool<batch*> *p) {
@@ -498,19 +497,19 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
     auto wait_time = std::chrono::milliseconds(500);
     auto timeout = std::chrono::seconds(2);
     auto t0 = std::chrono::system_clock::now();
-    auto seq0 = seq;
+    auto seq0 = seq.load();
 
     while (p->running) {
 	std::unique_lock<std::mutex> lk(*p->m);
 	p->cv.wait_for(lk, wait_time);
-	if (p->running && seq0 == seq && b->len > 0) {
+	if (p->running && seq0 == seq.load() && b->len > 0) {
 	    if (std::chrono::system_clock::now() - t0 > timeout) {
 		lk.unlock();
 		flush();
 	    }
 	}
 	else {
-	    seq0 = seq;
+	    seq0 = seq.load();
 	    t0 = std::chrono::system_clock::now();
 	}
     }
@@ -594,7 +593,7 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, 4);
     notify_complete(ckpt_seq);
-	
+    
     free(buf);
 
     /* Now re-write the superblock with the new list of checkpoints
@@ -613,14 +612,14 @@ void translate_impl::ckpt_thread(thread_pool<int> *p) {
     const char *name = "ckpt_thread";
     pthread_setname_np(pthread_self(), name);
     auto one_second = std::chrono::seconds(1);
-    auto seq0 = seq;
+    auto seq0 = seq.load();
     const int ckpt_interval = 100;
 
     while (p->running) {
 	std::unique_lock<std::mutex> lk(m);
 	p->cv.wait_for(lk, one_second);
-	if (p->running && seq - seq0 > ckpt_interval) {
-	    seq0 = seq;
+	if (p->running && seq.load() - seq0 > ckpt_interval) {
+	    seq0 = seq.load();
 	    lk.unlock();
 	    checkpoint();
 	}
@@ -649,7 +648,7 @@ int translate_impl::checkpoint(void) {
 void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     assert(!m.try_lock());	// must be locked
     gc_cycles++;
-    int max_obj = seq;
+    int max_obj = seq.load();
 
     /* create list of object info in increasing order of 
      * utilization, i.e. (live data) / (total size)

@@ -36,6 +36,11 @@ Note - I had been thinking about having the RBD level (`lsvd.cc`) pass data to t
 
 **race conditions** - scrub notification methods to look for race conditions like the read cache one.
 
+Checkpoint list weirdness:
+```
+    ckpts:     68 : 4294967295
+```
+
 ## list of TODO comments in code
 
 `io.cc`:
