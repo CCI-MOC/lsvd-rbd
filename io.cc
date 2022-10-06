@@ -43,9 +43,13 @@ size_t getsize64(int fd)
 
 /* libaio helpers */
 
-void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
-
-void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2)
+void e_iocb_cb_r(io_context_t ctx, iocb *io, long res, long res2)
+{
+    auto iocb = (e_iocb*)io;
+    iocb->cb(iocb->ptr);
+    delete iocb;
+}
+void e_iocb_cb_w(io_context_t ctx, iocb *io, long res, long res2)
 {
     auto iocb = (e_iocb*)io;
     iocb->cb(iocb->ptr);
@@ -77,7 +81,7 @@ void e_io_prep_pwrite(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
     io_prep_pwrite(&io->io, fd, buf, len, offset);
     io->cb = cb;
     io->ptr = arg;
-    io_set_callback(&io->io, e_iocb_cb);
+    io_set_callback(&io->io, e_iocb_cb_w);
 }
 
 void e_io_prep_pread(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
@@ -86,7 +90,7 @@ void e_io_prep_pread(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
     io_prep_pread(&io->io, fd, buf, len, offset);
     io->cb = cb;
     io->ptr = arg;
-    io_set_callback(&io->io, e_iocb_cb);
+    io_set_callback(&io->io, e_iocb_cb_r);
 }
 
 void e_io_prep_pwritev(e_iocb *io, int fd, const struct iovec *iov, int iovcnt,
@@ -95,7 +99,7 @@ void e_io_prep_pwritev(e_iocb *io, int fd, const struct iovec *iov, int iovcnt,
     io_prep_pwritev(&io->io, fd, iov, iovcnt, offset);
     io->cb = cb;
     io->ptr = arg;
-    io_set_callback(&io->io, e_iocb_cb);
+    io_set_callback(&io->io, e_iocb_cb_w);
 }
 
 void e_io_prep_preadv(e_iocb *eio, int fd, const struct iovec *iov, int iovcnt,
@@ -104,7 +108,7 @@ void e_io_prep_preadv(e_iocb *eio, int fd, const struct iovec *iov, int iovcnt,
     io_prep_preadv(&eio->io, fd, iov, iovcnt, offset);
     eio->cb = cb;
     eio->ptr = arg;
-    io_set_callback(&eio->io, e_iocb_cb);
+    io_set_callback(&eio->io, e_iocb_cb_r);
 }
 
 int e_io_submit(io_context_t ctx, e_iocb *eio)

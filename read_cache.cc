@@ -346,7 +346,7 @@ class rcache_req : public request {
     off_t buf_offset;
     char *_buf = NULL;
 
-//    std::mutex m;
+    std::mutex m;
 //    std::condition_variable cv;
     
 public:
@@ -369,10 +369,25 @@ void rcache_req::release() {
 	delete this;
 }
 
+#if 0
+const char *state_names[] = {
+    "RCACHE_NONE",
+    "RCACHE_LOCAL_BUFFER",	// 1
+    "RCACHE_SSD_READ",		// 2
+    "RCACHE_QUEUED",		// 3
+    "RCACHE_BLOCK_WRITE",	// 4
+    "RCACHE_BACKEND_WAIT",	// 5
+    "RCACHE_DIRECT_READ",	// 6
+    "RCACHE_DONE"		// 7
+};
+#endif
+
 void rcache_req::notify(request *child) {
+    std::unique_lock lk(m);
+    
     bool notify_parent = false;
     enum req_type next_state = state;
-    
+
     if (child != NULL)
 	child->release();
     
@@ -427,8 +442,11 @@ void rcache_req::notify(request *child) {
     
     if (notify_parent && parent != NULL) 
 	parent->notify(this);
-    if (next_state == RCACHE_DONE && released)
+
+    if (next_state == RCACHE_DONE && released) {
+	lk.unlock();
 	delete this;
+    }
     else
 	state = next_state;
 }

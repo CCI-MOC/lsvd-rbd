@@ -265,10 +265,20 @@ public:
     void release() {}
 };
 
-char logbuf[1024], *p_log = logbuf;
-extern "C" int get_logbuf(char *buf) {
-    memcpy(buf, logbuf, p_log - logbuf);
-    return p_log - logbuf;
+char logbuf[4096], *p_log = logbuf;
+extern "C" int get_logbuf(char *buf, size_t max) {
+    size_t len = p_log - logbuf;
+    len = (len > max) ? max : len;
+    memcpy(buf, logbuf, len);
+    return len;
+}
+
+#include <stdarg.h>
+void do_log(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    size_t max = logbuf + sizeof(logbuf) - p_log;
+    p_log += vsnprintf(p_log, max, fmt, args);
 }
 
 class read1_req : public request {
@@ -283,7 +293,6 @@ public:
     ~read1_req() { printf("read1 delete\n"); }
 
     void notify(request *child) {
-	p_log += sprintf(p_log, "read1 notify %p\n", this);
 	*done = true;
 	cv->notify_all();
     }

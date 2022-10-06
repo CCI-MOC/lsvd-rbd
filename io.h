@@ -21,12 +21,12 @@ size_t getsize64(int fd);
 
 /* adapt libaio for generic callbacks
  */
-void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
+//void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2);
 struct e_iocb {
     iocb io;
     void (*cb)(void*) = NULL;
     void *ptr = NULL;
-    e_iocb() { io_set_callback(&io, e_iocb_cb); }
+    e_iocb() {}
 };
 
 /* this is *supposed* to be implemented in libaio

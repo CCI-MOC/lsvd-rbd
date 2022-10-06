@@ -93,4 +93,9 @@ extern "C" void fakemap_update(_dbg *d, int base, int limit,
                                int obj, int offset);
 extern "C" void fakemap_reset(_dbg *d);
 
+/* lightweight printf to buffer, retrieve via get_logbuf or lsvd.logbuf
+ */
+extern void do_log(const char *fmt, ...);
+extern "C" int get_logbuf(char *buf);
+
 #endif
