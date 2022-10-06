@@ -55,6 +55,8 @@ class translate_impl : public translate {
     objmap      *map; /* map shared between read cache and translate */
     int          seq;
 
+    friend class translate_req;
+    
     class batch {
     public:
 	char  *buf = NULL;	// data goes here
@@ -188,7 +190,6 @@ translate_impl::translate_impl(backend *_io, objmap *omap) :
     objstore = _io;
     parser = new object_reader(objstore);
     map = omap;
-    b = new batch(BATCH_SIZE);
 }
 
 translate *make_translate(backend *_io, objmap *omap) {
@@ -196,7 +197,7 @@ translate *make_translate(backend *_io, objmap *omap) {
 }
 
 translate_impl::~translate_impl() {
-    if (b)
+    if (b) 
 	delete b;
     delete parser;
 }
@@ -370,6 +371,45 @@ ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     return len;
 }
 
+/* translate_req: just call notify_completion then 
+ * delete everything
+ */
+class translate_req : public request {
+    uint32_t seq;
+    translate_impl *tx;
+    friend class translate_impl;
+    
+    /* various things that we might need to free
+     */
+    std::vector<char*> to_free;
+    translate_impl::batch *b;
+    
+public:
+    translate_req(uint32_t seq_, translate_impl *tx_) {
+	seq = seq_;
+	tx = tx_;
+    }
+    ~translate_req(){}
+
+    sector_t lba() { return 0; }
+    smartiov *iovs() { return NULL; }
+    bool is_done() { return true; }
+    void wait() {}
+    void run(request *parent) {}
+    void release() {}
+
+    void notify(request *child) {
+	if (child)
+	    child->release();
+	tx->notify_complete(seq);
+	for (auto ptr : to_free)
+	    free(ptr);
+	if (b) 
+	    delete b;
+	delete this;
+    }
+};
+ 
 /* worker: pull batches from queue and write them out
  */
 void translate_impl::worker_thread(thread_pool<batch*> *p) {
@@ -432,20 +472,15 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 	iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
 		       {b->buf, b->len}};
 
-	/* Note that we've already decremented object live counts when 
-	 * we copied the data into the batch buffer.
+	/* on completion, t_req calls notify_complete and frees stuff
 	 */
-	auto closure = wrap([this, hdr, b]{
-		notify_complete(b->seq);
-		free(hdr);
-		delete b;
-		return true;
-	    });
-
+	auto t_req = new translate_req(b->seq, this);
+	t_req->to_free.push_back(hdr);
+	t_req->b = b;
+	
 	objname name(prefix(), b->seq);
-	auto cb_req = new callback_req(call_wrapped, closure);
 	auto req = objstore->make_write_req(name.c_str(), iov, 2);
-	req->run(cb_req);
+	req->run(t_req);
     }
 }
 
@@ -740,7 +775,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    lk.lock();
 	    off_t byte_offset = 0;
 	    sector_t data_sectors = 0;
-	    auto obj_extents = new std::vector<data_map>();
+	    std::vector<data_map> obj_extents;
 	    
 	    for (auto [base, limit, ptr] : extents) {
 		for (auto it2 = map->map.lookup(base);
@@ -760,7 +795,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 			       it3 == file_map.end() ? "Y" : "n");
 			throw_fs_error("gc");
 		    }
-		    obj_extents->push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
+		    obj_extents.push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
 
 		    data_sectors += _sectors;
 		    byte_offset += bytes;
@@ -770,9 +805,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 
 	    gc_sectors_written += data_sectors;
 	    int hdr_sectors = make_gc_hdr(hdr, _seq, data_sectors,
-					  obj_extents->data(), obj_extents->size());
+					  obj_extents.data(), obj_extents.size());
 	    auto offset = hdr_sectors;
-	    for (auto e : *obj_extents) {
+	    for (auto e : obj_extents) {
 		extmap::obj_offset oo = {_seq, offset};
 		map->map.update(e.lba, e.lba+e.len, oo, NULL);
 		offset += e.len;
@@ -780,34 +815,18 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 
 	    lk.unlock();
 
-	    auto iovs = new smartiov;
-	    iovs->push_back((iovec){hdr, (size_t)hdr_sectors*512});
-	    iovs->push_back((iovec){buf, (size_t)byte_offset});
+	    smartiov iovs;
+	    iovs.push_back((iovec){hdr, (size_t)hdr_sectors*512});
+	    iovs.push_back((iovec){buf, (size_t)byte_offset});
 
-	    auto closure = wrap([this, hdr_sectors, obj_extents, buf, hdr, _seq, iovs]{
-		    std::unique_lock lk(m);
-
-		    /* update most recent completion
-		     */
-		    done[_seq % 128] = true;
-		    while (done[next_compln % 128]) {
-			done[next_compln % 128] = false;
-			next_compln++;
-		    }
-		    cv.notify_all();
-
-		    delete obj_extents;
-		    delete iovs;
-		    free(buf);
-		    free(hdr);
-		    return true;
-		});
+	    auto t_req = new translate_req(_seq, this);
+	    t_req->to_free.push_back(hdr);
+	    t_req->to_free.push_back(buf);
 
 	    objname name(prefix(), _seq);
-	    auto cb_req = new callback_req(call_wrapped, closure);
-	    auto [iov,iovcnt] = iovs->c_iov();
+	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
-	    req->run(cb_req);
+	    req->run(t_req);
 	}
 	close(fd);
     }
