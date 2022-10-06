@@ -91,26 +91,6 @@ static inline void throw_fs_error(std::string msg) {
                                                     std::system_category()));
 }
 
-// cache_work:	This is a structure for support in using the read_cache and write_cache objects
-//		It contains callback to function, sectors for the caches, smartiov (see smartiov.h
-//		for documentation), and a constructure for itself
-struct cache_work {
-public:
-    uint64_t  lba;
-    void    (*callback)(void*);
-    void     *ptr;
-    sector_t     sectors;
-    smartiov  iovs;
-    cache_work(sector_t _lba, const iovec *iov, int iovcnt,
-	       void (*_callback)(void*), void *_ptr) : iovs(iov, iovcnt) {
-	lba = _lba;
-	sectors = iovs.bytes() / 512;
-	callback = _callback;
-	ptr = _ptr;
-    }
-};
-
-
 /* convenience class, because we don't know cache size etc.
  * at cache object construction time.
  */
