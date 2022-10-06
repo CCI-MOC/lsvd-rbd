@@ -878,7 +878,12 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 	}
     }
 
-    off_t iov_offset = 0;
+    if (regions.size() == 0) {
+	iovs.zero();
+	return 0;
+    }
+    
+    size_t iov_offset = 0;
     for (auto [obj, _offset, _len] : regions) {
 	auto slice = iovs.slice(iov_offset, iov_offset + _len);
 	if (obj == -1)
@@ -891,7 +896,12 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 	iov_offset += _len;
     }
 
-    return iov_offset;
+    if (iov_offset < iovs.bytes()) {
+	auto slice = iovs.slice(iov_offset, len - iov_offset);
+	slice.zero();
+    }
+    
+    return 0;
 }
 
 void translate_impl::getmap(int base, int limit,
@@ -915,7 +925,7 @@ int translate_impl::batch_seq(void) {
     return seq;
 }
 
-extern "C" int batch_seq(void *xlate_) {
+int batch_seq(translate *xlate_) {
     auto xlate = (translate_impl*)xlate_;
     return xlate->batch_seq();
 }

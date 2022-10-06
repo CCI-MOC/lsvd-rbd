@@ -18,6 +18,11 @@ liblsvd.so:  $(OBJS)
 
 %.o: %.d
 
+test-1: test-1.o $(OBJS)
+	$(CXX) -o $@ test-1.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio
+test-2: test-2.o $(OBJS)
+	$(CXX) -o $@ test-2.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio
+
 # Add .d to Make's recognized suffixes.
 SUFFIXES += .d
 
