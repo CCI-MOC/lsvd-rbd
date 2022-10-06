@@ -1,5 +1,9 @@
 # punch list
 
+**GET FIO WORKING**
+- read seems to have regressed totally
+- write seems to hang on completion when compiled with -O3
+
 ## config file
 things to go here:
 - write batch size
