@@ -41,7 +41,7 @@ def fmt_ckpt_map(maps):
 
 def read_ckpts(buf, base, bytes):
     if bytes <= 0:
-        return [ 'none' ]
+        return [ ]
     n = bytes//4
     ckpts = (c_int * n).from_buffer(buf[base:base+bytes])
     return [_ for _ in ckpts]
