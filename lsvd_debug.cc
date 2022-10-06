@@ -252,6 +252,50 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
     rcache->do_evict(n);
 }
 
+class trivial_req : public request {
+public:
+    trivial_req() {}
+    ~trivial_req() {}
+    virtual void notify(request *child) = 0;
+    sector_t lba() { return 0; }
+    smartiov *iovs() { return NULL; }
+    bool is_done() { return true; }
+    void wait() {}
+    void run(request *parent) {}
+    void release() {}
+};
+
+char logbuf[1024], *p_log = logbuf;
+extern "C" int get_logbuf(char *buf) {
+    memcpy(buf, logbuf, p_log - logbuf);
+    return p_log - logbuf;
+}
+
+class read1_req : public request {
+    std::condition_variable *cv;
+    bool *done;
+    
+public:
+    read1_req(std::condition_variable *cv_, bool *done_) {
+	cv = cv_;
+	done = done_;
+    }
+    ~read1_req() { printf("read1 delete\n"); }
+
+    void notify(request *child) {
+	p_log += sprintf(p_log, "read1 notify %p\n", this);
+	*done = true;
+	cv->notify_all();
+    }
+
+    sector_t lba() { return 0; }
+    smartiov *iovs() { return NULL; }
+    bool is_done() { return true; }
+    void wait() {}
+    void run(request *parent) {}
+    void release() {}
+};
+
 /* note that this leaks read cache request structures, because it 
  * doesn't call req->release()
  */
@@ -265,12 +309,6 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
     
     for (char *_buf = buf2; _len > 0; ) {
 	bool done = false;
-	void *closure = wrap([&m, &cv, &done]{
-		done = true;
-		cv.notify_all();
-		return true;
-	    });
-	auto cb_req = new callback_req(call_wrapped, closure);
 	auto [skip_len, read_len, r_req] =
 	    rcache->async_read(offset, _buf, _len);
 	
@@ -279,14 +317,13 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
 	_len -= (skip_len+read_len);
 	offset += (skip_len+read_len);
 	if (r_req != NULL) {
-	    r_req->run(cb_req);
+	    auto req1 = new read1_req(&cv, &done);
+	    r_req->run(req1);
 	    std::unique_lock lk(m);
 	    while (!done)
 		cv.wait(lk);
 	    r_req->release();
 	}
-	else
-	    delete_wrapped(closure);
     }
     memcpy(buf, buf2, len);
     free(buf2);

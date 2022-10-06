@@ -153,4 +153,4 @@ if __name__ == '__main__':
     unittest.main(exit=False)
     lsvd.io_stop()
     time.sleep(0.1)
-
+    print(lsvd.logbuf())

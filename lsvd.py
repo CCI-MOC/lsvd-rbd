@@ -210,6 +210,10 @@ def io_stop():
     pass
     #lsvd_lib.e_io_stop()
 
+def logbuf():
+    buf = (c_char * 1024)()
+    nbytes = lsvd_lib.get_logbuf(buf)
+    return (buf[0:nbytes]).decode('utf-8')
 
 # RBD functions
 
