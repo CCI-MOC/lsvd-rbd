@@ -347,14 +347,6 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 
 /* ----------- data transfer logic -------------*/
 
-/* TODO: 
- * if the read logic gets handled in what's currently the read cache,
- * then there's no need to handle reads from memory. 
- * - enter extents into map once, when writing batch
- * - update unit tests to use flush() when testing translation layer
- * - get rid of all that completion processing nonsense
- */
-
 /* an awful lot of code to copy data to the current batch and then
  * toss it to the worker thread pool if it's full
  * NOTE: offset is in bytes

@@ -47,7 +47,6 @@ void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2)
 {
     auto iocb = (e_iocb*)io;
     iocb->cb(iocb->ptr);
-    delete iocb;
 }
 
 int io_queue_wait(io_context_t ctx, struct timespec *timeout)

@@ -76,7 +76,6 @@ class write_cache_impl : public write_cache {
     uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
     std::vector<work_tuple> work;
     j_write_super *super;
-    int            fd;          /* TODO: remove, use sync NVME */
 
     /* these are used by wcache_write_req
      */
@@ -467,8 +466,6 @@ void write_cache_impl::read_map_entries() {
     char *map_buf = (char*)aligned_alloc(512, map_bytes_4k);
     std::vector<j_map_extent> extents;
 
-    // TODO: use nvme
-    //
     if (nvme_w->read(map_buf, map_bytes_4k, 4096L * super->map_start) < 0)
 	throw_fs_error("wcache_map");
     decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
@@ -499,11 +496,10 @@ void write_cache_impl::roll_log_forward() {
     // TODO TODO TODO
 }
     
-write_cache_impl::write_cache_impl(uint32_t blkno, int _fd,
+write_cache_impl::write_cache_impl(uint32_t blkno, int fd,
 				   translate *_be, int n_threads) {
 
     super_blkno = blkno;
-    fd = _fd;
     dev_max = getsize64(fd);
     be = _be;
     

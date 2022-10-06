@@ -31,7 +31,7 @@ class nvme_impl;
 
 class nvme_request : public request {
 public:
-    e_iocb     *eio;		// this is self-deleting. TODO: fix?
+    e_iocb      eio;
     smartiov    _iovs;
     size_t      ofs;
     int         t;
@@ -129,7 +129,6 @@ void call_send_request_notify(void *parent)
 nvme_request::nvme_request(smartiov *iov, size_t offset,
 			   int type, nvme_impl* nvme_w) : _iovs(iov->data(),
 								iov->size()) {
-    eio = new e_iocb;
     ofs = offset;
     t = type;
     nvme_ptr = nvme_w;
@@ -138,7 +137,6 @@ nvme_request::nvme_request(smartiov *iov, size_t offset,
 nvme_request::nvme_request(char *buf, size_t len, size_t offset,
 			   int type, nvme_impl* nvme_w) {
     _iovs.push_back((iovec){buf, len});
-    eio = new e_iocb;
     ofs = offset;
     t = type;
     nvme_ptr = nvme_w;
@@ -146,17 +144,13 @@ nvme_request::nvme_request(char *buf, size_t len, size_t offset,
 
 void nvme_request::run(request* parent_) {
     parent = parent_;
-    if (t == WRITE_REQ) {
-	e_io_prep_pwritev(eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
+    if (t == WRITE_REQ) 
+	e_io_prep_pwritev(&eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
 			  ofs, call_send_request_notify, this);
-	e_io_submit(nvme_ptr->ioctx, eio);
-
-    } else if (t == READ_REQ) {
-	e_io_prep_preadv(eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
+    else
+	e_io_prep_preadv(&eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
 			 ofs, call_send_request_notify, this);
-	e_io_submit(nvme_ptr->ioctx, eio);
-    } else
-	assert(false);
+    e_io_submit(nvme_ptr->ioctx, &eio);
 }
 
 void nvme_request::notify(request *child) {
@@ -188,5 +182,3 @@ void nvme_request::release() {
 }
 
 nvme_request::~nvme_request() {}
-
-

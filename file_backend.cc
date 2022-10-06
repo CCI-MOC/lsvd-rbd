@@ -73,7 +73,7 @@ class file_backend_req : public request {
     std::string     name;
     io_context_t    ioctx;
     request        *parent = NULL;
-    e_iocb         *eio;    // this is self-deleting. TODO: fix io.cc?
+    e_iocb          eio;
     int             fd;
     
 public:
@@ -101,19 +101,18 @@ public:
  */
 void file_backend_req::run(request *parent_) {
     parent = parent_;
-    eio = new e_iocb;
     int mode = (op == OP_READ) ? O_RDONLY : O_RDWR | O_CREAT | O_TRUNC;
     if ((fd = open(name.c_str(), mode, 0777)) < 0)
 	throw("file object error");
 
     auto [iov,iovcnt] = _iovs.c_iov();
     if (op == OP_WRITE)
-	e_io_prep_pwritev(eio, fd, iov, iovcnt, offset, rw_cb_fn, this);
+	e_io_prep_pwritev(&eio, fd, iov, iovcnt, offset, rw_cb_fn, this);
     else if (op == OP_READ) 
-	e_io_prep_preadv(eio, fd, iov, iovcnt, offset, rw_cb_fn, this);
+	e_io_prep_preadv(&eio, fd, iov, iovcnt, offset, rw_cb_fn, this);
     else
 	assert(false);
-    e_io_submit(ioctx, eio);
+    e_io_submit(ioctx, &eio);
 }
 
 /* TODO: this assumes no use of wait/release
