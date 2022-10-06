@@ -358,9 +358,6 @@ public:
     void release();
 
     void wait() {}
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
-    bool is_done() { return false; }
 };    
 
 void rcache_req::release() {

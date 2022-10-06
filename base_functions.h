@@ -1,7 +1,6 @@
 /*
  * file:	base_functions.h
  * description: General functions and minor structures for LSVD
- *			-wrapper functions
  *			-rounding functions
  * author:	Peter Desnoyers, Northeastern University
  *              Copyright 2021, 2022 Peter Desnoyers
@@ -36,27 +35,6 @@ size_t iov_sum(const iovec *iov, int iovcnt);
 
 // hex :	Converts uint32_t number to hex
 std::string hex(uint32_t n);
-
-/* simple hack so we can pass lambdas through C callback mechanisms
- */
-struct wrapper {
-    std::function<bool()> f;
-    wrapper(std::function<bool()> _f) : f(_f) {}
-};
-
-/* invoked function returns boolean - if true, delete the wrapper; otherwise
- * keep it around for another invocation
- */
-
-// wrap:	creates a new wrapper for the inputted function
-void *wrap(std::function<bool()> _f);
-
-// call_wrapped:	Invokes a wrapped function stored in location pointed to by pointer and if
-//			the function returns a value of TRUE, the wrapped function is deleted
-void call_wrapped(void *ptr);
-
-// delete_wrapped:	Wrapped function pointed to by ptr is simply deleted
-void delete_wrapped(void *ptr);
 
 // aligned :	returns if ptr is properly aligned with a-1
 bool aligned(const void *ptr, int a);

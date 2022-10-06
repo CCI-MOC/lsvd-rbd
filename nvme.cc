@@ -49,9 +49,6 @@ public:
 		 nvme_impl* nvme_w);
     ~nvme_request();
 
-    sector_t lba();
-    smartiov *iovs();
-    bool is_done(void);
     void wait();
     void run(request *parent);
     void notify(request *child);
@@ -192,7 +189,4 @@ void nvme_request::release() {
 
 nvme_request::~nvme_request() {}
 
-bool nvme_request::is_done() { return complete; }
-sector_t nvme_request::lba() { return 0; } // no one needs this
-smartiov *nvme_request::iovs() { return NULL; }
 

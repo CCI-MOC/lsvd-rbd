@@ -251,7 +251,7 @@ class rbd_aio_req : public request {
         data_iovs.push_back((iovec){aligned_buf, len});
         int blocks = div_round_up(len, 4096);
         img->wcache->get_room(blocks);
-        img->wcache->writev(this);
+        img->wcache->writev(this, offset/512, &data_iovs);
     }
     
     void run_r() {
@@ -309,9 +309,6 @@ public:
 	    free(aligned_buf);
     }
 
-    sector_t lba() { return offset / 512; }
-    smartiov *iovs() { return &data_iovs; }
-
     /* note that there's no child request until read cache is updated
      * to use request/notify model.
      */
@@ -320,13 +317,6 @@ public:
 	    notify_r(child);
 	else
 	    notify_w(child);
-    }
-
-    bool is_done() {
-	if (op == OP_READ)
-	    return launched && n_req <= 0;
-	else
-	    return complete;
     }
 
     /* TODO: this is really gross. To properly fix it I need to integrate this

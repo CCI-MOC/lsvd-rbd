@@ -81,11 +81,7 @@ public:
     }
     ~file_backend_req() {}
 
-    bool      is_done() {return false;} // TODO: ?????
     void      wait() {}		   // TODO: ?????
-    sector_t  lba() {return 0;}
-    smartiov *iovs() {return NULL;}
-
     void      run(request *parent);
     void      notify(request *child);
     void      release() {};

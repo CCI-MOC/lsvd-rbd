@@ -20,7 +20,7 @@ public:
 
     virtual ~write_cache() {}
 
-    virtual void writev(request *req) = 0;
+    virtual void writev(request *req, sector_t lba, smartiov *iov) = 0;
     virtual std::tuple<size_t,size_t,request*>
         async_read(size_t,char*,size_t) = 0;
     

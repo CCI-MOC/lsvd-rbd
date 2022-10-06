@@ -17,7 +17,6 @@
 #include <sstream>
 #include <iomanip>
 
-#include <algorithm>		// needed for wrap()
 #include "base_functions.h"
 
 #include <condition_variable>
@@ -192,9 +191,6 @@ public:
 	    rados_aio_write(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
     }
 
-    sector_t lba() { return 0;}
-    smartiov *iovs() { return NULL; }
-    bool is_done() { return false; }
     void release() {}
     void wait() {}
 };

@@ -38,8 +38,9 @@
 #include "write_cache.h"
 extern uuid_t my_uuid;
 
-/* ------------- Write cache structure ------------- */
+typedef std::tuple<request*,sector_t,smartiov*> work_tuple;
 
+/* ------------- Write cache structure ------------- */
 class write_cache_impl : public write_cache {
     size_t         dev_max;
     uint32_t       super_blkno;
@@ -73,7 +74,7 @@ class write_cache_impl : public write_cache {
     /* allocate journal entry, create a header
      */
     uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
-    std::vector<request*> work;
+    std::vector<work_tuple> work;
     j_write_super *super;
     int            fd;          /* TODO: remove, use sync NVME */
 
@@ -99,7 +100,7 @@ public:
     write_cache_impl(uint32_t blkno, int _fd, translate *_be, int n_threads);
     ~write_cache_impl();
 
-    void writev(request *req);
+    void writev(request *req, sector_t lba, smartiov *iov);
     virtual std::tuple<size_t,size_t,request*> 
         async_read(size_t offset, char *buf, size_t bytes);
 
@@ -126,7 +127,7 @@ class wcache_write_req : public request {
     std::atomic<int> reqs = 0;
 
     sector_t      plba;
-    std::vector<request*> *work = NULL;
+    std::vector<work_tuple> *work = NULL;
     request      *r_data = NULL;
     char         *hdr = NULL;
     smartiov     *data_iovs = NULL;
@@ -138,30 +139,24 @@ class wcache_write_req : public request {
     write_cache_impl *wcache = NULL;
     
 public:
-    wcache_write_req(std::vector<request*> *w, page_t n_pages, page_t page,
+    wcache_write_req(std::vector<work_tuple> *w, page_t n_pages, page_t page,
 		     page_t n_pad, page_t pad,
 		     write_cache *wcache);
     ~wcache_write_req();
     void run(request *parent);
     void notify(request *child);
 
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
-    bool is_done(void) { return true; }
     void wait() {}
     void release() {}		// TODO: free properly
 };
 
-static uint64_t sectors(request *req) {
-    return req->iovs()->bytes() / 512;
-}
 
 /* n_pages: number of 4KB data pages (not counting header)
  * page:    page number to begin writing 
  * n_pad:   number of pages to skip (not counting header)
  * pad:     page number for pad entry (0 if none)
  */
-wcache_write_req::wcache_write_req(std::vector<request*> *work_,
+wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
 				       page_t n_pages, page_t page,
 				       page_t n_pad, page_t pad,
 				       write_cache* wcache_)  {
@@ -178,8 +173,10 @@ wcache_write_req::wcache_write_req(std::vector<request*> *work_,
     }
   
     std::vector<j_extent> extents;
-    for (auto _w : *work)
-	extents.push_back((j_extent){(uint64_t)_w->lba(), sectors(_w)});
+    for (auto [req,lba,iov] : *work) {
+	(void)req;
+	extents.push_back((j_extent){(uint64_t)lba, iov->bytes() / 512});
+    }
   
     hdr = (char*)aligned_alloc(512, 4096);
     j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, my_uuid, 1+n_pages);
@@ -192,8 +189,9 @@ wcache_write_req::wcache_write_req(std::vector<request*> *work_,
     plba = (page+1) * 8;
     data_iovs = new smartiov();
     data_iovs->push_back((iovec){hdr, 4096});
-    for (auto _w : *work) {
-	auto [iov, iovcnt] = _w->iovs()->c_iov();
+    for (auto [req,lba,iovs] : *work) {
+	(void)req; (void)lba;
+	auto [iov, iovcnt] = iovs->c_iov();
 	data_iovs->ingest(iov, iovcnt);
     }
     r_data = wcache->nvme_w->make_write_request(data_iovs, page*4096L);
@@ -220,11 +218,13 @@ void wcache_write_req::notify(request *child) {
 
 	/* update the write cache forward and reverse maps
 	 */
-	for (auto _w : *work) {
-	    wcache->map.update(_w->lba(), _w->lba() + sectors(_w),
+	for (auto [req,lba,iovs] : *work) {
+	    (void)req;
+	    sector_t sectors = iovs->bytes() / 512;
+	    wcache->map.update(lba, lba + sectors,
 			       _plba, &garbage);
-	    wcache->rmap.update(_plba, _plba+sectors(_w), _w->lba());
-	    _plba += sectors(_w);
+	    wcache->rmap.update(_plba, _plba+sectors, lba);
+	    _plba += sectors;
 	    wcache->map_dirty = true;
 	}
 
@@ -236,10 +236,10 @@ void wcache_write_req::notify(request *child) {
 
     /* send data to backend, invoke callbacks, then clean up
      */
-    for (auto _w : *work) {
-	auto [iov, iovcnt] = _w->iovs()->c_iov();
-	wcache->be->writev(_w->lba()*512, iov, iovcnt);
-	_w->notify(NULL);	// don't release multiple times
+    for (auto [req,lba,iovs] : *work) {
+	auto [iov, iovcnt] = iovs->c_iov();
+	wcache->be->writev(lba*512, iov, iovcnt);
+	req->notify(NULL);	// don't release multiple times
     }
 
     /* we don't implement release or wait - just delete ourselves.
@@ -543,14 +543,16 @@ write_cache_impl::~write_cache_impl() {
 }
 
 void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
-    auto w = new std::vector<request*>(std::make_move_iterator(work.begin()),
-					  std::make_move_iterator(work.end()));
+    auto w = new std::vector<work_tuple>(
+	std::make_move_iterator(work.begin()),
+	std::make_move_iterator(work.end()));
     work.erase(work.begin(), work.end());
 
     sector_t sectors = 0;
-    for (auto _w : *w) {
-	sectors += _w->iovs()->bytes() / 512;
-	assert(_w->iovs()->aligned(512));
+    for (auto [req,lba,iov] : *w) {
+	(void)lba; (void)req;
+	sectors += iov->bytes() / 512;
+	assert(iov->aligned(512));
     }
     
     page_t pages = div_round_up(sectors, 8);
@@ -572,9 +574,9 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
     req->run(NULL);
 }
 
-void write_cache_impl::writev(request *req) {
+void write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
     std::unique_lock lk(m);
-    work.push_back(req);
+    work.push_back(std::make_tuple(req, lba, iov));
 
     // if we're not under write pressure, send writes immediately; else
     // batch them

@@ -371,10 +371,7 @@ ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     return len;
 }
 
-/* translate_req: just call notify_completion then 
- * delete everything
- */
-class translate_req : public request {
+class translate_req : public trivial_request {
     uint32_t seq;
     translate_impl *tx;
     friend class translate_impl;
@@ -390,13 +387,6 @@ public:
 	tx = tx_;
     }
     ~translate_req(){}
-
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
-    bool is_done() { return true; }
-    void wait() {}
-    void run(request *parent) {}
-    void release() {}
 
     void notify(request *child) {
 	if (child)

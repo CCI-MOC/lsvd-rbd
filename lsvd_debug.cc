@@ -252,19 +252,6 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
     rcache->do_evict(n);
 }
 
-class trivial_req : public request {
-public:
-    trivial_req() {}
-    ~trivial_req() {}
-    virtual void notify(request *child) = 0;
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
-    bool is_done() { return true; }
-    void wait() {}
-    void run(request *parent) {}
-    void release() {}
-};
-
 char logbuf[4096], *p_log = logbuf;
 extern "C" int get_logbuf(char *buf, size_t max) {
     size_t len = p_log - logbuf;
@@ -281,7 +268,7 @@ void do_log(const char *fmt, ...) {
     p_log += vsnprintf(p_log, max, fmt, args);
 }
 
-class read1_req : public request {
+class read1_req : public trivial_request {
     std::condition_variable *cv;
     bool *done;
     
@@ -290,19 +277,12 @@ public:
 	cv = cv_;
 	done = done_;
     }
-    ~read1_req() { printf("read1 delete\n"); }
+    ~read1_req() { }
 
     void notify(request *child) {
 	*done = true;
 	cv->notify_all();
     }
-
-    sector_t lba() { return 0; }
-    smartiov *iovs() { return NULL; }
-    bool is_done() { return true; }
-    void wait() {}
-    void run(request *parent) {}
-    void release() {}
 };
 
 /* note that this leaks read cache request structures, because it 
@@ -338,6 +318,38 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
     free(buf2);
 }
 
+class read2_req : public trivial_request {
+public:
+    int refcnt = 0;
+    std::mutex m;
+    std::condition_variable cv;
+    bool started = false;
+    
+    read2_req() { }
+    ~read2_req() { }
+
+    void add_ref() {
+	std::unique_lock lk(m);
+	refcnt++;
+    }
+    void run(request *unused) {
+	std::unique_lock lk(m);
+	started = true;
+	if (refcnt == 0)
+	    cv.notify_all();
+    }
+    void notify(request *child) {
+	std::unique_lock lk(m);
+	if (--refcnt == 0 && started) 
+	    cv.notify_all();
+    }
+    void wait() {
+	std::unique_lock lk(m);
+	while (refcnt > 0)
+	    cv.wait(lk);
+    }
+};
+
 /* note that this leaks read cache request structures, because it 
  * doesn't call req->release()
  */
@@ -346,20 +358,12 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
     int _len = len;
-    std::atomic<int> left(0);
     std::mutex m;
     std::condition_variable cv;
+
+    auto req = new read2_req();
     
     for (char *_buf = buf2; _len > 0; ) {
-	void *closure = wrap([&cv, &left]{
-		if (--left == 0) {
-		    cv.notify_all();
-		    return true;
-		}
-		return false;
-	    });
-	left++;
-	auto cb_req = new callback_req(call_wrapped, closure);
 	auto [skip_len, read_len, r_req] =
 	    rcache->async_read(offset, _buf, _len);
 	
@@ -367,19 +371,17 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
 	_buf += (skip_len+read_len);
 	_len -= (skip_len+read_len);
 	offset += (skip_len+read_len);
-	
-	if (r_req != NULL)
-	    r_req->run(cb_req);
-	else {
-	    left--;
-	    delete_wrapped(closure);
+
+	if (r_req != NULL) {
+	    req->add_ref();
+	    r_req->run(req);
 	}
     }
-    std::unique_lock lk(m);
-    while (left.load() > 0)
-	cv.wait(lk);
+    req->run(NULL);
+    req->wait();
     memcpy(buf, buf2, len);
     free(buf2);
+    delete req;
 }
 
 extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len)
