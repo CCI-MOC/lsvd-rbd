@@ -17,6 +17,8 @@ def div_round_up(n, m):
 # rm -f <cachedir>/*.cache
 def cleanup(name):
     cache_dir = os.path.dirname(name)
+    if not os.access(cache_dir, os.R_OK | os.X_OK):
+        os.mkdir(cache_dir)
     for f in os.listdir(cache_dir):
         if f.endswith('.cache'):
             os.unlink(cache_dir + '/' + f)
