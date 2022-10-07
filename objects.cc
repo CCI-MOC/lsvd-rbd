@@ -135,18 +135,32 @@ ssize_t object_reader::read_checkpoint(const char *name,
     return 0;
 }
 
+/* How many bytes will we need for an object header if we 
+ * have @n_entries extent entries. 
+ * list of checkpoints = [] if ckpt == 0, else [ckpt]
+ */
+size_t obj_hdr_len(int n_entries, int ckpt) {
+    return sizeof(obj_hdr) +
+	sizeof(obj_data_hdr) +
+	n_entries * sizeof(data_map) +
+	((ckpt == 0) ? 0 : sizeof(int));
+}
+
 /* create header for a data object, returns size in bytes
+ * unfortunately we need the length earlier in the code, so
+ * we duplicate some of this logic in obj_hdr_len()
  */
 size_t make_data_hdr(char *hdr, size_t bytes, uint32_t last_ckpt,
 		     std::vector<data_map> *entries, uint32_t seq,
 		     uuid_t *uuid) {
     auto h = (obj_hdr*)hdr;
     auto dh = (obj_data_hdr*)(h+1);
-    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
+    uint32_t o1 = sizeof(*h) + sizeof(*dh),
+	l1 = (last_ckpt == 0) ? 0 : sizeof(uint32_t),
 	o2 = o1 + l1, l2 = entries->size() * sizeof(data_map),
 	hdr_bytes = o2 + l2;
     uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
-	
+
     *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_DATA, .seq = seq,
 		   .hdr_sectors = hdr_sectors,
@@ -158,10 +172,13 @@ size_t make_data_hdr(char *hdr, size_t bytes, uint32_t last_ckpt,
 			 objs_cleaned_len = 0, .data_map_offset = o2,
 			 .data_map_len = l2};
 
-    uint32_t *p_ckpt = (uint32_t*)(dh+1);
-    *p_ckpt = last_ckpt;
+    auto dm = (data_map*)(dh+1);
+    if (l1 != 0) {
+	auto p_ckpt = (uint32_t*)dm;
+	*p_ckpt = last_ckpt;
+	dm = (data_map*)(p_ckpt+1);
+    }
 
-    data_map *dm = (data_map*)(p_ckpt+1);
     for (auto e : *entries)
 	*dm++ = e;
 

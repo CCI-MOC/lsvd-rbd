@@ -157,6 +157,8 @@ public:
 			    std::vector<ckpt_mapentry> &dmap);
 };
 
+extern size_t obj_hdr_len(int n_entries, int ckpt);
+
 extern size_t make_data_hdr(char *hdr, size_t bytes, uint32_t last_ckpt, 
                             std::vector<data_map> *entries, uint32_t seq,
                             uuid_t *uuid);

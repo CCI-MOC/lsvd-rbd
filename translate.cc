@@ -42,14 +42,6 @@
 uuid_t my_uuid;			// used by write cache (read cache?)
 const int BATCH_SIZE = 8 * 1024 * 1024;
 
-/* How many bytes will we need for an object header if we 
- * have @n_entries extent entries
- */
-static size_t obj_hdr_len(int n_entries) {
-    return sizeof(obj_hdr) +
-	sizeof(obj_data_hdr) + n_entries * sizeof(data_map);
-}
-
 /* ----------- Object translation layer -------------- */
 
 class translate_impl : public translate {
@@ -96,7 +88,7 @@ class translate_impl : public translate {
     /* tracking completions for flush()
      */
     int       next_compln = 1;
-    int       last_ckpt = -1;	// TODO - initialize
+    int       last_ckpt = 0;	// special value - see make_data_hdr
     int       last_sent = 0;	// most recent data object
     
     std::vector<bool> done;
@@ -419,7 +411,7 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 	 * - map->map - LBA to obj/offset map
 	 * - object_info, totals - adjust for new garbage
 	 */
-	size_t hdr_bytes = obj_hdr_len(b->entries.size());
+	size_t hdr_bytes = obj_hdr_len(b->entries.size(), last_ckpt);
 	uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
 	obj_info oi = {.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
 		       .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
