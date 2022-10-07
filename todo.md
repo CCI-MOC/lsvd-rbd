@@ -20,9 +20,10 @@ Can probably have sections that override settings on a per-volume basis
 
 **split read/write** - if we're going to use files, there's no reason why the two caches can't go in different files.
 
-**naming** - default name is volume UUID, or "UUID.rcache", "UUID.wcache"
+[DONE] **naming** - default name is volume UUID, or "UUID.rcache", "UUID.wcache"
 
-**creation** - volume startup should be able to create cache if none exists
+[DONE] **creation** - volume startup should be able to create cache if none exists
+note that we still don't handle malformed cache files
 
 ## other stuff
 
@@ -36,13 +37,14 @@ Can probably have sections that override settings on a per-volume basis
 
 Note - I had been thinking about having the RBD level (`lsvd.cc`) pass data to the translation layer after write cache completion, but this won't work, as it won't preserve the write ordering in the cache. It will result in a *legal* ordering, but if the backend and cache differ, volume could change after crash recovery.
 
-**top-level structure** - `fake_rbd_image` was just an afterthought. Need to re-architect it properly.
+**top-level structure** - [DONE] `fake_rbd_image` was just an
+afterthought. Need to re-architect it properly.
 
 **merged caches** - Is there any way we can move stuff from the write cache to the read cache? 
 
 **race conditions** - scrub notification methods to look for race conditions like the read cache one.
 
-Checkpoint list weirdness:
+[DONE] Checkpoint list weirdness:
 ```
     ckpts:     68 : 4294967295
 ```
@@ -73,7 +75,7 @@ requests in general:
 
 `translate.cc`:
 - get rid of global UUID
-- initialize `last_ckpt` - done? need to check
+- [DONE] initialize `last_ckpt` - done? need to check
 - `translate_impl::worker_thread` - coalesce writes
 - GC in general, also something about the objmap lock...
 
