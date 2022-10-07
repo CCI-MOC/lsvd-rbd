@@ -227,7 +227,7 @@ ssize_t translate_impl::init(const char *prefix_,
 
     memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
     
-    seq = super_sh->next_obj;
+    seq = next_compln = super_sh->next_obj;
     b = new batch(BATCH_SIZE);
     
     int _ckpt = 1;
@@ -261,7 +261,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	std::vector<obj_cleaned> cleaned;
 	std::vector<data_map>    entries;
 	obj_hdr h; obj_data_hdr dh;
-	seq = i;
+	seq = next_compln = i;
 	objname name(prefix(), i);
 	if (parser->read_data_hdr(name.c_str(), h, dh, ckpts,
 				  cleaned, entries) < 0)
