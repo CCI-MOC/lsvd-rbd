@@ -30,6 +30,7 @@ def rbd_startup():
     mkdisk.cleanup(img)
     sectors = 10*1024*2 # 10MB
     mkdisk.mkdisk(img, sectors)
+    mkcache.cleanup(nvme)
     mkcache.mkcache(nvme)
     return lsvd.rbd_open(img)
 

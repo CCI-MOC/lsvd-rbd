@@ -14,6 +14,13 @@ import blkdev
 def div_round_up(n, m):
     return (n + m - 1) // m
 
+# rm -f <cachedir>/*.cache
+def cleanup(name):
+    cache_dir = os.path.dirname(name)
+    for f in os.listdir(cache_dir):
+        if f.endswith('.cache'):
+            os.unlink(cache_dir + '/' + f)
+    
 # backend batch size is 8MB, write cache should be >= 2 batches
 # 
 def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=4096, rblks=4096):
