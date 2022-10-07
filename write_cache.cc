@@ -36,7 +36,7 @@
 #include "nvme.h"
 
 #include "write_cache.h"
-extern uuid_t my_uuid;
+#include "config.h"
 
 typedef std::tuple<request*,sector_t,smartiov*> work_tuple;
 
@@ -44,7 +44,9 @@ typedef std::tuple<request*,sector_t,smartiov*> work_tuple;
 class write_cache_impl : public write_cache {
     size_t         dev_max;
     uint32_t       super_blkno;
-
+    uuid_t         vol_uuid;
+    lsvd_config   *cfg;
+    
     std::atomic<int64_t> sequence; // write sequence #
 
     /* bookkeeping for write throttle
@@ -85,7 +87,7 @@ class write_cache_impl : public write_cache {
     extmap::cachemap2 rmap;
     bool              map_dirty;
     translate        *be;
-    j_hdr *mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks);
+    j_hdr *mk_header(char *buf, uint32_t type, page_t blks);
     nvme 		      *nvme_w = NULL;
 
 public:
@@ -96,7 +98,8 @@ public:
     void release_room(int blks);
 
 
-    write_cache_impl(uint32_t blkno, int _fd, translate *_be, int n_threads);
+    write_cache_impl(uint32_t blkno, int _fd, translate *_be,
+		     uuid_t uuid, lsvd_config *cfg);
     ~write_cache_impl();
 
     void writev(request *req, sector_t lba, smartiov *iov);
@@ -164,7 +167,7 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
     
     if (pad != 0) {
 	pad_hdr = (char*)aligned_alloc(512, 4096);
-	wcache->mk_header(pad_hdr, LSVD_J_PAD, my_uuid, n_pad+1);
+	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
 	pad_iov = new smartiov();
 	pad_iov->push_back((iovec){pad_hdr, 4096});
 	reqs++;
@@ -178,7 +181,7 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
     }
   
     hdr = (char*)aligned_alloc(512, 4096);
-    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, my_uuid, 1+n_pages);
+    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, 1+n_pages);
 
     j->extent_offset = sizeof(*j);
     size_t e_bytes = extents.size() * sizeof(j_extent);
@@ -349,14 +352,14 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
 
 /* call with lock held
  */
-j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, uuid_t &uuid, page_t blks) {
+j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
     assert(!m.try_lock());
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr*)buf;
-    *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1, .vol_uuid = {0},
+    *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1,
+		 .vol_uuid = {*vol_uuid},
 		 .seq = super->seq++, .len = (uint32_t)blks, .crc32 = 0,
 		 .extent_offset = 0, .extent_len = 0};
-    memcpy(h->vol_uuid, uuid, sizeof(uuid));
     return h;
 }
 
@@ -496,12 +499,14 @@ void write_cache_impl::roll_log_forward() {
     // TODO TODO TODO
 }
     
-write_cache_impl::write_cache_impl(uint32_t blkno, int fd,
-				   translate *_be, int n_threads) {
-
+write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
+				    uuid_t uuid,
+				    lsvd_config *cfg_) {
     super_blkno = blkno;
     dev_max = getsize64(fd);
     be = _be;
+    cfg = cfg_;
+    memcpy(vol_uuid, uuid, sizeof(vol_uuid));
     
     const char *name = "write_cache_cb";
     nvme_w = make_nvme(fd, name);
@@ -528,8 +533,9 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd,
 }
 
 write_cache *make_write_cache(uint32_t blkno, int fd,
-			      translate *be, int n_threads) {
-    return new write_cache_impl(blkno, fd, be, n_threads);
+			      translate *be, uuid_t &uuid_,
+			      lsvd_config *cfg) {
+    return new write_cache_impl(blkno, fd, be, uuid_, cfg);
 }
 
 write_cache_impl::~write_cache_impl() {

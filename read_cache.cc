@@ -39,6 +39,7 @@
 
 #include "request.h"
 #include "journal.h"
+#include "config.h"
 #include "translate.h"
 #include "nvme.h"
 

@@ -71,7 +71,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 
     /* read superblock and initialize translation layer
      */
-    xlate = make_translate(objstore, &map, &map_lock);
+    xlate = make_translate(objstore, &cfg, &map, &map_lock);
     xlate->init(name, cfg.xlate_threads, true);
 
     /* figure out cache file name, create it if necessary
@@ -93,7 +93,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	return -1;
     if (js->magic != LSVD_MAGIC || js->type != LSVD_J_SUPER)
 	return -1;
-    wcache = make_write_cache(js->write_super, fd, xlate, cfg.wcache_threads);
+    wcache = make_write_cache(js->write_super, fd, xlate,
+			      xlate->uuid, &cfg);
     rcache = make_read_cache(js->read_super, fd, false,
 			     xlate, &map, &map_lock, objstore);
     free(js);

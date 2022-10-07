@@ -33,7 +33,8 @@ public:
 };
 
 extern write_cache *make_write_cache(uint32_t blkno, int fd,
-                                     translate *be, int n_threads);
+                                     translate *be, uuid_t &uuid,
+                                     lsvd_config *cfg);
 
 #endif
 

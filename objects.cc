@@ -44,14 +44,14 @@ std::pair<char*,ssize_t>
 object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
 			  std::vector<clone_info*> &clones,
 			  std::vector<snap_info> &snaps,
-			  uuid_t &my_uuid) {
+			  uuid_t &uuid) {
     char *super_buf = read_object_hdr(name, false);
     auto super_h = (obj_hdr*)super_buf;
 
     if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
 	super_h->type != LSVD_SUPER)
 	return std::make_pair((char*)NULL,-1);
-    memcpy(my_uuid, super_h->vol_uuid, sizeof(uuid_t));
+    memcpy(uuid, super_h->vol_uuid, sizeof(uuid_t));
 
     super_hdr *super_sh = (super_hdr*)(super_h+1);
 

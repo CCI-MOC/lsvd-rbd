@@ -49,6 +49,11 @@ afterthought. Need to re-architect it properly.
     ckpts:     68 : 4294967295
 ```
 
+translate threads - do we actually need multiple threads, since we're
+using async calls? probably not.
+
+any other parameters that should go in the config file?
+
 ## list of TODO comments in code
 
 `io.cc`:
@@ -61,7 +66,7 @@ requests in general:
 `rados_backend.cc`:
 - should `rados_backend` take an ioctx rather than using pool in the prefix?
 - handle multiple pools in rados backend
-- shut down RADOS state on rados backend delete
+- [DONE] shut down RADOS state on rados backend delete
 
 `lsvd.cc`:
 - implement `rbd_aio_discard`

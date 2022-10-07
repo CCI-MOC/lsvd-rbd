@@ -30,6 +30,8 @@
 #include "file_backend.h"
 #include "rados_backend.h"
 
+#include "config.h"
+
 /* types used to interface with some debug functions - must
  * match ctypes definitions in lsvd_types.py
  */
@@ -41,6 +43,8 @@ public:
     std::shared_mutex obj_lock;
     read_cache  *rcache;
     backend     *io;
+    uuid_t       uuid;
+    lsvd_config  cfg;
 };
 
 // tuple :	used for retrieving maps
@@ -92,7 +96,7 @@ extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
     auto d = new _dbg();
     d->io = new file_backend();
-    d->lsvd = make_translate(d->io, &d->obj_map, &d->obj_lock);
+    d->lsvd = make_translate(d->io, &d->cfg, &d->obj_map, &d->obj_lock);
     auto rv = d->lsvd->init(name, n, flushthread);
     *p = (void*)d;
     return rv;
@@ -158,7 +162,7 @@ extern "C" int xlate_checkpoint(_dbg *d)
 }
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p)
 {
-    auto wcache = make_write_cache(blkno, fd, d->lsvd, 2);
+    auto wcache = make_write_cache(blkno, fd, d->lsvd, d->uuid, &d->cfg);
     *p = (void*)wcache;
 }
 extern "C" void wcache_close(write_cache *wcache)

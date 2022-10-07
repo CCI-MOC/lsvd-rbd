@@ -13,6 +13,7 @@
 
 struct iovec;
 class backend;
+class lsvd_config;
 
 class translate {
 public:
@@ -41,7 +42,7 @@ public:
     virtual int frontier(void) = 0;
 };
 
-extern translate *make_translate(backend *_io, extmap::objmap *map,
-                                 std::shared_mutex *m);
+extern translate *make_translate(backend *_io, lsvd_config *cfg,
+                                 extmap::objmap *map, std::shared_mutex *m);
 
 #endif

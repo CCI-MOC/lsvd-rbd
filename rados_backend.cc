@@ -73,11 +73,15 @@ rados_backend::rados_backend() {
 }
 
 rados_backend::~rados_backend() {
+    if (pool_len > 0)
+	rados_ioctx_destroy(io_ctx);
     /* TODO: do we close things down? */
 }
 
-/* TODO: make rados_backend take an io_ctx, dispense with all this
- * pool nonsense. Means all images go in the same pool
+/* if pool hasn't been initialized yet, initialize the ioctx
+ * only supports one pool, exception if you try to access another one
+ * name format: <pool>/<object_prefix>
+ * HACK: returns pointer to object name
  */
 char* rados_backend::pool_init(const char *pool_) {
     if (pool_len == 0) {
@@ -93,14 +97,6 @@ char* rados_backend::pool_init(const char *pool_) {
     }
     assert(!memcmp(pool, pool_, pool_len));
     return (char*)pool_ + pool_len + 1;
-}
-
-/* really gross, just special case of strtok. 
- */
-std::pair<char*,char*> split_name(char *name) {
-    char *p = strchr(name, '/');
-    *p = 0;
-    return std::pair(name, p+1);
 }
 
 int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {

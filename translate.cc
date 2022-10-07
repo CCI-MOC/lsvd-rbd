@@ -32,15 +32,13 @@
 #include "request.h"
 #include "objects.h"
 #include "objname.h"
+#include "config.h"
 #include "translate.h"
 
 #include "backend.h"
 #include "smartiov.h"
 #include "misc_cache.h"
 
-// TODO: fix this
-uuid_t my_uuid;			// used by write cache (read cache?)
-const int BATCH_SIZE = 8 * 1024 * 1024;
 
 /* ----------- Object translation layer -------------- */
 
@@ -48,6 +46,7 @@ class translate_impl : public translate {
     std::mutex         m;	// for things in this instance
     extmap::objmap    *map;	// shared object map
     std::shared_mutex *map_lock; // locks the object map
+    lsvd_config       *cfg;
     
     std::atomic<int> seq;
 
@@ -77,7 +76,7 @@ class translate_impl : public translate {
 	}
     };
     batch *b = NULL;
-
+    
     /* info on all live objects - all sizes in sectors */
     struct obj_info {
 	uint32_t hdr;
@@ -155,7 +154,8 @@ class translate_impl : public translate {
     }
 
 public:
-    translate_impl(backend *_io, extmap::objmap *map, std::shared_mutex *m);
+    translate_impl(backend *_io, lsvd_config *cfg_,
+		   extmap::objmap *map, std::shared_mutex *m);
     ~translate_impl();
 
     ssize_t init(const char *name, int nthreads, bool timedflush);
@@ -179,18 +179,19 @@ public:
     int batch_seq(void);
 };
 
-translate_impl::translate_impl(backend *_io, extmap::objmap *map_,
-			       std::shared_mutex *m_) :
+translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
+			       extmap::objmap *map_, std::shared_mutex *m_) :
     done(128,false), workers(&m), misc_threads(&m) {
     objstore = _io;
     parser = new object_reader(objstore);
     map = map_;
     map_lock = m_;
+    cfg = cfg_;
 }
 
-translate *make_translate(backend *_io, extmap::objmap *map,
-                                 std::shared_mutex *m) {
-    return (translate*) new translate_impl(_io, map, m);
+translate *make_translate(backend *_io, lsvd_config *cfg,
+			  extmap::objmap *map, std::shared_mutex *m) {
+    return (translate*) new translate_impl(_io, cfg, map, m);
 }
 
 translate_impl::~translate_impl() {
@@ -214,7 +215,6 @@ ssize_t translate_impl::init(const char *prefix_,
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
-    memcpy(my_uuid, uuid, sizeof(uuid)); // TODO
     
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
@@ -224,7 +224,7 @@ ssize_t translate_impl::init(const char *prefix_,
     memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
     
     seq = next_compln = super_sh->next_obj;
-    b = new batch(BATCH_SIZE);
+    b = new batch(cfg->batch_size);
     
     int _ckpt = 1;
     for (auto ck : ckpts) {
@@ -354,7 +354,7 @@ ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     if (b->len + len > b->max) {
 	b->seq = last_sent = seq++;
 	workers.put_locked(b);
-	b = new batch(BATCH_SIZE);
+	b = new batch(cfg->batch_size);
     }
 
     b->append(offset / 512, &siov);
@@ -475,7 +475,7 @@ int translate_impl::flush() {
     if (b->len > 0) {
 	b->seq = last_sent = seq++;
 	workers.put_locked(b);
-	b = new batch(BATCH_SIZE);
+	b = new batch(cfg->batch_size);
     }
     auto _seq = last_sent;
 
@@ -627,7 +627,7 @@ int translate_impl::checkpoint(void) {
     if (b->len > 0) {
 	b->seq = seq++;
 	workers.put_locked(b);
-	b = new batch(BATCH_SIZE);
+	b = new batch(cfg->batch_size);
     }
     int _seq = seq++;
     lk.unlock();

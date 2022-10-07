@@ -20,7 +20,6 @@ public:
     int         batch_size = 8*1024*1024; // in bytes
     int         wcache_window = 32;	  // in operations
     std::string cache_dir = "/tmp";
-    int         wcache_threads = 2;
     int         xlate_threads = 2;
     enum cfg_backend backend = BACKEND_RADOS;
     long        cache_size = 8199*4096; // in bytes
