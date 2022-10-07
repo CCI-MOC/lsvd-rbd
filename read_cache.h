@@ -48,7 +48,8 @@ public:
 };
 
 extern read_cache *make_read_cache(uint32_t blkno, int _fd, bool nt,
-                                   translate *_be, objmap *_om, backend *_io);
+                                   translate *_be, extmap::objmap *map,
+                                   std::shared_mutex *m, backend *_io);
 
 #endif
 

@@ -13,10 +13,11 @@
 
 struct iovec;
 class backend;
-class objmap;
 
 class translate {
 public:
+    uuid_t    uuid;
+
     translate() {}
     virtual ~translate() {}
 
@@ -40,6 +41,7 @@ public:
     virtual int frontier(void) = 0;
 };
 
-extern translate *make_translate(backend *_io, objmap *omap);
+extern translate *make_translate(backend *_io, extmap::objmap *map,
+                                 std::shared_mutex *m);
 
 #endif

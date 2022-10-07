@@ -1,11 +1,12 @@
 /*
- * TODO: straighten out header files some more
+ * file:        image.h
+ * description: the fake RBD image. 
+ *
+ * TODO: fix up lsvd_debug.cc and move this into lsvd.cc
  */
 
 #ifndef __IMAGE_H__
 #define __IMAGE_H__
-
-struct lsvd_completion;
 
 struct event_socket {
     int socket;
@@ -42,26 +43,28 @@ public:
     }
 };
 
-class backend;
-class objmap;
-class translate;
-class write_cache;
-class read_cache;
-struct j_super;
+struct rbd_image {
+    lsvd_config  cfg;
+    ssize_t      size;          // bytes
 
-struct fake_rbd_image {
-    std::mutex   m;
-    backend     *io;
-    objmap      *omap;
-    translate   *lsvd;
+    std::shared_mutex map_lock;
+    extmap::objmap    map;
+
+    backend     *objstore;
+    translate   *xlate;
     write_cache *wcache;
     read_cache  *rcache;
-    ssize_t      size;          // bytes
-    int          fd;            // cache device
-    j_super     *js;            // cache page 0
 
+    std::mutex   m;
     event_socket ev;
     std::queue<rbd_completion_t> completions;
+
+    rbd_image() {}
+    ~rbd_image() {}
+
+    int image_open(rados_ioctx_t io, const char *name);
+    int image_close(void);
+    int poll_io_events(rbd_completion_t *comps, int numcomp);
 };
 
 #endif

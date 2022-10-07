@@ -45,8 +45,10 @@ const int BATCH_SIZE = 8 * 1024 * 1024;
 /* ----------- Object translation layer -------------- */
 
 class translate_impl : public translate {
-    std::mutex   m;
-    objmap      *map; /* map shared between read cache and translate */
+    std::mutex         m;	// for things in this instance
+    extmap::objmap    *map;	// shared object map
+    std::shared_mutex *map_lock; // locks the object map
+    
     std::atomic<int> seq;
 
     friend class translate_req;
@@ -97,7 +99,6 @@ class translate_impl : public translate {
     /* various constant state
      */
     char      single_prefix[128];
-    uuid_t    uuid;
 
     /* superblock has two sections: [obj_hdr] [super_hdr]
      */
@@ -154,7 +155,7 @@ class translate_impl : public translate {
     }
 
 public:
-    translate_impl(backend *_io, objmap *omap);
+    translate_impl(backend *_io, extmap::objmap *map, std::shared_mutex *m);
     ~translate_impl();
 
     ssize_t init(const char *name, int nthreads, bool timedflush);
@@ -178,15 +179,18 @@ public:
     int batch_seq(void);
 };
 
-translate_impl::translate_impl(backend *_io, objmap *omap) :
+translate_impl::translate_impl(backend *_io, extmap::objmap *map_,
+			       std::shared_mutex *m_) :
     done(128,false), workers(&m), misc_threads(&m) {
     objstore = _io;
     parser = new object_reader(objstore);
-    map = omap;
+    map = map_;
+    map_lock = m_;
 }
 
-translate *make_translate(backend *_io, objmap *omap) {
-    return (translate*) new translate_impl(_io, omap);
+translate *make_translate(backend *_io, extmap::objmap *map,
+                                 std::shared_mutex *m) {
+    return (translate*) new translate_impl(_io, map, m);
 }
 
 translate_impl::~translate_impl() {
@@ -210,7 +214,7 @@ ssize_t translate_impl::init(const char *prefix_,
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
-    memcpy(my_uuid, uuid, sizeof(uuid));
+    memcpy(my_uuid, uuid, sizeof(uuid)); // TODO
     
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
@@ -241,7 +245,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	    total_live_sectors += o.live_sectors;
 	}
 	for (auto m : entries) {
-	    map->map.update(m.lba, m.lba + m.len,
+	    map->update(m.lba, m.lba + m.len,
 			    (extmap::obj_offset){.obj = m.obj,
 				    .offset = m.offset});
 	}
@@ -266,7 +270,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	for (auto m : entries) {
 	    std::vector<extmap::lba2obj> deleted;
 	    extmap::obj_offset oo = {i, offset + hdr_len};
-	    map->map.update(m.lba, m.lba + m.len, oo, &deleted);
+	    map->update(m.lba, m.lba + m.len, oo, &deleted);
 	    offset += m.len;
 	    for (auto d : deleted) {
 		auto [base, limit, ptr] = d.vals();
@@ -408,7 +412,7 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 
 	/* make the following updates:
 	 * - object_info - hdrlen, total/live data sectors
-	 * - map->map - LBA to obj/offset map
+	 * - map - LBA to obj/offset map
 	 * - object_info, totals - adjust for new garbage
 	 */
 	size_t hdr_bytes = obj_hdr_len(b->entries.size(), last_ckpt);
@@ -424,10 +428,10 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 	sector_t sector_offset = hdr_sectors;
 	std::vector<extmap::lba2obj> deleted;
 
-	std::unique_lock objlock(map->m);
+	std::unique_lock objlock(*map_lock);
 	for (auto e : b->entries) {
 	    extmap::obj_offset oo = {b->seq, sector_offset};
-	    map->map.update(e.lba, e.lba+e.len, oo, &deleted);
+	    map->update(e.lba, e.lba+e.len, oo, &deleted);
 	    sector_offset += e.len;
 	}
 	objlock.unlock();
@@ -520,9 +524,9 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     /* hold the map lock while we get a copy of the map
      */
     {
-	std::unique_lock lk(map->m);
+	std::unique_lock lk(*map_lock);
 	last_ckpt = ckpt_seq;
-	for (auto it = map->map.begin(); it != map->map.end(); it++) {
+	for (auto it = map->begin(); it != map->end(); it++) {
 	    auto [base, limit, ptr] = it->vals();
 	    entries.push_back((ckpt_mapentry){.lba = base,
 			.len = limit-base, .obj = (int32_t)ptr.obj,
@@ -675,7 +679,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     /* TODO: I think we need to hold the objmap lock here...
      */
     extmap::objmap live_extents;
-    for (auto it = map->map.begin(); it != map->map.end(); it++) {
+    for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	if (bitmap[ptr.obj])
 	    live_extents.update(base, limit, ptr);
@@ -755,8 +759,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    std::vector<data_map> obj_extents;
 	    
 	    for (auto [base, limit, ptr] : extents) {
-		for (auto it2 = map->map.lookup(base);
-		     it2->base() < limit && it2 != map->map.end(); it2++) {
+		for (auto it2 = map->lookup(base);
+		     it2->base() < limit && it2 != map->end(); it2++) {
 		    auto [_base, _limit, _ptr] = it2->vals(base, limit);
 		    if (_ptr.obj != ptr.obj)
 			continue;
@@ -786,7 +790,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    auto offset = hdr_sectors;
 	    for (auto e : obj_extents) {
 		extmap::obj_offset oo = {_seq, offset};
-		map->map.update(e.lba, e.lba+e.len, oo, NULL);
+		map->update(e.lba, e.lba+e.len, oo, NULL);
 		offset += e.len;
 	    }
 
@@ -848,7 +852,7 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 
     /* various things break when map size is zero
      */
-    if (map->map.size() == 0) {
+    if (map->size() == 0) {
 	iovs.zero();
 	return len;
     }
@@ -859,10 +863,10 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
     auto prev = base;
     {
 	std::unique_lock lk(m);
-	std::shared_lock slk(map->m);
+	std::shared_lock slk(*map_lock);
 
-	for (auto it = map->map.lookup(base);
-	     it != map->map.end() && it->base() < limit; it++) {
+	for (auto it = map->lookup(base);
+	     it != map->end() && it->base() < limit; it++) {
 	    auto [_base, _limit, oo] = it->vals(base, limit);
 	    if (_base > prev) {	// unmapped
 		size_t _len = (_base - prev)*512;
@@ -902,17 +906,17 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 
 void translate_impl::getmap(int base, int limit,
 		       int (*cb)(void *ptr,int,int,int,int), void *ptr) {
-    for (auto it = map->map.lookup(base); it != map->map.end() && it->base() < limit; it++) {
+    for (auto it = map->lookup(base); it != map->end() && it->base() < limit; it++) {
 	auto [_base, _limit, oo] = it->vals(base, limit);
 	if (!cb(ptr, (int)_base, (int)_limit, (int)oo.obj, (int)oo.offset))
 	    break;
     }
 }
 int translate_impl::mapsize(void) {
-    return map->map.size();
+    return map->size();
 }
 void translate_impl::reset(void) {
-    map->map.reset();
+    map->reset();
 }
 int translate_impl::frontier(void) {
     return b->len / 512;

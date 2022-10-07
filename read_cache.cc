@@ -56,7 +56,10 @@ class read_cache_impl : public read_cache {
 
     j_read_super       *super;
     extmap::obj_offset *flat_map;
-    objmap             *omap;
+
+    extmap::objmap     *obj_map;
+    std::shared_mutex  *obj_lock;
+    
     translate          *be;
     backend            *io;
     nvme               *ssd;
@@ -113,7 +116,8 @@ class read_cache_impl : public read_cache {
 
 public:
     read_cache_impl(uint32_t blkno, int _fd, bool nt,
-		    translate *_be, objmap *_om, backend *_io);
+		    translate *_be, extmap::objmap *map,
+		    std::shared_mutex *m, backend *_io);
     ~read_cache_impl();
     
     std::tuple<size_t,size_t,request*> async_read(size_t offset,
@@ -137,16 +141,19 @@ public:
 /* factory function so we can hide implementation
  */
 read_cache *make_read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
-			    objmap *_om, backend *_io) {
-    return new read_cache_impl(blkno, _fd, nt, _be, _om, _io);
+			    extmap::objmap *map, std::shared_mutex *m,
+			    backend *_io) {
+    return new read_cache_impl(blkno, _fd, nt, _be, map, m, _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
 read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, bool nt,
-				 translate *be_, objmap *om_,
+				 translate *be_, extmap::objmap *omap,
+				 std::shared_mutex *maplock,
 				 backend *io_) : misc_threads(&m) {
-    omap = om_;
+    obj_map = omap;
+    obj_lock = maplock;
     be = be_;
     io = io_;
     nothreads = nt;
@@ -479,9 +486,9 @@ read_cache_impl::async_read(size_t offset, char *buf, size_t len) {
     size_t skip_len = 0, read_len = 0;
     extmap::obj_offset oo = {0, 0};
 
-    std::shared_lock lk(omap->m);
-    auto it = omap->map.lookup(base);
-    if (it == omap->map.end() || it->base() >= limit)
+    std::shared_lock lk(*obj_lock);
+    auto it = obj_map->lookup(base);
+    if (it == obj_map->end() || it->base() >= limit)
 	skip_len = len;
     else {
 	auto [_base, _limit, _ptr] = it->vals(base, limit);

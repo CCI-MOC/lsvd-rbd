@@ -3,8 +3,10 @@
 **GET FIO WORKING**
 - read seems to have regressed totally
 - write seems to hang on completion when compiled with -O3
+[DONE]
 
 ## config file
+[DONE, needs to be integrated]
 things to go here:
 - write batch size
 - write window outstanding

@@ -8,13 +8,13 @@ CFLAGS = -ggdb3 -Wall -Wno-psabi $(OPT)
 CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra $(OPT)
 SOFLAGS = -shared -fPIC
 
-OBJS = objects.o translate.o io.o read_cache.o  \
+OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 	nvme.o write_cache.o file_backend.o \
 	rados_backend.o lsvd_debug.o lsvd.o
 CFILES = $(OBJS:.o=.cc)
 
 liblsvd.so:  $(OBJS)
-	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio
+	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
 
 %.o: %.d
 

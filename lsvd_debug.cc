@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <uuid/uuid.h>
 
 #include <queue>
 #include <map>
@@ -11,20 +12,21 @@
 #include "lsvd_types.h"
 #include "smartiov.h"
 #include "fake_rbd.h"
+#include "config.h"
+#include "extent.h"
+#include "backend.h"
+#include "translate.h"
+#include "read_cache.h"
+#include "journal.h"
+#include "write_cache.h"
 #include "image.h"
 
-#include "extent.h"
-#include "journal.h"
 #include "objects.h"
 #include "request.h"
 
 #include "misc_cache.h"
 #include "nvme.h"
 
-#include "translate.h"
-#include "read_cache.h"
-#include "write_cache.h"
-#include "backend.h"
 #include "file_backend.h"
 #include "rados_backend.h"
 
@@ -33,15 +35,12 @@
  */
 struct _dbg {
 public:
-    int type = 0;
     translate   *lsvd;
     write_cache *wcache;
-    objmap      *omap;
+    extmap::objmap    obj_map;
+    std::shared_mutex obj_lock;
     read_cache  *rcache;
     backend     *io;
-    _dbg(int _t, translate *_l, write_cache *_w, objmap *_o,
-         read_cache *_r, backend *_io) : type(_t), lsvd(_l), wcache(_w),
-        omap(_o), rcache(_r), io(_io) {}
 };
 
 // tuple :	used for retrieving maps
@@ -60,67 +59,67 @@ struct getmap_s {
     struct tuple *t;
 };
 
+extern translate *image_2_xlate(rbd_image_t image);
+
 /* debug functions
  */
 extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size)
 {
-    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto xlate = image_2_xlate(image);
     iovec iov = {buffer, size};
-    size_t val = fri->lsvd->writev(offset, &iov, 1);
+    size_t val = xlate->writev(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
+
+// struct rbd_image;
+extern rbd_image *make_rbd_image(backend *b, translate *t,
+				 write_cache *w, read_cache *r);
+
 extern "C" int dbg_lsvd_read(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size)
 {
-    fake_rbd_image *fri = (fake_rbd_image*)image;
+    auto xlate = image_2_xlate(image);
     iovec iov = {buffer, size};
-    size_t val = fri->lsvd->readv(offset, &iov, 1);
+    size_t val = xlate->readv(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
 extern "C" int dbg_lsvd_flush(rbd_image_t image)
 {
-    fake_rbd_image *fri = (fake_rbd_image*)image;
-    fri->lsvd->flush();
+    auto xlate = image_2_xlate(image);
+    xlate->flush();
     return 0;
 }
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
-    backend *io = new file_backend();
-    objmap *omap = new objmap();
-    translate *lsvd = make_translate(io, omap);
-    auto rv = lsvd->init(name, n, flushthread);
-    auto d = new _dbg(1, lsvd, NULL, omap, NULL, io);
+    auto d = new _dbg();
+    d->io = new file_backend();
+    d->lsvd = make_translate(d->io, &d->obj_map, &d->obj_lock);
+    auto rv = d->lsvd->init(name, n, flushthread);
     *p = (void*)d;
     return rv;
 }
 extern "C" void xlate_close(_dbg *d)
 {
-    assert(d->type == 1);
     d->lsvd->shutdown();
     delete d->lsvd;
-    delete d->omap;
     delete d->io;
     delete d;
 }
 extern "C" int xlate_flush(_dbg *d)
 {
-    assert(d->type == 1);
     return d->lsvd->flush();
 }
 extern "C" int xlate_size(_dbg *d)
 {
-    assert(d->type == 1);
     return d->lsvd->mapsize();
 }
 extern "C" int xlate_read(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
 {
-    assert(d->type == 1);
     iovec iov = {buffer, size};
     size_t val = d->lsvd->readv(offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
 extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
 {
-    assert(d->type == 1);
     iovec iov = {buffer, size};
     size_t val = d->lsvd->writev(offset, &iov, 1);
     return val < 0 ? -1 : 0;
@@ -134,14 +133,12 @@ int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
 }
 extern "C" int xlate_getmap(_dbg *d, int base, int limit, int max, struct tuple *t)
 {
-    assert(d->type == 1);
     getmap_s s = {0, max, t};
     d->lsvd->getmap(base, limit, getmap_cb, (void*)&s);
     return s.i;
 }
 extern "C" int xlate_frontier(_dbg *d)
 {
-    assert(d->type == 1);
     return d->lsvd->frontier();
 }
 
@@ -153,17 +150,14 @@ extern "C" int xlate_seq(_dbg *d)
 
 extern "C" void xlate_reset(_dbg *d)
 {
-    assert(d->type == 1);
     d->lsvd->reset();
 }
 extern "C" int xlate_checkpoint(_dbg *d)
 {
-    assert(d->type == 1);
     return d->lsvd->checkpoint();
 }
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p)
 {
-    assert(d->type == 1);
     auto wcache = make_write_cache(blkno, fd, d->lsvd, 2);
     *p = (void*)wcache;
 }
@@ -195,16 +189,16 @@ extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uin
     memcpy(buf, buf2, len);
     free(buf2);
 }
+
 extern "C" void wcache_img_write(rbd_image_t image, char *buf, uint64_t offset, uint64_t len)
 {
     rbd_write((rbd_image_t)image, offset, len, buf);
 }
 extern "C" void wcache_write(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
 {
-    fake_rbd_image *fri = new fake_rbd_image;
-    fri->wcache = wcache;
-    wcache_img_write(fri, buf, offset, len);
-    delete fri;
+    auto img = make_rbd_image(NULL, NULL, wcache, NULL);
+    wcache_img_write(img, buf, offset, len);
+    delete img;
 }
 int wc_getmap_cb(void *ptr, int base, int limit, int plba)
 {
@@ -240,7 +234,7 @@ extern "C" void rcache_init(_dbg *d,
 			    uint32_t blkno, int fd, void **val_p)
 {
     auto rcache = make_read_cache(blkno, fd, false,
-				  d->lsvd, d->omap, d->io);
+				  d->lsvd, &d->obj_map, &d->obj_lock, d->io);
     *val_p = (void*)rcache;
 }
 extern "C" void rcache_shutdown(read_cache *rcache)
@@ -422,9 +416,9 @@ extern "C" void fakemap_update(_dbg *d, int base, int limit,
 			       int obj, int offset)
 {
     extmap::obj_offset oo = {obj,offset};
-    d->omap->map.update(base, limit, oo);
+    d->obj_map.update(base, limit, oo);
 }
 extern "C" void fakemap_reset(_dbg *d)
 {
-    d->omap->map.reset();
+    d->obj_map.reset();
 }

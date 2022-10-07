@@ -11,6 +11,7 @@ import time
 import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
+os.environ["LSVD_BACKEND"] = "file"
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
 
@@ -178,6 +179,7 @@ class tests(unittest.TestCase):
         xlate.write(0, d)
         xlate.write(8192,d)
         xlate.write(4096,d)
+        xlate.flush()
         n = xlate.checkpoint()
         hdr, ckpt_hdr, ckpts, objs, exts = read_ckpt(img + ('.%08x' % n))
         self.assertEqual([_ for _ in ckpts], [2])

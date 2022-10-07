@@ -164,6 +164,7 @@ class j_write_super(Structure):
 sizeof_j_write_super = sizeof(j_write_super)
 
 class j_read_super(Structure):
+    _pack_ = 1
     _fields_ = [("magic",        c_uint),
                 ("type",         c_uint),
                 ("version",      c_uint),
@@ -179,6 +180,7 @@ class j_read_super(Structure):
 sizeof_j_read_super = sizeof(j_read_super)
 
 class j_super(Structure):
+    _pack_ = 1
     _fields_ = [("magic",        c_uint),
                 ("type",         c_uint),
                 ("version",      c_uint),

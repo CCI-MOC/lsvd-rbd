@@ -10,6 +10,7 @@
 #include <libaio.h>
 #include <unistd.h>
 #include <sys/uio.h>
+#include <uuid/uuid.h>
 
 #include <mutex>
 #include <shared_mutex>

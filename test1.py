@@ -22,6 +22,8 @@ for f in os.listdir(dir):
 sectors = 10*1024*2 # 10MB
 mkdisk.mkdisk(img, sectors)
 
+os.environ["LSVD_BACKEND"] = "file"
+
 xlate = lsvd.translate(img, 1, False)
 assert xlate.nbytes == 10*1024*1024
 _size = xlate.nbytes

@@ -74,14 +74,6 @@ public:
     }
 };
 
-/* object map, shared between translate and read_cache
- */
-class objmap {
-public:
-    std::shared_mutex m;
-    extmap::objmap    map;
-};
-
 /* nice error messages
  */
 #include <experimental/filesystem>

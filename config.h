@@ -14,19 +14,21 @@
 
 enum cfg_backend { BACKEND_FILE = 1, BACKEND_RADOS = 2 };
 
-class config {
+class lsvd_config {
 public:
 
     int         batch_size = 8*1024*1024; // in bytes
     int         wcache_window = 32;	  // in operations
-    std::string cache_dir;
+    std::string cache_dir = "/tmp";
     int         wcache_threads = 2;
     int         xlate_threads = 2;
-    enum cfg_backend backend;
+    enum cfg_backend backend = BACKEND_RADOS;
+    long        cache_size = 8199*4096; // in bytes
     
-    config(){}
-    ~config(){ }
-    void read();
+    lsvd_config(){}
+    ~lsvd_config(){ }
+    int read();
+    std::string cache_filename(uuid_t &uuid, const char *name);
 };
 
 #endif
