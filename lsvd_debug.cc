@@ -162,7 +162,7 @@ extern "C" int xlate_checkpoint(_dbg *d)
 }
 extern "C" void wcache_open(_dbg *d, uint32_t blkno, int fd, void **p)
 {
-    auto wcache = make_write_cache(blkno, fd, d->lsvd, d->uuid, &d->cfg);
+    auto wcache = make_write_cache(blkno, fd, d->lsvd, &d->cfg);
     *p = (void*)wcache;
 }
 extern "C" void wcache_close(write_cache *wcache)

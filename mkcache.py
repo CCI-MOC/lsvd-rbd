@@ -49,7 +49,6 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=4096, rblks=4096):
                               seq=1, meta_base = 3, meta_limit = 3+mblks,
                               base=3+mblks, limit=3+mblks+wblks,
                                 next=3+mblks, oldest=3+mblks)
-    wsup.vol_uuid[:] = uuid
     data = bytearray() + wsup
     data += b'\0' * (4096-len(data))
     os.write(fd, data) # page 1
@@ -64,7 +63,6 @@ def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=4096, rblks=4096):
                                 map_start=rbase, map_blocks=map_blks,
                                 base=rbase+map_blks)
 
-    rsup.vol_uuid[:] = uuid
     data = bytearray() + rsup
     data += b'\0' * (4096-len(data))
     os.write(fd, data) # page 2

@@ -47,7 +47,6 @@ int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
     *wsup = (j_write_super){LSVD_MAGIC,
 			    LSVD_J_W_SUPER,
 			    1,		   // version
-			    {*uuid},	   // uuid
 			    1,		   // seq
 			    3,		   // metadata_base
 			    3+mblks,	   // metadata limit
@@ -68,7 +67,6 @@ int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
     *rsup = (j_read_super){LSVD_MAGIC,
 			   LSVD_J_R_SUPER,
 			   1,
-			   {*uuid},
 			   128,	// unit size
 			   rbase+map_blks, // base
 			   units,	   // units

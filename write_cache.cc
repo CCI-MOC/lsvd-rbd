@@ -44,7 +44,6 @@ typedef std::tuple<request*,sector_t,smartiov*> work_tuple;
 class write_cache_impl : public write_cache {
     size_t         dev_max;
     uint32_t       super_blkno;
-    uuid_t         vol_uuid;
     lsvd_config   *cfg;
     
     std::atomic<int64_t> sequence; // write sequence #
@@ -53,6 +52,7 @@ class write_cache_impl : public write_cache {
      */
     int total_write_pages = 0;
     int max_write_pages = 0;
+    int max_write_ops = 0;
     std::condition_variable write_cv;
 
     void evict(page_t base, page_t len);
@@ -94,12 +94,12 @@ public:
 
     /* throttle writes with window of max_write_pages
      */
-    void get_room(int blks); 
-    void release_room(int blks);
+    void get_room(sector_t sectors); 
+    void release_room(sector_t sectors);
 
 
     write_cache_impl(uint32_t blkno, int _fd, translate *_be,
-		     uuid_t uuid, lsvd_config *cfg);
+		     lsvd_config *cfg);
     ~write_cache_impl();
 
     void writev(request *req, sector_t lba, smartiov *iov);
@@ -263,7 +263,8 @@ void wcache_write_req::run(request *parent /* unused */) {
 /* stall write requests using window of max_write_blocks, which should
  * be <= 0.5 * write cache size.
  */
-void write_cache_impl::get_room(int pages) {
+void write_cache_impl::get_room(sector_t sectors) {
+    int pages = sectors / 8;
     std::unique_lock lk(m);
     while (total_write_pages + pages > max_write_pages)
 	write_cv.wait(lk);
@@ -272,7 +273,8 @@ void write_cache_impl::get_room(int pages) {
 	write_cv.notify_one();
 }
 
-void write_cache_impl::release_room(int pages) {
+void write_cache_impl::release_room(sector_t sectors) {
+    int pages = sectors / 8;
     std::unique_lock lk(m);
     total_write_pages -= pages;
     if (total_write_pages < max_write_pages)
@@ -357,7 +359,6 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr*)buf;
     *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1,
-		 .vol_uuid = {*vol_uuid},
 		 .seq = super->seq++, .len = (uint32_t)blks, .crc32 = 0,
 		 .extent_offset = 0, .extent_len = 0};
     return h;
@@ -500,13 +501,11 @@ void write_cache_impl::roll_log_forward() {
 }
     
 write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
-				    uuid_t uuid,
 				    lsvd_config *cfg_) {
     super_blkno = blkno;
     dev_max = getsize64(fd);
     be = _be;
     cfg = cfg_;
-    memcpy(vol_uuid, uuid, sizeof(vol_uuid));
     
     const char *name = "write_cache_cb";
     nvme_w = make_nvme(fd, name);
@@ -525,6 +524,7 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 
     auto N = super->limit - super->base;
     max_write_pages = N/2;
+    max_write_ops = cfg->wcache_window;
     
     // https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 
@@ -533,9 +533,8 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 }
 
 write_cache *make_write_cache(uint32_t blkno, int fd,
-			      translate *be, uuid_t &uuid_,
-			      lsvd_config *cfg) {
-    return new write_cache_impl(blkno, fd, be, uuid_, cfg);
+			      translate *be, lsvd_config *cfg) {
+    return new write_cache_impl(blkno, fd, be, cfg);
 }
 
 write_cache_impl::~write_cache_impl() {

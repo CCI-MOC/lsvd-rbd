@@ -30,13 +30,13 @@ blk_fmt = lambda x: '%d%s' % (x, '' if x < npages else ' *INVALID*')
 hdr_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
               ['write_super', blk_fmt], ['read_super', blk_fmt]]
 
-wsup_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
+wsup_pp = [['magic', magic], ['type', fieldnames], 
                ['seq', '%d'], ['meta_base', '%d'], ['meta_limit', '%d'],
                ['base', '%d'], ['limit', '%d'], ['next', '%d'], ['oldest', '%d'], 
                ['map_start', '%d'], ['map_entries', '%d'],
                ['len_start', '%d'], ['len_entries', '%d']]
 
-rsup_pp = [["magic", magic], ["type", fieldnames], ['vol_uuid', fmt_uuid], ["unit_size", '%d'], 
+rsup_pp = [["magic", magic], ["type", fieldnames], ["unit_size", '%d'], 
                ["base", '%d'], ["units", '%d'], ["map_start", '%d'],["map_blocks", '%d'],
                ["evict_type", '%d'], ["evict_start", '%d'], ["evict_blocks", '%d']]
 

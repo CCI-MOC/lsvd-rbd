@@ -41,7 +41,6 @@ struct j_hdr {
     uint32_t magic;
     uint32_t type;		// LSVD_J_DATA
     uint32_t version;		// 1
-    uuid_t   vol_uuid;		// must match backend volume
     uint64_t seq;
     uint32_t len;		// in 4KB blocks, including header
     uint32_t crc32;		// TODO: implement this
@@ -57,7 +56,6 @@ struct j_write_super {
     uint32_t magic;
     uint32_t type;		// LSVD_J_W_SUPER
     uint32_t version;		// 1
-    uuid_t   vol_uuid;
 
     uint64_t seq;		// next write sequence
 
@@ -103,7 +101,6 @@ struct j_read_super {
     uint32_t magic;
     uint32_t type;		// LSVD_J_R_SUPER
     uint32_t version;		// 1
-    uuid_t   vol_uuid;
 
     int32_t unit_size;		// cache unit size, in sectors
 

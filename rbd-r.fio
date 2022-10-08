@@ -2,7 +2,7 @@
 ioengine=rbd
 clientname=admin
 pool=rbd
-rbdname=/mnt/nvme/lsvd/SSD,rados:rbd/obj_B
+rbdname=rbd/obj_B
 #rw=randwrite
 rw=randread
 bs=4k

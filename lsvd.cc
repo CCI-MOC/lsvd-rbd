@@ -72,7 +72,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     /* read superblock and initialize translation layer
      */
     xlate = make_translate(objstore, &cfg, &map, &map_lock);
-    xlate->init(name, cfg.xlate_threads, true);
+    size = xlate->init(name, cfg.xlate_threads, true);
 
     /* figure out cache file name, create it if necessary
      */
@@ -93,8 +93,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	return -1;
     if (js->magic != LSVD_MAGIC || js->type != LSVD_J_SUPER)
 	return -1;
-    wcache = make_write_cache(js->write_super, fd, xlate,
-			      xlate->uuid, &cfg);
+    if (memcmp(js->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
+	throw("object and cache UUIDs don't match");
+    
+    wcache = make_write_cache(js->write_super, fd, xlate, &cfg);
     rcache = make_read_cache(js->read_super, fd, false,
 			     xlate, &map, &map_lock, objstore);
     free(js);
@@ -309,10 +311,10 @@ class rbd_aio_req : public request {
     std::condition_variable cv;
 
     void notify_w(request *unused) {
-        int blocks = div_round_up(len, 4096);
-        img->wcache->release_room(blocks);
+        sector_t sectors = div_round_up(len, 512);
+        img->wcache->release_room(sectors);
         
-        complete = true;
+	assert(--n_req == 0);
         if (p != NULL) 
             p->complete(len);
 
@@ -343,13 +345,15 @@ class rbd_aio_req : public request {
     }
     
     void run_w() {
+	n_req++;		// single sub-request for write
+	launched.store(true);
         if (!aligned(buf, 512)) {
             aligned_buf = (char*)aligned_alloc(512, len);
             memcpy(aligned_buf, buf, len);
         }
         data_iovs.push_back((iovec){aligned_buf, len});
-        int blocks = div_round_up(len, 4096);
-        img->wcache->get_room(blocks);
+        sector_t sectors = div_round_up(len, 512);
+        img->wcache->get_room(sectors);
         img->wcache->writev(this, offset/512, &data_iovs);
     }
     
@@ -423,8 +427,7 @@ public:
      */
     void wait() {
 	std::unique_lock lk(m);
-	while ((op == OP_READ && (!launched || n_req > 0)) ||
-	       (op == OP_WRITE && !complete))
+	while (!launched || n_req > 0)
 	    cv.wait(lk);
 	lk.unlock();
 	release();
@@ -433,7 +436,7 @@ public:
     void release() {
 	released = true;
 	if ((op == OP_READ && n_req == 0) ||
-	    (op == OP_WRITE && complete))
+	    (op == OP_WRITE && n_req == 0))
 		delete this;
     }
 

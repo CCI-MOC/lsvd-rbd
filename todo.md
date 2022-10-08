@@ -79,7 +79,7 @@ requests in general:
 - lots of notes that documentation needs to be added
 
 `translate.cc`:
-- get rid of global UUID
+- [DONE] get rid of global UUID
 - [DONE] initialize `last_ckpt` - done? need to check
 - `translate_impl::worker_thread` - coalesce writes
 - GC in general, also something about the objmap lock...
@@ -89,3 +89,5 @@ requests in general:
 - switch metadata regions when writing checkpoint
 - something about `super_copy->next`
 - `roll_log_forward` - NOT IMPLEMENTED 
+- write throttling - currently only limits number of bytes, not number
+  of outstanding operations. Fix this?
