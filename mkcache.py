@@ -23,6 +23,14 @@ def cleanup(name):
         if f.endswith('.cache'):
             os.unlink(cache_dir + '/' + f)
     
+# https://stackoverflow.com/questions/42865724/parse-human-readable-filesizes-into-bytes
+units = {"K": 2**10, "M": 2**20, "G": 2**30}
+def parse_size(size):
+    if size[-1:] in units:
+        return int(float(size[:-1])*units[size[-1]])
+    else:
+        return int(size)
+
 # backend batch size is 8MB, write cache should be >= 2 batches
 # 
 def mkcache(name, uuid=b'\0'*16, write_zeros=True, wblks=4096, rblks=4096):
@@ -84,11 +92,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='initialize LSVD cache')
     parser.add_argument('--uuid', help='volume UUID',
                             default='00000000-0000-0000-0000-000000000000')
+    parser.add_argument('--size', help='volue size',
+                            default=0)
     parser.add_argument('device', help='cache partition')
     args = parser.parse_args()
 
     uuid = uuid.UUID(args.uuid).bytes
 
+    if not os.access(args.device, os.F_OK) and args.size:
+        size = parse_size(args.size)
+        buf = bytes(4096)
+        fp = open(args.device, 'wb')
+        for i in range(0, size, 4096):
+            fp.write(buf)
+        fp.close()
+    
     if os.access(args.device, os.F_OK):
         s = os.stat(args.device)
         if blkdev.S_ISBLK(s.st_mode):

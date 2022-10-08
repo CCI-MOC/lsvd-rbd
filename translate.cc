@@ -132,6 +132,7 @@ class translate_impl : public translate {
 
     void do_gc(std::unique_lock<std::mutex> &lk);
     void gc_thread(thread_pool<int> *p);
+    void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
     void worker_thread(thread_pool<batch*> *p);
     void ckpt_thread(thread_pool<int> *p);
     void flush_thread(thread_pool<int> *p);
@@ -391,6 +392,69 @@ public:
     }
 };
 
+void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
+    /* TODO: coalesce writes: 
+     *   bufmap m
+     *   for e in entries
+     *      m.insert(lba, len, ptr)
+     *   for e in m:
+     *      (lba, iovec) -> output
+     */
+
+    /* make the following updates:
+     * - object_info - hdrlen, total/live data sectors
+     * - map - LBA to obj/offset map
+     * - object_info, totals - adjust for new garbage
+     */
+    size_t hdr_bytes = obj_hdr_len(b->entries.size(), last_ckpt);
+    uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
+    obj_info oi = {.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
+		   .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
+    object_info[b->seq] = oi;
+
+    /* note that we update the map before the object is written,
+     * and count on the write cache preventing any reads until
+     * it's persisted. TODO: verify this
+     */
+    sector_t sector_offset = hdr_sectors;
+    std::vector<extmap::lba2obj> deleted;
+
+    std::unique_lock objlock(*map_lock);
+    for (auto e : b->entries) {
+	extmap::obj_offset oo = {b->seq, sector_offset};
+	map->update(e.lba, e.lba+e.len, oo, &deleted);
+	sector_offset += e.len;
+    }
+    objlock.unlock();
+
+    for (auto d : deleted) {
+	auto [base, limit, ptr] = d.vals();
+	object_info[ptr.obj].live -= (limit - base);
+	total_live_sectors -= (limit - base);
+    }
+
+    total_sectors += b->len/512;
+    total_live_sectors += b->len/512;
+    if (next_compln == -1)
+	next_compln = b->seq;
+    lk.unlock();
+
+    char *hdr = (char*)calloc(hdr_sectors*512, 1);
+    make_data_hdr(hdr, b->len, last_ckpt, &b->entries, b->seq, &uuid);
+    iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
+		   {b->buf, b->len}};
+
+    /* on completion, t_req calls notify_complete and frees stuff
+     */
+    auto t_req = new translate_req(b->seq, this);
+    t_req->to_free.push_back(hdr);
+    t_req->b = b;
+	
+    objname name(prefix(), b->seq);
+    auto req = objstore->make_write_req(name.c_str(), iov, 2);
+    req->run(t_req);
+}
+
 /* worker: pull batches from queue and write them out
  */
 void translate_impl::worker_thread(thread_pool<batch*> *p) {
@@ -402,66 +466,7 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 	if (!p->get_locked(lk, b)) 
 	    return;
 
-	/* TODO: coalesce writes: 
-	 *   bufmap m
-	 *   for e in entries
-	 *      m.insert(lba, len, ptr)
-	 *   for e in m:
-	 *      (lba, iovec) -> output
-	 */
-
-	/* make the following updates:
-	 * - object_info - hdrlen, total/live data sectors
-	 * - map - LBA to obj/offset map
-	 * - object_info, totals - adjust for new garbage
-	 */
-	size_t hdr_bytes = obj_hdr_len(b->entries.size(), last_ckpt);
-	uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
-	obj_info oi = {.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
-		       .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
-	object_info[b->seq] = oi;
-
-	/* note that we update the map before the object is written,
-	 * and count on the write cache preventing any reads until
-	 * it's persisted. TODO: verify this
-	 */
-	sector_t sector_offset = hdr_sectors;
-	std::vector<extmap::lba2obj> deleted;
-
-	std::unique_lock objlock(*map_lock);
-	for (auto e : b->entries) {
-	    extmap::obj_offset oo = {b->seq, sector_offset};
-	    map->update(e.lba, e.lba+e.len, oo, &deleted);
-	    sector_offset += e.len;
-	}
-	objlock.unlock();
-
-	for (auto d : deleted) {
-	    auto [base, limit, ptr] = d.vals();
-	    object_info[ptr.obj].live -= (limit - base);
-	    total_live_sectors -= (limit - base);
-	}
-
-	total_sectors += b->len/512;
-	total_live_sectors += b->len/512;
-	if (next_compln == -1)
-	    next_compln = b->seq;
-	lk.unlock();
-
-	char *hdr = (char*)calloc(hdr_sectors*512, 1);
-	make_data_hdr(hdr, b->len, last_ckpt, &b->entries, b->seq, &uuid);
-	iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
-		       {b->buf, b->len}};
-
-	/* on completion, t_req calls notify_complete and frees stuff
-	 */
-	auto t_req = new translate_req(b->seq, this);
-	t_req->to_free.push_back(hdr);
-	t_req->b = b;
-	
-	objname name(prefix(), b->seq);
-	auto req = objstore->make_write_req(name.c_str(), iov, 2);
-	req->run(t_req);
+	process_batch(b, lk);
     }
 }
 

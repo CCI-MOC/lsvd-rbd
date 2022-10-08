@@ -33,8 +33,9 @@ int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
 		     1,   // version
 		     1,   // write superblock offset
 		     2,   // read superblock offset
-		     {*uuid}, // uuid
+		     {0}, // uuid
 		     LSVD_BE_RADOS}; // doesn't matter
+    memcpy(sup->vol_uuid, uuid, sizeof(uuid_t));
     fwrite(buf, 4096, 1, fp);
 
     uint32_t _map = div_round_up(wblks, 512);

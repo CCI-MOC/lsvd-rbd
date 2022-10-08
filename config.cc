@@ -114,8 +114,7 @@ int lsvd_config::read() {
 std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name) {
     char buf[256]; // PATH_MAX
     std::string file(name);
-    if (backend == BACKEND_FILE) 
-	file = fs::path(file).filename();
+    file = fs::path(file).filename();
     
     sprintf(buf, "%s/%s.cache", cache_dir.c_str(), file.c_str());
     if (access(buf, R_OK|W_OK) == 0)
