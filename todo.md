@@ -89,5 +89,17 @@ requests in general:
 - switch metadata regions when writing checkpoint
 - something about `super_copy->next`
 - `roll_log_forward` - NOT IMPLEMENTED 
-- write throttling - currently only limits number of bytes, not number
-  of outstanding operations. Fix this?
+- **write throttling** - need to (a) bound number of outstanding NVMe
+  writes, (b) avoid "hanging" writes due to batching
+- **shutdown** - flush all writes and checkpoint before closing
+
+## performance
+
+`io_uring` - should shift from libaio to `io_uring` - currently taking
+as much CPU for `io_submit` as for the rest of LSVD. Or can I just get
+libaio to work correctly? Currently 5% of CPU (out of total 38.5% used
+by LSVD) is going to `usleep`.
+
+**locking** - can we use shared lock for `get_room`? any other locking
+fixes to get rid of overhead?
+
