@@ -199,6 +199,8 @@ translate_impl::~translate_impl() {
     if (b) 
 	delete b;
     delete parser;
+    if (super_buf)
+	free(super_buf);
 }
 
 ssize_t translate_impl::init(const char *prefix_,
@@ -524,8 +526,6 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
-    flush();
-    
     /* hold the map lock while we get a copy of the map
      */
     {
