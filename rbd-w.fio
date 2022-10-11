@@ -10,9 +10,9 @@ rbdname=rbd/obj_B
 rw=randwrite
 #rw=randread
 bs=4k
-#runtime=90
 runtime=15
 time_based
+direct=1
 
 [rbd_iodepth32]
 iodepth=16
