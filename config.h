@@ -18,7 +18,7 @@ class lsvd_config {
 public:
 
     int         batch_size = 8*1024*1024; // in bytes
-    int         wcache_window = 32;	  // in operations
+    int         wcache_batch = 8;	  // requests
     std::string cache_dir = "/tmp";
     int         xlate_threads = 2;
     enum cfg_backend backend = BACKEND_RADOS;

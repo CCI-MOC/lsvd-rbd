@@ -135,6 +135,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name,
 int rbd_image::image_close(void) {
     rcache->write_map();
     delete rcache;
+    wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
     xlate->flush();

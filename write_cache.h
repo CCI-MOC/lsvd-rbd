@@ -17,6 +17,7 @@ class write_cache {
 public:
     virtual void get_room(sector_t sectors) = 0; 
     virtual void release_room(sector_t sectors) = 0;
+    virtual void flush(void) = 0;
 
     virtual ~write_cache() {}
 

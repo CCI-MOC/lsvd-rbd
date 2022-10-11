@@ -52,7 +52,8 @@ class write_cache_impl : public write_cache {
      */
     int total_write_pages = 0;
     int max_write_pages = 0;
-    int max_write_ops = 0;
+    int outstanding_writes = 0;
+    size_t write_batch = 0;
     std::condition_variable write_cv;
 
     void evict(page_t base, page_t len);
@@ -69,6 +70,7 @@ class write_cache_impl : public write_cache {
 
     thread_pool<int>          *misc_threads;
 
+    void flush_thread(thread_pool<int> *p);
     void ckpt_thread(thread_pool<int> *p);
     bool ckpt_in_progress = false;
     void write_checkpoint(void);
@@ -96,7 +98,7 @@ public:
      */
     void get_room(sector_t sectors); 
     void release_room(sector_t sectors);
-
+    void flush(void);
 
     write_cache_impl(uint32_t blkno, int _fd, translate *_be,
 		     lsvd_config *cfg);
@@ -152,7 +154,6 @@ public:
     void release() {}		// TODO: free properly
 };
 
-
 /* n_pages: number of 4KB data pages (not counting header)
  * page:    page number to begin writing 
  * n_pad:   number of pages to skip (not counting header)
@@ -196,6 +197,7 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
 	auto [iov, iovcnt] = iovs->c_iov();
 	data_iovs->ingest(iov, iovcnt);
     }
+    reqs++;
     r_data = wcache->nvme_w->make_write_request(data_iovs, page*4096L);
 }
 
@@ -234,6 +236,10 @@ void wcache_write_req::notify(request *child) {
 	 */
 	for (auto it = garbage.begin(); it != garbage.end(); it++) 
 	    wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
+
+	wcache->outstanding_writes--;
+	if (wcache->work.size() >= wcache->write_batch)
+	    wcache->send_writes(lk);
     }
 
     /* send data to backend, invoke callbacks, then clean up
@@ -250,11 +256,8 @@ void wcache_write_req::notify(request *child) {
 }
 
 void wcache_write_req::run(request *parent /* unused */) {
-    reqs++;
-    if(r_pad) {
-	reqs++;
+    if(r_pad) 
 	r_pad->run(this);
-    }
     r_data->run(this);
 }
 
@@ -269,8 +272,6 @@ void write_cache_impl::get_room(sector_t sectors) {
     while (total_write_pages + pages > max_write_pages)
 	write_cv.wait(lk);
     total_write_pages += pages;
-    if (total_write_pages < max_write_pages)
-	write_cv.notify_one();
 }
 
 void write_cache_impl::release_room(sector_t sectors) {
@@ -278,7 +279,13 @@ void write_cache_impl::release_room(sector_t sectors) {
     std::unique_lock lk(m);
     total_write_pages -= pages;
     if (total_write_pages < max_write_pages)
-	write_cv.notify_one();
+	write_cv.notify_all();
+}
+
+void write_cache_impl::flush(void) {
+    std::unique_lock lk(m);
+    while (total_write_pages > 0)
+	write_cv.wait(lk);
 }
 
 /* circular buffer logic - returns true if any [p..p+len) is in the
@@ -364,7 +371,21 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
     return h;
 }
 
+void write_cache_impl::flush_thread(thread_pool<int> *p) {
+    pthread_setname_np(pthread_self(), "wcache_flush");
+    auto period = std::chrono::milliseconds(50);
+    while (p->running) {
+	std::unique_lock lk(m);
+	p->cv.wait_for(lk, period);
+	if (!p->running)
+	    return;
+	if (outstanding_writes == 0 && work.size() > 0)
+	    send_writes(lk);
+    }
+}
+
 void write_cache_impl::ckpt_thread(thread_pool<int> *p) {
+    pthread_setname_np(pthread_self(), "wcache_ckpt");
     auto next0 = super->next, N = super->limit - super->base;
     auto period = std::chrono::milliseconds(100);
     auto t0 = std::chrono::system_clock::now();
@@ -507,7 +528,7 @@ void write_cache_impl::roll_log_forward() {
     //     send it to the backend
     // if we moved write_super->next, write another checkpoint
 }
-    
+
 write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 				    lsvd_config *cfg_) {
     super_blkno = blkno;
@@ -532,12 +553,15 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 
     auto N = super->limit - super->base;
     max_write_pages = N/2;
-    max_write_ops = cfg->wcache_window;
+    write_batch = cfg->wcache_batch;
     
     // https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
 
     misc_threads = new thread_pool<int>(&m);
-    misc_threads->pool.push(std::thread(&write_cache_impl::ckpt_thread, this, misc_threads));
+    misc_threads->pool.push(std::thread(&write_cache_impl::ckpt_thread,
+					this, misc_threads));
+    misc_threads->pool.push(std::thread(&write_cache_impl::flush_thread,
+					this, misc_threads));
 }
 
 write_cache *make_write_cache(uint32_t blkno, int fd,
@@ -578,7 +602,8 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
     }
 
     auto req = new wcache_write_req(w, pages, page, n_pad-1, pad, this);
-
+    outstanding_writes++;
+    
     lk.unlock();
     req->run(NULL);
 }
@@ -589,7 +614,7 @@ void write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
 
     // if we're not under write pressure, send writes immediately; else
     // batch them
-    if (total_write_pages < 32 || work.size() >= 8) 
+    if (outstanding_writes == 0 || work.size() >= write_batch)
 	send_writes(lk);
 }
 

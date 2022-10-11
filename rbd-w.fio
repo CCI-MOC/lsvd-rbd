@@ -10,7 +10,7 @@ rbdname=rbd/obj_B
 rw=randwrite
 #rw=randread
 bs=4k
-runtime=15
+runtime=30
 time_based
 direct=1
 

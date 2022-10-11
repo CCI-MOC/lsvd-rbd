@@ -76,8 +76,8 @@ int lsvd_config::read() {
 	    split(line, words);
 	    if (words[0] == "batch_size")
 		batch_size = parseint(words[1]);
-	    if (words[0] == "wcache_window")
-		wcache_window = atoi(words[1].c_str());
+	    if (words[0] == "wcache_batch")
+		wcache_batch = atoi(words[1].c_str());
 	    if (words[0] == "cache_dir")
 		cache_dir = words[1];
 	    if (words[0] == "xlate_threads")
@@ -95,8 +95,8 @@ int lsvd_config::read() {
 	batch_size = parseint(val);
     if ((val = getenv("LSVD_CACHE_DIR")))
 	cache_dir = std::string(val);
-    if ((val = getenv("LSVD_WCACHE_WINDOW")))
-	wcache_window = atoi(val);
+    if ((val = getenv("LSVD_WCACHE_BATCH")))
+	wcache_batch = atoi(val);
     if ((val = getenv("LSVD_CACHE_DIR")))
 	cache_dir = std::string(val);
     if ((val = getenv("LSVD_XLATE_THREADS")))
@@ -126,18 +126,3 @@ std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name) {
     return std::string((const char*)buf);
 }
 
-#if 0
-int main(int argc, char **argv) {
-    auto cfg = new lsvd_config;
-    cfg->read();
-
-    printf("batch: %d\n", cfg->batch_size);
-    printf("wc window %d\n", cfg->wcache_window);
-    printf("cache: %s\n", cfg->cache_dir.c_str());
-    printf("xl threads %d\n", cfg->xlate_threads);
-    printf("backend: %d\n", (int)cfg->backend);
-
-    uuid_t uu;
-    std::cout << cfg->cache_filename(uu, "foobar") << "\n";
-}
-#endif
