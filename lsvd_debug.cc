@@ -250,7 +250,7 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
     rcache->do_evict(n);
 }
 
-char logbuf[4096], *p_log = logbuf;
+char logbuf[64*1096], *p_log = logbuf;
 extern "C" int get_logbuf(char *buf, size_t max) {
     size_t len = p_log - logbuf;
     len = (len > max) ? max : len;
@@ -262,7 +262,7 @@ extern "C" int get_logbuf(char *buf, size_t max) {
 void do_log(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    size_t max = logbuf + sizeof(logbuf) - p_log;
+    size_t max = logbuf + sizeof(logbuf) - p_log - 1;
     p_log += vsnprintf(p_log, max, fmt, args);
 }
 
