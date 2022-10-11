@@ -726,7 +726,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    gc_sectors_read += sectors;
 	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
 	    file_map.update(_base, _limit, offset);
-	    write(fd, buf, sectors*512);
+	    if (write(fd, buf, sectors*512) < 0)
+		throw("no space");
 	    offset += sectors;
 	}
 	free(buf);

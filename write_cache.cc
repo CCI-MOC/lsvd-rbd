@@ -46,7 +46,7 @@ class write_cache_impl : public write_cache {
     uint32_t       super_blkno;
     lsvd_config   *cfg;
     
-    std::atomic<int64_t> sequence; // write sequence #
+    std::atomic<uint64_t> sequence; // write sequence #
 
     /* bookkeeping for write throttle
      */
@@ -62,7 +62,7 @@ class write_cache_impl : public write_cache {
     /* initialization stuff
      */
     void read_map_entries();
-    void roll_log_forward();
+    int roll_log_forward();
 
     /* track length of each journal record in cache
      */
@@ -517,7 +517,7 @@ void write_cache_impl::read_map_entries() {
     free(len_buf);
 }
 
-void write_cache_impl::roll_log_forward() {
+int write_cache_impl::roll_log_forward() {
     // TODO
     // start at write_super->next
     // for each journal record:
@@ -527,6 +527,57 @@ void write_cache_impl::roll_log_forward() {
     //     put it in the map and rmap
     //     send it to the backend
     // if we moved write_super->next, write another checkpoint
+    bool dirty = false;
+    while (true) {
+	char buf[4096];
+	auto hdr = (j_hdr*)buf;
+	if (nvme_w->read(buf, sizeof(buf), 4096L * super->next) < 0)
+	    return -1;
+	if (hdr->magic != LSVD_MAGIC ||
+	    (hdr->type != LSVD_J_DATA && hdr->type != LSVD_J_PAD) ||
+	    hdr->seq != sequence.load())
+	    break;
+
+	sequence++;
+	if (hdr->type == LSVD_J_PAD) {
+	    super->next = super->base;
+	    continue;
+	}
+	
+	lengths[super->next] = hdr->len;
+	dirty = true;
+	std::vector<j_extent> entries;
+	decode_offset_len<j_extent>(buf, hdr->extent_offset,
+				    hdr->extent_len, entries);
+
+	size_t data_len = 4096L * (hdr->len - 1);
+	char *data = (char*)aligned_alloc(512, data_len);
+	if (nvme_w->read(data, data_len, 4096L * (super->next + 1)) < 0)
+	    return -1;
+
+	sector_t plba = (super->next+1) * 8;
+	size_t offset = 0;
+	std::vector<extmap::lba2lba> garbage;
+	for (auto e : entries) {
+	    map.update(e.lba, e.lba+e.len, plba, &garbage);
+	    rmap.update(plba, plba+e.len, e.lba);
+	    size_t bytes = e.len * 512;
+	    iovec iov = {data+offset, bytes};
+	    be->writev(e.lba*512, &iov, 1);
+	    offset += bytes;
+	    plba += e.len;
+	}
+	for (auto g : garbage)
+	    rmap.trim(g.s.base, g.s.base+g.s.len);
+	
+	free(data);
+	super->next += hdr->len;
+	
+    }
+    if (dirty)
+	write_checkpoint();
+
+    return 0;
 }
 
 write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
