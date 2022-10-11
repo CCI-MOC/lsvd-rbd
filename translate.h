@@ -29,6 +29,7 @@ public:
     virtual int checkpoint(void) = 0; /* flush, then write checkpoint */
 
     virtual ssize_t writev(size_t offset, iovec *iov, int iovcnt) = 0;
+    virtual void wait_for_room(void) = 0;
     virtual ssize_t readv(size_t offset, iovec *iov, int iovcnt) = 0;
 
     virtual const char *prefix() = 0; /* for read cache */

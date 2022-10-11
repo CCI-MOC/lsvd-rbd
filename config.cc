@@ -82,6 +82,8 @@ int lsvd_config::read() {
 		cache_dir = words[1];
 	    if (words[0] == "xlate_threads")
 		xlate_threads = atoi(words[1].c_str());
+	    if (words[0] == "xlate_window")
+		xlate_window = atoi(words[1].c_str());
 	    if (words[0] == "backend")
 		backend = m[words[1]];
 	    if (words[0] == "cache_size")
@@ -101,6 +103,8 @@ int lsvd_config::read() {
 	cache_dir = std::string(val);
     if ((val = getenv("LSVD_XLATE_THREADS")))
 	xlate_threads = atoi(val);
+    if ((val = getenv("LSVD_XLATE_WINDOW")))
+	xlate_window = atoi(val);
     if ((val = getenv("LSVD_BACKEND"))) {
 	std::string word(val);
 	backend = m[word];

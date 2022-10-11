@@ -166,6 +166,7 @@ public:
     int checkpoint(void);       /* flush, then write checkpoint */
 
     ssize_t writev(size_t offset, iovec *iov, int iovcnt);
+    void wait_for_room(void);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
 
     const char *prefix() { return single_prefix; }
@@ -345,9 +346,7 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 
 /* ----------- data transfer logic -------------*/
 
-/* an awful lot of code to copy data to the current batch and then
- * toss it to the worker thread pool if it's full
- * NOTE: offset is in bytes
+/* NOTE: offset is in bytes
  */
 ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     std::unique_lock<std::mutex> lk(m);
@@ -363,6 +362,12 @@ ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
     b->append(offset / 512, &siov);
 
     return len;
+}
+
+void translate_impl::wait_for_room(void) {
+    std::unique_lock<std::mutex> lk(m);
+    while (next_compln - last_sent > cfg->xlate_window)
+	cv.wait(lk);
 }
 
 class translate_req : public trivial_request {
