@@ -159,6 +159,7 @@ public:
 	parent->notify(this);
 	if (buf != NULL)
 	    free(buf);
+	rados_aio_release(c);
 	delete this;
     }
 
