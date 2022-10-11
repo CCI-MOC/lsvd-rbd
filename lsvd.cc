@@ -318,10 +318,8 @@ class rbd_aio_req : public request {
         if (p != NULL) 
             p->complete(len);
 
-        if (released)
-            delete this;
-        else
-            cv.notify_all();
+	cv.notify_all();
+	delete this;
     }
     
     void notify_r(request *child) {
@@ -338,10 +336,8 @@ class rbd_aio_req : public request {
         if (p != NULL) 
             p->complete(len);
 
-        if (released)
-            delete this;
-        else 
-            cv.notify_all();
+	cv.notify_all();
+	delete this;
     }
     
     void run_w() {
