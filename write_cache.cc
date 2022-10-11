@@ -497,7 +497,15 @@ void write_cache_impl::read_map_entries() {
 }
 
 void write_cache_impl::roll_log_forward() {
-    // TODO TODO TODO
+    // TODO
+    // start at write_super->next
+    // for each journal record:
+    //   read the whole record
+    //   verify it, quit if done
+    //   for each entry in it
+    //     put it in the map and rmap
+    //     send it to the backend
+    // if we moved write_super->next, write another checkpoint
 }
     
 write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
