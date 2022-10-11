@@ -259,10 +259,16 @@ extern "C" int get_logbuf(char *buf, size_t max) {
 }
 
 #include <stdarg.h>
+std::mutex m;
 void do_log(const char *fmt, ...) {
+    std::unique_lock lk(m);
     va_list args;
     va_start(args, fmt);
     size_t max = logbuf + sizeof(logbuf) - p_log - 1;
+    if (max < 16) {
+	p_log = logbuf;
+	max = sizeof(logbuf);
+    }
     p_log += vsnprintf(p_log, max, fmt, args);
 }
 
