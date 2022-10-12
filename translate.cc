@@ -43,11 +43,13 @@
 /* ----------- Object translation layer -------------- */
 
 class translate_impl : public translate {
+    /* lock ordering: lock m before *map_lock
+     */
     std::mutex         m;	// for things in this instance
     extmap::objmap    *map;	// shared object map
     std::shared_mutex *map_lock; // locks the object map
     lsvd_config       *cfg;
-    
+
     std::atomic<int> seq;
 
     friend class translate_req;
@@ -79,10 +81,10 @@ class translate_impl : public translate {
     
     /* info on all live objects - all sizes in sectors */
     struct obj_info {
-	uint32_t hdr;
-	uint32_t data;
-	uint32_t live;
-	int      type;
+	int hdr;		// sectors
+	int data;		// sectors
+	int live;		// sectors
+	enum obj_type type;	// LSVD_DATA or LSVD_CKPT
     };
     std::map<int,obj_info> object_info;
 
@@ -241,9 +243,9 @@ ssize_t translate_impl::init(const char *prefix_,
 				    deletes, entries) < 0)
 	    return -1;
 	for (auto o : objects) {
-	    object_info[o.seq] = (obj_info){.hdr = o.hdr_sectors,
-					    .data = o.data_sectors,
-					    .live = o.live_sectors,
+	    object_info[o.seq] = (obj_info){.hdr = (int)o.hdr_sectors,
+					    .data = (int)o.data_sectors,
+					    .live = (int)o.live_sectors,
 					    .type = LSVD_DATA};
 	    total_sectors += o.data_sectors;
 	    total_live_sectors += o.live_sectors;
@@ -266,8 +268,10 @@ ssize_t translate_impl::init(const char *prefix_,
 	if (parser->read_data_hdr(name.c_str(), h, dh, ckpts,
 				  cleaned, entries) < 0)
 	    break;
-	object_info[i] = (obj_info){.hdr = h.hdr_sectors, .data = h.data_sectors,
-				    .live = h.data_sectors, .type = LSVD_DATA};
+	object_info[i] = (obj_info){.hdr = (int)h.hdr_sectors,
+				    .data = (int)h.data_sectors,
+				    .live = (int)h.data_sectors,
+				    .type = LSVD_DATA};
 	total_sectors += h.data_sectors;
 	total_live_sectors += h.data_sectors;
 	int offset = 0, hdr_len = h.hdr_sectors;
@@ -279,6 +283,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	    for (auto d : deleted) {
 		auto [base, limit, ptr] = d.vals();
 		object_info[ptr.obj].live -= (limit - base);
+		assert(object_info[ptr.obj].live >= 0);
 		total_live_sectors -= (limit - base);
 	    }
 	}
@@ -378,7 +383,7 @@ class translate_req : public trivial_request {
     /* various things that we might need to free
      */
     std::vector<char*> to_free;
-    translate_impl::batch *b;
+    translate_impl::batch *b = NULL;
     
 public:
     translate_req(uint32_t seq_, translate_impl *tx_) {
@@ -399,6 +404,8 @@ public:
     }
 };
 
+void do_log(const char*,...);
+
 void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     /* TODO: coalesce writes: 
      *   bufmap m
@@ -414,9 +421,11 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
      * - object_info, totals - adjust for new garbage
      */
     size_t hdr_bytes = obj_hdr_len(b->entries.size(), last_ckpt);
-    uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
-    obj_info oi = {.hdr = hdr_sectors, .data = (uint32_t)(b->len/512),
-		   .live = (uint32_t)(b->len/512), .type = LSVD_DATA};
+    int hdr_sectors = div_round_up(hdr_bytes, 512);
+
+    std::unique_lock objlock(*map_lock);
+    obj_info oi = {.hdr = hdr_sectors, .data = (int)b->len/512,
+		   .live = (int)b->len/512, .type = LSVD_DATA};
     object_info[b->seq] = oi;
 
     /* note that we update the map before the object is written,
@@ -426,19 +435,20 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     sector_t sector_offset = hdr_sectors;
     std::vector<extmap::lba2obj> deleted;
 
-    std::unique_lock objlock(*map_lock);
     for (auto e : b->entries) {
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
 	sector_offset += e.len;
     }
-    objlock.unlock();
 
     for (auto d : deleted) {
 	auto [base, limit, ptr] = d.vals();
+	assert(object_info.find(ptr.obj) != object_info.end());
 	object_info[ptr.obj].live -= (limit - base);
+	assert(object_info[ptr.obj].live >= 0);
 	total_live_sectors -= (limit - base);
     }
+    objlock.unlock();
 
     total_sectors += b->len/512;
     total_live_sectors += b->len/512;
@@ -531,46 +541,49 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
-    /* hold the map lock while we get a copy of the map
+    /* hold the translation layer lock until we get a copy of object_info
      */
-    {
-	std::unique_lock lk(*map_lock);
-	last_ckpt = ckpt_seq;
-	for (auto it = map->begin(); it != map->end(); it++) {
-	    auto [base, limit, ptr] = it->vals();
-	    entries.push_back((ckpt_mapentry){.lba = base,
-			.len = limit-base, .obj = (int32_t)ptr.obj,
-			.offset = (int32_t)ptr.offset});
-	}
-	lk.unlock();
+    std::unique_lock lk(m);
+
+    /* hold the map lock while we get a copy of the map.
+     */
+    std::unique_lock objlock(*map_lock);
+
+    last_ckpt = ckpt_seq;
+    for (auto it = map->begin(); it != map->end(); it++) {
+	auto [base, limit, ptr] = it->vals();
+	entries.push_back((ckpt_mapentry){.lba = base,
+		    .len = limit-base, .obj = (int32_t)ptr.obj,
+		    .offset = (int32_t)ptr.offset});
     }
+    objlock.unlock();
+
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
 
-    /* hold the translation layer lock while we get a copy of object_info
-     */
-    std::unique_lock lk2(m);
     for (auto it = object_info.begin(); it != object_info.end(); it++) {
 	auto obj_num = it->first;
 	auto [hdr, data, live, type] = it->second;
 	if (type == LSVD_DATA)
-	    objects.push_back((ckpt_obj){.seq = (uint32_t)obj_num, .hdr_sectors = hdr,
-			.data_sectors = data, .live_sectors = live});
+	    objects.push_back((ckpt_obj){.seq = (uint32_t)obj_num,
+			.hdr_sectors = (uint32_t)hdr,
+			.data_sectors = (uint32_t)data,
+			.live_sectors = (uint32_t)live});
     }
 
     /* add object for this checkpoint
      */
     size_t objs_bytes = objects.size() * sizeof(ckpt_obj);
     size_t hdr_bytes = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr);
-    uint32_t sectors = div_round_up(hdr_bytes + sizeof(ckpt_seq) + map_bytes +
-				    objs_bytes, 512);
+    int sectors = div_round_up(hdr_bytes + sizeof(ckpt_seq) + map_bytes +
+			       objs_bytes, 512);
     object_info[ckpt_seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0,
 				   .type = LSVD_CKPT};
 
     /* wait until all prior objects have been acked by backend
      */
     while (next_compln < ckpt_seq)
-	cv.wait(lk2);
-    lk2.unlock();
+	cv.wait(lk);
+    lk.unlock();
 
     /* put it all together in memory
      */
@@ -578,7 +591,7 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     auto h = (obj_hdr*)buf;
     *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_CKPT, .seq = (uint32_t)ckpt_seq,
-		   .hdr_sectors = sectors, .data_sectors = 0};
+		   .hdr_sectors = (uint32_t)sectors, .data_sectors = 0};
     memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
     auto ch = (obj_ckpt_hdr*)(h+1);
 
@@ -606,7 +619,8 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
      */
     size_t offset = sizeof(*super_h) + sizeof(*super_sh);
 
-    // lk2.lock(); TODO: WTF???
+    /* this is the only place we modify *super_sh
+     */
     super_sh->ckpts_offset = offset;
     super_sh->ckpts_len = sizeof(ckpt_seq);
     *(int*)(super_buf + offset) = ckpt_seq;
@@ -660,6 +674,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
      * utilization, i.e. (live data) / (total size)
      */
     std::set<std::tuple<double,int,int>> utilization;
+
     for (auto p : object_info)  {
 	double rho = 1.0 * p.second.live / p.second.data;
 	sector_t sectors = p.second.hdr + p.second.data;
@@ -680,20 +695,22 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     if (objs_to_clean.size() == 0) 
 	return;
 	
-    /* find all live extents in objects listed in objs_to_clean
+    /* find all live extents in objects listed in objs_to_clean:
+     * - make bitmap from objs_to_clean
+     * - find all entries in map pointing to those objects
      */
     std::vector<bool> bitmap(max_obj+1);
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++)
 	bitmap[it->first] = true;
 
-    /* TODO: I think we need to hold the objmap lock here...
-     */
+    std::unique_lock objlock(*map_lock); // TODO: might not need til later...
     extmap::objmap live_extents;
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	if (bitmap[ptr.obj])
 	    live_extents.update(base, limit, ptr);
     }
+    objlock.unlock();
     lk.unlock();
 
     /* everything before this point was in-memory only, with the 
@@ -704,10 +721,10 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
      * in the read cache, and put retrieved data there...
      */
     if (live_extents.size() > 0) {
-	/* temporary file, delete on close. Should use mkstemp().
-	 * need a proper config file so we can configure all this crap...
+	/* temporary file, delete on close. 
 	 */
-	char temp[] = "/mnt/nvme/lsvd/gc.XXXXXX";
+	char temp[cfg->cache_dir.size() + 20];
+	sprintf(temp, "%s/gc.XXXXXX", cfg->cache_dir.c_str());
 	int fd = mkstemp(temp);
 	unlink(temp);
 
@@ -716,8 +733,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	 */
 	extmap::cachemap file_map;
 	sector_t offset = 0;
-	//char *buf = (char*)malloc(10*1024*1024);
-	char *buf = (char*)aligned_alloc(512, 10*1024*1024); // TODO: WHY??
+	char *buf = (char*)malloc(10*1024*1024);
 
 	for (auto [i,sectors] : objs_to_clean) {
 	    objname name(prefix(), i);
@@ -742,7 +758,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    auto [base, limit, ptr] = it->vals();
 	    all_extents.push_back((_extent){base, limit, ptr});
 	}
-	//live_extents.reset();	// give up memory early
 	
 	while (all_extents.size() > 0) {
 	    sector_t sectors = 0, max = 16 * 1024; // 8MB
@@ -764,7 +779,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	     */
 	    char *buf = (char*)aligned_alloc(512, sectors * 512);
 
-	    lk.lock();
+	    lk.lock();		// m
+	    objlock.lock();	// *map_lock
 	    off_t byte_offset = 0;
 	    sector_t data_sectors = 0;
 	    std::vector<data_map> obj_extents;
@@ -799,12 +815,18 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    int hdr_sectors = make_gc_hdr(hdr, _seq, data_sectors,
 					  obj_extents.data(), obj_extents.size());
 	    auto offset = hdr_sectors;
+
+	    int gc_sectors = byte_offset / 512;
+	    obj_info oi = {.hdr = hdr_sectors, .data = gc_sectors,
+		   .live = gc_sectors, .type = LSVD_DATA};
+	    object_info[_seq] = oi;
+	    
 	    for (auto e : obj_extents) {
 		extmap::obj_offset oo = {_seq, offset};
 		map->update(e.lba, e.lba+e.len, oo, NULL);
 		offset += e.len;
 	    }
-
+	    objlock.unlock();
 	    lk.unlock();
 
 	    smartiov iovs;
@@ -822,11 +844,16 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	}
 	close(fd);
     }
-	
+
+    lk.lock();
+    for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) 
+	object_info.erase(object_info.find(it->first));
+    lk.unlock();
+    
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	objname name(prefix(), it->first);
 	objstore->delete_object(name.c_str());
-	gc_deleted++;
+	gc_deleted++;		// single-threaded, no lock needed
     }
     lk.lock();
 }
