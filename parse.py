@@ -5,15 +5,32 @@ import lsvd
 import sys
 import uuid
 from ctypes import *
+import argparse
+import rados
 
-f = open(sys.argv[1], 'rb')
-obj = f.read(None)
-f.close()
+parser = argparse.ArgumentParser(description='Read backend object')
+parser.add_argument('--rados', help='fetch from RADOS', action='store_true')
+parser.add_argument('object', help='object path')
+args = parser.parse_args()
+
+if args.rados:
+    pool,oid = args.object.split('/')
+    cluster = rados.Rados(conffile='')
+    cluster.connect()
+    if not cluster.pool_exists(pool):
+        raise RuntimeError('Pool not found: ' + pool)
+    ioctx = cluster.open_ioctx(pool)
+    obj = ioctx.read(oid)
+    ioctx.close()
+else:
+    f = open(sys.argv[1], 'rb')
+    obj = f.read(None)
+    f.close()
 
 o2 = l1 = lsvd.sizeof_hdr
 
 def fmt_ckpt(ckpts):
-    return map(lambda x: "%d" % x, ckpts)
+    return map(lambda x: "%d (0x%x)" % (x,x), ckpts)
 
 def fmt_obj_cleaned(objs):
     l = []
@@ -92,7 +109,7 @@ elif h.type == lsvd.LSVD_DATA:
     print('n_hdr:    ', h.hdr_sectors)
     print('n_data:   ', h.data_sectors)
 
-    print('last_data:', dh.last_data_obj)
+    print('last_data:', dh.last_data_obj, "(0x%x)" % dh.last_data_obj)
     print('ckpts:    ', dh.ckpts_offset, ':', ', '.join(fmt_ckpt(ckpts)))
     print('cleaned:  ', dh.objs_cleaned_offset, ':', ', '.join(fmt_obj_cleaned(objs)))
     print('map:      ', dh.map_offset, ':', ', '.join(fmt_data_map(maps)))
