@@ -101,7 +101,7 @@ char* rados_backend::pool_init(const char *pool_) {
 
 int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
     auto oname = pool_init(name);
-
+    assert(*((int*)iov[0].iov_base) == LSVD_MAGIC);
     smartiov iovs(iov, iovcnt);
     char *buf = (char*)malloc(iovs.bytes());
     iovs.copy_out(buf);
@@ -195,6 +195,7 @@ public:
 request *rados_backend::make_write_req(const char *name, iovec *iov,
 				       int iovcnt) {
     auto oid = pool_init(name);
+    assert(*((int*)iov[0].iov_base) == LSVD_MAGIC);
     return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx);
 }
 
