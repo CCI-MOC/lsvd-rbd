@@ -46,7 +46,7 @@ class write_cache_impl : public write_cache {
     uint32_t       super_blkno;
     lsvd_config   *cfg;
     
-    std::atomic<uint64_t> sequence; // write sequence #
+    std::atomic<uint64_t> sequence = 1; // write sequence #
 
     /* bookkeeping for write throttle
      */
@@ -64,9 +64,26 @@ class write_cache_impl : public write_cache {
     void read_map_entries();
     int roll_log_forward();
 
-    /* track length of each journal record in cache
+    /* track contents of the write cache. 
      */
-    std::map<page_t,int> lengths;
+    enum page_type { WCACHE_NONE = 0,
+		     WCACHE_HDR = 17,
+		     WCACHE_PAD = 18,
+		     WCACHE_DATA = 19};
+    struct page_desc {
+	enum page_type type = WCACHE_NONE;
+	int            n_pages;
+    };
+    page_desc *cache_blocks;
+    extmap::cachemap2 rmap;	// reverse map: pLBA,len -> vLBA
+
+    /* track outstanding requests and point before which
+     * all writes are durable in SSD
+     */
+    std::vector<std::pair<page_t,page_t>> outstanding;
+    page_t next_acked_page = 0;
+    void notify_complete(page_t start, page_t len);
+    void record_outstanding(page_t start, page_t len);
 
     thread_pool<int>          *misc_threads;
 
@@ -86,7 +103,6 @@ class write_cache_impl : public write_cache {
     friend class wcache_write_req;
     std::mutex                m;
     extmap::cachemap2 map;
-    extmap::cachemap2 rmap;
     bool              map_dirty;
     translate        *be;
     j_hdr *mk_header(char *buf, uint32_t type, page_t blks);
@@ -125,12 +141,19 @@ public:
     void do_write_checkpoint(void);
 };
 
+
 /* ------------- batched write request ------------- */
 
 class wcache_write_req : public request {
     std::atomic<int> reqs = 0;
 
     sector_t      plba;
+
+    page_t        hdr_page;	// for tracking completions
+    page_t        n_hdr_pages;
+    page_t        pad_page = 0;
+    page_t        n_pad_pages;
+    
     std::vector<work_tuple> *work = NULL;
     request      *r_data = NULL;
     char         *hdr = NULL;
@@ -138,7 +161,7 @@ class wcache_write_req : public request {
 
     request      *r_pad = NULL;
     char         *pad_hdr = NULL;
-    smartiov     *pad_iov = NULL;
+    smartiov      pad_iov;
 
     write_cache_impl *wcache = NULL;
     
@@ -169,10 +192,14 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
     if (pad != 0) {
 	pad_hdr = (char*)aligned_alloc(512, 4096);
 	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
-	pad_iov = new smartiov();
-	pad_iov->push_back((iovec){pad_hdr, 4096});
+
+	pad_page = pad;	// track completion
+	n_pad_pages = n_pad+1;
+	wcache->record_outstanding(pad, n_pad+1);
+
+	pad_iov.push_back((iovec){pad_hdr, 4096});
 	reqs++;
-	r_pad = wcache->nvme_w->make_write_request(pad_iov, pad*4096L);
+	r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad*4096L);
     }
   
     std::vector<j_extent> extents;
@@ -184,12 +211,17 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
     hdr = (char*)aligned_alloc(512, 4096);
     j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, 1+n_pages);
 
+    hdr_page = page;		// track completion
+    n_hdr_pages = 1+n_pages;
+    wcache->record_outstanding(page, 1+n_pages);
+
     j->extent_offset = sizeof(*j);
     size_t e_bytes = extents.size() * sizeof(j_extent);
     j->extent_len = e_bytes;
     memcpy((void*)(hdr + sizeof(*j)), (void*)extents.data(), e_bytes);
 
     plba = (page+1) * 8;
+
     data_iovs = new smartiov();
     data_iovs->push_back((iovec){hdr, 4096});
     for (auto [req,lba,iovs] : *work) {
@@ -204,12 +236,12 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
 wcache_write_req::~wcache_write_req() {
     free(hdr);
     if (pad_hdr) 
-	free(pad_hdr);
+        free(pad_hdr);
     delete data_iovs;
-    if (pad_iov)
-	delete pad_iov;
     delete work;
 }
+
+void do_log(const char*, ...);
 
 void wcache_write_req::notify(request *child) {
     child->release();
@@ -217,29 +249,32 @@ void wcache_write_req::notify(request *child) {
 	return;
     {
 	std::unique_lock lk(wcache->m);
-	std::vector<extmap::lba2lba> garbage; 
 	auto _plba = plba;
 
 	/* update the write cache forward and reverse maps
 	 */
+        std::vector<extmap::lba2lba> garbage; 
 	for (auto [req,lba,iovs] : *work) {
 	    (void)req;
 	    sector_t sectors = iovs->bytes() / 512;
-	    wcache->map.update(lba, lba + sectors,
-			       _plba, &garbage);
-	    wcache->rmap.update(_plba, _plba+sectors, lba);
+
+	    wcache->map.update(lba, lba + sectors, _plba, NULL);
+            wcache->rmap.update(_plba, _plba+sectors, lba);
+	    assert(wcache->map.size() <= 6354);
+	    
 	    _plba += sectors;
 	    wcache->map_dirty = true;
 	}
-
-	/* remove reverse mappings for old versions of data
-	 */
-	for (auto it = garbage.begin(); it != garbage.end(); it++) 
-	    wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
+        for (auto it = garbage.begin(); it != garbage.end(); it++) 
+            wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
 
 	wcache->outstanding_writes--;
 	if (wcache->work.size() >= wcache->write_batch)
 	    wcache->send_writes(lk);
+
+	if (pad_page != 0)
+	    wcache->notify_complete(pad_page, n_pad_pages);
+	wcache->notify_complete(hdr_page, n_hdr_pages);
     }
 
     /* send data to backend, invoke callbacks, then clean up
@@ -288,49 +323,53 @@ void write_cache_impl::flush(void) {
 	write_cv.wait(lk);
 }
 
-/* circular buffer logic - returns true if any [p..p+len) is in the
- * range [oldest..newest) modulo [base,limit)
- */
-static bool in_range(page_t p, page_t len, page_t oldest, page_t newest) {
-    if (oldest == newest)
-	return false;
-    
-    if (oldest < newest)
-	// |--p...+len..[========]---p...+len|  <<< not in range
-	//              ^old     ^new
-	return !(p+len <= oldest || newest <= p);
-    else
-	// |============]--p..+len--[========| <<< not in range
-	//              ^new        ^old
-	return !(p >= newest && p+len < oldest);
-}
-
 /* call this BEFORE writing to cache, guarantees that we don't have any 
  * old map entries pointing to the locations being written to.
  */
-void write_cache_impl::evict(page_t page, page_t len) {
+void write_cache_impl::evict(page_t page, page_t limit) {
     assert(!m.try_lock());  // m must be locked
+    page_t b = super->base;
+    page_t oldest = super->oldest;
 
-    auto oldest = super->oldest,
-	newest = super->next;
-
-    while (in_range(page, len, oldest, newest)) {
-	auto len = lengths[oldest];
-	assert(len > 0);
-
-	sector_t base = (oldest+1)*8, limit = base + (len-1)*8;
-	for (auto it = rmap.lookup(base);
-	     it != rmap.end() && it->base() < limit; it++) {
-	    auto [p_base, p_limit, vlba] = it->vals(base, limit);
-	    map.trim(vlba, vlba + p_limit-p_base);
-	}
-        rmap.trim(base, limit);
-
-	lengths.erase(oldest);
-	oldest += len;
-	if (oldest >= super->limit)
-	    oldest = super->base;
+    while (page < limit && cache_blocks[page - b].type == WCACHE_NONE)
+	page++;
+    if (page == limit)		// fresh cache - nothing to evict
+	return;
+    
+    /* page < limit, so if we hit a pad we're done
+     */
+    assert(page == oldest);
+    if (cache_blocks[page - b].type == WCACHE_PAD) {
+	cache_blocks[page - b].type = WCACHE_NONE;
+	super->oldest = super->base;
+	return;
     }
+
+    /* otherwise we're chipping away at the oldest journal records
+     */
+    assert(cache_blocks[oldest - b].type == WCACHE_HDR);
+
+    while (oldest < limit) {
+	page_t len = cache_blocks[oldest - b].n_pages;
+	sector_t s_base = oldest*8, s_limit = s_base + len*8;
+	
+	for (auto it = rmap.lookup(s_base);
+	     it != rmap.end() && it->base() < s_limit; it++) {
+	    auto [_base, _limit, ptr] = it->vals(s_base, s_limit);
+	    map.trim(ptr, ptr+(_limit-_base));
+	}
+	rmap.trim(s_base, s_limit);
+
+	for (int i = 0; i < len; i++)
+	    cache_blocks[oldest - b + i].type = WCACHE_NONE;
+
+	oldest += len;
+    }
+
+    assert(oldest <= (page_t)super->limit);
+    if (oldest == (page_t)super->limit)
+	oldest = super->base;
+    super->oldest = oldest;
 }
 
 
@@ -346,7 +385,7 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     if (super->limit - super->next < (uint32_t)n) {
 	pad = super->next;
 	n_pad = super->limit - pad;
-	evict(pad, n_pad);
+	evict(pad, super->limit);
 	super->next = super->base;
     }
 
@@ -359,14 +398,29 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     return val;
 }
 
+void write_cache_impl::notify_complete(page_t start, page_t len) {
+    assert(!m.try_lock());	// must be locked
+    auto it = std::find(outstanding.begin(), outstanding.end(),
+			std::make_pair(start,len));
+    assert(it != outstanding.end());
+    outstanding.erase(it);
+    next_acked_page = outstanding.front().first;
+}
+
+void write_cache_impl::record_outstanding(page_t start, page_t len) {
+    assert(!m.try_lock());	// must be locked
+    outstanding.push_back(std::make_pair(start, len));
+}
+
 /* call with lock held
  */
 j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
     assert(!m.try_lock());
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr*)buf;
+    // OH NO - am I using wcache->sequence or wcache->super->seq???
     *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1,
-		 .seq = super->seq++, .len = (uint32_t)blks, .crc32 = 0,
+		 .seq = sequence++, .len = (uint32_t)blks, .crc32 = 0,
 		 .extent_offset = 0, .extent_len = 0};
     return h;
 }
@@ -415,6 +469,16 @@ void write_cache_impl::write_checkpoint(void) {
 	return;
     ckpt_in_progress = true;
 
+    /* find all the journal record lengths in cache_blocks[.] first
+     */
+    std::vector<j_length> lengths;
+    page_t b = super->base;
+    for (int i = super->base; i < (int)super->limit; i++) {
+	auto [type, n_pages] = cache_blocks[i - b];
+	if (type == WCACHE_HDR)
+	    lengths.push_back((j_length){i, n_pages});
+    }
+
     size_t map_bytes = map.size() * sizeof(j_map_extent);
     size_t len_bytes = lengths.size() * sizeof(j_length);
     page_t map_pages = div_round_up(map_bytes, 4096),
@@ -443,8 +507,8 @@ void write_cache_impl::write_checkpoint(void) {
     char *l_buf = (char*)aligned_alloc(512, 4096L * len_pages);
     auto jl = (j_length*)l_buf;
     int n_lens = 0;
-    for (auto it = lengths.begin(); it != lengths.end(); it++)
-	jl[n_lens++] = (j_length){it->first, it->second};
+    for (auto l : lengths)
+	jl[n_lens++] = l;
 
     // valgrind:
     int pad2 = 4096L * len_pages - len_bytes;
@@ -454,10 +518,9 @@ void write_cache_impl::write_checkpoint(void) {
 
     j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
     memcpy(super_copy, super, 4096);
+    super_copy->seq = sequence;
+    super_copy->next = next_acked_page;
 
-    /* TODO: super_copy->next needs to point just past the most 
-     * completed journal write recorded in the map
-     */
     super_copy->map_start = super->map_start = blockno;
     super_copy->map_blocks = super->map_blocks = map_pages;
     super_copy->map_entries = super->map_entries = n_extents;
@@ -496,8 +559,8 @@ void write_cache_impl::read_map_entries() {
     decode_offset_len<j_map_extent>(map_buf, 0, map_bytes, extents);
 
     for (auto e : extents) {
-	map.update(e.lba, e.lba+e.len, e.plba);
-	rmap.update(e.plba, e.plba + e.len, e.lba);
+	map.update(e.lba, e.lba+e.len, e.plba); // forward map
+        rmap.update(e.plba, e.plba + e.len, e.lba); // reverse
     }
     free(map_buf);
 
@@ -510,10 +573,13 @@ void write_cache_impl::read_map_entries() {
 	throw_fs_error("wcache_len");
     decode_offset_len<j_length>(len_buf, 0, len_bytes, _lengths);
 
+    auto b = super->base;
     for (auto l : _lengths) {
-	lengths[l.page] = l.len;
-	assert(lengths[l.page] > 0);
+	cache_blocks[l.page - b] = (page_desc){WCACHE_HDR, l.len};
+	for (int i = 1; i < l.len; i++)
+	    cache_blocks[l.page - b + i].type = WCACHE_DATA;
     }
+
     free(len_buf);
 }
 
@@ -524,7 +590,7 @@ int write_cache_impl::roll_log_forward() {
     //   read the whole record
     //   verify it, quit if done
     //   for each entry in it
-    //     put it in the map and rmap
+    //     put it in the map and cache_blocks[.]
     //     send it to the backend
     // if we moved write_super->next, write another checkpoint
     bool dirty = false;
@@ -539,12 +605,22 @@ int write_cache_impl::roll_log_forward() {
 	    break;
 
 	sequence++;
+	page_t idx = super->next - super->base;
+	
 	if (hdr->type == LSVD_J_PAD) {
+	    cache_blocks[idx++] =
+		(page_desc){WCACHE_PAD, (int)(super->limit - super->next)};
+	    while (idx < (page_t)super->limit)
+		cache_blocks[idx++].type = WCACHE_NONE;
+	    
 	    super->next = super->base;
 	    continue;
 	}
+
+	cache_blocks[idx] = (page_desc){WCACHE_HDR, (int)hdr->len};
+	for (int i = 1; i < (int)hdr->len; i++)
+	    cache_blocks[idx+i].type = WCACHE_DATA;
 	
-	lengths[super->next] = hdr->len;
 	dirty = true;
 	std::vector<j_extent> entries;
 	decode_offset_len<j_extent>(buf, hdr->extent_offset,
@@ -558,9 +634,11 @@ int write_cache_impl::roll_log_forward() {
 	sector_t plba = (super->next+1) * 8;
 	size_t offset = 0;
 	std::vector<extmap::lba2lba> garbage;
+	
 	for (auto e : entries) {
 	    map.update(e.lba, e.lba+e.len, plba, &garbage);
 	    rmap.update(plba, plba+e.len, e.lba);
+
 	    size_t bytes = e.len * 512;
 	    iovec iov = {data+offset, bytes};
 	    be->writev(e.lba*512, &iov, 1);
@@ -568,8 +646,8 @@ int write_cache_impl::roll_log_forward() {
 	    plba += e.len;
 	}
 	for (auto g : garbage)
-	    rmap.trim(g.s.base, g.s.base+g.s.len);
-	
+	    rmap.trim(g.s.base, g.s.base+g.s.len);	    
+
 	free(data);
 	super->next += hdr->len;
 	
@@ -597,17 +675,17 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
     super = (j_write_super*)buf;
     map_dirty = false;
 
+    int n_pages = super->limit - super->base;
+    cache_blocks = new page_desc[n_pages];
+    
     if (super->map_entries)
 	read_map_entries();
 
     roll_log_forward();
 
-    auto N = super->limit - super->base;
-    max_write_pages = N/2;
+    max_write_pages = n_pages / 2;
     write_batch = cfg->wcache_batch;
     
-    // https://stackoverflow.com/questions/22657770/using-c-11-multithreading-on-non-static-member-function
-
     misc_threads = new thread_pool<int>(&m);
     misc_threads->pool.push(std::thread(&write_cache_impl::ckpt_thread,
 					this, misc_threads));
@@ -622,6 +700,7 @@ write_cache *make_write_cache(uint32_t blkno, int fd,
 
 write_cache_impl::~write_cache_impl() {
     delete misc_threads;
+    delete[] cache_blocks;
     free(super);
     delete nvme_w;
 }
@@ -635,22 +714,27 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
     sector_t sectors = 0;
     for (auto [req,lba,iov] : *w) {
 	(void)lba; (void)req;
-	sectors += iov->bytes() / 512;
-	assert(iov->aligned(512));
+        sectors += iov->bytes() / 512;
+        assert(iov->aligned(512));
     }
     
     page_t pages = div_round_up(sectors, 8);
     page_t pad, n_pad;
     page_t page = allocate(pages+1, pad, n_pad);
-
-    lengths[page] = pages+1;
-
+    auto b = super->base;
+    
     if (pad) {
 	page_t pad_len = super->limit - pad;
-	evict(pad, pad_len);
-	lengths[pad] = pad_len;
-	assert((pad+pad_len)*4096UL <= dev_max);
+	evict(pad, super->limit);
+	cache_blocks[pad - b] = (page_desc){WCACHE_PAD, pad_len};
+	for (page_t i = pad+1; i < (page_t)super->limit; i++)
+	    cache_blocks[i - b].type = WCACHE_NONE;
     }
+
+    cache_blocks[page - b] = (page_desc){WCACHE_HDR, pages+1};
+    for (int i = 0; i < pages; i++)
+	cache_blocks[page - b + 1 + i].type = WCACHE_DATA;
+    
 
     auto req = new wcache_write_req(w, pages, page, n_pad-1, pad, this);
     outstanding_writes++;
