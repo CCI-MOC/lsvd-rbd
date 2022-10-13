@@ -6,7 +6,6 @@ import sys
 import uuid
 from ctypes import *
 import argparse
-import rados
 
 parser = argparse.ArgumentParser(description='Read backend object')
 parser.add_argument('--rados', help='fetch from RADOS', action='store_true')
@@ -14,6 +13,7 @@ parser.add_argument('object', help='object path')
 args = parser.parse_args()
 
 if args.rados:
+    import rados
     pool,oid = args.object.split('/')
     cluster = rados.Rados(conffile='')
     cluster.connect()
