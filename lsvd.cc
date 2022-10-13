@@ -300,24 +300,27 @@ class rbd_aio_req : public request {
 
     /* note - 'complete' = (n_req == 0) */
     std::atomic<int>  n_req = 0;
-    std::atomic<bool> launched = false;
-    bool              released = false;
-    
-    bool              complete = false; // write only
 
+    /* 1 = complete, 2 = launched, 16 = waited on */
+    std::atomic<int>  status = 0;
     std::mutex        m;
     std::condition_variable cv;
 
     void notify_w(request *unused) {
         sector_t sectors = div_round_up(len, 512);
         img->wcache->release_room(sectors);
-        
-	assert(--n_req == 0);
+
         if (p != NULL)
             p->complete(len);
 
+	assert(--n_req == 0);
+	std::unique_lock lk(m);
+	auto x = (status += 1);
 	cv.notify_all();
-	delete this;
+	lk.unlock();
+
+	if (x == 3)
+	    delete this;
     }
     
     void notify_r(request *child) {
@@ -325,9 +328,12 @@ class rbd_aio_req : public request {
 	    child->release();
         if (--n_req > 0)
             return;
-        if (!launched)
-            return;
+
+	std::unique_lock lk(m);
+	if ((status.load() & 2) == 0)
+	    return; 		// not launched
         
+	auto x = (status += 1);
         if (aligned_buf != buf) 
             memcpy(buf, aligned_buf, len);
 
@@ -335,12 +341,13 @@ class rbd_aio_req : public request {
             p->complete(len);
 
 	cv.notify_all();
-	delete this;
+	if (x == 3)
+	    delete this;
     }
     
     void run_w() {
 	n_req++;		// single sub-request for write
-	launched.store(true);
+	
         if (!aligned(buf, 512)) {
             aligned_buf = (char*)aligned_alloc(512, len);
             memcpy(aligned_buf, buf, len);
@@ -348,6 +355,8 @@ class rbd_aio_req : public request {
         data_iovs.push_back((iovec){aligned_buf, len});
         sector_t sectors = div_round_up(len, 512);
         img->wcache->get_room(sectors);
+
+	status += 2;		// launched
         img->wcache->writev(this, offset/512, &data_iovs);
     }
     
@@ -359,6 +368,7 @@ class rbd_aio_req : public request {
          */
         char *_buf = aligned_buf;       // read and increment this
         size_t _len = len;              // and this
+	bool no_async = true;
 	
         while (_len > 0) {
             auto [skip,wait,rreq] =
@@ -366,6 +376,7 @@ class rbd_aio_req : public request {
 	    if (rreq != NULL) {
 		n_req++;
 		rreq->run(this);
+		no_async = false;
 	    }
 
             _len -= skip;
@@ -375,6 +386,7 @@ class rbd_aio_req : public request {
 		if (req) {
 		    n_req++;
 		    req->run(this);
+		    no_async = false;
 		}
                 memset(_buf, 0, skip2);
                 skip -= (skip2 + wait2);
@@ -385,8 +397,9 @@ class rbd_aio_req : public request {
             _len -= wait;
             offset += wait;
 	}
-        launched.store(true);
-        if (n_req == 0)
+
+	status += 2;		// launched
+	if (no_async)
             notify(NULL);
     }
     
@@ -421,18 +434,15 @@ public:
      */
     void wait() {
 	std::unique_lock lk(m);
-	while (!launched || n_req > 0)
+	status += 16;		   // guard from deletion
+	while (status.load() != 3+16) // wait for launched+complete
 	    cv.wait(lk);
+	status -= 16;		   // guard from deletion
 	lk.unlock();
-	release();
+	delete this;
     }
 
-    void release() {
-	released = true;
-	if ((op == OP_READ && n_req == 0) ||
-	    (op == OP_WRITE && n_req == 0))
-		delete this;
-    }
+    void release() {}
 
     void run(request *parent /* unused */) {
 	if (op == OP_READ)
