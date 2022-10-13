@@ -88,6 +88,8 @@ class translate_impl : public translate {
     };
     std::map<int,obj_info> object_info;
 
+    std::queue<uint32_t> checkpoints;
+    
     /* tracking completions for flush()
      */
     int       next_compln = 1;
@@ -404,8 +406,6 @@ public:
     }
 };
 
-void do_log(const char*,...);
-
 void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     /* TODO: coalesce writes: 
      *   bufmap m
@@ -578,7 +578,8 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
 			       objs_bytes, 512);
     object_info[ckpt_seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0,
 				   .type = LSVD_CKPT};
-
+    checkpoints.push(ckpt_seq);
+    
     /* wait until all prior objects have been acked by backend
      */
     while (next_compln < ckpt_seq)
@@ -676,14 +677,18 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     std::set<std::tuple<double,int,int>> utilization;
 
     for (auto p : object_info)  {
-	double rho = 1.0 * p.second.live / p.second.data;
-	sector_t sectors = p.second.hdr + p.second.data;
+	auto [hdrlen, datalen, live, type] = p.second;
+	if (type != LSVD_DATA)
+	    continue;
+	double rho = 1.0 * live / datalen;
+	sector_t sectors = hdrlen + datalen;
 	utilization.insert(std::make_tuple(rho, p.first, sectors));
+	assert(sectors <= 10*1024*1024/512);
     }
 
     /* gather list of objects needing cleaning, return if none
      */
-    const double threshold = 0.55;
+    const double threshold = 0.50;
     std::vector<std::pair<int,int>> objs_to_clean;
     for (auto [u, o, n] : utilization) {
 	if (u > threshold)
@@ -848,12 +853,26 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     lk.lock();
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) 
 	object_info.erase(object_info.find(it->first));
+
+    /* trim checkpoints
+     */
+    std::vector<int> ckpts_to_delete;
+    while (checkpoints.size() > 3) {
+	ckpts_to_delete.push_back(checkpoints.front());
+	checkpoints.pop();
+    }
+    
     lk.unlock();
     
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	objname name(prefix(), it->first);
 	objstore->delete_object(name.c_str());
 	gc_deleted++;		// single-threaded, no lock needed
+    }
+
+    for (auto c : ckpts_to_delete) {
+	objname name(prefix(), c);
+	objstore->delete_object(name.c_str());
     }
     lk.lock();
 }
