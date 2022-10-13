@@ -159,12 +159,13 @@ public:
     rbd_callback_t cb;
     void *arg;
     int retval;
-    bool done = false;
-    std::atomic<bool> released {false};
     std::mutex m;
     std::condition_variable cv;
-
-    std::atomic<int> n = 0;
+    /* done: += 1
+     * released: += 10
+     * caller waiting: += 20
+     */
+    std::atomic<int> done_released = 0;
     
     lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
 
@@ -181,23 +182,19 @@ public:
 	    }
 	    img->ev.notify();
 	}
-	
-	done = true;
-	if (released)
+
+	std::unique_lock lk(m);
+	int x = (done_released += 1);
+	cv.notify_all();
+	if (x == 11) {
+	    lk.unlock();
 	    delete this;
-	else {
-	    std::unique_lock lk(m);
-	    cv.notify_all();
 	}
     }
 
-    /* the Ceph folks *really* want to make sure users don't
-     * release twice
-     */
     void release() {
-	bool old_released = released.exchange(true);
-	assert(!old_released);
-	if (done)
+	int x = (done_released += 10);
+	if (x == 11) 
 	    delete this;
     }
 };
@@ -316,7 +313,7 @@ class rbd_aio_req : public request {
         img->wcache->release_room(sectors);
         
 	assert(--n_req == 0);
-        if (p != NULL) 
+        if (p != NULL)
             p->complete(len);
 
 	cv.notify_all();
@@ -511,9 +508,15 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
+    p->done_released += 20;
     std::unique_lock lk(p->m);
-    while (!p->done)
+    while ((p->done_released.load() % 1) == 0)
 	p->cv.wait(lk);
+    int x = (p->done_released -= 20);
+    if (x == 11) {
+	lk.unlock();
+	delete p;
+    }
     return 0;
 }
 
@@ -579,3 +582,16 @@ extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
     return -1;
 }
 
+#if 0				// librados replacement
+extern "C" int rados_conf_read_file(rados_t r, const char* s)
+{
+       return 0;
+}
+extern "C" int rados_connect(rados_t cluster) {
+       return 0;
+}
+extern "C" int rados_ioctx_create(rados_t cluster, const char *pool_name,
+                                      rados_ioctx_t *ioctx) {
+       return 0;
+}
+#endif
