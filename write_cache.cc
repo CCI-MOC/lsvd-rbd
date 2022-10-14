@@ -475,7 +475,8 @@ void write_cache_impl::write_checkpoint(void) {
     page_t b = super->base;
     for (int i = super->base; i < (int)super->limit; i++) {
 	auto [type, n_pages] = cache_blocks[i - b];
-	if (type == WCACHE_HDR)
+	if (type == WCACHE_HDR && (i < (int)next_acked_page ||
+				   i >= (int)super->oldest))
 	    lengths.push_back((j_length){i, n_pages});
     }
 
@@ -489,6 +490,8 @@ void write_cache_impl::write_checkpoint(void) {
      * don't leave in inconsistent state if we crash during checkpoint
      */
     page_t blockno = super->meta_base;
+    if (super->map_start == (uint32_t)blockno)
+	blockno = (super->meta_base + super->meta_limit) / 2;
 
     char *e_buf = (char*)aligned_alloc(512, 4096L*map_pages);
     auto jme = (j_map_extent*)e_buf;
@@ -594,8 +597,9 @@ int write_cache_impl::roll_log_forward() {
     //     send it to the backend
     // if we moved write_super->next, write another checkpoint
     bool dirty = false;
+    char *buf = (char*)aligned_alloc(512, 4096);
+
     while (true) {
-	char buf[4096];
 	auto hdr = (j_hdr*)buf;
 	if (nvme_w->read(buf, sizeof(buf), 4096L * super->next) < 0)
 	    return -1;
@@ -652,6 +656,8 @@ int write_cache_impl::roll_log_forward() {
 	super->next += hdr->len;
 	
     }
+    free(buf);
+
     if (dirty)
 	write_checkpoint();
 
@@ -674,6 +680,7 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
     
     super = (j_write_super*)buf;
     map_dirty = false;
+    sequence = super->seq;
 
     int n_pages = super->limit - super->base;
     cache_blocks = new page_desc[n_pages];
