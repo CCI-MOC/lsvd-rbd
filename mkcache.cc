@@ -38,8 +38,8 @@ int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
     memcpy(sup->vol_uuid, uuid, sizeof(uuid_t));
     fwrite(buf, 4096, 1, fp);
 
-    uint32_t _map = div_round_up(wblks, 512);
-    uint32_t _len = div_round_up(wblks, 1024);
+    uint32_t _map = div_round_up(wblks, 256);
+    uint32_t _len = div_round_up(wblks, 512);
     uint32_t mblks = 2 * (_map + _len);
     wblks -= mblks;
     
