@@ -46,9 +46,7 @@
 #include "read_cache.h"
 #include "objname.h"
 
-#if 0
-#include "io.h"
-#endif
+extern void do_log(const char *, ...);
 
 class read_cache_impl : public read_cache {
     
@@ -173,23 +171,25 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, bool nt,
     int oos_per_pg = 4096 / sizeof(extmap::obj_offset);
     assert(div_round_up(super->units, oos_per_pg) == super->map_blocks);
 
+    in_use.init(super->units);
+    written.init(super->units);
+    buffer.init(super->units);
+    pending.init(super->units);
+    a_bit.init(super->units);
+
     flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
     if (ssd->read((char*)flat_map, super->map_blocks*4096,
 		  super->map_start*4096L) < 0)
 	throw("read flatmap");
 
     for (int i = 0; i < super->units; i++) {
-	if (flat_map[i].obj != 0) 
+	if (flat_map[i].obj != 0) {
 	    map[flat_map[i]] = i;
+	    written[i] = true;
+	}
 	else 
 	    free_blks.push_back(i);
     }
-
-    in_use.init(super->units);
-    written.init(super->units);
-    buffer.init(super->units);
-    pending.init(super->units);
-    a_bit.init(super->units);
 
     map_dirty = false;
 
@@ -402,6 +402,7 @@ void rcache_req::notify(request *child) {
 
     if (child != NULL)
 	child->release();
+
     
     /* direct read from nvme, line 375
      */
@@ -466,8 +467,9 @@ void rcache_req::notify(request *child) {
 void rcache_req::run(request *parent_) {
     parent = parent_;
 
-    if (state == RCACHE_QUEUED)
-	/* nothing */ ;
+    if (state == RCACHE_QUEUED) {
+	/* nothing */
+    }
     else if (state == RCACHE_LOCAL_BUFFER) {
 	parent->notify(this);
 	state = RCACHE_DONE;
