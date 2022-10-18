@@ -40,6 +40,9 @@
 #include "misc_cache.h"
 
 
+void do_log(const char*, ...);
+void fp_log(const char*, ...);
+
 /* ----------- Object translation layer -------------- */
 
 class translate_impl : public translate {
@@ -861,8 +864,12 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	ckpts_to_delete.push_back(checkpoints.front());
 	checkpoints.pop();
     }
-    
+
+    /* write checkpoint *before* deleting any objects
+     */
+    int ckpt_seq = seq++;
     lk.unlock();
+    write_checkpoint(ckpt_seq);
     
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	objname name(prefix(), it->first);
