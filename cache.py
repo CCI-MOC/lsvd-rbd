@@ -69,15 +69,15 @@ if super.read_super < npages:
     prettyprint(r_super, rsup_pp)
 
 def read_exts(b, npgs, n):
-    buf = os.pread(fd, npgs*4096, b*4096)
     bytes = n*lsvd.sizeof_j_map_extent
-    e = (lsvd.j_map_extent*n).from_buffer(bytearray(buf[0:bytes]))
+    buf = os.pread(fd, bytes, b*4096)
+    e = (lsvd.j_map_extent*n).from_buffer(bytearray(buf))
     return [(_.lba, _.len, _.plba) for _ in e]
 
 def read_lens(b, npgs, n):
-    buf = os.pread(fd, npgs*4096, b*4096)
     bytes = n*lsvd.sizeof_j_length
-    l = (lsvd.j_length*n).from_buffer(bytearray(buf[0:bytes]))
+    buf = os.pread(fd, bytes, b*4096)
+    l = (lsvd.j_length*n).from_buffer(bytearray(buf))
     return [(_.page, _.len) for _ in l]
     
 if args.write and super.write_super < npages:
