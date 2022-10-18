@@ -48,6 +48,8 @@
 #include "config.h"
 #include "image.h"
 
+extern void do_log(const char *, ...);
+
 /* RBD "image" and completions are only used in this file, so we
  * don't break them out into a .h
  */
@@ -283,6 +285,15 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
+static std::atomic<int> __reqs;
+
+enum rbd_req_status {
+    REQ_NOWAIT = 0,
+    REQ_COMPLETE = 1,
+    REQ_LAUNCHED = 2,
+    REQ_WAIT = 4
+};
+
 /* rbd_aio_req - state machine for rbd_aio_read, rbd_aio_write
  *
  * TODO: fix this. I merged separate read & write classes in the
@@ -298,14 +309,14 @@ class rbd_aio_req : public request {
     lsvd_op           op;
     smartiov          data_iovs;
 
-    /* note - 'complete' = (n_req == 0) */
     std::atomic<int>  n_req = 0;
-
-    /* 1 = complete, 2 = launched, 16 = waited on */
     std::atomic<int>  status = 0;
     std::mutex        m;
     std::condition_variable cv;
 
+    /* there's only a single notification to a write request, so 
+     * we ignore n_req and LAUNCHED
+     */
     void notify_w(request *unused) {
         sector_t sectors = div_round_up(len, 512);
         img->wcache->release_room(sectors);
@@ -313,41 +324,16 @@ class rbd_aio_req : public request {
         if (p != NULL)
             p->complete(len);
 
-	assert(--n_req == 0);
 	std::unique_lock lk(m);
-	auto x = (status += 1);
-	cv.notify_all();
-	lk.unlock();
-
-	if (x == 3)
+	if (status & REQ_WAIT)
+	    cv.notify_all();
+	else {
+	    lk.unlock();
 	    delete this;
+	}
     }
-    
-    void notify_r(request *child) {
-	if (child)
-	    child->release();
-        if (--n_req > 0)
-            return;
 
-	std::unique_lock lk(m);
-	if ((status.load() & 2) == 0)
-	    return; 		// not launched
-        
-	auto x = (status += 1);
-        if (aligned_buf != buf) 
-            memcpy(buf, aligned_buf, len);
-
-        if (p != NULL) 
-            p->complete(len);
-
-	cv.notify_all();
-	if (x == 3)
-	    delete this;
-    }
-    
     void run_w() {
-	n_req++;		// single sub-request for write
-	
         if (!aligned(buf, 512)) {
             aligned_buf = (char*)aligned_alloc(512, len);
             memcpy(aligned_buf, buf, len);
@@ -355,39 +341,62 @@ class rbd_aio_req : public request {
         data_iovs.push_back((iovec){aligned_buf, len});
         sector_t sectors = div_round_up(len, 512);
         img->wcache->get_room(sectors);
-
-	status += 2;		// launched
         img->wcache->writev(this, offset/512, &data_iovs);
     }
     
+    void read_notify_parent(void) {
+	assert(!m.try_lock());
+        if (aligned_buf != buf) 
+            memcpy(buf, aligned_buf, len);
+        if (p != NULL) 
+            p->complete(len);
+	if (status & REQ_WAIT)
+	    cv.notify_all();
+    }
+    
+    void notify_r(request *child) {
+	if (child)
+	    child->release();
+
+	std::unique_lock lk(m);
+        if (--n_req > 0)
+	    return;
+
+	auto x = (status |= REQ_COMPLETE);
+	if (x & REQ_LAUNCHED) {
+	    read_notify_parent();
+	    if (! (x & REQ_WAIT)) {
+		lk.unlock();
+		delete this;
+	    }
+	}
+    }
+
     void run_r() {
         if (!aligned(buf, 512))
             aligned_buf = (char*)aligned_alloc(512, len);
 
+	__reqs++;
+	
         /* we're not done until n_req == 0 && launched == true
          */
         char *_buf = aligned_buf;       // read and increment this
         size_t _len = len;              // and this
-	bool no_async = true;
+	std::vector<request*> requests;
 	
         while (_len > 0) {
-            auto [skip,wait,rreq] =
+            auto [skip,wait,req] =
                 img->wcache->async_read(offset, _buf, _len);
-	    if (rreq != NULL) {
-		n_req++;
-		rreq->run(this);
-		no_async = false;
-	    }
+	    if (req != NULL)
+		requests.push_back(req);
 
             _len -= skip;
             while (skip > 0) {
-                auto [skip2, wait2, req] =
+                auto [skip2, wait2, req2] =
                     img->rcache->async_read(offset, _buf, skip);
-		if (req) {
-		    n_req++;
-		    req->run(this);
-		    no_async = false;
-		}
+		if (req2)
+		    requests.push_back(req2);
+
                 memset(_buf, 0, skip2);
                 skip -= (skip2 + wait2);
                 _buf += (skip2 + wait2);
@@ -398,14 +407,25 @@ class rbd_aio_req : public request {
             offset += wait;
 	}
 
-	status += 2;		// launched
-	if (no_async)
-            notify(NULL);
+	n_req += requests.size();
+	for (auto r : requests)
+	    r->run(this);
+	
+	std::unique_lock lk(m);
+	if (requests.size() == 0)
+	    status |= REQ_COMPLETE;
+	auto x = (status |= REQ_LAUNCHED);
+
+	if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
+	    read_notify_parent();
+	    lk.unlock();
+	    delete this;
+	}
     }
     
 public:
     rbd_aio_req(lsvd_op op_, rbd_image *img_, lsvd_completion *p_,
-		char *buf_, uint64_t offset_, size_t len_) {
+		char *buf_, uint64_t offset_, size_t len_, int status_) {
 	op = op_;
 	img = img_;
 	p = p_;
@@ -413,6 +433,7 @@ public:
 	offset = offset_;
 	len = len_;
 	aligned_buf = buf;
+	status = status_;
     }
     ~rbd_aio_req() {
 	if (aligned_buf != buf)
@@ -433,12 +454,10 @@ public:
      * with rbd_aio_completion and use its release() method
      */
     void wait() {
+	assert(status & REQ_WAIT);
 	std::unique_lock lk(m);
-	status += 16;		   // guard from deletion
-	while (status.load() != 3+16) // wait for launched+complete
+	while (! (status & REQ_COMPLETE))
 	    cv.wait(lk);
-	status -= 16;		   // guard from deletion
-	lk.unlock();
 	delete this;
     }
 
@@ -464,7 +483,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
     auto p = (lsvd_completion*)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_READ, img, p, buf, offset, len);
+    auto req = new rbd_aio_req(OP_READ, img, p, buf, offset, len, REQ_NOWAIT);
     req->run(NULL);
     return 0;
 }
@@ -490,7 +509,8 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_WRITE, img, p, (char*)buf, offset, len);
+    auto req = new rbd_aio_req(OP_WRITE, img, p, (char*)buf,
+			       offset, len, REQ_NOWAIT);
     req->run(NULL);
     return 0;
 }
@@ -500,7 +520,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     rbd_image *img = (rbd_image*)image;
-    auto req = new rbd_aio_req(OP_READ, img, NULL, buf, off, len);
+    auto req = new rbd_aio_req(OP_READ, img, NULL, buf, off, len, REQ_WAIT);
     req->run(NULL);
     req->wait();
     return 0;
@@ -509,7 +529,8 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char *buf)
 {
     rbd_image *img = (rbd_image*)image;
-    auto req = new rbd_aio_req(OP_WRITE, img, NULL, (char*)buf, off, len);
+    auto req = new rbd_aio_req(OP_WRITE, img, NULL, (char*)buf,
+			       off, len, REQ_WAIT);
     req->run(NULL);
     req->wait();
     return 0;
@@ -592,7 +613,7 @@ extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
     return -1;
 }
 
-#if 0				// librados replacement
+#if 1				// librados replacement
 extern "C" int rados_conf_read_file(rados_t r, const char* s)
 {
        return 0;
