@@ -260,7 +260,7 @@ void wcache_write_req::notify(request *child) {
 
 	    wcache->map.update(lba, lba + sectors, _plba, NULL);
             wcache->rmap.update(_plba, _plba+sectors, lba);
-	    assert(wcache->map.size() <= 6354);
+	    //assert(wcache->map.size() <= 6354);
 	    
 	    _plba += sectors;
 	    wcache->map_dirty = true;
