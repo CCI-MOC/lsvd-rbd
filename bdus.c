@@ -81,12 +81,12 @@ static struct bdus_attrs device_attrs =
 };
 
 
-static char args_doc[] = "SSD OBJ_PREFIX";
+static char args_doc[] = "OBJ_PREFIX";
 static struct argp_option options[] = {
     {"threads",      't', "THREADS",   0, "max number of threads"},
     {0},
 };
-char *ssd, *prefix;
+char *prefix;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -95,15 +95,13 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         device_attrs.max_concurrent_callbacks = atoi(arg);
         break;
     case ARGP_KEY_ARG:
-        if (ssd == NULL)
-            ssd = arg;
-        else if (prefix == NULL)
+        if (prefix == NULL)
             prefix = arg;
         else
             return ARGP_ERR_UNKNOWN;
         break;
     case ARGP_KEY_END:
-        if (!ssd || !prefix)
+        if (!prefix)
             argp_usage(state);
         break;
     default:
@@ -116,11 +114,9 @@ static struct argp argp = { options, parse_opt, NULL, args_doc};
 int main(int argc, char **argv)
 {
     argp_parse (&argp, argc, argv, ARGP_LONG_ONLY, 0, NULL);
-    char rbd_name[128];
-    sprintf(rbd_name, "%s,%s", ssd, prefix);
-    
+
     rbd_image_t img;
-    int rv = rbd_open(NULL, rbd_name, &img, NULL);
+    int rv = rbd_open(NULL, prefix, &img, NULL);
     if (rv < 0)
         fprintf(stderr, "failed to open\n"), exit(1);
     
