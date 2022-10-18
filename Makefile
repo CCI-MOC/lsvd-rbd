@@ -38,7 +38,7 @@ sources:
 	@echo $(CFILES)
 
 bdus: bdus.o $(OBJS)
-	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio
+	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio -luuid
 
 clean:
 	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d
