@@ -19,8 +19,8 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <filesystem>
-namespace fs = std::filesystem;
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
 
 #include "config.h"
 
@@ -41,27 +41,16 @@ static void split(std::string s, std::vector<std::string> &words) {
 	words.push_back(w);
 }
 
-static long parseint(const char *_s)
-{
-    char *s = (char*)_s;
-    long val = strtol(s, &s, 0);
-    if (toupper(*s) == 'G')
-        val *= (1024*1024*1024);
-    if (toupper(*s) == 'M')
-        val *= (1024*1024);
-    if (toupper(*s) == 'K')
-        val *= 1024;
-    return val;
-}
-
-static long parseint(std::string &s)
-{
-    return parseint(s.c_str());
-}
-
 static std::map<std::string,cfg_backend> m = {{"file", BACKEND_FILE},
 					      {"rados", BACKEND_RADOS}};
 
+
+/* fancy-ass macros to parse config file lines. 
+ *   config keyword = field name
+ *   environment var = LSVD_ + uppercase(field name)
+ *   skips blank lines and lines that don't match a keyword
+ */
+#include "config_macros.h"
 
 int lsvd_config::read() {
     for (auto f : cfg_path) {
@@ -74,43 +63,27 @@ int lsvd_config::read() {
 		continue;
 	    std::vector<std::string> words;
 	    split(line, words);
-	    if (words[0] == "batch_size")
-		batch_size = parseint(words[1]);
-	    if (words[0] == "wcache_batch")
-		wcache_batch = atoi(words[1].c_str());
-	    if (words[0] == "cache_dir")
-		cache_dir = words[1];
-	    if (words[0] == "xlate_threads")
-		xlate_threads = atoi(words[1].c_str());
-	    if (words[0] == "xlate_window")
-		xlate_window = atoi(words[1].c_str());
-	    if (words[0] == "backend")
-		backend = m[words[1]];
-	    if (words[0] == "cache_size")
-		cache_size = parseint(words[1]);
+	    if (words.size() != 2)
+		continue;
+	    F_CONFIG_H_INT(words[0], words[1], batch_size);
+	    F_CONFIG_INT(words[0], words[1], wcache_batch);
+	    F_CONFIG_STR(words[0], words[1], cache_dir);
+	    F_CONFIG_INT(words[0], words[1], xlate_threads);
+	    F_CONFIG_INT(words[0], words[1], xlate_window);
+	    F_CONFIG_TABLE(words[0], words[1], backend, m);
+	    F_CONFIG_H_INT(words[0], words[1], cache_size);
 	}
 	fp.close();
 	break;
     }
-    const char *val = NULL;
-    if ((val = getenv("LSVD_BATCH_SIZE")))
-	batch_size = parseint(val);
-    if ((val = getenv("LSVD_CACHE_DIR")))
-	cache_dir = std::string(val);
-    if ((val = getenv("LSVD_WCACHE_BATCH")))
-	wcache_batch = atoi(val);
-    if ((val = getenv("LSVD_CACHE_DIR")))
-	cache_dir = std::string(val);
-    if ((val = getenv("LSVD_XLATE_THREADS")))
-	xlate_threads = atoi(val);
-    if ((val = getenv("LSVD_XLATE_WINDOW")))
-	xlate_window = atoi(val);
-    if ((val = getenv("LSVD_BACKEND"))) {
-	std::string word(val);
-	backend = m[word];
-    }
-    if ((val = getenv("LSVD_CACHE_SIZE"))) 
-	cache_size = parseint(val);
+    
+    ENV_CONFIG_H_INT(batch_size);
+    ENV_CONFIG_INT(wcache_batch);
+    ENV_CONFIG_STR(cache_dir);
+    ENV_CONFIG_INT(xlate_threads);
+    ENV_CONFIG_INT(xlate_window);
+    ENV_CONFIG_TABLE(backend, m);
+    ENV_CONFIG_H_INT(cache_size);
 
     return 0;			// success
 }
@@ -130,3 +103,17 @@ std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name) {
     return std::string((const char*)buf);
 }
 
+#if 0
+int main(int argc, char **argv) {
+    auto cfg = new lsvd_config;
+    cfg->read();
+
+    printf("batch: %d\n", cfg->batch_size); // h_int
+    printf("wc batch %d\n", cfg->wcache_batch); // int
+    printf("cache: %s\n", cfg->cache_dir.c_str()); // str
+    printf("backend: %d\n", (int)cfg->backend);	   // table
+
+    uuid_t uu;
+    std::cout << cfg->cache_filename(uu, "foobar") << "\n";
+}
+#endif
