@@ -250,26 +250,32 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
     rcache->do_evict(n);
 }
 
-char logbuf[64*1096], *p_log = logbuf;
-extern "C" int get_logbuf(char *buf, size_t max) {
-    size_t len = p_log - logbuf;
-    len = (len > max) ? max : len;
-    memcpy(buf, logbuf, len);
-    return len;
-}
-
+char *logbuf, *p_log;
 #include <stdarg.h>
 std::mutex m;
 void do_log(const char *fmt, ...) {
     std::unique_lock lk(m);
+    if (!logbuf) {
+	size_t sz = 64*1024;
+	const char *env = getenv("LSVD_DEBUG_BUF");
+	if (env)
+	    sz = atoi(env);
+	p_log = logbuf = (char*)malloc(sz);
+    }
     va_list args;
     va_start(args, fmt);
-    size_t max = logbuf + sizeof(logbuf) - p_log - 1;
-    if (max < 16) {
-	p_log = logbuf;
-	max = sizeof(logbuf);
-    }
+    ssize_t max = logbuf + sizeof(logbuf) - p_log - 1;
     p_log += vsnprintf(p_log, max, fmt, args);
+}
+
+FILE *_fp;
+void fp_log(const char *fmt, ...) {
+    //std::unique_lock lk(m);
+    if (_fp == NULL)
+	_fp = fopen("/tmp/lsvd.log", "w");
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(_fp, fmt, args);
 }
 
 class read1_req : public trivial_request {
