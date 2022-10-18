@@ -613,7 +613,7 @@ extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
     return -1;
 }
 
-#if 1				// librados replacement
+#if 0				// librados replacement
 extern "C" int rados_conf_read_file(rados_t r, const char* s)
 {
        return 0;
