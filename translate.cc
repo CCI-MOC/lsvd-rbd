@@ -91,12 +91,11 @@ class translate_impl : public translate {
     };
     std::map<int,obj_info> object_info;
 
-    std::queue<uint32_t> checkpoints;
+    std::vector<uint32_t> checkpoints;
     
     /* tracking completions for flush()
      */
     int       next_compln = 1;
-    int       last_ckpt = 0;	// special value - see make_data_hdr
     int       last_sent = 0;	// most recent data object
     
     std::vector<bool> done;
@@ -132,7 +131,7 @@ class translate_impl : public translate {
      *  https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
      */
 
-    void write_checkpoint(int seq);
+    void write_checkpoint(int seq, std::unique_lock<std::mutex> &lk);
 
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
@@ -233,17 +232,26 @@ ssize_t translate_impl::init(const char *prefix_,
     super_sh = (super_hdr*)(super_h+1);
 
     memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
-    
-    seq = next_compln = super_sh->next_obj;
+
     b = new batch(cfg->batch_size);
-    
-    int _ckpt = 1;
-    for (auto ck : ckpts) {
-	ckpts.resize(0);
+
+    /* actually we're going to forget about next_obj
+     */
+    seq = next_compln = super_sh->next_obj;
+
+    /* read in the last checkpoint, then roll forward from there;
+     */
+    if (ckpts.size() > 0) {
+	int last_ckpt = 0;
+	for (auto c : ckpts) {
+	    last_ckpt = c;
+	    checkpoints.push_back(c); // so we can delete them later
+	}
+
 	std::vector<ckpt_obj> objects;
 	std::vector<deferred_delete> deletes;
 	std::vector<ckpt_mapentry> entries;
-	objname name(prefix(), ck);
+	objname name(prefix(), last_ckpt);
 	if (parser->read_checkpoint(name.c_str(), ckpts, objects,
 				    deletes, entries) < 0)
 	    return -1;
@@ -260,29 +268,37 @@ ssize_t translate_impl::init(const char *prefix_,
 			    (extmap::obj_offset){.obj = m.obj,
 				    .offset = m.offset});
 	}
-	_ckpt = ck;
+	seq = next_compln = last_ckpt + 1;
     }
 
-    for (int i = _ckpt; ; i++) {
+    /* roll forward
+     */
+    for (; ; seq++) {
 	std::vector<uint32_t>    ckpts;
 	std::vector<obj_cleaned> cleaned;
 	std::vector<data_map>    entries;
 	obj_hdr h; obj_data_hdr dh;
-	seq = next_compln = i;
-	objname name(prefix(), i);
+
+	objname name(prefix(), seq);
 	if (parser->read_data_hdr(name.c_str(), h, dh, ckpts,
 				  cleaned, entries) < 0)
 	    break;
-	object_info[i] = (obj_info){.hdr = (int)h.hdr_sectors,
-				    .data = (int)h.data_sectors,
-				    .live = (int)h.data_sectors,
-				    .type = LSVD_DATA};
+	if (h.type == LSVD_CKPT) {
+	    checkpoints.push_back(seq);
+	    continue;
+	}
+
+	assert(h.type == LSVD_DATA);
+	object_info[seq] = (obj_info){.hdr = (int)h.hdr_sectors,
+				      .data = (int)h.data_sectors,
+				      .live = (int)h.data_sectors,
+				      .type = LSVD_DATA};
 	total_sectors += h.data_sectors;
 	total_live_sectors += h.data_sectors;
 	int offset = 0, hdr_len = h.hdr_sectors;
 	for (auto m : entries) {
 	    std::vector<extmap::lba2obj> deleted;
-	    extmap::obj_offset oo = {i, offset + hdr_len};
+	    extmap::obj_offset oo = {seq, offset + hdr_len};
 	    map->update(m.lba, m.lba + m.len, oo, &deleted);
 	    offset += m.len;
 	    for (auto d : deleted) {
@@ -292,6 +308,13 @@ ssize_t translate_impl::init(const char *prefix_,
 		total_live_sectors -= (limit - base);
 	    }
 	}
+    }
+
+    /* delete any potential "dangling" objects.
+     */
+    for (int i = 1; i < 32; i++) {
+	objname name(prefix(), i + seq);
+	objstore->delete_object(name.c_str());
     }
 
     for (int i = 0; i < nthreads; i++) 
@@ -325,7 +348,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 				     data_map *extents, int n_extents) {
     auto h = (obj_hdr*)buf;
     auto dh = (obj_data_hdr*)(h+1);
-    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = sizeof(uint32_t),
+    uint32_t o1 = sizeof(*h) + sizeof(*dh),
+	l1 = sizeof(uint32_t) * checkpoints.size(),
 	o2 = o1 + l1, l2 = n_extents * sizeof(data_map),
 	hdr_bytes = o2 + l2;
     sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
@@ -342,7 +366,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 			 .data_map_offset = o2, .data_map_len = l2};
 
     uint32_t *p_ckpt = (uint32_t*)(dh+1);
-    *p_ckpt = last_ckpt;
+    for (auto c : checkpoints)
+	*p_ckpt++ = c;
 
     data_map *dm = (data_map*)(p_ckpt+1);
     for (int i = 0; i < n_extents; i++)
@@ -423,7 +448,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
      * - map - LBA to obj/offset map
      * - object_info, totals - adjust for new garbage
      */
-    size_t hdr_bytes = obj_hdr_len(b->entries.size(), last_ckpt);
+    size_t hdr_bytes = obj_hdr_len(b->entries.size(), checkpoints.size());
     int hdr_sectors = div_round_up(hdr_bytes, 512);
 
     std::unique_lock objlock(*map_lock);
@@ -460,7 +485,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     lk.unlock();
 
     char *hdr = (char*)calloc(hdr_sectors*512, 1);
-    make_data_hdr(hdr, b->len, last_ckpt, &b->entries, b->seq, &uuid);
+    make_data_hdr(hdr, b->len, &checkpoints, &b->entries, b->seq, &uuid);
     iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
 		   {b->buf, b->len}};
 
@@ -539,20 +564,19 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
 /* -------------- Checkpointing -------------- */
 
 /* synchronously write a checkpoint
+ * NOTE - this drops the lock passed to it.
  */
-void translate_impl::write_checkpoint(int ckpt_seq) {
+void translate_impl::write_checkpoint(int ckpt_seq,
+				      std::unique_lock<std::mutex> &lk) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
-    /* hold the translation layer lock until we get a copy of object_info
-     */
-    std::unique_lock lk(m);
-
-    /* hold the map lock while we get a copy of the map.
+    /* - hold the translation layer lock (lk) until we get a copy 
+     *   of object_info
+     * - hold the map lock while we get a copy of the map.
      */
     std::unique_lock objlock(*map_lock);
 
-    last_ckpt = ckpt_seq;
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	entries.push_back((ckpt_mapentry){.lba = base,
@@ -581,7 +605,7 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
 			       objs_bytes, 512);
     object_info[ckpt_seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0,
 				   .type = LSVD_CKPT};
-    checkpoints.push(ckpt_seq);
+    checkpoints.push_back(ckpt_seq);
     
     /* wait until all prior objects have been acked by backend
      */
@@ -626,8 +650,11 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     /* this is the only place we modify *super_sh
      */
     super_sh->ckpts_offset = offset;
-    super_sh->ckpts_len = sizeof(ckpt_seq);
-    *(int*)(super_buf + offset) = ckpt_seq;
+    super_sh->ckpts_len = checkpoints.size() * sizeof(ckpt_seq);
+    auto pc = (uint32_t*)(super_buf + offset);
+    for (auto c : checkpoints)
+	*pc++ = c;
+
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
 }
@@ -658,8 +685,7 @@ int translate_impl::checkpoint(void) {
 	b = new batch(cfg->batch_size);
     }
     int _seq = seq++;
-    lk.unlock();
-    write_checkpoint(_seq);
+    write_checkpoint(_seq, lk); // UNLOCKS
     return _seq;
 }
 
@@ -862,14 +888,13 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     std::vector<int> ckpts_to_delete;
     while (checkpoints.size() > 3) {
 	ckpts_to_delete.push_back(checkpoints.front());
-	checkpoints.pop();
+	checkpoints.erase(checkpoints.begin());
     }
 
     /* write checkpoint *before* deleting any objects
      */
     int ckpt_seq = seq++;
-    lk.unlock();
-    write_checkpoint(ckpt_seq);
+    write_checkpoint(ckpt_seq, lk); // UNLOCKS
     
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	objname name(prefix(), it->first);
@@ -881,7 +906,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	objname name(prefix(), c);
 	objstore->delete_object(name.c_str());
     }
-    lk.lock();
 }
 
 
@@ -896,6 +920,9 @@ void translate_impl::gc_thread(thread_pool<int> *p) {
 	p->cv.wait_for(lk, interval);
 	if (!p->running)
 	    return;
+
+	/* check to see if we should run a GC cycle
+	 */
 	if (total_sectors - total_live_sectors < trigger)
 	    continue;
 	if (((double)total_live_sectors / total_sectors) > 0.6)
