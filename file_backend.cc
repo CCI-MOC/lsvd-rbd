@@ -124,6 +124,7 @@ void file_backend_req::notify(request *unused) {
 }
 
 request *file_backend::make_write_req(const char*name, iovec *iov, int niov) {
+    assert(access(name, F_OK) != 0);
     return new file_backend_req(OP_WRITE, name, iov, niov, 0, ioctx);
 }
 
