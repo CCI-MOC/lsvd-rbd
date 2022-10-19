@@ -79,7 +79,7 @@ struct snap_info {
 
 struct obj_data_hdr {
     uint32_t last_data_obj;
-    uint32_t ckpts_offset;
+    uint32_t ckpts_offset;      // TODO - do we really need this?
     uint32_t ckpts_len;
     uint32_t objs_cleaned_offset;
     uint32_t objs_cleaned_len;
@@ -100,7 +100,7 @@ struct data_map {
 };
 
 struct obj_ckpt_hdr {
-    uint32_t ckpts_offset;	// list includes self
+    uint32_t ckpts_offset;	// list includes self (TODO - not needed?)
     uint32_t ckpts_len;
     uint32_t objs_offset;	// objects and sizes
     uint32_t objs_len;
@@ -157,10 +157,11 @@ public:
 			    std::vector<ckpt_mapentry> &dmap);
 };
 
-extern size_t obj_hdr_len(int n_entries, int ckpt);
+extern size_t obj_hdr_len(int n_entries, int n_ckpts);
 
-extern size_t make_data_hdr(char *hdr, size_t bytes, uint32_t last_ckpt, 
-                            std::vector<data_map> *entries, uint32_t seq,
-                            uuid_t *uuid);
+extern size_t make_data_hdr(char *hdr, size_t bytes,
+                            std::vector<uint32_t> *ckpts, 
+                            std::vector<data_map> *entries,
+                            uint32_t seq, uuid_t *uuid);
 
 #endif
