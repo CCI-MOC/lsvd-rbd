@@ -630,21 +630,11 @@ int write_cache_impl::roll_log_forward() {
      * and write to backend.
      */
     sequence = part1_min.second;
-    page_t start = part1_min.first, end = part2_max.first;
+    page_t start = super->oldest = part1_min.first;
+    page_t end = super->next = part2_max.first;
     if (end == 0)
 	end = part1_max.first;
     
-
-    // TODO
-    // start at write_super->next
-    // for each journal record:
-    //   read the whole record
-    //   verify it, quit if done
-    //   for each entry in it
-    //     put it in the map and cache_blocks[.]
-    //     send it to the backend
-    // if we moved write_super->next, write another checkpoint
-
     for (b = start; b != end; ) {
 	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
 	    throw_fs_error("wcache");
