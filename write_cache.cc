@@ -63,6 +63,8 @@ class write_cache_impl : public write_cache {
      */
     void read_map_entries();
     int roll_log_forward();
+    std::tuple<bool,page_t,uint64_t> chase(page_t, uint64_t, page_t);
+    char *_hdrbuf;		// for reading at startup
 
     /* track contents of the write cache. 
      */
@@ -88,8 +90,6 @@ class write_cache_impl : public write_cache {
     thread_pool<int>          *misc_threads;
 
     void flush_thread(thread_pool<int> *p);
-    void ckpt_thread(thread_pool<int> *p);
-    bool ckpt_in_progress = false;
     void write_checkpoint(void);
     
     /* allocate journal entry, create a header
@@ -103,7 +103,6 @@ class write_cache_impl : public write_cache {
     friend class wcache_write_req;
     std::mutex                m;
     extmap::cachemap2 map;
-    bool              map_dirty;
     translate        *be;
     j_hdr *mk_header(char *buf, uint32_t type, page_t blks);
     nvme 		      *nvme_w = NULL;
@@ -263,7 +262,6 @@ void wcache_write_req::notify(request *child) {
 	    //assert(wcache->map.size() <= 6354);
 	    
 	    _plba += sectors;
-	    wcache->map_dirty = true;
 	}
         for (auto it = garbage.begin(); it != garbage.end(); it++) 
             wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
@@ -438,36 +436,10 @@ void write_cache_impl::flush_thread(thread_pool<int> *p) {
     }
 }
 
-void write_cache_impl::ckpt_thread(thread_pool<int> *p) {
-    pthread_setname_np(pthread_self(), "wcache_ckpt");
-    auto next0 = super->next, N = super->limit - super->base;
-    auto period = std::chrono::milliseconds(100);
-    auto t0 = std::chrono::system_clock::now();
-    auto timeout = std::chrono::seconds(5);
-    const int ckpt_interval = N / 4;
-
-    while (p->running) {
-	std::unique_lock lk(m);
-	p->cv.wait_for(lk, period);
-	if (!p->running)
-	    return;
-	auto t = std::chrono::system_clock::now();
-	bool do_ckpt = (int)((super->next + N - next0) % N) > ckpt_interval ||
-	    ((t - t0 > timeout) && map_dirty);
-	if (p->running && do_ckpt) {
-	    next0 = super->next;
-	    t0 = t;
-	    lk.unlock();
-	    write_checkpoint();
-	}
-    }
-}
-
+/* note that this is only called on shutdown, so we don't
+ * worry about locking, and we set the 'clean' flag in the superblock
+ */
 void write_cache_impl::write_checkpoint(void) {
-    std::unique_lock<std::mutex> lk(m);
-    if (ckpt_in_progress)
-	return;
-    ckpt_in_progress = true;
 
     /* find all the journal record lengths in cache_blocks[.] first
      */
@@ -486,12 +458,7 @@ void write_cache_impl::write_checkpoint(void) {
 	len_pages = div_round_up(len_bytes, 4096),
 	ckpt_pages = map_pages + len_pages;
 
-    /* TODO - switch between top/bottom of metadata region so we
-     * don't leave in inconsistent state if we crash during checkpoint
-     */
     page_t blockno = super->meta_base;
-    if (super->map_start == (uint32_t)blockno)
-	blockno = (super->meta_base + super->meta_limit) / 2;
 
     char *e_buf = (char*)aligned_alloc(512, 4096L*map_pages);
     auto jme = (j_map_extent*)e_buf;
@@ -519,6 +486,10 @@ void write_cache_impl::write_checkpoint(void) {
     if (pad2 > 0)
 	memset(l_buf + len_bytes, 0, pad2);
 
+    /* shouldn't really need the copy, since it's only called on
+     * shutdown, except that some unit tests call this and expect things
+     * to work afterwards
+     */
     j_write_super *super_copy = (j_write_super*)aligned_alloc(512, 4096);
     memcpy(super_copy, super, 4096);
     super_copy->seq = sequence;
@@ -532,7 +503,7 @@ void write_cache_impl::write_checkpoint(void) {
     super_copy->len_blocks = super->len_blocks = len_pages;
     super_copy->len_entries = super->len_entries = n_lens;
 
-    lk.unlock();
+    super_copy->clean = true;
 
     assert(4096UL*blockno + 4096UL*ckpt_pages <= dev_max);
     iovec iov[] = {{e_buf, map_pages*4096UL},
@@ -547,8 +518,6 @@ void write_cache_impl::write_checkpoint(void) {
     free(e_buf);
     free(l_buf);
 
-    map_dirty = false;
-    ckpt_in_progress = false;
 }
 
 void write_cache_impl::read_map_entries() {
@@ -586,7 +555,86 @@ void write_cache_impl::read_map_entries() {
     free(len_buf);
 }
 
+/* returns:
+ *   bool: false for failure
+ *   page: next page after last record (super.limit if we hit end)
+ *   seq: sequence number next for next record
+ */
+std::tuple<bool,page_t,uint64_t> write_cache_impl::chase(page_t page,
+							 uint64_t seq,
+							 page_t limit) {
+    auto hdr = (j_hdr*)_hdrbuf;
+
+    if (nvme_w->read(_hdrbuf, 4096, 4096L * page) < 0)
+	throw_fs_error("cache log roll-forward");
+    while (hdr->magic == LSVD_MAGIC && hdr->seq == seq && page < limit) {
+	page += hdr->len;
+	seq++;
+	if (nvme_w->read(_hdrbuf, 4096, 4096L * page) < 0)
+	    throw_fs_error("cache log roll-forward");
+    }
+    if (page < limit && hdr->magic == LSVD_MAGIC)
+	return std::make_tuple(false, 0, 0);
+
+    return std::make_tuple(true, page, seq);
+}
+
 int write_cache_impl::roll_log_forward() {
+    auto hdr = (j_hdr*)_hdrbuf;
+    page_t b = super->base;
+
+    /* locate the ranges of valid records - from part1_min to part1_max
+     * and optionally part2_min to part2_max (if we wrapped around)
+     * note that 0 is an invalid page number
+     */
+    std::pair<page_t,uint64_t> part1_min(0,0), part1_max(0,0),
+	part2_min(0,0), part2_max(0,0);
+
+    if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
+	throw_fs_error("cache log roll-forward");
+
+    /* since we're not checking CRCs, there will always be at least
+     * one valid record at the beginning of the log
+     * find the end of that run, set part1_min/max
+     */
+    part1_min = std::make_pair(b, hdr->seq);
+    auto [rv, _page, _seq] = chase(b, hdr->seq, super->limit);
+    if (!rv)
+	return -1;
+
+    /* find a run starting after part1_max. If we find one, it must
+     * be earlier, so part2 <- part1, part1 = the run we found
+     */
+    part1_max = std::make_pair(_page, _seq);
+    for (b = _page; b < (page_t)super->limit; b++) {
+	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
+	    throw_fs_error("cache log roll-forward");
+
+	if (hdr->magic != LSVD_MAGIC ||
+	    (hdr->type != LSVD_J_DATA && hdr->type != LSVD_J_PAD) ||
+	    (hdr->seq > part1_min.second))
+	    continue;
+	    
+	auto _seq0 = hdr->seq;
+	auto [rv, _page, _seq] = chase(b, hdr->seq, super->limit);
+	if (rv && _page == (page_t)super->limit) {
+	    part2_min = part1_min;
+	    part2_max = part1_max;
+	    part1_min = std::make_pair(b, _seq0);
+	    part1_max = std::make_pair(_page, _seq);
+	    break;
+	}
+    }
+
+    /* Now read all the records in, update lengths and map,
+     * and write to backend.
+     */
+    sequence = part1_min.second;
+    page_t start = part1_min.first, end = part2_max.first;
+    if (end == 0)
+	end = part1_max.first;
+    
+
     // TODO
     // start at write_super->next
     // for each journal record:
@@ -596,46 +644,51 @@ int write_cache_impl::roll_log_forward() {
     //     put it in the map and cache_blocks[.]
     //     send it to the backend
     // if we moved write_super->next, write another checkpoint
-    bool dirty = false;
-    char *buf = (char*)aligned_alloc(512, 4096);
 
-    while (true) {
-	auto hdr = (j_hdr*)buf;
-	if (nvme_w->read(buf, sizeof(buf), 4096L * super->next) < 0)
-	    return -1;
+    for (b = start; b != end; ) {
+	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
+	    throw_fs_error("wcache");
+
+	/* we've already verified everything, so this shouldn't fail, 
+	 * right???
+	 */
 	if (hdr->magic != LSVD_MAGIC ||
 	    (hdr->type != LSVD_J_DATA && hdr->type != LSVD_J_PAD) ||
-	    hdr->seq != sequence.load())
-	    break;
-
-	sequence++;
-	page_t idx = super->next - super->base;
+	    hdr->seq != sequence)
+	    return -1;
 	
+	sequence++;
+	page_t idx = b - super->base;
+
+	/* update the record length accounting
+	 */
 	if (hdr->type == LSVD_J_PAD) {
 	    cache_blocks[idx++] =
 		(page_desc){WCACHE_PAD, (int)(super->limit - super->next)};
-	    while (idx < (page_t)super->limit)
+	    while (idx < (page_t)(super->limit - super->base))
 		cache_blocks[idx++].type = WCACHE_NONE;
-	    
-	    super->next = super->base;
+	    b = super->base;
 	    continue;
 	}
 
 	cache_blocks[idx] = (page_desc){WCACHE_HDR, (int)hdr->len};
 	for (int i = 1; i < (int)hdr->len; i++)
 	    cache_blocks[idx+i].type = WCACHE_DATA;
-	
-	dirty = true;
+
+	/* read LBA info from header, read data, then 
+	 * - put mappings into cache map and rmap
+	 * - write data to backend
+	 */
 	std::vector<j_extent> entries;
-	decode_offset_len<j_extent>(buf, hdr->extent_offset,
+	decode_offset_len<j_extent>(_hdrbuf, hdr->extent_offset,
 				    hdr->extent_len, entries);
 
 	size_t data_len = 4096L * (hdr->len - 1);
 	char *data = (char*)aligned_alloc(512, data_len);
 	if (nvme_w->read(data, data_len, 4096L * (super->next + 1)) < 0)
-	    return -1;
+	    throw_fs_error("wcache");
 
-	sector_t plba = (super->next+1) * 8;
+	sector_t plba = (b+1) * 8;
 	size_t offset = 0;
 	std::vector<extmap::lba2lba> garbage;
 	
@@ -653,13 +706,8 @@ int write_cache_impl::roll_log_forward() {
 	    rmap.trim(g.s.base, g.s.base+g.s.len);	    
 
 	free(data);
-	super->next += hdr->len;
-	
+	b += hdr->len;
     }
-    free(buf);
-
-    if (dirty)
-	write_checkpoint();
 
     return 0;
 }
@@ -670,32 +718,37 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
     dev_max = getsize64(fd);
     be = _be;
     cfg = cfg_;
+
+    _hdrbuf = (char*)aligned_alloc(512, 4096);
     
     const char *name = "write_cache_cb";
     nvme_w = make_nvme(fd, name);
 
     char *buf = (char*)aligned_alloc(512, 4096);
-    if (nvme_w->read(buf, 4096, 4096L*blkno) < 4096)
+    if (nvme_w->read(buf, 4096, 4096L*super_blkno) < 4096)
 	throw_fs_error("wcache");
     
     super = (j_write_super*)buf;
-    map_dirty = false;
-    sequence = super->seq;
-
     int n_pages = super->limit - super->base;
     cache_blocks = new page_desc[n_pages];
+
+    /* if it's clean we can read in the map and lengths, otherwise
+     * do crash recovery. Then set the dirty flag
+     */
+    if (super->clean) {
+	sequence = super->seq;
+	read_map_entries();	// length, too
+    }
+    else
+	roll_log_forward();
+    super->clean = false;
+    if (nvme_w->write(buf, 4096, 4096L*super_blkno) < 4096)
+	throw_fs_error("wcache");
     
-    if (super->map_entries)
-	read_map_entries();
-
-    roll_log_forward();
-
     max_write_pages = n_pages / 2;
     write_batch = cfg->wcache_batch;
     
     misc_threads = new thread_pool<int>(&m);
-    misc_threads->pool.push(std::thread(&write_cache_impl::ckpt_thread,
-					this, misc_threads));
     misc_threads->pool.push(std::thread(&write_cache_impl::flush_thread,
 					this, misc_threads));
 }
@@ -842,7 +895,6 @@ page_t write_cache_impl::get_oldest(page_t blk, std::vector<j_extent> &extents) 
 }
     
 void write_cache_impl::do_write_checkpoint(void) {
-    if (map_dirty)
-	write_checkpoint();
+    write_checkpoint();
 }
 
