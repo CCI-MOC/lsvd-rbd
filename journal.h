@@ -57,7 +57,8 @@ struct j_write_super {
     uint32_t type;		// LSVD_J_W_SUPER
     uint32_t version;		// 1
 
-    uint64_t seq;		// next write sequence
+    uint32_t clean;
+    uint64_t seq;		// next write sequence (if clean)
 
     /* all values are in 4KB block units. */
     

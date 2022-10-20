@@ -146,6 +146,7 @@ class j_write_super(Structure):
     _fields_ = [("magic",       c_uint),
                 ("type",        c_uint),
                 ("version",     c_uint),
+                ("clean",       c_uint),
                 ("seq",         c_ulong),
                 ("meta_base",   c_uint),
                 ("meta_limit",  c_uint),
