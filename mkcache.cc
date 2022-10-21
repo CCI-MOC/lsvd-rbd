@@ -48,6 +48,7 @@ int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
     *wsup = (j_write_super){LSVD_MAGIC,
 			    LSVD_J_W_SUPER,
 			    1,		   // version
+			    1,		   // clean
 			    1,		   // seq
 			    3,		   // metadata_base
 			    3+mblks,	   // metadata limit
