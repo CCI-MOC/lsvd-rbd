@@ -67,17 +67,17 @@ static const struct bdus_ops device_ops =
 static struct bdus_attrs device_attrs =
 {
     .logical_block_size = 512,
-    /* physical_block_size */
+    .physical_block_size = 0,
     .size               = 1 << 30, // 1 GiB
     .max_concurrent_callbacks = 0,
-    /* max_read_write_size */
-    /* max_write_same_size */
-    /* max_write_zeros_size */
-    /* max_discard_erase_size */
-    /* disable_partition_scanning */
-    /* recoverable */
+    .max_read_write_size = 0,
+    .max_write_same_size = 0,
+    .max_write_zeros_size = 0,
+    .max_discard_erase_size = 0,
+    .disable_partition_scanning = 1,
+    .recoverable = 0,
     .dont_daemonize     = 1,
-    /* log */
+    .log = 1
 };
 
 
