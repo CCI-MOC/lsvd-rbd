@@ -325,6 +325,7 @@ class rbd_aio_req : public request {
             p->complete(len);
 
 	std::unique_lock lk(m);
+	status |= REQ_COMPLETE;
 	if (status & REQ_WAIT)
 	    cv.notify_all();
 	else {
