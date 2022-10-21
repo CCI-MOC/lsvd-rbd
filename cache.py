@@ -30,7 +30,7 @@ blk_fmt = lambda x: '%d%s' % (x, '' if x < npages else ' *INVALID*')
 hdr_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
               ['write_super', blk_fmt], ['read_super', blk_fmt]]
 
-wsup_pp = [['magic', magic], ['type', fieldnames], 
+wsup_pp = [['magic', magic], ['type', fieldnames], ['clean', lambda x: "YES" if x else "NO"],
                ['seq', '%d'], ['meta_base', '%d'], ['meta_limit', '%d'],
                ['base', '%d'], ['limit', '%d'], ['next', '%d'], ['oldest', '%d'], 
                ['map_start', '%d'], ['map_entries', '%d'],
@@ -81,26 +81,17 @@ def read_lens(b, npgs, n):
     return [(_.page, _.len) for _ in l]
     
 if args.write and super.write_super < npages:
-    b = w_super.oldest
-    while True:
+    b = w_super.base
+    while b < w_super.limit:
         [j,e] = t3.c_hdr(fd, b)
-    #    if j.type != lsvd.LSVD_J_DATA:
-    #        break
         if j.magic != lsvd.LSVD_MAGIC:
-            break
-        if j.type == lsvd.LSVD_J_CKPT:    # not relevant anymore
-            print('\ncheckpoint - map:', b)
-            e = read_exts(b+1, w_super.map_blocks, w_super.map_entries)
-            print(' '.join(['(%d+%d->%d)' % _ for _ in e]))
-            print('\ncheckpoint - lengths:', )
-            l = read_lens(b+1+w_super.map_blocks, w_super.len_blocks, w_super.len_entries)
-            print(' '.join(['([%d]=%d)' % _ for _ in l]))
-            
-        else:
-            h_pp = [["magic", magic], ["type", fieldnames], ["seq", '%d'], ["len", '%d']]
-            print('\ndata: (%d)' % b)
-            prettyprint(j, h_pp)
-            print('extents    :', ' '.join(['%d+%d' % (_.lba,_.len) for _ in e]))
+            b += 1
+            continue
+
+        h_pp = [["magic", magic], ["type", fieldnames], ["seq", '%d'], ["len", '%d']]
+        print('\ndata: (%d)' % b)
+        prettyprint(j, h_pp)
+        print('extents    :', ' '.join(['%d+%d' % (_.lba,_.len) for _ in e]))
         b = b + j.len
 
 def wrapjoin(prefix, linelen, items):
