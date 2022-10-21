@@ -38,6 +38,8 @@
 #include "write_cache.h"
 #include "config.h"
 
+extern void do_log(const char *, ...);
+
 typedef std::tuple<request*,sector_t,smartiov*> work_tuple;
 
 /* ------------- Write cache structure ------------- */
@@ -187,7 +189,7 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
 				       write_cache* wcache_)  {
     wcache = (write_cache_impl*)wcache_;
     work = work_;
-    
+
     if (pad != 0) {
 	pad_hdr = (char*)aligned_alloc(512, 4096);
 	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
@@ -239,8 +241,6 @@ wcache_write_req::~wcache_write_req() {
     delete data_iovs;
     delete work;
 }
-
-void do_log(const char*, ...);
 
 void wcache_write_req::notify(request *child) {
     child->release();
@@ -339,8 +339,8 @@ void write_cache_impl::evict(page_t page, page_t limit) {
     assert(page == oldest);
     if (cache_blocks[page - b].type == WCACHE_PAD) {
 	cache_blocks[page - b].type = WCACHE_NONE;
-	super->oldest = super->base;
-	return;
+	page = oldest = super->oldest = super->base;
+	limit = super->base + 10; // leave a bit of room
     }
 
     /* otherwise we're chipping away at the oldest journal records
@@ -362,11 +362,14 @@ void write_cache_impl::evict(page_t page, page_t limit) {
 	    cache_blocks[oldest - b + i].type = WCACHE_NONE;
 
 	oldest += len;
+
+	assert(oldest <= (page_t)super->limit);
+	if (oldest == (page_t)super->limit) {
+	    oldest = super->base;
+	    limit = oldest + 10;
+	}
     }
 
-    assert(oldest <= (page_t)super->limit);
-    if (oldest == (page_t)super->limit)
-	oldest = super->base;
     super->oldest = oldest;
 }
 
@@ -388,7 +391,7 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     }
 
     auto val = super->next;
-    evict(val, val + n);
+    evict(val, std::min((val + n + 10), super->limit));
 
     super->next += n;
     if (super->next == super->limit)
@@ -697,6 +700,8 @@ int write_cache_impl::roll_log_forward() {
 
 	free(data);
 	b += hdr->len;
+	if (b >= (page_t)super->limit)
+	    b = super->base;
     }
 
     return 0;
@@ -806,8 +811,7 @@ void write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
 /* arguments:
  *  lba to start at
  *  iov corresponding to lba (iov.bytes() = length to read)
- *  
-returns (number of bytes skipped), (number of bytes read_started)
+ * returns (number of bytes skipped), (number of bytes read_started)
  */
 std::tuple<size_t,size_t,request*>
 write_cache_impl::async_read(size_t offset, char *buf, size_t bytes) {
