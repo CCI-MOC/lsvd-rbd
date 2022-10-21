@@ -31,7 +31,9 @@ public:
     virtual ssize_t writev(size_t offset, iovec *iov, int iovcnt) = 0;
     virtual void wait_for_room(void) = 0;
     virtual ssize_t readv(size_t offset, iovec *iov, int iovcnt) = 0;
-
+    virtual bool check_object_ready(int obj) = 0; /* GC stalls */
+    virtual void wait_object_ready(int obj) = 0;
+    
     virtual const char *prefix() = 0; /* for read cache */
     
     /* debug functions
@@ -41,6 +43,7 @@ public:
     virtual int mapsize(void) = 0;
     virtual void reset(void) = 0;
     virtual int frontier(void) = 0;
+    virtual void set_completion(int next) = 0;
 };
 
 extern translate *make_translate(backend *_io, lsvd_config *cfg,

@@ -507,6 +507,12 @@ read_cache_impl::async_read(size_t offset, char *buf, size_t len) {
     if (read_len == 0)
 	return std::make_tuple(skip_len, read_len, (request*)NULL);
 
+    /* handle the small probability that it's for an object
+     * currently being GC'ed
+     */
+    if (!be->check_object_ready(oo.obj))
+	be->wait_object_ready(oo.obj);
+    
     auto r = new rcache_req(this);
     
     extmap::obj_offset unit = {oo.obj, oo.offset / unit_sectors};

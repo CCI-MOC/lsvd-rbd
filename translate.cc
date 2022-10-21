@@ -174,6 +174,8 @@ public:
     ssize_t writev(size_t offset, iovec *iov, int iovcnt);
     void wait_for_room(void);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
+    bool check_object_ready(int obj);
+    void wait_object_ready(int obj);
 
     const char *prefix() { return single_prefix; }
     
@@ -181,10 +183,11 @@ public:
      */
     void getmap(int base, int limit,
                 int (*cb)(void *ptr,int,int,int,int), void *ptr);
-    int mapsize(void);
-    void reset(void);
-    int frontier(void);
-    int batch_seq(void);
+    int mapsize(void) { return map->size(); }
+    void reset(void) { map->reset(); }
+    int frontier(void) { return b->len / 512; }
+    int batch_seq(void) { return seq; }
+    void set_completion(int next);
 };
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
@@ -404,6 +407,22 @@ void translate_impl::wait_for_room(void) {
     while (next_compln - last_sent > cfg->xlate_window)
 	cv.wait(lk);
 }
+
+/* GC (like normal write) updates the map before it writes an object,
+ * but we can't assume the data is in cache, so we might get writes
+ * for objects that haven't committed yet.
+ * since this almost never blocks, do an unlocked check before the
+ * locked one.
+ */
+bool translate_impl::check_object_ready(int obj) {
+    return obj < (int)next_compln;
+}
+void translate_impl::wait_object_ready(int obj) {
+    std::unique_lock lk(m);
+    while (obj >= next_compln)
+	cv.wait(lk);
+}
+
 
 class translate_req : public trivial_request {
     uint32_t seq;
@@ -1003,17 +1022,11 @@ void translate_impl::getmap(int base, int limit,
 	    break;
     }
 }
-int translate_impl::mapsize(void) {
-    return map->size();
-}
-void translate_impl::reset(void) {
-    map->reset();
-}
-int translate_impl::frontier(void) {
-    return b->len / 512;
-}
-int translate_impl::batch_seq(void) {
-    return seq;
+
+void translate_impl::set_completion(int next)
+{
+    if (next > next_compln)
+	next_compln= next;
 }
 
 int batch_seq(translate *xlate_) {

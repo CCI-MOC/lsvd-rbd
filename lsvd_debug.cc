@@ -435,6 +435,7 @@ extern "C" void fakemap_update(_dbg *d, int base, int limit,
 {
     extmap::obj_offset oo = {obj,offset};
     d->obj_map.update(base, limit, oo);
+    d->lsvd->set_completion(obj+1);
 }
 extern "C" void fakemap_reset(_dbg *d)
 {
