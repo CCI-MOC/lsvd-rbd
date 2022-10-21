@@ -250,7 +250,7 @@ extern "C" void rcache_evict(read_cache *rcache, int n)
     rcache->do_evict(n);
 }
 
-char *logbuf, *p_log;
+char *logbuf, *p_log, *end_log;
 #include <stdarg.h>
 std::mutex m;
 void do_log(const char *fmt, ...) {
@@ -261,11 +261,13 @@ void do_log(const char *fmt, ...) {
 	if (env)
 	    sz = atoi(env);
 	p_log = logbuf = (char*)malloc(sz);
+	end_log = p_log + sz;
     }
     va_list args;
     va_start(args, fmt);
-    ssize_t max = logbuf + sizeof(logbuf) - p_log - 1;
-    p_log += vsnprintf(p_log, max, fmt, args);
+    ssize_t max = end_log - p_log - 1;
+    if (max > 0)
+	p_log += vsnprintf(p_log, max, fmt, args);
 }
 
 FILE *_fp;
