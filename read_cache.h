@@ -30,7 +30,7 @@ public:
     virtual ~read_cache() {};
     
     virtual std::tuple<size_t,size_t,request*>
-        async_read(size_t offset, char *buf, size_t len) = 0;
+        async_readv(size_t offset, smartiov *iov) = 0;
 
     /* debugging. 
      * TODO: document the first three methods

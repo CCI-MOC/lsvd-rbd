@@ -49,6 +49,7 @@
 #include "image.h"
 
 extern void do_log(const char *, ...);
+extern void fp_log(const char *, ...);
 
 /* RBD "image" and completions are only used in this file, so we
  * don't break them out into a .h
@@ -147,6 +148,7 @@ int rbd_image::image_close(void) {
 
 extern "C" int rbd_close(rbd_image_t image)
 {
+    //do_log("rbd_close\n");
     rbd_image *img = (rbd_image*)image;
     img->image_close();
     delete img;
@@ -243,6 +245,7 @@ extern "C" void rbd_aio_release(rbd_completion_t c)
 extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 			       uint64_t len, rbd_completion_t c)
 {
+    //do_log("rbd_aio_discard\n");
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = (rbd_image*)image;
 
@@ -255,6 +258,7 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 
 extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
+    //do_log("rbd_aio_flush\n");
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = (rbd_image*)image;
 
@@ -267,6 +271,7 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 
 extern "C" int rbd_flush(rbd_image_t image)
 {
+    //do_log("rbd_flush\n");
     auto img = (rbd_image*)image;
     img->xlate->flush();
     img->xlate->checkpoint();
@@ -302,12 +307,12 @@ enum rbd_req_status {
 class rbd_aio_req : public request {
     rbd_image        *img;
     lsvd_completion  *p;
-    char             *buf;
-    char             *aligned_buf;
+    char             *aligned_buf = NULL;
     uint64_t          offset;
-    size_t            len;
     lsvd_op           op;
-    smartiov          data_iovs;
+    smartiov          iovs;
+    smartiov          aligned_iovs;
+    sector_t          sectors = 0;
 
     std::atomic<int>  n_req = 0;
     std::atomic<int>  status = 0;
@@ -318,11 +323,12 @@ class rbd_aio_req : public request {
      * we ignore n_req and LAUNCHED
      */
     void notify_w(request *unused) {
-        sector_t sectors = div_round_up(len, 512);
         img->wcache->release_room(sectors);
 
-        if (p != NULL)
-            p->complete(len);
+        if (p != NULL) {
+	    //do_log(" w notify %p\n", this);
+            p->complete(0);
+	}
 
 	std::unique_lock lk(m);
 	status |= REQ_COMPLETE;
@@ -335,22 +341,16 @@ class rbd_aio_req : public request {
     }
 
     void run_w() {
-        if (!aligned(buf, 512)) {
-            aligned_buf = (char*)aligned_alloc(512, len);
-            memcpy(aligned_buf, buf, len);
-        }
-        data_iovs.push_back((iovec){aligned_buf, len});
-        sector_t sectors = div_round_up(len, 512);
+	if (aligned_buf)	// copy to aligned *before* write
+	    iovs.copy_out(aligned_buf);
         img->wcache->get_room(sectors);
-        img->wcache->writev(this, offset/512, &data_iovs);
+        img->wcache->writev(this, offset/512, &aligned_iovs);
     }
     
     void read_notify_parent(void) {
 	assert(!m.try_lock());
-        if (aligned_buf != buf) 
-            memcpy(buf, aligned_buf, len);
         if (p != NULL) 
-            p->complete(len);
+            p->complete(0);
 	if (status & REQ_WAIT)
 	    cv.notify_all();
     }
@@ -363,6 +363,9 @@ class rbd_aio_req : public request {
         if (--n_req > 0)
 	    return;
 
+	if (aligned_buf)	// copy from aligned *after* read
+	    iovs.copy_in(aligned_buf);
+
 	auto x = (status |= REQ_COMPLETE);
 	if (x & REQ_LAUNCHED) {
 	    read_notify_parent();
@@ -374,37 +377,33 @@ class rbd_aio_req : public request {
     }
 
     void run_r() {
-        if (!aligned(buf, 512))
-            aligned_buf = (char*)aligned_alloc(512, len);
-
 	__reqs++;
 	
         /* we're not done until n_req == 0 && launched == true
          */
-        char *_buf = aligned_buf;       // read and increment this
-        size_t _len = len;              // and this
+	size_t _offset = 0, _end = aligned_iovs.bytes();
 	std::vector<request*> requests;
 	
-        while (_len > 0) {
+        while (_offset < _end) {
+	    smartiov wcache_iov = aligned_iovs.slice(_offset,_end);
             auto [skip,wait,req] =
-                img->wcache->async_read(offset, _buf, _len);
+                img->wcache->async_readv(offset, &wcache_iov);
 	    if (req != NULL)
 		requests.push_back(req);
 
-            _len -= skip;
             while (skip > 0) {
+		smartiov rcache_iov = aligned_iovs.slice(_offset, _offset+skip);
                 auto [skip2, wait2, req2] =
-                    img->rcache->async_read(offset, _buf, skip);
+                    img->rcache->async_readv(offset, &rcache_iov);
 		if (req2)
 		    requests.push_back(req2);
 
-                memset(_buf, 0, skip2);
+		aligned_iovs.zero(_offset, _offset+skip2);
                 skip -= (skip2 + wait2);
-                _buf += (skip2 + wait2);
+                _offset += (skip2 + wait2);
                 offset += (skip2 + wait2);
             }
-            _buf += wait;
-            _len -= wait;
+            _offset += wait;
             offset += wait;
 	}
 
@@ -423,21 +422,37 @@ class rbd_aio_req : public request {
 	    delete this;
 	}
     }
-    
-public:
-    rbd_aio_req(lsvd_op op_, rbd_image *img_, lsvd_completion *p_,
-		char *buf_, uint64_t offset_, size_t len_, int status_) {
-	op = op_;
+
+    void setup(lsvd_op op_, rbd_image *img_,
+	       lsvd_completion *p_, uint64_t offset_, int status_) {
+	op = op_;		// OP_READ or OP_WRITE
 	img = img_;
 	p = p_;
-	buf = buf_;
-	offset = offset_;
-	len = len_;
-	aligned_buf = buf;
-	status = status_;
+	offset = offset_;	// byte offset into volume
+	status = status_;	// 0 or REQ_WAIT
+	sectors = iovs.bytes() / 512;
+	if (iovs.aligned(512))
+	    aligned_iovs = iovs;
+	else {
+	    aligned_buf = (char*)aligned_alloc(512, iovs.bytes());
+	    iovec iov = {aligned_buf, iovs.bytes()};
+	    aligned_iovs.ingest(&iov, 1);
+	}
+    }
+    
+public:
+    rbd_aio_req(lsvd_op op_, rbd_image *img_,
+		lsvd_completion *p_, uint64_t offset_, int status_,
+		const iovec *iov, size_t niov) : iovs(iov, niov) {
+	setup(op_, img_, p_, offset_, status_);
+    }
+    rbd_aio_req(lsvd_op op_, rbd_image *img_,
+		lsvd_completion *p_, uint64_t offset_, int status_,
+		char *buf_, size_t len_) : iovs(buf_, len_) {
+	setup(op_, img_, p_, offset_, status_);
     }
     ~rbd_aio_req() {
-	if (aligned_buf != buf)
+	if (aligned_buf)
 	    free(aligned_buf);
     }
 
@@ -459,6 +474,7 @@ public:
 	std::unique_lock lk(m);
 	while (! (status & REQ_COMPLETE))
 	    cv.wait(lk);
+	lk.unlock();
 	delete this;
     }
 
@@ -480,38 +496,58 @@ public:
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
 			    size_t len, char *buf, rbd_completion_t c)
 {
+    //do_log("rbd_aio_read\n");
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_READ, img, p, buf, offset, len, REQ_NOWAIT);
+    auto req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, buf, len);
     req->run(NULL);
     return 0;
 }
 
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
-			     int iovcnt, uint64_t off, rbd_completion_t c)
+			     int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-    /* TODO */
+    //do_log("rbd_aio_readv\n");
+    rbd_image *img = (rbd_image*)image;
+    auto p = (lsvd_completion*)c;
+    p->img = img;
+
+    auto req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, iov, iovcnt);
+    req->run(NULL);
     return 0;
 }
 
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
-			      int iovcnt, uint64_t off, rbd_completion_t c)
+			      int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-    /* TODO */
+    rbd_image *img = (rbd_image*)image;
+    lsvd_completion *p = (lsvd_completion *)c;
+    p->img = img;
+
+    auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
+			       iov, iovcnt);
+#if 0
+    int sum = 0;
+    for (int i = 0; i < iovcnt; i++)
+	sum += (iov[i].iov_len / 512);
+    do_log("rbd_aio_writev %d %ld+%d %p\n", iovcnt, offset/512L, sum, req);
+#endif
+    req->run(NULL);
     return 0;
 }
 
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 			     const char *buf, rbd_completion_t c)
 {
+    //do_log("rbd_aio_write\n");
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_WRITE, img, p, (char*)buf,
-			       offset, len, REQ_NOWAIT);
+    auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
+			       (char*)buf, len);
     req->run(NULL);
     return 0;
 }
@@ -520,8 +556,9 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
+    //do_log("rbd_read\n");
     rbd_image *img = (rbd_image*)image;
-    auto req = new rbd_aio_req(OP_READ, img, NULL, buf, off, len, REQ_WAIT);
+    auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
     req->run(NULL);
     req->wait();
     return 0;
@@ -529,9 +566,10 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char *buf)
 {
+    //do_log("rbd_write\n");
     rbd_image *img = (rbd_image*)image;
-    auto req = new rbd_aio_req(OP_WRITE, img, NULL, (char*)buf,
-			       off, len, REQ_WAIT);
+    auto req = new rbd_aio_req(OP_WRITE, img, NULL, off, REQ_WAIT,
+			       (char*)buf, len);
     req->run(NULL);
     req->wait();
     return 0;
@@ -554,6 +592,7 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
+    //do_log("rbd_stat\n");
     rbd_image *img = (rbd_image*)image;
     info->size = img->size;
     return 0;
@@ -561,6 +600,7 @@ extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosi
 
 extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
 {
+    //do_log("rbd_get_size\n");
     rbd_image *img = (rbd_image*)image;
     *size = img->size;
     return 0;

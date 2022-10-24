@@ -23,7 +23,9 @@ public:
 
     virtual void writev(request *req, sector_t lba, smartiov *iov) = 0;
     virtual std::tuple<size_t,size_t,request*>
-        async_read(size_t,char*,size_t) = 0;
+        async_read(size_t offset, char* buf, size_t len) = 0;
+    virtual std::tuple<size_t,size_t,request*>
+        async_readv(size_t offset, smartiov *iovs) = 0;
     
     virtual void getmap(int base, int limit, int (*cb)(void*,int,int,int),
                         void *ptr) = 0;

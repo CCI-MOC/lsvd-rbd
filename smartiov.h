@@ -26,6 +26,9 @@ public:
 	for (int i = 0; i < iovcnt; i++)
 	    iovs.push_back(iov[i]);
     }
+    smartiov(char *buf, size_t len) {
+        iovs.push_back((iovec){buf, len});
+    }
     void push_back(const iovec &iov) {
 	iovs.push_back(iov);
     }
@@ -70,6 +73,19 @@ public:
     void zero(void) {
 	for (auto i : iovs)
 	    memset(i.iov_base, 0, i.iov_len);
+    }
+    void zero(size_t off, size_t limit) {
+	size_t len = limit - off;
+	for (auto it = iovs.begin(); it != iovs.end() && len > 0; it++) {
+	    if (it->iov_len < off)
+		off -= it->iov_len;
+	    else {
+		auto _len = std::min(len, it->iov_len - off);
+                memset((char*)it->iov_base + off, 0, _len);
+		len -= _len;
+		off = 0;
+	    }
+	}
     }
     void copy_in(char *buf) {
 	for (auto i : iovs) {

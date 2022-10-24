@@ -172,16 +172,20 @@ extern "C" void wcache_close(write_cache *wcache)
 extern "C" void wcache_read(write_cache *wcache, char *buf, uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not aligned
-    int _len = len;
     std::condition_variable cv;
     std::mutex m;
-    for (char *_buf = buf2; _len > 0; ) {
-        std::unique_lock lk(m);
-        auto [skip_len, read_len, rreq] = wcache->async_read(offset, _buf, _len);
 
-        memset(_buf, 0, skip_len);
-        _buf += (skip_len + read_len);
-        _len -= (skip_len + read_len);
+    smartiov iovs(buf2, len);
+
+    for (size_t _offset = 0; _offset < len; ) {
+        std::unique_lock lk(m);
+	auto tmp = iovs.slice(_offset, len);
+        auto [skip_len, read_len, rreq] = wcache->async_readv(offset, &tmp);
+
+	if (skip_len) 
+	    iovs.zero(_offset, _offset + skip_len);
+
+        _offset += (skip_len + read_len);
         offset += (skip_len + read_len);
 
 	if (rreq != NULL) {
@@ -278,6 +282,7 @@ void fp_log(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     vfprintf(_fp, fmt, args);
+    fflush(_fp);
 }
 
 class read1_req : public trivial_request {
@@ -304,19 +309,22 @@ extern "C" void rcache_read(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    int _len = len;
     std::mutex m;
     std::condition_variable cv;
+
+    smartiov iovs(buf2, len);
     
-    for (char *_buf = buf2; _len > 0; ) {
+    for (size_t _offset = 0; _offset < len; ) {
 	bool done = false;
+	auto tmp = iovs.slice(_offset, len);
 	auto [skip_len, read_len, r_req] =
-	    rcache->async_read(offset, _buf, _len);
-	
-	memset(_buf, 0, skip_len);
-	_buf += (skip_len+read_len);
-	_len -= (skip_len+read_len);
-	offset += (skip_len+read_len);
+	    rcache->async_readv(offset, &tmp);
+
+	if (skip_len) 
+	    iovs.zero(_offset, _offset + skip_len);
+
+	_offset += (skip_len+read_len); // buffer offset
+	offset += (skip_len+read_len);	// disk offset
 	if (r_req != NULL) {
 	    auto req1 = new read1_req(&cv, &done);
 	    r_req->run(req1);
@@ -369,19 +377,22 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    int _len = len;
     std::mutex m;
     std::condition_variable cv;
 
+    smartiov iovs(buf2, len);
+
     auto req = new read2_req();
     
-    for (char *_buf = buf2; _len > 0; ) {
+    for (size_t _offset = 0; _offset < len; ) {
+	auto tmp = iovs.slice(_offset, len);
 	auto [skip_len, read_len, r_req] =
-	    rcache->async_read(offset, _buf, _len);
-	
-	memset(_buf, 0, skip_len);
-	_buf += (skip_len+read_len);
-	_len -= (skip_len+read_len);
+	    rcache->async_readv(offset, &tmp);
+
+	if (skip_len) 
+	    iovs.zero(_offset, _offset + skip_len);
+
+	_offset += (skip_len+read_len);
 	offset += (skip_len+read_len);
 
 	if (r_req != NULL) {
