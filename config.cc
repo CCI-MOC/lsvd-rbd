@@ -53,6 +53,11 @@ static std::map<std::string,cfg_backend> m = {{"file", BACKEND_FILE},
 #include "config_macros.h"
 
 int lsvd_config::read() {
+    auto explicit_cfg = getenv("LSVD_CONFIG_FILE");
+    if (explicit_cfg) {
+	std::string f(explicit_cfg);
+	cfg_path.insert(cfg_path.begin(), f);
+    }
     for (auto f : cfg_path) {
 	std::ifstream fp(f);
 	if (!fp.is_open())
