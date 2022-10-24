@@ -12,6 +12,7 @@ import signal
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 os.environ["LSVD_BACKEND"] = "file"
+os.environ["LSVD_CONFIG_FILE"] = "/dev/null"
 nvme = '/tmp/obj.cache'
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)

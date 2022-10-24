@@ -11,6 +11,7 @@ import test2 as t2
 import test3 as t3
 
 os.environ["LSVD_BACKEND"] = "file"
+os.environ["LSVD_CONFIG_FILE"] = "/dev/null"
 nvme = '/tmp/nvme'
 img = '/tmp/bkt/obj'
 dir = os.path.dirname(img)
