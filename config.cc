@@ -72,6 +72,7 @@ int lsvd_config::read() {
 		continue;
 	    F_CONFIG_H_INT(words[0], words[1], batch_size);
 	    F_CONFIG_INT(words[0], words[1], wcache_batch);
+	    F_CONFIG_H_INT(words[0], words[1], wcache_chunk);
 	    F_CONFIG_STR(words[0], words[1], cache_dir);
 	    F_CONFIG_INT(words[0], words[1], xlate_threads);
 	    F_CONFIG_INT(words[0], words[1], xlate_window);
@@ -84,6 +85,7 @@ int lsvd_config::read() {
     
     ENV_CONFIG_H_INT(batch_size);
     ENV_CONFIG_INT(wcache_batch);
+    ENV_CONFIG_H_INT(wcache_chunk);
     ENV_CONFIG_STR(cache_dir);
     ENV_CONFIG_INT(xlate_threads);
     ENV_CONFIG_INT(xlate_window);

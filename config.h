@@ -19,6 +19,7 @@ public:
 
     int         batch_size = 8*1024*1024; // in bytes
     int         wcache_batch = 8;	  // requests
+    int         wcache_chunk = 2*1024*1024; // bytes
     std::string cache_dir = "/tmp";
     int         xlate_threads = 2;
     int         xlate_window = 8;
