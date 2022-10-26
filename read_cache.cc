@@ -392,7 +392,15 @@ const char *state_names[] = {
     "RCACHE_DIRECT_READ",	// 6
     "RCACHE_DONE"		// 7
 };
+
+static int is_zero(char *buf, size_t len) {
+    for (int i = 0; i < len; i++)
+	if (buf[i] != 0)
+	    return false;
+    return true;
+}
 #endif
+
 
 void rcache_req::notify(request *child) {
     std::unique_lock lk(m);
@@ -403,7 +411,6 @@ void rcache_req::notify(request *child) {
     if (child != NULL)
 	child->release();
 
-    
     /* direct read from nvme, line 375
      */
     if (state == RCACHE_SSD_READ) {
@@ -423,24 +430,24 @@ void rcache_req::notify(request *child) {
     else if (state == RCACHE_BACKEND_WAIT) {
 	iovs.copy_in(_buf + buf_offset);
 
-	 std::unique_lock lk(rci->m);
-	 rci->buffer[n] = _buf;
-	 std::vector<request*>
-	     v(std::make_move_iterator(rci->pending[n].begin()),
-	       std::make_move_iterator(rci->pending[n].end()));
+	std::unique_lock lk(rci->m);
+	rci->buffer[n] = _buf;
+	std::vector<request*>
+	    v(std::make_move_iterator(rci->pending[n].begin()),
+	      std::make_move_iterator(rci->pending[n].end()));
 	     
-	 rci->pending[n].erase(rci->pending[n].begin(), rci->pending[n].end());
-	 lk.unlock();
+	rci->pending[n].erase(rci->pending[n].begin(), rci->pending[n].end());
+	lk.unlock();
 
-	 notify_parent = true;
-	 for (auto p : v) {
-	     p->notify(NULL);	// they're in state LINE_386
-	 }
+	notify_parent = true;
+	for (auto p : v) {
+	    p->notify(NULL);	// they're in state LINE_386
+	}
 
-	 sub_req = rci->ssd->make_write_request(_buf, rci->unit_sectors*512L,
-						nvme_offset);
-	 next_state = RCACHE_BLOCK_WRITE; // write_done closure
-	 sub_req->run(this);
+	sub_req = rci->ssd->make_write_request(_buf, rci->unit_sectors*512L,
+					       nvme_offset);
+	next_state = RCACHE_BLOCK_WRITE; // write_done closure
+	sub_req->run(this);
     }
     else if (state == RCACHE_BLOCK_WRITE) {
 	rci->written[n] = true;
