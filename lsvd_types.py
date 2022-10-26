@@ -196,3 +196,8 @@ class j_be_file(Structure):
     _fields_ = [("len", c_ushort),
                 ("prefix", c_char*24)]      # hack. max of 24 bytes
 
+class iovec(Structure):
+    _fields_ = [('iov_base', c_void_p),
+                ('iov_len', c_size_t)]
+
+iovec_ptr = POINTER(iovec)
