@@ -25,6 +25,8 @@
 #include "backend.h"
 #include "rados_backend.h"
 
+void do_log(const char*, ...);
+
 class rados_backend : public backend {
     std::mutex m;
     char pool[128];
@@ -135,7 +137,8 @@ class rados_be_request : public request {
     smartiov       _iovs;
     char          *buf = NULL;
     request       *parent = NULL;
-    char          *oid = NULL;
+    char           oid[64];
+    //char          *oid = NULL;
     size_t         offset = 0;
     rados_ioctx_t  io_ctx;
     rados_completion_t c;
@@ -148,7 +151,7 @@ public:
 		     rados_ioctx_t io_ctx_) : _iovs(iov, niov) {
 	offset = offset_;
 	io_ctx = io_ctx_;
-	oid = obj_name;
+	strcpy(oid, obj_name);
 	op = op_;
     }
     ~rados_be_request() {}
