@@ -14,7 +14,7 @@ OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 CFILES = $(OBJS:.o=.cc)
 
 liblsvd.so:  $(OBJS)
-	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
+	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
 
 %.o: %.d
 
