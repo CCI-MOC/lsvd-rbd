@@ -387,7 +387,7 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 /* NOTE: offset is in bytes
  */
 ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
-    std::unique_lock<std::mutex> lk(m);
+    std::unique_lock lk(m);
     smartiov siov(iov, iovcnt);
     size_t len = siov.bytes();
 
@@ -403,7 +403,7 @@ ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
 }
 
 void translate_impl::wait_for_room(void) {
-    std::unique_lock<std::mutex> lk(m);
+    std::unique_lock lk(m);
     while (next_compln - last_sent > cfg->xlate_window)
 	cv.wait(lk);
 }
@@ -482,6 +482,26 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     sector_t sector_offset = hdr_sectors;
     std::vector<extmap::lba2obj> deleted;
 
+#if 0
+    extern void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg);
+    do_log("batch (%ld)\n", b->entries.size());
+    std::vector<std::pair<sector_t,char*>> pairs;
+    std::set<sector_t> seen;
+    char *ptr = b->buf;
+    for (auto e : b->entries)
+	for (int i = 0; i < e.len; i++) {
+	    pairs.push_back(std::make_pair(e.lba+i, ptr));
+	    ptr += 512;
+	}
+    std::reverse(pairs.begin(), pairs.end());
+    for (auto [_sec,_ptr] : pairs) 
+	if (seen.find(_sec) == seen.end()) {
+	    iovec iov = {_ptr, 512};
+	    check_crc(_sec, &iov, 1, "2");
+	    seen.insert(_sec);
+	}
+#endif
+
     for (auto e : b->entries) {
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
@@ -517,6 +537,8 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     objname name(prefix(), b->seq);
     auto req = objstore->make_write_req(name.c_str(), iov, 2);
     req->run(t_req);
+
+    lk.lock();
 }
 
 /* worker: pull batches from queue and write them out
@@ -525,7 +547,7 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
     pthread_setname_np(pthread_self(), "worker_thread");
 
     while (p->running) {
-	std::unique_lock<std::mutex> lk(m);
+	std::unique_lock lk(m);
 	batch *b;
 	if (!p->get_locked(lk, b)) 
 	    return;
@@ -539,7 +561,7 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
  * returns sequence number of last written object.
  */
 int translate_impl::flush() {
-    std::unique_lock<std::mutex> lk(m);
+    std::unique_lock lk(m);
     
     if (b->len > 0) {
 	b->seq = last_sent = seq++;
@@ -565,7 +587,8 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
     auto seq0 = seq.load();
 
     while (p->running) {
-	std::unique_lock<std::mutex> lk(*p->m);
+	//std::unique_lock lk(*p->m);
+	std::unique_lock lk(m);
 	p->cv.wait_for(lk, wait_time);
 	if (p->running && seq0 == seq.load() && b->len > 0) {
 	    if (std::chrono::system_clock::now() - t0 > timeout) {
@@ -676,6 +699,8 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
+
+    lk.lock();
 }
 
 void translate_impl::ckpt_thread(thread_pool<int> *p) {
@@ -686,7 +711,7 @@ void translate_impl::ckpt_thread(thread_pool<int> *p) {
     const int ckpt_interval = 100;
 
     while (p->running) {
-	std::unique_lock<std::mutex> lk(m);
+	std::unique_lock lk(m);
 	p->cv.wait_for(lk, one_second);
 	if (p->running && seq.load() - seq0 > ckpt_interval) {
 	    seq0 = seq.load();
@@ -697,7 +722,7 @@ void translate_impl::ckpt_thread(thread_pool<int> *p) {
 }
 
 int translate_impl::checkpoint(void) {
-    std::unique_lock<std::mutex> lk(m);
+    std::unique_lock lk(m);
     if (b->len > 0) {
 	b->seq = seq++;
 	workers.put_locked(b);
@@ -715,7 +740,7 @@ int translate_impl::checkpoint(void) {
  * for now...
  */
 void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
-    assert(!m.try_lock());	// must be locked
+    //assert(!m.try_lock());	// must be locked
     gc_cycles++;
     int max_obj = seq.load();
 
@@ -925,6 +950,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	objname name(prefix(), c);
 	objstore->delete_object(name.c_str());
     }
+    lk.lock();
 }
 
 
