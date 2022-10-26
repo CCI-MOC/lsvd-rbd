@@ -258,11 +258,14 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 
 extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
-    //do_log("rbd_aio_flush\n");
+    //do_log("'f', 0, 0, []\n");
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = (rbd_image*)image;
 
-    /* TODO: implement
+    p->img->xlate->flush();
+    p->img->xlate->checkpoint();
+
+    /* TODO: implement properly
      */
 
     p->complete(0);
@@ -309,50 +312,75 @@ class rbd_aio_req : public request {
     lsvd_completion  *p;
     char             *aligned_buf = NULL;
     uint64_t          offset;
+    sector_t          _sector;
     lsvd_op           op;
     smartiov          iovs;
     smartiov          aligned_iovs;
     sector_t          sectors = 0;
-
+    std::vector<smartiov*> to_free;
+    
     std::atomic<int>  n_req = 0;
     std::atomic<int>  status = 0;
     std::mutex        m;
     std::condition_variable cv;
 
-    /* there's only a single notification to a write request, so 
-     * we ignore n_req and LAUNCHED
-     */
-    void notify_w(request *unused) {
-        img->wcache->release_room(sectors);
-
-        if (p != NULL) {
-	    //do_log(" w notify %p\n", this);
-            p->complete(0);
-	}
-
-	std::unique_lock lk(m);
-	status |= REQ_COMPLETE;
+    void notify_parent(void) {
+	assert(!m.try_lock());
+        if (p != NULL) 
+            p->complete(sectors*512L);
 	if (status & REQ_WAIT)
 	    cv.notify_all();
-	else {
-	    lk.unlock();
-	    delete this;
+    }
+    
+    void notify_w(request *unused) {
+	std::unique_lock lk(m);
+	auto z = --n_req;
+	if (z > 0)
+	    return;
+
+        img->wcache->release_room(sectors);
+
+	auto x = (status |= REQ_COMPLETE);
+	if (x & REQ_LAUNCHED) {
+	    notify_parent();
+	    if (! (x & REQ_WAIT)) {
+		lk.unlock();
+		delete this;
+	    }
 	}
     }
 
     void run_w() {
 	if (aligned_buf)	// copy to aligned *before* write
 	    iovs.copy_out(aligned_buf);
-        img->wcache->get_room(sectors);
-        img->wcache->writev(this, offset/512, &aligned_iovs);
-    }
-    
-    void read_notify_parent(void) {
-	assert(!m.try_lock());
-        if (p != NULL) 
-            p->complete(0);
-	if (status & REQ_WAIT)
-	    cv.notify_all();
+
+	//add_crc(_sector, aligned_iovs.data(), aligned_iovs.size());
+
+	img->wcache->get_room(sectors);
+
+	/* split large requests into 2MB (default) chunks
+	 */
+	sector_t max_sectors = img->cfg.wcache_chunk / 512;
+	n_req += div_round_up(sectors, max_sectors);
+
+	// TODO: this is horribly ugly
+	for (sector_t s_offset = 0; s_offset < sectors; s_offset += max_sectors) {
+	    auto _sectors = std::min(sectors - s_offset, max_sectors);
+	    smartiov tmp = aligned_iovs.slice(s_offset*512L, s_offset*512L + _sectors*512L);
+	    smartiov *_iov = new smartiov(tmp.data(), tmp.size());
+	    to_free.push_back(_iov);
+	    img->wcache->writev(this, offset/512, _iov);
+	    offset += _sectors*512L;
+	}
+
+	std::unique_lock lk(m);
+	auto x = (status |= REQ_LAUNCHED);
+
+	if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
+	    notify_parent();
+	    lk.unlock();
+	    delete this;
+	}
     }
     
     void notify_r(request *child) {
@@ -363,12 +391,14 @@ class rbd_aio_req : public request {
         if (--n_req > 0)
 	    return;
 
+	//check_crc(_sector, aligned_iovs.data(), aligned_iovs.size(), "1");
+
 	if (aligned_buf)	// copy from aligned *after* read
 	    iovs.copy_in(aligned_buf);
 
 	auto x = (status |= REQ_COMPLETE);
 	if (x & REQ_LAUNCHED) {
-	    read_notify_parent();
+	    notify_parent();
 	    if (! (x & REQ_WAIT)) {
 		lk.unlock();
 		delete this;
@@ -417,7 +447,7 @@ class rbd_aio_req : public request {
 	auto x = (status |= REQ_LAUNCHED);
 
 	if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
-	    read_notify_parent();
+	    notify_parent();
 	    lk.unlock();
 	    delete this;
 	}
@@ -429,8 +459,16 @@ class rbd_aio_req : public request {
 	img = img_;
 	p = p_;
 	offset = offset_;	// byte offset into volume
+	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
-	sectors = iovs.bytes() / 512;
+	sectors = iovs.bytes() / 512L;
+#if 0
+	if (op == OP_WRITE) {
+	    do_log("%s %ld\n", op == OP_READ ? "R" : "W", sectors);
+	    if (iovs.size() > 10)
+		do_log(" big\n");
+	}
+#endif
 	if (iovs.aligned(512))
 	    aligned_iovs = iovs;
 	else {
@@ -454,6 +492,8 @@ public:
     ~rbd_aio_req() {
 	if (aligned_buf)
 	    free(aligned_buf);
+	for (auto iov : to_free)
+	    delete iov;
     }
 
     /* note that there's no child request until read cache is updated
@@ -506,10 +546,18 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
     return 0;
 }
 
+
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-    //do_log("rbd_aio_readv\n");
+#if 0
+    char pbuf[512], *_p = pbuf;
+    _p += sprintf(_p, "'r', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
+    for (int i = 0; i < iovcnt; i++)
+	_p += sprintf(_p, "%s%ld", i ? "," : "", iov[i].iov_len / 512);
+    _p += sprintf(_p, "]");
+    do_log("%s\n", pbuf);
+#endif
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
     p->img = img;
@@ -529,10 +577,12 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
 			       iov, iovcnt);
 #if 0
-    int sum = 0;
+    char pbuf[512], *_p = pbuf;
+    _p += sprintf(_p, "'w', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
     for (int i = 0; i < iovcnt; i++)
-	sum += (iov[i].iov_len / 512);
-    do_log("rbd_aio_writev %d %ld+%d %p\n", iovcnt, offset/512L, sum, req);
+	_p += sprintf(_p, "%s%ld", i ? "," : "", iov[i].iov_len / 512);
+    _p += sprintf(_p, "]");
+    do_log("%s\n", pbuf);
 #endif
     req->run(NULL);
     return 0;
