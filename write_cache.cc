@@ -142,6 +142,10 @@ public:
      */
     page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
     void do_write_checkpoint(void);
+
+    std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) {
+	return std::make_pair(&m, &map);
+    }
 };
 
 
@@ -157,10 +161,10 @@ class wcache_write_req : public request {
     page_t        pad_page = 0;
     page_t        n_pad_pages;
     
-    std::vector<work_tuple> *work = NULL;
+    std::vector<work_tuple> work;
     request      *r_data = NULL;
     char         *hdr = NULL;
-    smartiov     *data_iovs = NULL;
+    smartiov      *data_iovs;
 
     request      *r_pad = NULL;
     char         *pad_hdr = NULL;
@@ -190,8 +194,9 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
 				       page_t n_pad, page_t pad,
 				       write_cache* wcache_)  {
     wcache = (write_cache_impl*)wcache_;
-    work = work_;
-
+    for (auto w : *work_)
+	work.push_back(w);
+    
     if (pad != 0) {
 	pad_hdr = (char*)aligned_alloc(512, 4096);
 	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
@@ -206,7 +211,7 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
     }
   
     std::vector<j_extent> extents;
-    for (auto [req,lba,iov] : *work) {
+    for (auto [req,lba,iov] : work) {
 	(void)req;
 	extents.push_back((j_extent){(uint64_t)lba, iov->bytes() / 512});
     }
@@ -227,7 +232,7 @@ wcache_write_req::wcache_write_req(std::vector<work_tuple> *work_,
 
     data_iovs = new smartiov();
     data_iovs->push_back((iovec){hdr, 4096});
-    for (auto [req,lba,iovs] : *work) {
+    for (auto [req,lba,iovs] : work) {
 	(void)req; (void)lba;
 	auto [iov, iovcnt] = iovs->c_iov();
 	data_iovs->ingest(iov, iovcnt);
@@ -241,8 +246,10 @@ wcache_write_req::~wcache_write_req() {
     if (pad_hdr) 
         free(pad_hdr);
     delete data_iovs;
-    delete work;
+    //delete work;
 }
+
+//extern void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg);
 
 void wcache_write_req::notify(request *child) {
     child->release();
@@ -255,7 +262,7 @@ void wcache_write_req::notify(request *child) {
 	/* update the write cache forward and reverse maps
 	 */
         std::vector<extmap::lba2lba> garbage; 
-	for (auto [req,lba,iovs] : *work) {
+	for (auto [req,lba,iovs] : work) {
 	    (void)req;
 	    sector_t sectors = iovs->bytes() / 512;
 
@@ -279,11 +286,13 @@ void wcache_write_req::notify(request *child) {
 
     /* send data to backend, invoke callbacks, then clean up
      */
-    for (auto [req,lba,iovs] : *work) {
+    for (auto [req,lba,iovs] : work) {
 	auto [iov, iovcnt] = iovs->c_iov();
+	//check_crc(lba, iov, iovcnt, "3");
 	wcache->be->writev(lba*512, iov, iovcnt);
-	req->notify(NULL);	// don't release multiple times
     }
+    for (auto [req,lba,iovs] : work) 
+	req->notify(NULL);
 
     /* we don't implement release or wait - just delete ourselves.
      */
@@ -327,7 +336,7 @@ void write_cache_impl::flush(void) {
  * old map entries pointing to the locations being written to.
  */
 void write_cache_impl::evict(page_t page, page_t limit) {
-    assert(!m.try_lock());  // m must be locked
+    //assert(!m.try_lock());  // m must be locked
     page_t b = super->base;
     page_t oldest = super->oldest;
 
@@ -383,7 +392,7 @@ void write_cache_impl::evict(page_t page, page_t limit) {
  * n_pad:    total pages for pad
  */
 uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
-    assert(!m.try_lock());
+    //assert(!m.try_lock());
     pad = n_pad = 0;
     if (super->limit - super->next < (uint32_t)n) {
 	pad = super->next;
@@ -402,7 +411,7 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
 }
 
 void write_cache_impl::notify_complete(page_t start, page_t len) {
-    assert(!m.try_lock());	// must be locked
+    //assert(!m.try_lock());	// must be locked
     auto it = std::find(outstanding.begin(), outstanding.end(),
 			std::make_pair(start,len));
     assert(it != outstanding.end());
@@ -411,14 +420,14 @@ void write_cache_impl::notify_complete(page_t start, page_t len) {
 }
 
 void write_cache_impl::record_outstanding(page_t start, page_t len) {
-    assert(!m.try_lock());	// must be locked
+    //assert(!m.try_lock());	// must be locked
     outstanding.push_back(std::make_pair(start, len));
 }
 
 /* call with lock held
  */
 j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
-    assert(!m.try_lock());
+    //assert(!m.try_lock());
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr*)buf;
     // OH NO - am I using wcache->sequence or wcache->super->seq???
@@ -433,6 +442,7 @@ void write_cache_impl::flush_thread(thread_pool<int> *p) {
     auto period = std::chrono::milliseconds(50);
     while (p->running) {
 	std::unique_lock lk(m);
+	//printf("%d %p\n", __LINE__, &m); fflush(stdout);
 	p->cv.wait_for(lk, period);
 	if (!p->running)
 	    return;
@@ -759,17 +769,19 @@ write_cache_impl::~write_cache_impl() {
     delete misc_threads;
     delete[] cache_blocks;
     free(super);
+    free(_hdrbuf);
     delete nvme_w;
 }
 
 void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
+#if 0
     auto w = new std::vector<work_tuple>(
 	std::make_move_iterator(work.begin()),
 	std::make_move_iterator(work.end()));
     work.erase(work.begin(), work.end());
-
+#endif
     sector_t sectors = 0;
-    for (auto [req,lba,iov] : *w) {
+    for (auto [req,lba,iov] : work) {
 	(void)lba; (void)req;
         sectors += iov->bytes() / 512;
         assert(iov->aligned(512));
@@ -793,15 +805,18 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
 	cache_blocks[page - b + 1 + i].type = WCACHE_DATA;
     
 
-    auto req = new wcache_write_req(w, pages, page, n_pad-1, pad, this);
+    auto req = new wcache_write_req(&work, pages, page, n_pad-1, pad, this);
+    work.erase(work.begin(), work.end());
     outstanding_writes++;
     
     lk.unlock();
     req->run(NULL);
+    lk.lock();
 }
 
 void write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
     std::unique_lock lk(m);
+    //printf("%d %p\n", __LINE__, &m); fflush(stdout);
     work.push_back(std::make_tuple(req, lba, iov));
 
     // if we're not under write pressure, send writes immediately; else

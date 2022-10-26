@@ -26,13 +26,16 @@ public:
         async_read(size_t offset, char* buf, size_t len) = 0;
     virtual std::tuple<size_t,size_t,request*>
         async_readv(size_t offset, smartiov *iovs) = 0;
-    
+
+    /* debug stuff 
+     */
     virtual void getmap(int base, int limit, int (*cb)(void*,int,int,int),
                         void *ptr) = 0;
     virtual void reset(void) = 0;
     virtual void get_super(j_write_super *s) = 0; /* copies superblock */
     virtual page_t get_oldest(page_t blk, std::vector<j_extent> &extents) = 0;
     virtual void do_write_checkpoint(void) = 0;
+    virtual std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) = 0;
 };
 
 extern write_cache *make_write_cache(uint32_t blkno, int fd,
