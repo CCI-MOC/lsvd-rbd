@@ -258,7 +258,6 @@ char *logbuf, *p_log, *end_log;
 #include <stdarg.h>
 std::mutex m;
 void do_log(const char *fmt, ...) {
-    return;
     std::unique_lock lk(m);
     if (!logbuf) {
 	size_t sz = 64*1024;
@@ -570,13 +569,13 @@ extern "C" int do_rbd_aio_readv(rbd_image_t image, const iovec *iov,
 
 /* random run-time debugging stuff, not used at the moment...
  */
-#if 0
+#if 1
 #include <zlib.h>
 static std::map<int,uint32_t> sector_crc;
 char zbuf[512];
 static std::mutex zm;
 
-static void add_crc(sector_t sector, iovec *iov, int niovs) {
+void add_crc(sector_t sector, iovec *iov, int niovs) {
     std::unique_lock lk(zm);
     for (int i = 0; i < niovs; i++) {
 	for (size_t j = 0; j < iov[i].iov_len; j += 512) {
@@ -613,7 +612,7 @@ void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg) {
     }
 }
 
-static void printaddr(sector_t sector, rbd_image *img) {
+void printaddr(sector_t sector, rbd_image *img) {
     sector_t base = sector, limit = base+8;
     char buf[1024], *p = buf;
     auto [wm,wmap] = img->wcache->getmap2();
@@ -642,7 +641,7 @@ static void printaddr(sector_t sector, rbd_image *img) {
     }
 }
 
-static size_t iovsum(const iovec *iov, int iovcnt) {
+size_t iovsum(const iovec *iov, int iovcnt) {
     int sum = 0;
     for (int i = 0; i < iovcnt; i++)
 	sum += iov[i].iov_len;

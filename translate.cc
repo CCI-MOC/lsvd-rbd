@@ -136,7 +136,7 @@ class translate_impl : public translate {
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
 
-    void do_gc(std::unique_lock<std::mutex> &lk);
+    void do_gc(void);
     void gc_thread(thread_pool<int> *p);
     void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
     void worker_thread(thread_pool<batch*> *p);
@@ -587,9 +587,10 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
     auto seq0 = seq.load();
 
     while (p->running) {
-	//std::unique_lock lk(*p->m);
-	std::unique_lock lk(m);
-	p->cv.wait_for(lk, wait_time);
+	std::unique_lock lk(*p->m);
+	//std::unique_lock lk(m);
+	if (p->cv.wait_for(lk, wait_time, [p] {return !p->running;}))
+	    return;
 	if (p->running && seq0 == seq.load() && b->len > 0) {
 	    if (std::chrono::system_clock::now() - t0 > timeout) {
 		lk.unlock();
@@ -739,8 +740,8 @@ int translate_impl::checkpoint(void) {
 /* Needs a lot of work. Note that all reads/writes are synchronous
  * for now...
  */
-void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
-    //assert(!m.try_lock());	// must be locked
+void translate_impl::do_gc(void) {
+    std::unique_lock lk(m);
     gc_cycles++;
     int max_obj = seq.load();
 
@@ -857,8 +858,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	     */
 	    char *buf = (char*)aligned_alloc(512, sectors * 512);
 
-	    lk.lock();		// m
-	    objlock.lock();	// *map_lock
+	    std::unique_lock lk2(m);
+	    std::unique_lock objlock2(*map_lock);
+
 	    off_t byte_offset = 0;
 	    sector_t data_sectors = 0;
 	    std::vector<data_map> obj_extents;
@@ -904,8 +906,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 		map->update(e.lba, e.lba+e.len, oo, NULL);
 		offset += e.len;
 	    }
-	    objlock.unlock();
-	    lk.unlock();
+	    objlock2.unlock();
+	    lk2.unlock();
 
 	    smartiov iovs;
 	    iovs.push_back((iovec){hdr, (size_t)hdr_sectors*512});
@@ -950,7 +952,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	objname name(prefix(), c);
 	objstore->delete_object(name.c_str());
     }
-    lk.lock();
 }
 
 
@@ -961,18 +962,20 @@ void translate_impl::gc_thread(thread_pool<int> *p) {
     pthread_setname_np(pthread_self(), name);
 	
     while (p->running) {
-	std::unique_lock lk(m);
-	p->cv.wait_for(lk, interval);
-	if (!p->running)
-	    return;
+	{
+	    std::unique_lock lk(m);
+	    p->cv.wait_for(lk, interval);
+	    if (!p->running)
+		return;
 
-	/* check to see if we should run a GC cycle
-	 */
-	if (total_sectors - total_live_sectors < trigger)
-	    continue;
-	if (((double)total_live_sectors / total_sectors) > 0.6)
-	    continue;
-	do_gc(lk);
+	    /* check to see if we should run a GC cycle
+	     */
+	    if (total_sectors - total_live_sectors < trigger)
+		continue;
+	    if (((double)total_live_sectors / total_sectors) > 0.6)
+		continue;
+	}
+	do_gc();
     }
 }
     

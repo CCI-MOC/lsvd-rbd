@@ -302,6 +302,21 @@ enum rbd_req_status {
     REQ_WAIT = 4
 };
 
+std::set<void*> all_reqs;
+std::mutex reqs_m;
+class rbd_aio_req;
+static void request_start(rbd_aio_req *r) {
+    auto v = (void*)r;
+    std::unique_lock lk(reqs_m);
+    all_reqs.insert(v);
+}
+static void request_end(rbd_aio_req *r) {
+    auto v = (void*)r;
+    std::unique_lock lk(reqs_m);
+    all_reqs.erase(v);
+}
+
+    
 /* rbd_aio_req - state machine for rbd_aio_read, rbd_aio_write
  *
  * TODO: fix this. I merged separate read & write classes in the
@@ -324,16 +339,23 @@ class rbd_aio_req : public request {
     std::mutex        m;
     std::condition_variable cv;
 
+    int n_subs = 0;
+
+    std::set<void*> wc_work;
+    
     void notify_parent(void) {
-	assert(!m.try_lock());
+	//assert(!m.try_lock());
+	request_end(this);
+	do_log(" - %s %ld\n", op==OP_READ?"r":"w", _sector);
         if (p != NULL) 
             p->complete(sectors*512L);
 	if (status & REQ_WAIT)
 	    cv.notify_all();
     }
     
-    void notify_w(request *unused) {
+    void notify_w(request *req) {
 	std::unique_lock lk(m);
+	wc_work.erase((void*)req);
 	auto z = --n_req;
 	if (z > 0)
 	    return;
@@ -362,18 +384,21 @@ class rbd_aio_req : public request {
 	 */
 	sector_t max_sectors = img->cfg.wcache_chunk / 512;
 	n_req += div_round_up(sectors, max_sectors);
-
+	n_subs = div_round_up(sectors, max_sectors); // debug
 	// TODO: this is horribly ugly
+
+	std::unique_lock lk(m);
+
 	for (sector_t s_offset = 0; s_offset < sectors; s_offset += max_sectors) {
 	    auto _sectors = std::min(sectors - s_offset, max_sectors);
 	    smartiov tmp = aligned_iovs.slice(s_offset*512L, s_offset*512L + _sectors*512L);
 	    smartiov *_iov = new smartiov(tmp.data(), tmp.size());
 	    to_free.push_back(_iov);
-	    img->wcache->writev(this, offset/512, _iov);
+	    auto wcw = img->wcache->writev(this, offset/512, _iov);
+	    wc_work.insert((void*)wcw);
 	    offset += _sectors*512L;
 	}
 
-	std::unique_lock lk(m);
 	auto x = (status |= REQ_LAUNCHED);
 
 	if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
@@ -521,6 +546,7 @@ public:
     void release() {}
 
     void run(request *parent /* unused */) {
+	request_start(this);
 	if (op == OP_READ)
 	    run_r();
 	else
@@ -547,16 +573,20 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
 }
 
 
+extern size_t iovsum(const iovec *iov, int iovcnt); // debug
+
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-#if 0
-    char pbuf[512], *_p = pbuf;
+#if 1
+    int blen = 64 + 8*iovcnt;
+    char *pbuf = (char*)malloc(blen), *_p = pbuf;
     _p += sprintf(_p, "'r', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
     for (int i = 0; i < iovcnt; i++)
 	_p += sprintf(_p, "%s%ld", i ? "," : "", iov[i].iov_len / 512);
     _p += sprintf(_p, "]");
     do_log("%s\n", pbuf);
+    free(pbuf);
 #endif
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
@@ -576,13 +606,15 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 
     auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
 			       iov, iovcnt);
-#if 0
-    char pbuf[512], *_p = pbuf;
+#if 1
+    int blen = 64 + 8*iovcnt;
+    char *pbuf = (char*)malloc(blen), *_p = pbuf;
     _p += sprintf(_p, "'w', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
     for (int i = 0; i < iovcnt; i++)
 	_p += sprintf(_p, "%s%ld", i ? "," : "", iov[i].iov_len / 512);
     _p += sprintf(_p, "]");
     do_log("%s\n", pbuf);
+    free(pbuf);
 #endif
     req->run(NULL);
     return 0;
