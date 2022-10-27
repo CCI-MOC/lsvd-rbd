@@ -262,8 +262,8 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = (rbd_image*)image;
 
-    p->img->xlate->flush();
-    p->img->xlate->checkpoint();
+//    p->img->xlate->flush();
+//    p->img->xlate->checkpoint();
 
     /* TODO: implement properly
      */
@@ -487,7 +487,7 @@ class rbd_aio_req : public request {
 	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
 	sectors = iovs.bytes() / 512L;
-#if 0
+#if 1
 	if (op == OP_WRITE) {
 	    do_log("%s %ld\n", op == OP_READ ? "R" : "W", sectors);
 	    if (iovs.size() > 10)
@@ -748,4 +748,17 @@ extern "C" int rados_ioctx_create(rados_t cluster, const char *pool_name,
                                       rados_ioctx_t *ioctx) {
        return 0;
 }
+
+typedef void *rados_t;
+typedef void *rados_ioctx_t;
+extern "C" int rados_conf_set(rados_t cluster, const char *option,
+			      const char *value) { return 0; }
+
+extern "C" int rados_create(rados_t *cluster,
+			    const char * const id) { return 0; }
+extern "C" void rados_ioctx_destroy(rados_ioctx_t io) {}
+extern "C" void rados_ioctx_set_namespace(rados_ioctx_t io,
+                               const char *nspace) {}
+extern "C" void rados_shutdown(rados_t cluster) {}
+
 #endif
