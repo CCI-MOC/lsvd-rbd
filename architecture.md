@@ -209,12 +209,14 @@ I'm not sure how big a problem (2) is - it's not too much of an issue with S3, b
 The solution is to do incremental checkpoints, keeping the last N - each contains any new entries since the last checkpoint, plus any remaining entries from the old checkpoint that just rolled out of the N-checkpoint window.
 Support is already there: the extent map keeps D bits, and the object format allows specifying more than one checkpoint which must be loaded before rolling the log forward.
 
-****stalling** - for consistency the map needs to be updated in write order. This can be done after an object write completes, but this is complicated, especially in the case of GC writes. 
+**[DONE] stalling** - for consistency the map needs to be updated in write order. This can be done after an object write completes, but this is complicated, especially in the case of GC writes. 
 It's a lot easier to do the update when launching the write, but this raises the possibility of a read before the write is complete.
 (see GC for discussion of a fix)
 
 Solutions: (1) ignore it, since the write cache should prevent this from ever happening. (2) provide a mechanism to stall reads if there are writes outstanding to those addresses.
 In the long run we probably need to do (2), since GC means that the data may not actually be in the write cache.
+
+Stalling is implemented for both the write cache (i.e. don't overrun the circular buffer) and for the backend, which we declare busy after there are N object writes in flight.
 
 ## Cleaner (garbage collector) 
 
@@ -230,7 +232,7 @@ Then we assemble the GC object, write it to the backend, and continue.
 
 This defragments the address space, avoids holding locks for too long, and seems to give good write amplification in simulation. It needs more testing and tuning, though.
 
-**read/GC interference** - if we update the object map when we start writing out a GC object, there's a chance that an incoming read will come in for data that's getting copied.
+**[DONE] read/GC interference** - if we update the object map when we start writing out a GC object, there's a chance that an incoming read will come in for data that's getting copied.
 There are a few ways to deal with this:
 1. deferred map updates. Really hard, because other write batches are going to follow the GC write, and we have to keep proper ordering
 2. redirect reads to the in-memory copy. Hard for accidental reasons - it crosses boundaries of the abstractions the code has been split into.
@@ -239,26 +241,32 @@ There are a few ways to deal with this:
 I think (3) is the most reasonable choice - keep a map (in the top-level object) of blocked LBA ranges, and a condition variable to wait until the read isn't interfering with GC anymore.
 The map will be smaller and simpler if we just block out the entire LBA range that's currently being cleaned.
 
+Actually, all we need to do is wait until all objects up to the one being read have been persisted to the backend. It works both for GC and for anything that gets missed in the write cache.
+
 **cleaner/translation split** - I haven't started this yet, and I'm starting to think that it might be a bad idea.
 In particular we need to keep track of when object writes complete, because (I think) we need to know when all objects up to sequence N have been successfully written, but GC, checkpoints, and data all share the same sequence number space.
 I think it makes sense to have a single object instance, but maybe split the method implementations into multiple files.
 
 ## To do
 
-**async requests** - The read cache, translation layer, and some debug functions still use a closure mechanism that's in the process of being replaced by request instances.
+**[DONE] async requests** - The read cache, translation layer, and some debug functions still use a closure mechanism that's in the process of being replaced by request instances.
 
-**in-memory objects** - the translation layer has a mechanism for accessing recent objects which haven't been fully written to the backend, which needs to be removed. It dates to before the write cache was implemented, and it's of no use anymore.
+**[DONE] in-memory objects** - the translation layer has a mechanism for accessing recent objects which haven't been fully written to the backend, which needs to be removed. It dates to before the write cache was implemented, and it's of no use anymore.
 
 **Image create/delete** - this is currently handled outside of the library by some of the test Python code; obviously it needs to be moved into the library itself
 
-**Config file** - it's reached the point where it needs a simple config file reader, which will be throw-away code since I assume we'll use Ceph config when upstreamed.
+**[DONE] Config file** - it's reached the point where it needs a simple config file reader, which will be throw-away code since I assume we'll use Ceph config when upstreamed.
 
-**Split translation, cleaning** - GC is currently part of the translation layer module.
+**[SKIPPED] Split translation, cleaning** - GC is currently part of the translation layer module.
 I think it would be best to factor this out, as it's a significant piece of complexity in its own right, however the two are going to need to share some common functions for handling sequence numbers and completions, since the objects they write are ordered by a single sequence of sequence numbers.
+
+Turns out it may not have been such a bad idea after all.
 
 **Snapshot, clone** - these need to be implemented and tested
 
 `io_uring` - I had delayed switching to `io_uring` because I had no idea when it would show up in RHEL, but now that it's there I don't think I can justify using `libaio`
+
+[whoops - RHEL 9 has 5.14, but I think they disabled `io_uring`]
 
 ## Random notes
 
