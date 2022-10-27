@@ -112,6 +112,8 @@ The current implementation is kind of a mess, using lambda-based continuations w
 We're in the middle of changing it to use request objects which encapsulate the state and logic for a request at a particular layer, and then invoke a `notify()` interface at the layer above when they complete.
 I haven't been able to fully understand the Ceph async request mechanism, but this seems like it should be much easier to rewrite into idiomatic Ceph code than the continuation stuff would be.
 
+Update: all closures have been converted, although some of the comments need to be fixed. (i.e. it doesn't matter that certain state corresponds to a closure that used to be on line X)
+
 ## extent map
 
 A central part of the code is the extent map, which does a pretty efficient job (wrt to both space and time) of mapping from LBA ranges to object locations, other LBAs, or pointers within a buffer.
@@ -121,3 +123,9 @@ The organization is stolen from Python sortedcontainers - it's actually a 2d arr
 It's a lot more compact - no per-element pointers, just some wasted elements in the 2nd-level arrays.
 It's also quite fast on modern CPUs, as it doesn't do pointer chasing and the CPU prefetcher works really well.
 The inner templates are a bit gross in order to pack the data structures better, which helps both space and time.
+
+## status
+
+It's been working with the fio rbd backend all along.
+
+As of 10/27 on QEMU/KVM it makes it almost all the way through installation from an old Ubuntu 14 ISO I had sitting around.
