@@ -348,6 +348,7 @@ class rcache_req : public request {
     friend class read_cache_impl;
 
     enum req_type state = RCACHE_NONE;
+    std::vector<std::pair<int,req_type>> old_states; // debug
     bool   released = false;
     request *sub_req = NULL;
 
@@ -411,6 +412,7 @@ void rcache_req::notify(request *child) {
     if (child != NULL)
 	child->release();
 
+    old_states.push_back(std::make_pair(__LINE__, state));
     /* direct read from nvme, line 375
      */
     if (state == RCACHE_SSD_READ) {
@@ -466,13 +468,17 @@ void rcache_req::notify(request *child) {
     if (next_state == RCACHE_DONE && released) {
 	lk.unlock();
 	delete this;
+	return;
     }
     else
 	state = next_state;
+    old_states.push_back(std::make_pair(__LINE__, state));
 }
 
 void rcache_req::run(request *parent_) {
     parent = parent_;
+
+    old_states.push_back(std::make_pair(__LINE__, state));
 
     if (state == RCACHE_QUEUED) {
 	/* nothing */
@@ -488,6 +494,8 @@ void rcache_req::run(request *parent_) {
     }
     else
 	assert(false);
+
+    old_states.push_back(std::make_pair(__LINE__, state));
 }
 
 std::tuple<size_t,size_t,request*>
@@ -517,6 +525,12 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     if (read_len == 0)
 	return std::make_tuple(skip_len, read_len, (request*)NULL);
 
+    /* damn this gets complicated. oo is the pointer corresponding
+     * to base+_offset, and we apply it for the minimum of
+     *   limit - base - _offset/512
+     *   top of unit
+     */
+    
     /* handle the small probability that it's for an object
      * currently being GC'ed
      */
@@ -528,10 +542,9 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     extmap::obj_offset unit = {oo.obj, oo.offset / unit_sectors};
     sector_t blk_base = unit.offset * unit_sectors;
     sector_t blk_offset = oo.offset % unit_sectors;
-    sector_t blk_top_offset = std::min({(int)(blk_offset+sectors),
-		round_up(blk_offset+1,unit_sectors),
-		(int)(blk_offset + (limit-base))});
-    int n = -1;             // cache block number
+    sector_t blk_top_offset = std::min((int)(blk_offset+sectors-_offset/512),
+				       round_up(blk_offset+1,unit_sectors));
+    int n = -1;			// cache block number
 
     std::unique_lock lk2(m);
     bool in_cache = false;
