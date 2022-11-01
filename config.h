@@ -23,6 +23,7 @@ public:
     std::string cache_dir = "/tmp";
     int         xlate_threads = 2;
     int         xlate_window = 8;
+    int         hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
     long        cache_size = 8199*4096; // in bytes
     

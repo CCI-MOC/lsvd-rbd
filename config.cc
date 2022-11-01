@@ -78,6 +78,7 @@ int lsvd_config::read() {
 	    F_CONFIG_INT(words[0], words[1], xlate_window);
 	    F_CONFIG_TABLE(words[0], words[1], backend, m);
 	    F_CONFIG_H_INT(words[0], words[1], cache_size);
+	    F_CONFIG_INT(words[0], words[1], hard_sync);
 	}
 	fp.close();
 	break;
@@ -91,6 +92,7 @@ int lsvd_config::read() {
     ENV_CONFIG_INT(xlate_window);
     ENV_CONFIG_TABLE(backend, m);
     ENV_CONFIG_H_INT(cache_size);
+    ENV_CONFIG_INT(hard_sync);
 
     return 0;			// success
 }

@@ -51,6 +51,9 @@
 extern void do_log(const char *, ...);
 extern void fp_log(const char *, ...);
 
+extern void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg);
+extern void add_crc(sector_t sector, iovec *iov, int niovs);
+
 /* RBD "image" and completions are only used in this file, so we
  * don't break them out into a .h
  */
@@ -260,15 +263,12 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
     //do_log("'f', 0, 0, []\n");
     lsvd_completion *p = (lsvd_completion *)c;
-    p->img = (rbd_image*)image;
+    auto img = p->img = (rbd_image*)image;
 
-//    p->img->xlate->flush();
-//    p->img->xlate->checkpoint();
+    if (img->cfg.hard_sync)
+	img->xlate->flush();
 
-    /* TODO: implement properly
-     */
-
-    p->complete(0);
+    p->complete(0);		// TODO - make asynchronous
     return 0;
 }
 
@@ -276,8 +276,8 @@ extern "C" int rbd_flush(rbd_image_t image)
 {
     //do_log("rbd_flush\n");
     auto img = (rbd_image*)image;
-    img->xlate->flush();
-    img->xlate->checkpoint();
+    if (img->cfg.hard_sync)
+	img->xlate->flush();
     return 0;
 }
 
@@ -376,7 +376,7 @@ class rbd_aio_req : public request {
 	if (aligned_buf)	// copy to aligned *before* write
 	    iovs.copy_out(aligned_buf);
 
-	//add_crc(_sector, aligned_iovs.data(), aligned_iovs.size());
+	add_crc(_sector, aligned_iovs.data(), aligned_iovs.size());
 
 	img->wcache->get_room(sectors);
 
@@ -416,7 +416,7 @@ class rbd_aio_req : public request {
         if (--n_req > 0)
 	    return;
 
-	//check_crc(_sector, aligned_iovs.data(), aligned_iovs.size(), "1");
+	check_crc(_sector, aligned_iovs.data(), aligned_iovs.size(), "1");
 
 	if (aligned_buf)	// copy from aligned *after* read
 	    iovs.copy_in(aligned_buf);
