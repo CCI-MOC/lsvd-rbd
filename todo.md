@@ -147,3 +147,8 @@ Remaining crash recovery optimizations:
 ## translation layer startup issues
 
 after several crash/restart cycles, getting assertion failure due to object overwrite
+
+## gc ideas
+
+add a GC generation field to objects
+
