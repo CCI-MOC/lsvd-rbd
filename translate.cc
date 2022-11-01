@@ -372,7 +372,7 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
     for (auto c : checkpoints)
 	*p_ckpt++ = c;
 
-    data_map *dm = (data_map*)(p_ckpt+1);
+    data_map *dm = (data_map*)p_ckpt;
     for (int i = 0; i < n_extents; i++)
 	*dm++ = extents[i];
 
@@ -690,6 +690,18 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      */
     size_t offset = sizeof(*super_h) + sizeof(*super_sh);
 
+    /* trim checkpoints. This function is the only place we modify
+     * checkpoints[]
+     */
+    std::vector<int> ckpts_to_delete;
+    while (checkpoints.size() > 3) {
+	ckpts_to_delete.push_back(checkpoints.front());
+	checkpoints.erase(checkpoints.begin());
+    }
+
+    if (checkpoints.size() > 3)
+	do_log("too many checkpoints: %d\n", checkpoints.size());
+
     /* this is the only place we modify *super_sh
      */
     super_sh->ckpts_offset = offset;
@@ -701,6 +713,11 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
 
+    for (auto c : ckpts_to_delete) {
+	objname name(prefix(), c);
+	objstore->delete_object(name.c_str());
+    }
+    
     lk.lock();
 }
 
@@ -757,7 +774,7 @@ void translate_impl::do_gc(void) {
 	double rho = 1.0 * live / datalen;
 	sector_t sectors = hdrlen + datalen;
 	utilization.insert(std::make_tuple(rho, p.first, sectors));
-	assert(sectors <= 10*1024*1024/512);
+	assert(sectors <= 20*1024*1024/512);
     }
 
     /* gather list of objects needing cleaning, return if none
@@ -812,7 +829,7 @@ void translate_impl::do_gc(void) {
 	 */
 	extmap::cachemap file_map;
 	sector_t offset = 0;
-	char *buf = (char*)malloc(10*1024*1024);
+	char *buf = (char*)malloc(20*1024*1024);
 
 	for (auto [i,sectors] : objs_to_clean) {
 	    objname name(prefix(), i);
