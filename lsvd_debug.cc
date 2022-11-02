@@ -583,7 +583,7 @@ void add_crc(sector_t sector, iovec *iov, int niovs) {
     for (int i = 0; i < niovs; i++) {
 	for (size_t j = 0; j < iov[i].iov_len; j += 512) {
 	    const unsigned char *ptr = j + (unsigned char*)iov[i].iov_base;
-	    unsigned c = sector_crc[sector] = (uint32_t)crc32(0, ptr, 512);
+	    sector_crc[sector] = (uint32_t)crc32(0, ptr, 512);
 	    sector++;
 	}
     }
@@ -608,7 +608,7 @@ void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg) {
 
 void list_crc(sector_t sector, int n) {
     for (int i = 0; i < n; i++)
-	printf("%d %08x\n", sector+i, sector_crc[sector+i]);
+	printf("%ld %08x\n", sector+i, sector_crc[sector+i]);
 }
 
 void printaddr(sector_t sector, rbd_image *img) {
@@ -633,7 +633,7 @@ void printaddr(sector_t sector, rbd_image *img) {
 	for (auto it = img->map.lookup(base);
 	     it != img->map.end() && it->base() < limit; it++) {
 	    auto [_b,_l,oo] = it->vals();
-	    p += sprintf(p, " %ld+%ld->%ld.%d", _b, _l-_b, oo.obj, oo.offset);
+	    p += sprintf(p, " %ld+%ld->%ld.%ld", _b, _l-_b, oo.obj, oo.offset);
 	}
 	p += sprintf(p, " ]");
 	do_log("%s\n", buf);
