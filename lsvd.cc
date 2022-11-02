@@ -346,7 +346,7 @@ class rbd_aio_req : public request {
     void notify_parent(void) {
 	//assert(!m.try_lock());
 	request_end(this);
-	do_log(" - %s %ld\n", op==OP_READ?"r":"w", _sector);
+	//do_log(" - %s %ld\n", op==OP_READ?"r":"w", _sector);
         if (p != NULL) 
             p->complete(sectors*512L);
 	if (status & REQ_WAIT)
@@ -376,7 +376,7 @@ class rbd_aio_req : public request {
 	if (aligned_buf)	// copy to aligned *before* write
 	    iovs.copy_out(aligned_buf);
 
-	add_crc(_sector, aligned_iovs.data(), aligned_iovs.size());
+	//add_crc(_sector, aligned_iovs.data(), aligned_iovs.size());
 
 	img->wcache->get_room(sectors);
 
@@ -416,7 +416,7 @@ class rbd_aio_req : public request {
         if (--n_req > 0)
 	    return;
 
-	check_crc(_sector, aligned_iovs.data(), aligned_iovs.size(), "1");
+	//check_crc(_sector, aligned_iovs.data(), aligned_iovs.size(), "1");
 
 	if (aligned_buf)	// copy from aligned *after* read
 	    iovs.copy_in(aligned_buf);
@@ -487,7 +487,7 @@ class rbd_aio_req : public request {
 	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
 	sectors = iovs.bytes() / 512L;
-#if 1
+#if 0
 	if (op == OP_WRITE) {
 	    do_log("%s %ld\n", op == OP_READ ? "R" : "W", sectors);
 	    if (iovs.size() > 10)
@@ -578,7 +578,7 @@ extern size_t iovsum(const iovec *iov, int iovcnt); // debug
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-#if 1
+#if 0
     int blen = 64 + 8*iovcnt;
     char *pbuf = (char*)malloc(blen), *_p = pbuf;
     _p += sprintf(_p, "'r', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
@@ -606,7 +606,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 
     auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
 			       iov, iovcnt);
-#if 1
+#if 0
     int blen = 64 + 8*iovcnt;
     char *pbuf = (char*)malloc(blen), *_p = pbuf;
     _p += sprintf(_p, "'w', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
