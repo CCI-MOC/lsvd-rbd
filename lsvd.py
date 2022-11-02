@@ -3,6 +3,7 @@ import os
 from lsvd_types import *
 
 dir = os.getcwd()
+dir = '/home/pjd/lsvd-rbd'
 lsvd_lib = CDLL(dir + "/liblsvd.so")
 assert lsvd_lib
 
@@ -315,3 +316,13 @@ def rbd_launch_writev(img, off, data, sizes):
 
 def rbd_wait_writev(req):
     lsvd_lib.wait_rbd_aio_writev(req)
+
+def noop():
+    print("noop")
+    lsvd_lib.noop()
+
+def rbd_getmap(img, base, limit):
+    n_tuples = 128
+    tuples = (tuple * n_tuples)()
+    n = lsvd_lib.rbd_getmap(c_long(base), c_long(limit), img, c_int(n_tuples), byref(tuples))
+    return list(map(lambda x: [x.base, x.limit, x.obj, x.offset], tuples[0:n]))
