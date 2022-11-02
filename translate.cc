@@ -312,12 +312,14 @@ ssize_t translate_impl::init(const char *prefix_,
 	    }
 	}
     }
+    next_compln = seq;
 
     /* delete any potential "dangling" objects.
      */
     for (int i = 1; i < 32; i++) {
 	objname name(prefix(), i + seq);
-	objstore->delete_object(name.c_str());
+	if (objstore->delete_object(name.c_str()) == 0)
+	    printf("deleted %s\n", name.c_str());
     }
 
     for (int i = 0; i < nthreads; i++) 
