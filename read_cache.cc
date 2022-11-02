@@ -327,18 +327,22 @@ enum req_type {
     // waiting for read from block already in NVME cache
     RCACHE_SSD_READ = 2,
 
+    // to be queued, waiting for run()
+    RCACHE_PENDING_QUEUE = 3,
+
     // waiting for someone else to read my cache block:
-    RCACHE_QUEUED = 3,
+    RCACHE_QUEUED = 4,
 
     // waiting for backend read of full cache block
-    RCACHE_BACKEND_WAIT = 5,	// backend cache block read
+    RCACHE_BACKEND_WAIT = 5,
 
     // waiting for block write to cache (async)
-    RCACHE_BLOCK_WRITE = 4,
+    RCACHE_BLOCK_WRITE = 6,
 
     // cache readaround - waiting for backend
-    RCACHE_DIRECT_READ = 6,
-    RCACHE_DONE = 7
+    RCACHE_DIRECT_READ = 7,
+
+    RCACHE_DONE = 8
 };
 
 class rcache_req : public request {
@@ -349,10 +353,15 @@ class rcache_req : public request {
 
     enum req_type state = RCACHE_NONE;
     std::vector<std::pair<int,req_type>> old_states; // debug
+    extmap::obj_offset _oo = {0, 0};
+    sector_t __sectors = 0;
+    sector_t dbg_base, dbg_limit;
+    size_t dbg_skip_len, dbg_read_len;
+    sector_t dbg__base, dbg_blk_base, dbg_blk_offset, dbg_top_offset;
     bool   released = false;
     request *sub_req = NULL;
 
-    int      n = RCACHE_NONE;
+    int      n = -1;
     sector_t blk_offset = -1;
 
     smartiov iovs;
@@ -478,10 +487,23 @@ void rcache_req::notify(request *child) {
 void rcache_req::run(request *parent_) {
     parent = parent_;
 
-    old_states.push_back(std::make_pair(__LINE__, state));
+    { std::unique_lock lk(m);
+	old_states.push_back(std::make_pair(__LINE__, state));}
 
     if (state == RCACHE_QUEUED) {
 	/* nothing */
+    }
+    else if (state == RCACHE_PENDING_QUEUE) {
+	std::unique_lock lk(rci->m);
+	if (rci->buffer[n] != NULL) {
+	    iovs.copy_in(rci->buffer[n] + blk_offset*512);
+	    parent->notify(this);
+	    state = RCACHE_DONE;
+	}
+	else {
+	    rci->pending[n].push_back(this);
+	    state = RCACHE_QUEUED;
+	}
     }
     else if (state == RCACHE_LOCAL_BUFFER) {
 	parent->notify(this);
@@ -495,18 +517,21 @@ void rcache_req::run(request *parent_) {
     else
 	assert(false);
 
-    old_states.push_back(std::make_pair(__LINE__, state));
+    {   std::unique_lock lk(m);
+	old_states.push_back(std::make_pair(__LINE__, state));}
 }
 
 std::tuple<size_t,size_t,request*>
 read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     size_t len = iov->bytes();
-    sector_t base = offset/512, sectors = len/512, limit = base+sectors;
+    sector_t base = offset/512, sectors = len/512;
+    sector_t limit = base+sectors, read_sectors = -1;
     size_t skip_len = 0, read_len = 0;
     extmap::obj_offset oo = {0, 0};
 
     size_t _offset = 0;
-
+    sector_t __base = base;
+    
     std::shared_lock lk(*obj_lock);
     auto it = obj_map->lookup(base);
     if (it == obj_map->end() || it->base() >= limit)
@@ -515,9 +540,11 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	auto [_base, _limit, _ptr] = it->vals(base, limit);
 	if (_base > base) {
 	    skip_len = 512 * (_base - base);
-	    _offset += skip_len;
+	    _offset = skip_len;
+	    __base = _base;
 	}
-	read_len = 512 * (_limit - _base);
+	read_sectors = _limit - _base;
+	read_len = 512 * read_sectors;
 	oo = _ptr;
     }
     lk.unlock();
@@ -536,16 +563,32 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
      */
     if (!be->check_object_ready(oo.obj))
 	be->wait_object_ready(oo.obj);
-    
+
     auto r = new rcache_req(this);
+    r->_oo = oo;
+    r->__sectors = read_len/512;
+    r->dbg_base = base;
+    r->dbg__base = __base;
+    r->dbg_limit = limit;
+    r->dbg_skip_len = skip_len;
+    r->dbg_read_len = read_len;
     
     extmap::obj_offset unit = {oo.obj, oo.offset / unit_sectors};
     sector_t blk_base = unit.offset * unit_sectors;
     sector_t blk_offset = oo.offset % unit_sectors;
-    sector_t blk_top_offset = std::min((int)(blk_offset+sectors-_offset/512),
+    sector_t blk_top_offset = std::min((int)(blk_offset+read_sectors),
 				       round_up(blk_offset+1,unit_sectors));
     int n = -1;			// cache block number
 
+    if (read_sectors > blk_top_offset - blk_offset) {
+	read_sectors = blk_top_offset - blk_offset;
+	read_len = read_sectors * 512L;
+    }
+    
+    r->dbg_blk_base = blk_base;
+    r->dbg_blk_offset = blk_offset;
+    r->dbg_top_offset = blk_top_offset;
+    
     std::unique_lock lk2(m);
     bool in_cache = false;
     auto it2 = map.find(unit);
@@ -573,18 +616,20 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	    smartiov _iov = iov->slice(_offset, _offset + bytes);
 	    _iov.copy_in(buffer[n] + blk_offset*512);
 	    r->state = RCACHE_LOCAL_BUFFER;
+	    r->old_states.push_back(std::make_pair(__LINE__, r->state));
 	}
 	else if (written[n]) {
 	    in_use[n]++;
 	    smartiov _iov = iov->slice(_offset, _offset + bytes);
 	    r->sub_req = ssd->make_read_request(&_iov, 512L*start);
 	    r->state = RCACHE_SSD_READ;
+	    r->old_states.push_back(std::make_pair(__LINE__, r->state));
 	}
 	else {              // prior read is pending
-	    r->state = RCACHE_QUEUED;
+	    r->state = RCACHE_PENDING_QUEUE;
 	    r->iovs = iov->slice(_offset, _offset + bytes);
 	    r->blk_offset = blk_offset;
-	    pending[n].push_back(r);
+	    r->old_states.push_back(std::make_pair(__LINE__, r->state));
 	}
 	read_len = bytes;
     }
@@ -602,8 +647,9 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	auto _buf = get_cacheline_buf(n);
 
 	hit_stats.backend += unit_sectors;
-	sector_t sectors = blk_top_offset - blk_offset;
-	hit_stats.user += sectors;
+	//sector_t sectors = std::min((sector_t)(read_len/512),
+	//			    blk_top_offset - blk_offset);
+	hit_stats.user += read_sectors;
 	lk2.unlock();
 
 	r->nvme_offset = (super->base*8 + n*unit_sectors) * 512L;
@@ -611,12 +657,14 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 
 	r->_buf = _buf;
 	r->state = RCACHE_BACKEND_WAIT;
-	r->iovs = iov->slice(0, 512L*sectors);
+	if (read_len == 512 && iov->bytes() > 4096)
+	    do_log("512\n");
+	r->iovs = iov->slice(_offset, _offset+read_len);
+	r->old_states.push_back(std::make_pair(__LINE__, r->state));
 	
 	objname name(be->prefix(), unit.obj);
 	r->sub_req = io->make_read_req(name.c_str(), 512L*blk_base,
 				       _buf, 512*unit_sectors);
-	read_len = 512L * sectors;
     }
     else {
 	hit_stats.user += read_len / 512;
@@ -629,6 +677,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	r->sub_req = io->make_read_req(name.c_str(), 512L*oo.offset,
 				       _iov, _niov);
 	r->state = RCACHE_DIRECT_READ;
+	r->old_states.push_back(std::make_pair(__LINE__, r->state));
 	// read_len unchanged
     }
     return std::make_tuple(skip_len, read_len, r);
