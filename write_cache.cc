@@ -369,6 +369,7 @@ void write_cache_impl::evict(page_t page, page_t limit) {
 
     while (oldest < limit) {
 	page_t len = cache_blocks[oldest - b].n_pages;
+	assert(oldest + len <= (page_t)super->limit);
 	sector_t s_base = oldest*8, s_limit = s_base + len*8;
 	
 	for (auto it = rmap.lookup(s_base);
