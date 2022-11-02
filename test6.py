@@ -148,14 +148,14 @@ class tests(unittest.TestCase):
                 io,_sector,data = w_handles[addr]
                 assert(_sector == addr)
                 lsvd.rbd_wait_writev(io)
-                #set_cksum(_sector, data)  << use C asserts
+                set_cksum(_sector, data)  # comment out to just use C asserts
                 del w_handles[addr]
             elif t[0] == 'rx':
                 addr = t[1]
                 io,_sector = r_handles[addr]
                 assert(_sector == addr)
                 data = lsvd.rbd_wait_readv(io)
-                #check_cksum(_sector,data) << use C asserts
+                check_cksum(_sector,data) # comment out to just use C asserts
                 del r_handles[addr]
             elif t[0] == 'w':
                 op,sector,n_sectors,sizes = t
