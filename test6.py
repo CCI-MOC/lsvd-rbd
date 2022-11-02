@@ -13,10 +13,17 @@ signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 os.environ["LSVD_BACKEND"] = "file"
 os.environ["LSVD_CONFIG_FILE"] = "/dev/null"
-nvme = '/tmp/obj.cache'
-img = '/tmp/bkt/obj'
-dir = os.path.dirname(img)
+if 'DEBUG_CACHE' in os.environ:
+    nvme = os.environ['DEBUG_CACHE']
+else:
+    nvme = '/tmp/obj.cache'    
+if 'DEBUG_OBJ' in os.environ:
+    img = os.environ['DEBUG_OBJ']
+else:
+    img = '/tmp/bkt/obj'
 
+print(nvme, img)
+dir = os.path.dirname(img)
 
 def div_round_up(n, m):
     return (n + m - 1) // m
@@ -55,9 +62,13 @@ def reset_checksums():
     global checksums
     checksums = dict()
 
-_rnd_data = bytes([random.randint(0,255) for _ in range(2*32000*512)])
+if 'DEBUG_NORANDOM' in os.environ:
+    _rnd_data = b'x' * (40000*512)
+else:
+    _rnd_data = bytes([random.randint(0,255) for _ in range(40000*512)])
+
 def random_data(nbytes):
-    offset = random.randint(0,10000*512)
+    offset = random.randint(0,7000*512)
     return _rnd_data[offset:offset+nbytes]
 
 def set_cksum(sector, data):
