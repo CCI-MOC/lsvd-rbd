@@ -51,21 +51,46 @@ void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2)
 
 int io_queue_wait(io_context_t ctx, struct timespec *timeout)
 {
-    return io_getevents(ctx, 0, 0, NULL, timeout);
+    return io_getevents(ctx, 1, 10, NULL, timeout);
+}
+
+/* https://lwn.net/Articles/39285/
+ */
+#define IO_BATCH_EVENTS 8               /* number of events to batch up */
+int io_queue_run2(io_context_t ctx, struct timespec *timeout)
+{
+    struct io_event events[IO_BATCH_EVENTS];
+    struct io_event *ep;
+    int ret = 0;                /* total number of events processed */
+    int n;
+
+    /*
+     * Process io events and call the callbacks.
+     * Try to batch the events up to IO_BATCH_EVENTS at a time.
+     * Loop until we have read all the available events and called the callbacks.
+     */
+    do {
+        int i;
+
+        if ((n = io_getevents(ctx, 1, IO_BATCH_EVENTS, events, timeout)) < 0)
+            break;
+        ret += n;
+        for (ep = events, i = n; i-- > 0; ep++) {
+            io_callback_t cb = (io_callback_t)ep->data;
+            struct iocb *iocb = ep->obj;
+            cb(ctx, iocb, ep->res, ep->res2);
+        }
+    } while (n >= 0);
+
+    return ret ? ret : n;               /* return number of events or error */
 }
 
 void e_iocb_runner(io_context_t ctx, bool *running, const char *name)
 {
-    int rv;
+    struct timespec timeout = {0, 1000*500}; // 500 microseconds
     pthread_setname_np(pthread_self(), name);
-    while (*running) {
-	if ((rv = io_queue_run(ctx)) < 0)
-	    break;
-	if (rv == 0)
-	    usleep(100);
-	if (io_queue_wait(ctx, NULL) < 0)
-	    break;
-    }
+    while (*running) 
+	io_queue_run2(ctx, &timeout);
 }
 
 void e_io_prep_pwrite(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
