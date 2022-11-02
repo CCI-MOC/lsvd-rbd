@@ -459,6 +459,7 @@ public:
     smartiov   iovs;
     char      *buf;
     bool       done = false;
+    rbd_completion_t c;
     std::mutex m;
     std::condition_variable cv;
 
@@ -492,6 +493,7 @@ extern "C" void *launch_rbd_aio_writev(rbd_image_t image, uint64_t offset,
     
     rbd_completion_t c;
     rbd_aio_create_completion((void*)req, aio_vreq_cb, &c);
+    req->c = c;
     rbd_aio_writev(image, iov, niov, offset, c);
 
     return (void*)req;
@@ -512,6 +514,7 @@ extern "C" void *launch_rbd_aio_readv(rbd_image_t image, uint64_t offset,
     
     rbd_completion_t c;
     rbd_aio_create_completion((void*)req, aio_vreq_cb, &c);
+    req->c = c;
     rbd_aio_readv(image, iov, niov, offset, c);
 
     return (void*)req;
@@ -581,9 +584,6 @@ void add_crc(sector_t sector, iovec *iov, int niovs) {
 	for (size_t j = 0; j < iov[i].iov_len; j += 512) {
 	    const unsigned char *ptr = j + (unsigned char*)iov[i].iov_base;
 	    unsigned c = sector_crc[sector] = (uint32_t)crc32(0, ptr, 512);
-	    //printf("[%d] = %08x\n", (int)sector, sector_crc[sector]);
-	    if (sector == 6923 || sector == 0)
-		do_log("%ld = %08x\n", sector, c);
 	    sector++;
 	}
     }
@@ -595,21 +595,20 @@ void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg) {
 	for (size_t j = 0; j < iov[i].iov_len; j += 512) {
 	    const unsigned char *ptr = j + (unsigned char*)iov[i].iov_base;
 	    if (sector_crc.find(sector) == sector_crc.end()) {
-		//assert(memcmp(ptr, zbuf, 512) == 0);
-		if (memcmp(ptr, zbuf, 512) != 0)
-		    do_log("[%s] %d fail: not zero\n", msg, (int)sector);
+		assert(memcmp(ptr, zbuf, 512) == 0);
 	    }
 	    else {
-//		printf("[%d] %08x vs %08x\n", (int)sector, sector_crc[sector], (uint32_t)crc32(0, ptr, 512));
 		unsigned crc1 = 0, crc2 = 0;
-		//assert(sector_crc[sector] == (uint32_t)crc32(0, ptr, 512));
-		if ((crc1 = sector_crc[sector]) != (crc2 = crc32(0, ptr, 512)))
-		    do_log("[%s] %d fail: %08x not %08x\n", msg, (int)sector,
-			   crc1, crc2);
+		assert((crc1 = sector_crc[sector]) == (crc2 = crc32(0, ptr, 512)));
 	    }
 	    sector++;
 	}
     }
+}
+
+void list_crc(sector_t sector, int n) {
+    for (int i = 0; i < n; i++)
+	printf("%d %08x\n", sector+i, sector_crc[sector+i]);
 }
 
 void printaddr(sector_t sector, rbd_image *img) {
@@ -646,6 +645,15 @@ size_t iovsum(const iovec *iov, int iovcnt) {
     for (int i = 0; i < iovcnt; i++)
 	sum += iov[i].iov_len;
     return sum;
+}
+
+extern "C" void noop(void) {
+}
+
+extern "C" int rbd_getmap(sector_t base, sector_t limit, rbd_image *img, int max, struct tuple *t) {
+    getmap_s s = {0, max, t};
+    img->xlate->getmap(base, limit, getmap_cb, (void*)&s);
+    return s.i;
 }
 
 #endif
