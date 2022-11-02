@@ -633,7 +633,7 @@ void printaddr(sector_t sector, rbd_image *img) {
 	for (auto it = img->map.lookup(base);
 	     it != img->map.end() && it->base() < limit; it++) {
 	    auto [_b,_l,oo] = it->vals();
-	    p += sprintf(p, " %ld+%ld->%ld.%ld", _b, _l-_b, oo.obj, oo.offset);
+	    p += sprintf(p, " %ld+%ld->%ld.%d", _b, _l-_b, oo.obj, (int)oo.offset);
 	}
 	p += sprintf(p, " ]");
 	do_log("%s\n", buf);
