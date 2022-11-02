@@ -11,19 +11,16 @@ The debug version uses files in a directory rather than an object store.
 Pick a RADOS pool, an image name, and a directory on an SSD-based file system (`rbd`, `img1`, and `/mnt/nvme/lsvd` in the example below).
 
 1. create a disk - this creates a 4KB RADOS object named `img1` with the volume metadata:
-    `sudo python3 mkdisk.py --rados \`
-    `    --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 --size 10g rbd/img1`
+
+    `sudo python3 mkdisk.py --rados --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 --size 10g rbd/img1`
 
 2. initialize the cache, using the same UUID. 
-    `sudo python3 mkcache.py --size 300M \`
-    `--uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 /mnt/nvme/lsvd/img1.cache`
+
+    `sudo python3 mkcache.py --size 300M --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 /mnt/nvme/lsvd/img1.cache`
 
 3. start KVM using the virtual disk. (note - you can use the file `lsvd.conf` instead of environment variables - see config.h / config.cc for details. Keywords are the same as field names.
-    `sudo env LSVD_CACHE_DIR=/mnt/nvme/lsvd LD_PRELOAD=$PWD/liblsvd.so \`
-    `qemu-system-x86_64 -m 1024 -cdrom whatever.iso \`
-    `-blockdev '{"driver":"rbd","pool":"rbd","image":"rbd/img1","server":[{"host":"10.1.0.4","port":"6789"}],"node-name":"libvirt-2-storage","auto-read-only":true,"discard":"unmap"}' \`
-    `-device virtio-blk,drive=libvirt-2-storage -k en-us -machine accel=kvm \`
-    `-smp 2 -m 1024`
+
+    `sudo env LSVD_CACHE_DIR=/mnt/nvme/lsvd LD_PRELOAD=$PWD/liblsvd.so qemu-system-x86_64 -m 1024 -cdrom whatever.iso -blockdev '{"driver":"rbd","pool":"rbd","image":"rbd/img1","server":[{"host":"10.1.0.4","port":"6789"}],"node-name":"libvirt-2-storage","auto-read-only":true,"discard":"unmap"}' -device virtio-blk,drive=libvirt-2-storage -k en-us -machine accel=kvm -smp 2 -m 1024`
 
 Notes:
 - cache gets divided 2/3 read cache, 1/3 write cache
