@@ -15,6 +15,7 @@ os.environ["LSVD_BACKEND"] = "file"
 os.environ["LSVD_CONFIG_FILE"] = "/dev/null"
 if 'DEBUG_CACHE' in os.environ:
     nvme = os.environ['DEBUG_CACHE']
+    os.environ['LSVD_CACHE_DIR'] = os.path.dirname(nvme)
 else:
     nvme = '/tmp/obj.cache'    
 if 'DEBUG_OBJ' in os.environ:
