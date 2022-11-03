@@ -18,9 +18,14 @@
 #include "extent.h"
 #include "journal.h"
 
-/* translated from mkcache.py version 461b997f
+/* translated from mkcache.py version 2a8d3060
  */
-int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
+int make_cache(std::string name, uuid_t &uuid, int n_pages) {
+    page_t r_units = 0.66 * n_pages / 16;
+    page_t r_pages = r_units * 16;
+    page_t r_meta = div_round_up(r_units * sizeof(extmap::obj_offset), 4096);
+    page_t w_pages = n_pages - r_pages - r_meta - 3;
+    
     FILE *fp = fopen(name.c_str(), "wb");
     if (fp == NULL)
 	return -1;
@@ -38,47 +43,44 @@ int make_cache(std::string name, uuid_t &uuid, uint32_t wblks, uint32_t rblks) {
     memcpy(sup->vol_uuid, uuid, sizeof(uuid_t));
     fwrite(buf, 4096, 1, fp);
 
-    uint32_t _map = div_round_up(wblks, 256);
-    uint32_t _len = div_round_up(wblks, 512);
-    uint32_t mblks = 2 * (_map + _len);
-    wblks -= mblks;
+    page_t _map = div_round_up(w_pages, 256);
+    page_t _len = div_round_up(w_pages, 512);
+    page_t w_meta = 2 * (_map + _len); // TODO: no more 2x?
+    w_pages -= w_meta;
     
     memset(buf, 0, sizeof(buf));
-    auto wsup = (j_write_super*)buf;
-    *wsup = (j_write_super){LSVD_MAGIC,
-			    LSVD_J_W_SUPER,
-			    1,		   // version
-			    1,		   // clean
-			    1,		   // seq
-			    3,		   // metadata_base
-			    3+mblks,	   // metadata limit
-			    3+mblks,	   // base
-			    3+mblks+wblks, // limit
-			    3+mblks,	   // next
-			    3+mblks,	   // oldest
-			    0,0,0,	   // map_start/blocks/entries
-			    0,0,0};	   // len_start/blocks/entries
+    auto w_super = (j_write_super*)buf;
+    *w_super = (j_write_super){LSVD_MAGIC,
+			       LSVD_J_W_SUPER,
+			       1,		   // version
+			       1,		   // clean
+			       1,		   // seq
+			       3,		   // meta_base
+			       3+w_meta,	   // meta_limit
+			       3+w_meta,	   // base
+			       3+w_meta+w_pages,   // limit
+			       3+w_meta,	   // next
+			       3+w_meta,	   // oldest
+			       0,0,0,	   // map_start/blocks/entries
+			       0,0,0};	   // len_start/blocks/entries
     fwrite(buf, 4096, 1, fp);
 
-    int rbase = wblks+mblks+3;
-    int units = rblks / 16;
-    int map_blks = div_round_up(units*sizeof(extmap::obj_offset), 4096);
+    page_t r_base = 3 + w_pages + w_meta;
 
     memset(buf, 0, sizeof(buf));
-    auto rsup = (j_read_super*)buf;
-    *rsup = (j_read_super){LSVD_MAGIC,
-			   LSVD_J_R_SUPER,
-			   1,
-			   128,	// unit size
-			   rbase+map_blks, // base
-			   units,	   // units
-			   rbase,	   // map_start
-			   map_blks,	   // map_blocks
-			   0,0,0};	   // unused (eviction)
+    auto r_super = (j_read_super*)buf;
+    *r_super = (j_read_super){LSVD_MAGIC,
+			      LSVD_J_R_SUPER,
+			      1,		     // version
+			      128,		     // unit_size
+			      r_base+r_meta,	     // base
+			      r_units,		     // units
+			      r_base,		     // map_start
+			      r_meta};		     // map_blocks
     fwrite(buf, 4096, 1, fp);
 
     memset(buf, 0, 4096);
-    for (unsigned i = 0; i < 3 + mblks + wblks + map_blks + rblks; i++)
+    for (int i = 3; i < 3 + w_pages + w_meta + r_pages + r_meta; i++)
 	fwrite(buf, 4096, 1, fp);
     fclose(fp);
 
