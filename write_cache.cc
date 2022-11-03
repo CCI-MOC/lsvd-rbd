@@ -404,7 +404,7 @@ void write_cache_impl::evict(page_t page, page_t limit) {
 uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     //assert(!m.try_lock());
     pad = n_pad = 0;
-    if (super->limit - super->next < (uint32_t)n) {
+    if (super->limit - super->next < n) {
 	pad = super->next;
 	n_pad = super->limit - pad;
 	evict(pad, super->limit);
@@ -442,7 +442,7 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
     j_hdr *h = (j_hdr*)buf;
     // OH NO - am I using wcache->sequence or wcache->super->seq???
     *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1,
-		 .seq = sequence++, .len = (uint32_t)blks, .crc32 = 0,
+		 .seq = sequence++, .len = blks, .crc32 = 0,
 		 .extent_offset = 0, .extent_len = 0};
     return h;
 }
