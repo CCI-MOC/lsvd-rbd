@@ -266,40 +266,44 @@ void read_cache_impl::evict_thread(thread_pool<int> *p) {
     }
 }
 
-    /* state machine for block obj,offset can be represented by the tuple:
-     *  map=n - i.e. exists(n) | map[obj,offset] = n
-     *  in_use[n] - 0 / >0
-     *  written[n] - n/a, F, T
-     *  buffer[n] - n/a, NULL, <p>
-     *  pending[n] - n/a, [], [...]
-     *
-     * if not cached                          -> {!map, n/a}
-     * first read will:
-     *   - add to map
-     *   - increment in_use
-     *   - launch read                        -> {map=n, >0, F, NULL, []}
-     * following reads will 
-     *   queue lambdas to copy from buffer[n] -> {map=n, >0, F, NULL, [..]}
-     * read complete will:
-     *   - set buffer[n]
-     *   - invoke lambdas from pending[*]
-     *   - launch write                       -> {map=n, >0, F, <p>, []}
-     * write complete will:
-     *   - set 'written' to true              -> {map=n, >0, T, <p>, []}
-     * eviction of buffer will:
-     *   - decr in_use
-     *   - remove buffer                      -> {map=n, 0, NULL, []}
-     * further reads will temporarily increment in_use
-     * eviction will remove from map:         -> {!map, n/a}
-     */
+/* state machine for block obj,offset can be represented by the tuple:
+ *  map=n - i.e. exists(n) | map[obj,offset] = n
+ *  in_use[n] - 0 / >0
+ *  written[n] - n/a, F, T
+ *  buffer[n] - n/a, NULL, <p>
+ *  pending[n] - n/a, [], [...]
+ *
+ * if not cached                          -> {!map, n/a}
+ * first read will:
+ *   - add to map
+ *   - increment in_use
+ *   - launch read                        -> {map=n, >0, F, NULL, []}
+ * following reads will 
+ *   queue request to copy from buffer[n] -> {map=n, >0, F, NULL, [..]}
+ * read complete will:
+ *   - set buffer[n]
+ *   - notify requests from pending[n]
+ *   - launch write                       -> {map=n, >0, F, <p>, []}
+ * write complete will:
+ *   - set written[n] to true             -> {map=n, >0, T, <p>, []}
+ * eviction of buffer will:
+ *   - decr in_use
+ *   - remove buffer                      -> {map=n, 0, T, NULL, []}
+ * further reads will temporarily increment in_use
+ * eviction will remove from map:         -> {!map, n/a}
+ */
 
 
-/* TODO: WTF is this?
+/* limit the number of block buffers, using FIFO replacement via
+ * the @buf_loc queue. Note that this is only called from async_readv
+ * with the read cache mutex locked
+ *
+ * TODO: double-check written[n] and recycle if it isn't?
  */
 char *read_cache_impl::get_cacheline_buf(int n) {
     char *buf;
     int len = 65536;
-    const int maxbufs = 48;
+    const int maxbufs = 300;	// 20MB with 64K blocks
     if (buf_loc.size() < maxbufs) {
 	buf = (char*)aligned_alloc(512, len);
 	memset(buf, 0, len);
