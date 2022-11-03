@@ -17,15 +17,15 @@ enum cfg_backend { BACKEND_FILE = 1, BACKEND_RADOS = 2 };
 class lsvd_config {
 public:
 
-    int         batch_size = 8*1024*1024; // in bytes
-    int         wcache_batch = 8;	  // requests
+    int         batch_size = 8*1024*1024;   // in bytes
+    int         wcache_batch = 8;           // requests
     int         wcache_chunk = 2*1024*1024; // bytes
     std::string cache_dir = "/tmp";
     int         xlate_threads = 2;
     int         xlate_window = 8;
     int         hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
-    long        cache_size = 8199*4096; // in bytes
+    long        cache_size = 100*1024*1024; // in bytes
     
     lsvd_config(){}
     ~lsvd_config(){ }
