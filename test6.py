@@ -39,7 +39,7 @@ def mk_300m_cache(nvme):
     mkcache.mkcache(nvme, wblks=w_pages, rblks=r_pages)
 
 def rbd_startup():
-    mkdisk.cleanup(img)
+    mkdisk.cleanup_files(img)
     sectors = 10*1024*1024*2 # 10GB
     mkdisk.mkdisk(img, sectors)
     mk_300m_cache(nvme)
@@ -58,6 +58,7 @@ def get_ui_oplist():
 import random
 random.seed(17)
 import zlib
+import time
 
 def reset_checksums():
     global checksums
@@ -129,7 +130,41 @@ class tests(unittest.TestCase):
                 lsvd.rbd_flush(_img)
             else:
                 self.assertTrue(False)
-        rbd_finish(_img)
+
+        print('waiting...')
+        time.sleep(2)
+        sectors = 10*1024*1024*2 # 10GB
+        print('checking image:')
+        for i in range(0, sectors, 128):
+            data = lsvd.rbd_read(_img, i*512, 128*512)
+            for j in range(128):
+                s = i + j
+                _msg = "sector %d" % s
+                _data = data[j*512:(j+1)*512]
+                if s in checksums:
+                    crc = zlib.crc32(_data)
+                    self.assertEqual(crc, checksums[s], msg=_msg)
+                else:
+                    self.assertEqual(_data, b'\0'*512, msg=_msg)
+
+        lsvd.rbd_close(_img)
+
+        print('checking image after close/open:')
+        _img2 = lsvd.rbd_open(img)
+        print('waiting...')
+        time.sleep(2)
+        
+        for i in range(0, sectors, 128):
+            data = lsvd.rbd_read(_img2, i*512, 128*512)
+            for j in range(128):
+                s = i + j
+                _msg = "sector %d" % s
+                _data = data[j*512:(j+1)*512]
+                if s in checksums:
+                    crc = zlib.crc32(_data)
+                    self.assertEqual(crc, checksums[s], msg=_msg)
+                else:
+                    self.assertEqual(_data, b'\0'*512, msg=_msg)
 
     # mimics I/O order, iovec structure, and completion order of sample ubuntu14 install
     def test_2_ubuntu_install(self):
@@ -168,6 +203,37 @@ class tests(unittest.TestCase):
                 io = lsvd.rbd_launch_readv(_img, sector*512, sizes)
                 r_handles[sector] = [io, sector]
 
+        print('checking image:')
+        print('waiting...')
+        time.sleep(2)
+        sectors = 10*1024*1024*2 # 10GB
+        for i in range(0, sectors, 128):
+            data = lsvd.rbd_read(_img, i*512, 128*512)
+            for j in range(128):
+                s = i + j
+                _msg = "sector %d" % s
+                _data = data[j*512:(j+1)*512]
+                if s in checksums:
+                    crc = zlib.crc32(_data)
+                    self.assertEqual(crc, checksums[s], msg=_msg)
+                else:
+                    self.assertEqual(_data, b'\0'*512, msg=_msg)
+
+
+        print('checking image after close/open:')
+        lsvd.rbd_close(_img)
+        _img2 = lsvd.rbd_open(img)
+        for i in range(0, sectors, 128):
+            data = lsvd.rbd_read(_img2, i*512, 128*512)
+            for j in range(128):
+                s = i + j
+                _msg = "sector %d" % s
+                _data = data[j*512:(j+1)*512]
+                if s in checksums:
+                    crc = zlib.crc32(_data)
+                    self.assertEqual(crc, checksums[s], msg=_msg)
+                else:
+                    self.assertEqual(_data, b'\0'*512, msg=_msg)
 
 oplist = [['w', 0, 24], ['w', 20971496, 24], ['r', 0, 32],
        ['r', 18876408, 8], ['w', 0, 8], ['w', 18876408, 8],
