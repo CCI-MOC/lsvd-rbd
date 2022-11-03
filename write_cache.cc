@@ -359,6 +359,8 @@ void write_cache_impl::evict(page_t page, page_t limit) {
     assert(page == oldest);
     if (cache_blocks[page - b].type == WCACHE_PAD) {
 	cache_blocks[page - b].type = WCACHE_NONE;
+	for (int i = page; i < super->limit; i++) 
+	    assert(cache_blocks[i-b].type == WCACHE_NONE);
 	page = oldest = super->oldest = super->base;
 	limit = super->base + 10; // leave a bit of room
     }
@@ -404,6 +406,12 @@ void write_cache_impl::evict(page_t page, page_t limit) {
 uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     //assert(!m.try_lock());
     pad = n_pad = 0;
+
+    page_t b = super->base;
+    if (super->next < super->oldest)
+	for (int i = super->next; i < super->oldest; i++)
+	    assert(cache_blocks[i-b].type == WCACHE_NONE);
+    
     if (super->limit - super->next < n) {
 	pad = super->next;
 	n_pad = super->limit - pad;
@@ -417,6 +425,11 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     super->next += n;
     if (super->next == super->limit)
 	super->next = super->base;
+
+    if (super->next < super->oldest)
+	for (int i = super->next; i < super->oldest; i++)
+	    assert(cache_blocks[i-b].type == WCACHE_NONE);
+    
     return val;
 }
 
