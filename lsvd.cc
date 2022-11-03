@@ -58,8 +58,7 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
  * don't break them out into a .h
  */
 
-extern int make_cache(std::string name, uuid_t &uuid,
-		      uint32_t wblks, uint32_t rblks);
+extern int make_cache(std::string name, uuid_t &uuid, int n_pages);
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     if (cfg.read() < 0)
@@ -85,8 +84,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     std::string cache = cfg.cache_filename(xlate->uuid, name);
     if (access(cache.c_str(), R_OK|W_OK) < 0) {
 	int cache_pages = cfg.cache_size / 4096;
-	int wblks = (cache_pages - 3) / 2, rblks = wblks;
-	if (make_cache(cache, xlate->uuid, wblks, rblks) < 0)
+	if (make_cache(cache, xlate->uuid, cache_pages) < 0)
 	    return -1;
     }
 
