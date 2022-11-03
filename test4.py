@@ -23,7 +23,7 @@ xlate,wcache,rcache = None,None,None
 
 def startup():
     global xlate,wcache,rcache
-    mkdisk.cleanup(img)
+    mkdisk.cleanup_files(img)
     sectors = 10*1024*2 # 10MB
     mkdisk.mkdisk(img, sectors)
     mkcache.mkcache(nvme)

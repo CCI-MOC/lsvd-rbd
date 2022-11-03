@@ -28,7 +28,7 @@ def inv(i, k, m):
     return _vals[i]
 
 def rbd_startup():
-    mkdisk.cleanup(img)
+    mkdisk.cleanup_files(img)
     sectors = 10*1024*2 # 10MB
     mkdisk.mkdisk(img, sectors)
     mkcache.cleanup(nvme)
