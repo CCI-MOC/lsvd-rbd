@@ -824,7 +824,6 @@ void translate_impl::do_gc(void) {
 	char temp[cfg->cache_dir.size() + 20];
 	sprintf(temp, "%s/gc.XXXXXX", cfg->cache_dir.c_str());
 	int fd = mkstemp(temp);
-	unlink(temp);
 
 	/* read all objects in completely. Someday we can check to see whether
 	 * (a) data is already in cache, or (b) sparse reading would be quicker
@@ -942,6 +941,7 @@ void translate_impl::do_gc(void) {
 	    req->run(t_req);
 	}
 	close(fd);
+	unlink(temp);
     }
 
     lk.lock();
