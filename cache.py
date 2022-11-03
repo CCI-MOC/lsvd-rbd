@@ -37,8 +37,7 @@ wsup_pp = [['magic', magic], ['type', fieldnames], ['clean', lambda x: "YES" if 
                ['len_start', '%d'], ['len_entries', '%d']]
 
 rsup_pp = [["magic", magic], ["type", fieldnames], ["unit_size", '%d'], 
-               ["base", '%d'], ["units", '%d'], ["map_start", '%d'],["map_blocks", '%d'],
-               ["evict_type", '%d'], ["evict_start", '%d'], ["evict_blocks", '%d']]
+               ["base", '%d'], ["units", '%d'], ["map_start", '%d'],["map_blocks", '%d']]
 
 parser = argparse.ArgumentParser(description='Read SSD cache')
 parser.add_argument('--write', help='print write cache details', action='store_true')
@@ -119,6 +118,7 @@ if args.read and r_super:
     print("map start:   ", r_super.map_start)
     buf = os.pread(fd, nbytes, r_super.map_start * 4096)
     oos = (lsvd.obj_offset * r_super.units).from_buffer(bytearray(buf))
+    oos = [_ for _ in filter(lambda x: x.obj != 0, oos)]
     print("\nread map:")
     print(wrapjoin(' ', 80, ['[%d] = %d.%d' % _ for _ in
                                  [(i, oos[i].obj, oos[i].offset) for i in range(len(oos))]]))
