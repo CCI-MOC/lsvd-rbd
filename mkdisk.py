@@ -46,7 +46,7 @@ def mkdisk(name, sectors, uuid=b'\0'*16, use_rados=False):
         fp.write(data) # page 1
         fp.close()
 
-def cleanup(name):
+def cleanup_files(name):
     d = os.path.dirname(name)
     b = os.path.basename(name)
     if not os.access(d, os.F_OK):
@@ -55,21 +55,36 @@ def cleanup(name):
         if f.startswith(b):
             os.unlink(d + '/' + f)
 
+# go to a bit of trouble to handle object names containing '/'
+def cleanup_rados(name):
+    tmp = name.split('/')
+    pool = tmp[0]
+    prefix = '/'.join(tmp[1:])
+    
+    cluster = rados.Rados(conffile='')
+    cluster.connect()
+    if not cluster.pool_exists(pool):
+        raise RuntimeError('Pool not found ' + pool)
+    ioctx = cluster.open_ioctx(pool)
+    for obj in ioctx.list_objects():
+        if obj.key.startswith(prefix):
+            ioctx.remove_object(obj.key)
+    ioctx.close()
+    cluster.shutdown()
+    
 if __name__ == '__main__':
+    _rnd_uuid = str(uuid.uuid4())
     parser = argparse.ArgumentParser(description='create LSVD disk')
     parser.add_argument('--size', help='volume size (k/m/g)', default='10m')
-    parser.add_argument('--uuid', help='volume UUID',
-                            default='00000000-0000-0000-0000-000000000000')
+    parser.add_argument('--uuid', help='volume UUID', default=_rnd_uuid)
     parser.add_argument('--rados', help='use RADOS backend', action='store_true');
     parser.add_argument('prefix', help='superblock name')
     args = parser.parse_args()
 
     size = parse_size(args.size)
     _uuid = uuid.UUID(args.uuid).bytes
-    if _uuid == b'\0'*16:
-        _uuid = uuid.uuid1().bytes
 
     if not args.rados:
-        cleanup(args.prefix)
+        cleanup_files(args.prefix)
     mkdisk(args.prefix, size//512, _uuid, args.rados)
 
