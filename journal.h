@@ -42,10 +42,10 @@ struct j_hdr {
     uint32_t type;		// LSVD_J_DATA
     uint32_t version;		// 1
     uint64_t seq;
-    uint32_t len;		// in 4KB blocks, including header
+    int32_t  len;		// in 4KB blocks, including header
     uint32_t crc32;		// TODO: implement this
-    uint32_t extent_offset;	// in bytes
-    uint32_t extent_len;	// in bytes
+    int32_t  extent_offset;	// in bytes
+    int32_t  extent_len;        // in bytes
 };
 
 /* probably in the second 4KB block of the parition
@@ -65,30 +65,25 @@ struct j_write_super {
     /* Map and length checkpoints live in this region. Allocation within this
      * range is arbitrary, just set {map/len}_{start/blocks/entries} properly
      */
-    uint32_t meta_base;
-    uint32_t meta_limit;
+    int32_t meta_base;
+    int32_t meta_limit;
     
     /* FIFO range is [base,limit), 
      *  valid range accounting for wraparound is [oldest,next)
      *  'wrapped' 
      */
-    uint32_t base;
-    uint32_t limit;
-    uint32_t next;
-    uint32_t oldest;
+    int32_t base;
+    int32_t limit;
+    int32_t next;
+    int32_t oldest;
     
-    /* to checkpoint the map:
-     * - allocate enough blocks at the write frontiers
-     * - write LSVD_J_CKPT header + map entries
-     * - overwrite the write superblock
-     */
-    uint32_t map_start;		// type: j_map_extent
-    uint32_t map_blocks;
-    uint32_t map_entries;
+    int32_t map_start;		// type: j_map_extent
+    int32_t map_blocks;
+    int32_t map_entries;
 
-    uint32_t len_start;	// type: j_length
-    uint32_t len_blocks;
-    uint32_t len_entries;
+    int32_t len_start;	// type: j_length
+    int32_t len_blocks;
+    int32_t len_entries;
 };
 
 /* probably in the third 4KB block, never gets overwritten (overwrite map in place)
@@ -114,10 +109,6 @@ struct j_read_super {
      */
     int32_t map_start;		// extmap::obj_offset
     int32_t map_blocks;
-
-    int32_t evict_type;		// eviction algorithm - TBD
-    int32_t evict_start;	// eviction state - TBD
-    int32_t evict_blocks;
 };
 
       
