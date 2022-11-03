@@ -148,18 +148,18 @@ class j_write_super(Structure):
                 ("version",     c_uint),
                 ("clean",       c_uint),
                 ("seq",         c_ulong),
-                ("meta_base",   c_uint),
-                ("meta_limit",  c_uint),
-                ("base",        c_uint),
-                ("limit",       c_uint),
-                ("next",        c_uint),
-                ("oldest",      c_uint),
-                ("map_start",   c_uint),
-                ("map_blocks",  c_uint),
-                ("map_entries", c_uint),
-                ("len_start",   c_uint),
-                ("len_blocks",  c_uint),
-                ("len_entries", c_uint)]
+                ("meta_base",   c_int),
+                ("meta_limit",  c_int),
+                ("base",        c_int),
+                ("limit",       c_int),
+                ("next",        c_int),
+                ("oldest",      c_int),
+                ("map_start",   c_int),
+                ("map_blocks",  c_int),
+                ("map_entries", c_int),
+                ("len_start",   c_int),
+                ("len_blocks",  c_int),
+                ("len_entries", c_int)]
 sizeof_j_write_super = sizeof(j_write_super)
 
 class j_read_super(Structure):
@@ -171,10 +171,7 @@ class j_read_super(Structure):
                 ("base",         c_int),
                 ("units",        c_int),
                 ("map_start",    c_int),
-                ("map_blocks",   c_int),
-                ("evict_type",   c_int),
-                ("evict_start",  c_int),
-                ("evict_blocks", c_int)]
+                ("map_blocks",   c_int)]
 sizeof_j_read_super = sizeof(j_read_super)
 
 class j_super(Structure):
