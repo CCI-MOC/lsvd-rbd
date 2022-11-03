@@ -71,8 +71,8 @@ public:
 
     ~nvme_impl() {
 	e_io_running = false;
-	e_io_th.join();
 	io_queue_release(ioctx);
+	e_io_th.join();
     }
 
     int read(void *buf, size_t count, off_t offset) {

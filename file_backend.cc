@@ -33,8 +33,8 @@ file_backend::file_backend() {
 
 file_backend::~file_backend() {
     e_io_running = false;
-    e_io_th.join();
     io_queue_release(ioctx);
+    e_io_th.join();
 }
 
 int file_backend::write_object(const char *name, iovec *iov, int iovcnt) {
