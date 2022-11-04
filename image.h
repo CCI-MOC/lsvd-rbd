@@ -55,7 +55,7 @@ struct rbd_image {
     write_cache *wcache;
     read_cache  *rcache;
 
-    std::mutex   m;
+    std::mutex   m;             /* protects completions */
     event_socket ev;
     std::queue<rbd_completion_t> completions;
 

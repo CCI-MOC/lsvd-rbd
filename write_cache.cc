@@ -405,6 +405,8 @@ void write_cache_impl::evict(page_t page, page_t limit) {
  */
 uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     //assert(!m.try_lock());
+    assert(n > 0);
+    assert(super->next >= super->base && super->next < super->limit);
     pad = n_pad = 0;
 
     page_t b = super->base;
@@ -421,6 +423,7 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
 
     auto val = super->next;
     evict(val, std::min((val + n + 10), super->limit));
+    assert(super->next >= super->base && super->next < super->limit);
 
     super->next += n;
     if (super->next == super->limit)
@@ -430,6 +433,7 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
 	for (int i = super->next; i < super->oldest; i++)
 	    assert(cache_blocks[i-b].type == WCACHE_NONE);
     
+    assert(super->next >= super->base && super->next < super->limit);
     return val;
 }
 

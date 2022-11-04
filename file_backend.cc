@@ -23,7 +23,6 @@
 #include "smartiov.h"
 #include "io.h"
 
-
 file_backend::file_backend() {
     e_io_running = true;
     io_queue_init(64, &ioctx);

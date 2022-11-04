@@ -362,11 +362,10 @@ class rbd_aio_req : public request {
 
 	auto x = (status |= REQ_COMPLETE);
 	if (x & REQ_LAUNCHED) {
+	    lk.unlock();
 	    notify_parent();
-	    if (! (x & REQ_WAIT)) {
-		lk.unlock();
+	    if (! (x & REQ_WAIT)) 
 		delete this;
-	    }
 	}
     }
 
@@ -400,8 +399,8 @@ class rbd_aio_req : public request {
 	auto x = (status |= REQ_LAUNCHED);
 
 	if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
-	    notify_parent();
 	    lk.unlock();
+	    notify_parent();
 	    delete this;
 	}
     }
@@ -421,11 +420,10 @@ class rbd_aio_req : public request {
 
 	auto x = (status |= REQ_COMPLETE);
 	if (x & REQ_LAUNCHED) {
+	    lk.unlock();
 	    notify_parent();
-	    if (! (x & REQ_WAIT)) {
-		lk.unlock();
+	    if (! (x & REQ_WAIT)) 
 		delete this;
-	    }
 	}
     }
 
@@ -470,8 +468,8 @@ class rbd_aio_req : public request {
 	auto x = (status |= REQ_LAUNCHED);
 
 	if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
-	    notify_parent();
 	    lk.unlock();
+	    notify_parent();
 	    delete this;
 	}
     }

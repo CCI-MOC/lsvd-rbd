@@ -407,12 +407,6 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
     delete req;
 }
 
-extern "C" void rcache_add(read_cache *rcache, int object, int block, char *buf, size_t len)
-{
-    assert(len == 65536);
-    extmap::obj_offset oo = {object, block};
-    rcache->do_add(oo, buf);
-}
 extern "C" void rcache_getsuper(read_cache *rcache, j_read_super *p_super)
 {
     j_read_super *p;

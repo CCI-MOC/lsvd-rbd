@@ -484,26 +484,6 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     sector_t sector_offset = hdr_sectors;
     std::vector<extmap::lba2obj> deleted;
 
-#if 0
-    extern void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg);
-    do_log("batch (%ld)\n", b->entries.size());
-    std::vector<std::pair<sector_t,char*>> pairs;
-    std::set<sector_t> seen;
-    char *ptr = b->buf;
-    for (auto e : b->entries)
-	for (int i = 0; i < e.len; i++) {
-	    pairs.push_back(std::make_pair(e.lba+i, ptr));
-	    ptr += 512;
-	}
-    std::reverse(pairs.begin(), pairs.end());
-    for (auto [_sec,_ptr] : pairs) 
-	if (seen.find(_sec) == seen.end()) {
-	    iovec iov = {_ptr, 512};
-	    check_crc(_sec, &iov, 1, "2");
-	    seen.insert(_sec);
-	}
-#endif
-
     for (auto e : b->entries) {
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
@@ -523,12 +503,12 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     total_live_sectors += b->len/512;
     if (next_compln == -1)
 	next_compln = b->seq;
-    lk.unlock();
 
     char *hdr = (char*)calloc(hdr_sectors*512, 1);
     make_data_hdr(hdr, b->len, &checkpoints, &b->entries, b->seq, &uuid);
     iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
 		   {b->buf, b->len}};
+    lk.unlock();
 
     /* on completion, t_req calls notify_complete and frees stuff
      */
@@ -656,7 +636,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      */
     while (next_compln < ckpt_seq)
 	cv.wait(lk);
-    lk.unlock();
 
     /* put it all together in memory
      */
@@ -682,9 +661,11 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 
     /* and write it
      */
+    lk.unlock();
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, 4);
     notify_complete(ckpt_seq);
+    lk.lock();
     
     free(buf);
 
@@ -712,6 +693,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     for (auto c : checkpoints)
 	*pc++ = c;
 
+    lk.unlock();
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
 
@@ -719,7 +701,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 	objname name(prefix(), c);
 	objstore->delete_object(name.c_str());
     }
-    
     lk.lock();
 }
 

@@ -35,7 +35,6 @@ public:
     /* debugging. 
      * TODO: document the first three methods
      */
-    virtual void do_add(extmap::obj_offset unit, char *buf) = 0; 
     virtual void do_evict(int n) = 0;
     virtual void write_map(void) = 0;
 
