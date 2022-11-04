@@ -658,7 +658,7 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
     lsvd_completion *p = (lsvd_completion *)c;
     p->done_released += 20;
     std::unique_lock lk(p->m);
-    while ((p->done_released.load() % 1) == 0)
+    while ((p->done_released.load() & 1) == 0)
 	p->cv.wait(lk);
     int x = (p->done_released -= 20);
     if (x == 11) {
@@ -732,7 +732,7 @@ extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
     return -1;
 }
 
-#if 0				// librados replacement
+#ifdef FAKE_RADOS		// librados replacement
 extern "C" int rados_conf_read_file(rados_t r, const char* s)
 {
        return 0;
