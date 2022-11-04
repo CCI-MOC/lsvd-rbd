@@ -255,7 +255,7 @@ struct cfg _cfg = {
 
 off_t parseint(char *s)
 {
-    off_t val = strtol(s, &s, 0);
+    off_t val = strtoul(s, &s, 0);
     if (toupper(*s) == 'G')
         val *= (1024*1024*1024);
     if (toupper(*s) == 'M')
@@ -274,7 +274,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         _cfg.n_runs = atoi(arg);
         break;
     case 's':
-	_cfg.seed = strtol(arg, NULL, 0);
+	_cfg.seed = strtoul(arg, NULL, 0);
 	break;
     case 'l':
 	_cfg.run_len = atoi(arg);
