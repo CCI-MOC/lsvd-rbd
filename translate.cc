@@ -863,25 +863,45 @@ void translate_impl::do_gc(void) {
 	    off_t byte_offset = 0;
 	    sector_t data_sectors = 0;
 	    std::vector<data_map> obj_extents;
-	    
+
+	    /* the extents may have been fragmented in the meantime...
+	     */
 	    for (auto [base, limit, ptr] : extents) {
 		for (auto it2 = map->lookup(base);
+		     /* [_base,_limit] is a piece of the extent
+		      * obj_base is where that piece starts in the object
+		      */
 		     it2->base() < limit && it2 != map->end(); it2++) {
-		    auto [_base, _limit, _ptr] = it2->vals(base, limit);
-		    if (_ptr.obj != ptr.obj)
+		    auto [_base, _limit, obj_base] = it2->vals(base, limit);
+
+		    /* skip if it's not still in the object, otherwise
+		     * _obj_limit is where it ends.
+		     */
+		    if (obj_base.obj != ptr.obj)
 			continue;
 		    sector_t _sectors = _limit - _base;
-		    size_t bytes = _sectors*512;
-		    auto it3 = file_map.lookup(_ptr);
-		    auto file_sector = it3->ptr();
+		    auto obj_limit =
+			extmap::obj_offset{obj_base.obj,
+					   obj_base.offset+_sectors};
 
+		    /* file_sector is where that piece starts in 
+		     * the GC file...
+		     */
+		    auto it3 = file_map.lookup(obj_base);
+		    auto [file_base,file_limit,file_sector] =
+			it3->vals(obj_base, obj_limit);
+		    (void)file_limit; // suppress warning
+		    (void)file_base;  // suppress warning
+
+		    size_t bytes = _sectors*512;
 		    auto err = pread(fd, buf+byte_offset, bytes, file_sector*512);
-		    if (err != (ssize_t)bytes) {
-			printf("\n\n");
-			printf("%ld != %ld, obj=%ld end=%s\n", err, bytes, _ptr.obj,
-			       it3 == file_map.end() ? "Y" : "n");
-			throw_fs_error("gc");
-		    }
+		    assert(err == (ssize_t)bytes);
+#if 1
+		    /* debug testing, with stamped sectors only */
+		    for (int i = 0; i < (_limit - _base); i++) 
+			assert(*(int*)(buf+byte_offset+i*512) == _base+i);
+#endif
+
 		    obj_extents.push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
 
 		    data_sectors += _sectors;

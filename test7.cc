@@ -72,8 +72,8 @@ void get_random(char *buf, int lba, int sectors) {
     std::uniform_int_distribution<int> uni(0,slack);
     int offset = uni(rng);
     memcpy(buf, rnd_data+offset, sectors*512);
-    for (auto p = (int*)buf; sectors > 0; sectors--)
-	*p++ = lba++;
+    for (auto p = (int*)buf; sectors > 0; sectors--, p += 512/4)
+	*p = lba++;
 }
 
 void clean_image(std::string name) {
@@ -94,9 +94,11 @@ void clean_image(std::string name) {
 void clean_cache(std::string cache_dir) {
     const char *suffix = ".cache";
     for (auto const& dir_entry : fs::directory_iterator{cache_dir}) {
-	    std::string entry{dir_entry.path().filename()};
-	    if (!strcmp(suffix, entry.c_str() + entry.size() - strlen(suffix)))
-		fs::remove(dir_entry.path());
+	std::string entry{dir_entry.path().filename()};
+	if (!strcmp(suffix, entry.c_str() + entry.size() - strlen(suffix)))
+	    fs::remove(dir_entry.path());
+	if (!strncmp(entry.c_str(), "gc.", 3))
+	    fs::remove(dir_entry.path());
     }
 }
 
@@ -225,6 +227,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     }
     free(buf);
     rbd_close(img);
+    sector_crc.clear();
 }
 
 
@@ -308,7 +311,8 @@ int main(int argc, char **argv) {
     argp_parse (&argp, argc, argv, 0, 0, 0);
 
     if (_cfg.seed) {
-	run_test(_cfg.seed, &_cfg);
+	for (int i = 0; i < _cfg.n_runs; i++)
+	    run_test(_cfg.seed, &_cfg);
     }
     else {
 	auto now = std::chrono::system_clock::now();

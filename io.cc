@@ -25,7 +25,7 @@
 #include "io.h"
 #include "misc_cache.h"
 
-//#include <valgrind/drd.h>
+#include <valgrind/drd.h>
 
 size_t getsize64(int fd)
 {
@@ -80,9 +80,7 @@ int io_queue_run2(io_context_t ctx, struct timespec *timeout)
         for (ep = events, i = n; i-- > 0; ep++) {
             io_callback_t cb = (io_callback_t)ep->data;
             struct iocb *iocb = ep->obj;
-	    //auto e = (e_iocb*)iocb;
-	    //ANNOTATE_HAPPENS_AFTER(&e->ptr);
-	    //ANNOTATE_HAPPENS_AFTER(&e->cb);
+	    ANNOTATE_HAPPENS_AFTER(iocb);
             cb(ctx, iocb, ep->res, ep->res2);
         }
     } while (n >= 0);
@@ -134,11 +132,13 @@ void e_io_prep_preadv(e_iocb *eio, int fd, const struct iovec *iov, int iovcnt,
     io_set_callback(&eio->io, e_iocb_cb);
 }
 
+// see https://chromium.googlesource.com/chromium/src/base/+/
+//  f86dd125dc43d6dba04b61e73ac8a2bd4636c3f8/dynamic_annotations.h
+
 int e_io_submit(io_context_t ctx, e_iocb *eio)
 {
     iocb *io = &eio->io;
-    //ANNOTATE_HAPPENS_BEFORE(&eio->ptr);
-    //ANNOTATE_HAPPENS_BEFORE(&eio->cb);
+    ANNOTATE_HAPPENS_BEFORE(&eio->io);
     return io_submit(ctx, 1, &io);
 }
 
