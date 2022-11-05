@@ -142,6 +142,7 @@ int rbd_image::image_close(void) {
     wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
+    xlate->wait_for_gc();
     xlate->checkpoint();
     delete xlate;
     return 0;

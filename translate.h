@@ -35,6 +35,8 @@ public:
     virtual void wait_object_ready(int obj) = 0;
     
     virtual const char *prefix() = 0; /* for read cache */
+
+    virtual void wait_for_gc(void); /* do this before shutdown */
     
     /* debug functions
      */

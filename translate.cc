@@ -125,6 +125,12 @@ class translate_impl : public translate {
     int gc_sectors_written = 0;
     int gc_deleted = 0;
 
+    /* for shutdown
+     */
+    bool gc_running = false;
+    std::condition_variable gc_cv;
+    void wait_for_gc(void);
+    
     object_reader *parser;
     
     /* maybe use insertion sorted vector?
@@ -742,6 +748,7 @@ int translate_impl::checkpoint(void) {
  */
 void translate_impl::do_gc(void) {
     std::unique_lock lk(m);
+    gc_running = true;
     gc_cycles++;
     int max_obj = seq.load();
 
@@ -896,7 +903,7 @@ void translate_impl::do_gc(void) {
 		    size_t bytes = _sectors*512;
 		    auto err = pread(fd, buf+byte_offset, bytes, file_sector*512);
 		    assert(err == (ssize_t)bytes);
-#if 1
+#if 0
 		    /* debug testing, with stamped sectors only */
 		    for (int i = 0; i < (_limit - _base); i++) 
 			assert(*(int*)(buf+byte_offset+i*512) == _base+i);
@@ -949,31 +956,45 @@ void translate_impl::do_gc(void) {
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) 
 	object_info.erase(object_info.find(it->first));
 
-    /* trim checkpoints
+#if 0
+    /* trim checkpoints - no, do it in write_checkpoint
      */
     std::vector<int> ckpts_to_delete;
     while (checkpoints.size() > 3) {
 	ckpts_to_delete.push_back(checkpoints.front());
 	checkpoints.erase(checkpoints.begin());
     }
-
+#endif
+    
     /* write checkpoint *before* deleting any objects
      */
-    int ckpt_seq = seq++;
-    write_checkpoint(ckpt_seq, lk); // UNLOCKS
+    if (objs_to_clean.size()) {
+	int ckpt_seq = seq++;
+	write_checkpoint(ckpt_seq, lk); // UNLOCKS
     
-    for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
-	objname name(prefix(), it->first);
-	objstore->delete_object(name.c_str());
-	gc_deleted++;		// single-threaded, no lock needed
+	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
+	    objname name(prefix(), it->first);
+	    objstore->delete_object(name.c_str());
+	    gc_deleted++;		// single-threaded, no lock needed
+	}
     }
-
+#if 0
     for (auto c : ckpts_to_delete) {
 	objname name(prefix(), c);
 	objstore->delete_object(name.c_str());
     }
+#endif
+    
+    lk.lock();
+    gc_running = false;
+    gc_cv.notify_all();    
 }
 
+void translate_impl::wait_for_gc(void) {
+    std::unique_lock lk(m);
+    while (gc_running)
+	gc_cv.wait(lk);
+}
 
 void translate_impl::gc_thread(thread_pool<int> *p) {
     auto interval = std::chrono::milliseconds(100);
