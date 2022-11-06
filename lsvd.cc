@@ -108,6 +108,14 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     return 0;
 }
 
+void rbd_image::notify(void) {
+    std::unique_lock lk(m);
+    if (ev.is_valid()) {
+	completions.push(this);
+	ev.notify();
+    }
+}
+
 /* for debug use
  */
 rbd_image *make_rbd_image(backend *b, translate *t, write_cache *w,
@@ -172,6 +180,7 @@ public:
      * caller waiting: += 20
      */
     std::atomic<int> done_released = 0;
+    request *req;
     
     lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
 
@@ -181,13 +190,7 @@ public:
 	retval = val;
 	if (cb)
 	    cb((rbd_completion_t)this, arg);
-	if (img->ev.is_valid()) {
-	    {
-		std::unique_lock lk(img->m);
-		img->completions.push(this);
-	    }
-	    img->ev.notify();
-	}
+	img->notify();
 
 	std::unique_lock lk(m);
 	int x = (done_released += 1);
@@ -300,21 +303,6 @@ enum rbd_req_status {
     REQ_LAUNCHED = 2,
     REQ_WAIT = 4
 };
-
-std::set<void*> all_reqs;
-std::mutex reqs_m;
-class rbd_aio_req;
-static void request_start(rbd_aio_req *r) {
-    auto v = (void*)r;
-    std::unique_lock lk(reqs_m);
-    all_reqs.insert(v);
-}
-static void request_end(rbd_aio_req *r) {
-    auto v = (void*)r;
-    std::unique_lock lk(reqs_m);
-    all_reqs.erase(v);
-}
-
     
 /* rbd_aio_req - state machine for rbd_aio_read, rbd_aio_write
  *
@@ -344,8 +332,6 @@ class rbd_aio_req : public request {
     
     void notify_parent(void) {
 	//assert(!m.try_lock());
-	request_end(this);
-	//do_log(" - %s %ld\n", op==OP_READ?"r":"w", _sector);
         if (p != NULL) 
             p->complete(sectors*512L);
 	if (status & REQ_WAIT)
@@ -543,7 +529,6 @@ public:
     void release() {}
 
     void run(request *parent /* unused */) {
-	request_start(this);
 	if (op == OP_READ)
 	    run_r();
 	else
@@ -564,8 +549,8 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
     auto p = (lsvd_completion*)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, buf, len);
-    req->run(NULL);
+    p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, buf, len);
+    p->req->run(NULL);
     return 0;
 }
 
@@ -575,22 +560,12 @@ extern size_t iovsum(const iovec *iov, int iovcnt); // debug
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-#if 0
-    int blen = 64 + 8*iovcnt;
-    char *pbuf = (char*)malloc(blen), *_p = pbuf;
-    _p += sprintf(_p, "'r', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
-    for (int i = 0; i < iovcnt; i++)
-	_p += sprintf(_p, "%s%ld", i ? "," : "", iov[i].iov_len / 512);
-    _p += sprintf(_p, "]");
-    do_log("%s\n", pbuf);
-    free(pbuf);
-#endif
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, iov, iovcnt);
-    req->run(NULL);
+    p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, iov, iovcnt);
+    p->req->run(NULL);
     return 0;
 }
 
@@ -601,19 +576,9 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
-			       iov, iovcnt);
-#if 0
-    int blen = 64 + 8*iovcnt;
-    char *pbuf = (char*)malloc(blen), *_p = pbuf;
-    _p += sprintf(_p, "'w', %ld, %ld, [", offset/512L, iovsum(iov, iovcnt)/512L);
-    for (int i = 0; i < iovcnt; i++)
-	_p += sprintf(_p, "%s%ld", i ? "," : "", iov[i].iov_len / 512);
-    _p += sprintf(_p, "]");
-    do_log("%s\n", pbuf);
-    free(pbuf);
-#endif
-    req->run(NULL);
+    p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
+			     iov, iovcnt);
+    p->req->run(NULL);
     return 0;
 }
 
@@ -625,9 +590,9 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = img;
 
-    auto req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
-			       (char*)buf, len);
-    req->run(NULL);
+    p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
+			     (char*)buf, len);
+    p->req->run(NULL);
     return 0;
 }
 
