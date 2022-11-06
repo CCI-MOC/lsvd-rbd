@@ -736,7 +736,7 @@ int translate_impl::checkpoint(void) {
 	b = new batch(cfg->batch_size);
     }
     int _seq = seq++;
-    write_checkpoint(_seq, lk); // UNLOCKS
+    write_checkpoint(_seq, lk);
     return _seq;
 }
 
@@ -970,7 +970,7 @@ void translate_impl::do_gc(void) {
      */
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
-	write_checkpoint(ckpt_seq, lk); // UNLOCKS
+	write_checkpoint(ckpt_seq, lk);
     
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(), it->first);
@@ -978,6 +978,7 @@ void translate_impl::do_gc(void) {
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
     }
+
 #if 0
     for (auto c : ckpts_to_delete) {
 	objname name(prefix(), c);
@@ -985,7 +986,6 @@ void translate_impl::do_gc(void) {
     }
 #endif
     
-    lk.lock();
     gc_running = false;
     gc_cv.notify_all();    
 }
