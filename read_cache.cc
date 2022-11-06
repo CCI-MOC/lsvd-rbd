@@ -132,6 +132,7 @@ public:
 		  std::vector<int> **p_free_blks,
                   std::map<extmap::obj_offset,int> **p_map);
 
+    void do_add(extmap::obj_offset unit, char *buf); /* TODO: document */
     void do_evict(int n);       /* TODO: document */
     void write_map(void);
 };
@@ -689,6 +690,22 @@ void read_cache_impl::get_info(j_read_super **p_super,
 	*p_free_blks = &free_blks;
     if (p_map != NULL)
 	*p_map = &map;
+}
+
+void read_cache_impl::do_add(extmap::obj_offset unit, char *buf) {
+    std::unique_lock lk(m);
+    char *_buf = (char*)aligned_alloc(512, 65536);
+    memcpy(_buf, buf, 65536);
+    int n = free_blks.back();
+    free_blks.pop_back();
+    written[n] = true;
+    map[unit] = n;
+    flat_map[n] = unit;
+    off_t nvme_offset = (super->base*8 + n*unit_sectors)*512L;
+    if (ssd->write(_buf, unit_sectors*512L, nvme_offset) < 0)
+       throw("write data");
+    write_map();
+    free(_buf);
 }
 
 void read_cache_impl::do_evict(int n) {
