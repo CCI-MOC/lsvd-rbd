@@ -142,7 +142,7 @@ class translate_impl : public translate {
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
 
-    void do_gc(void);
+    void do_gc(std::unique_lock<std::mutex> &lk);
     void gc_thread(thread_pool<int> *p);
     void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
     void worker_thread(thread_pool<batch*> *p);
@@ -746,9 +746,7 @@ int translate_impl::checkpoint(void) {
 /* Needs a lot of work. Note that all reads/writes are synchronous
  * for now...
  */
-void translate_impl::do_gc(void) {
-    std::unique_lock lk(m);
-    gc_running = true;
+void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     gc_cycles++;
     int max_obj = seq.load();
 
@@ -985,9 +983,6 @@ void translate_impl::do_gc(void) {
 	objstore->delete_object(name.c_str());
     }
 #endif
-    
-    gc_running = false;
-    gc_cv.notify_all();    
 }
 
 void translate_impl::wait_for_gc(void) {
@@ -1003,20 +998,22 @@ void translate_impl::gc_thread(thread_pool<int> *p) {
     pthread_setname_np(pthread_self(), name);
 	
     while (p->running) {
-	{
-	    std::unique_lock lk(m);
-	    p->cv.wait_for(lk, interval);
-	    if (!p->running)
-		return;
+	std::unique_lock lk(m);
+	p->cv.wait_for(lk, interval);
+	if (!p->running)
+	    return;
 
-	    /* check to see if we should run a GC cycle
-	     */
-	    if (total_sectors - total_live_sectors < trigger)
-		continue;
-	    if (((double)total_live_sectors / total_sectors) > 0.6)
-		continue;
-	}
-	do_gc();
+	/* check to see if we should run a GC cycle
+	 */
+	if (total_sectors - total_live_sectors < trigger)
+	    continue;
+	if (((double)total_live_sectors / total_sectors) > 0.6)
+	    continue;
+
+	gc_running = true;
+	do_gc(lk);
+	gc_running = false;
+	gc_cv.notify_all();
     }
 }
     
