@@ -64,7 +64,6 @@ class write_cache_impl : public write_cache {
      */
     void read_map_entries();
     int roll_log_forward();
-    std::tuple<bool,page_t,uint64_t> chase(page_t, uint64_t, page_t);
     char *_hdrbuf;		// for reading at startup
 
     /* track contents of the write cache. 
@@ -656,18 +655,13 @@ void write_cache_impl::read_map_entries() {
  *   page: next page after last record (super.limit if we hit end)
  *   seq: sequence number next for next record
  */
-std::tuple<bool,page_t,uint64_t> write_cache_impl::chase(page_t page,
-							 uint64_t seq,
-							 page_t limit) {
-    auto hdr = (j_hdr*)_hdrbuf;
-
-    if (nvme_w->read(_hdrbuf, 4096, 4096L * page) < 0)
-	throw_fs_error("cache log roll-forward");
+std::tuple<bool,page_t,uint64_t> chase(page_t page, uint64_t seq, page_t limit,
+				       j_hdr *hdrs) {
+    auto hdr = hdrs + page;
     while (hdr->magic == LSVD_MAGIC && hdr->seq == seq && page < limit) {
 	page += hdr->len;
 	seq++;
-	if (nvme_w->read(_hdrbuf, 4096, 4096L * page) < 0)
-	    throw_fs_error("cache log roll-forward");
+	hdr = hdrs + page;
     }
     if (page < limit && hdr->magic == LSVD_MAGIC)
 	return std::make_tuple(false, 0, 0);
@@ -675,53 +669,59 @@ std::tuple<bool,page_t,uint64_t> write_cache_impl::chase(page_t page,
     return std::make_tuple(true, page, seq);
 }
 
-int write_cache_impl::roll_log_forward() {
-    auto hdr = (j_hdr*)_hdrbuf;
-    page_t b = super->base;
-
-    /* locate the ranges of valid records - from part1_min to part1_max
-     * and optionally part2_min to part2_max (if we wrapped around)
-     * note that 0 is an invalid page number
-     */
-    std::pair<page_t,uint64_t> part1_min(0,0), part1_max(0,0),
-	part2_min(0,0), part2_max(0,0);
-
-    if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
-	throw_fs_error("cache log roll-forward");
-
-    /* since we're not checking CRCs, there will always be at least
-     * one valid record at the beginning of the log
-     * find the end of that run, set part1_min/max
-     */
+bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
+		    std::pair<page_t,uint64_t> &part1_max,
+		    std::pair<page_t,uint64_t> &part2_min,
+		    std::pair<page_t,uint64_t> &part2_max,
+		    int base, int limit, j_hdr *hdrs) {
+    auto b = base;
+    auto hdr = &hdrs[b];
     part1_min = std::make_pair(b, hdr->seq);
-    auto [rv, _page, _seq] = chase(b, hdr->seq, super->limit);
+    auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs);
+
     if (!rv)
-	return -1;
-
-    /* find a run starting after part1_max. If we find one, it must
-     * be earlier, so part2 <- part1, part1 = the run we found
-     */
+	return rv;
+    
     part1_max = std::make_pair(_page, _seq);
-    for (b = _page; b < (page_t)super->limit; b++) {
-	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
-	    throw_fs_error("cache log roll-forward");
-
+    for (b = _page; b < (page_t)limit; b++) {
+	hdr = &hdrs[b];
 	if (hdr->magic != LSVD_MAGIC ||
 	    (hdr->type != LSVD_J_DATA && hdr->type != LSVD_J_PAD) ||
 	    (hdr->seq > part1_min.second))
 	    continue;
 	    
 	auto _seq0 = hdr->seq;
-	auto [rv, _page, _seq] = chase(b, hdr->seq, super->limit);
-	if (rv && _page == (page_t)super->limit) {
+	auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs);
+	if (rv && _page == (page_t)limit) {
 	    part2_min = part1_min;
 	    part2_max = part1_max;
 	    part1_min = std::make_pair(b, _seq0);
 	    part1_max = std::make_pair(_page, _seq);
-	    break;
+	    return true;
 	}
     }
+    return false;
+}
 
+int write_cache_impl::roll_log_forward() {
+    auto hdrs = new j_hdr[super->limit];
+    for (int i = super->base; i < super->limit; i++) {
+	if (nvme_w->read(_hdrbuf, 4096, 4096L * i) < 0)
+	    throw_fs_error("cache log roll-forward");
+	hdrs[i] = *(j_hdr*)_hdrbuf;
+    }
+    
+    /* locate the ranges of valid records - from part1_min to part1_max
+     * and optionally part2_min to part2_max (if we wrapped around)
+     * note that 0 is an invalid page number
+     */
+    std::pair<page_t,uint64_t> part1_min(0,0), part1_max(0,0),
+	part2_min(0,0), part2_max(0,0);
+    if (!decode_journal(part1_min, part1_max, part2_min, part2_max,
+			super->base, super->limit, hdrs))
+	return -1;
+    delete[] hdrs;
+    
     /* Now read all the records in, update lengths and map,
      * and write to backend.
      */
@@ -731,18 +731,11 @@ int write_cache_impl::roll_log_forward() {
     if (end == 0)
 	end = part1_max.first;
     
-    for (b = start; b != end; ) {
+    for (int b = start; b != end; ) {
 	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
 	    throw_fs_error("wcache");
 
-	/* we've already verified everything, so this shouldn't fail, 
-	 * right???
-	 */
-	if (hdr->magic != LSVD_MAGIC ||
-	    (hdr->type != LSVD_J_DATA && hdr->type != LSVD_J_PAD) ||
-	    hdr->seq != sequence)
-	    return -1;
-	
+	auto hdr = (j_hdr*)_hdrbuf;
 	sequence++;
 	page_t idx = b - super->base;
 
