@@ -24,7 +24,10 @@ test-2: test-2.o $(OBJS)
 	$(CXX) -o $@ test-2.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
 
 test7: test7.o $(OBJS)
-	$(CXX) -o $@ test7.o $(OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test7.o $(OBJS) crc32.o crc32_simd.o -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+
+test8: test8.o $(OBJS)
+	$(CXX) -o $@ test8.o $(OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
 
 # Add .d to Make's recognized suffixes.
 SUFFIXES += .d
@@ -44,7 +47,7 @@ bdus: bdus.o $(OBJS)
 	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio -luuid
 
 clean:
-	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d
+	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d test7 test8
 
 unit-test: unit-test.cc extent.h
 	$(CXX) $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs
