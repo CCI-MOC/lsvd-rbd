@@ -70,9 +70,11 @@ public:
     }
 
     ~nvme_impl() {
+	auto tmp = e_io_running;
 	e_io_running = false;
 	io_queue_release(ioctx);
-	e_io_th.join();
+	if (tmp)
+	    e_io_th.join();
     }
 
     int read(void *buf, size_t count, off_t offset) {
@@ -111,6 +113,12 @@ public:
     request* make_read_request(char *buf, size_t len, size_t offset) {
 	auto req = new nvme_request(buf, len, offset, READ_REQ, this);
 	return (request*) req;
+    }
+
+    void kill(void) {
+	e_io_running = false;
+	pthread_cancel(e_io_th.native_handle());
+	delete this;
     }
 };
 

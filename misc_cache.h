@@ -50,9 +50,19 @@ public:
 	}
     }
     ~thread_pool() {
-        stop();
+        if (running)
+            stop();
     }
 
+    void kill(void) {
+        running = false;
+	while (!pool.empty()) {
+	    pthread_cancel(pool.front().native_handle());
+	    pool.pop();
+	}
+        delete this;
+    }
+    
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
         while (running && q.empty())
             cv.wait(lk);

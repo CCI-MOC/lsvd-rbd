@@ -194,6 +194,8 @@ public:
     int frontier(void) { return b->len / 512; }
     int batch_seq(void) { return seq; }
     void set_completion(int next);
+
+    void kill(void);
 };
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
@@ -217,6 +219,12 @@ translate_impl::~translate_impl() {
     delete parser;
     if (super_buf)
 	free(super_buf);
+}
+
+void translate_impl::kill(void) {
+    workers.kill();
+    misc_threads.kill();
+    delete this;
 }
 
 ssize_t translate_impl::init(const char *prefix_,

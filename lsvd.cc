@@ -157,6 +157,20 @@ int rbd_image::image_close(void) {
     return 0;
 }
 
+void rbd_image::image_kill(void) {
+    rcache->kill();
+    wcache->kill();
+    objstore->kill();
+    xlate->kill();
+    delete this;
+}
+
+extern "C" int rbd_kill(rbd_image_t image) {
+    rbd_image *img = (rbd_image*)image;
+    img->image_kill();
+    return 0;
+}
+
 extern "C" int rbd_close(rbd_image_t image)
 {
     //do_log("rbd_close\n");

@@ -31,9 +31,17 @@ file_backend::file_backend() {
 }
 
 file_backend::~file_backend() {
+    auto tmp = e_io_running;
     e_io_running = false;
     io_queue_release(ioctx);
-    e_io_th.join();
+    if (tmp)
+	e_io_th.join();
+}
+
+void file_backend::kill(void) {
+    e_io_running = false;
+    pthread_cancel(e_io_th.native_handle());
+    delete this;
 }
 
 int file_backend::write_object(const char *name, iovec *iov, int iovcnt) {

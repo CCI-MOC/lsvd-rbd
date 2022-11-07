@@ -160,6 +160,8 @@ public:
     std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) {
 	return std::make_pair(&m, &map);
     }
+
+    void kill(void);
 };
 
 void print_pages(write_cache_impl *w, const char *file) {
@@ -845,6 +847,12 @@ write_cache_impl::~write_cache_impl() {
     free(super);
     free(_hdrbuf);
     delete nvme_w;
+}
+
+void write_cache_impl::kill(void) {
+    nvme_w->kill();
+    misc_threads->kill();
+    delete this;
 }
 
 void write_cache_impl::send_writes(void) {

@@ -135,6 +135,8 @@ public:
     void do_add(extmap::obj_offset unit, char *buf); /* TODO: document */
     void do_evict(int n);       /* TODO: document */
     void write_map(void);
+
+    void kill(void);
 };
 
 /* factory function so we can hide implementation
@@ -206,6 +208,12 @@ read_cache_impl::~read_cache_impl() {
 	    free(buffer[i]);
     free((void*)super);
     delete ssd;
+}
+
+void read_cache_impl::kill(void) {
+    ssd->kill();
+    misc_threads.kill();
+    delete this;
 }
 
 #if 0

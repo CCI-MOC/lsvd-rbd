@@ -45,6 +45,8 @@ public:
     virtual void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, 
                           std::vector<int> **p_free_blks,
                           std::map<extmap::obj_offset,int> **p_map) = 0;
+
+    virtual void kill(void) = 0;
 };
 
 extern read_cache *make_read_cache(uint32_t blkno, int _fd, bool nt,
