@@ -43,6 +43,7 @@ parser = argparse.ArgumentParser(description='Read SSD cache')
 parser.add_argument('--write', help='print write cache details', action='store_true')
 parser.add_argument('--writemap', help='print write cache map', action='store_true')
 parser.add_argument('--read', help='print read cache details', action='store_true')
+parser.add_argument('--nowrap', help='one entry per line', action='store_true')
 parser.add_argument('device', help='cache device/file')
 args = parser.parse_args()
 
@@ -108,10 +109,17 @@ def wrapjoin(prefix, linelen, items):
 if args.writemap and w_super:
     print('\nwrite cache map:')
     e = read_exts(w_super.map_start, w_super.map_blocks, w_super.map_entries)
-    print(wrapjoin(' ', 80, ['%d+%d->%d' % _ for _ in e]))
+    if args.nowrap:
+        print('\n'.join(['%d+%d->%d' % _ for _ in e]))
+    else:
+        print(wrapjoin(' ', 80, ['%d+%d->%d' % _ for _ in e]))
+
     print('\nwrite cache lengths:')
     l = read_lens(w_super.len_start, w_super.len_blocks, w_super.len_entries)
-    print(wrapjoin(' ', 80, ['[%d]=%d' % _ for _ in l]))
+    if args.nowrap:
+        print('\n'.join(['[%d]=%d' % _ for _ in l]))
+    else:
+        print(wrapjoin(' ', 80, ['[%d]=%d' % _ for _ in l]))
 
 if args.read and r_super:
     nbytes = r_super.units * lsvd.sizeof_obj_offset
