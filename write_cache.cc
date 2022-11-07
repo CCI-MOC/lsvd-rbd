@@ -636,7 +636,12 @@ void write_cache_impl::read_map_entries() {
 	if (l.page + l.len > max)
 	    max = l.page + l.len;
     }
+    /* TODO: the block accounting is a total hack. Anyone with ideas
+     * for fixing it is totally welcome to try.
+     */
     if (max < super->limit && super->oldest > super->base) {
+	if (super->oldest > max)
+	    super->oldest = max;
 	int n = super->limit - max;
 	cache_blocks[max-b] = (page_desc){WCACHE_PAD, n};
 	for (int i = 1; i < n; i++)
