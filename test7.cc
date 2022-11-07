@@ -31,6 +31,7 @@ struct cfg {
     bool   reopen;
     bool   restart;
     bool   verbose;
+    bool   existing;
 };
 
 
@@ -272,6 +273,7 @@ static struct argp_option options[] = {
     {"keep",     'k', 0,      0, "keep data between tests"},
     {"verbose",  'v', 0,      0, "print LBAs and CRCs"},
     {"reverse",  'R', 0,      0, "reverse NVMe completion order"},    
+    {"existing", 'x', 0,      0, "don't delete existing cache"},    
     {0},
 };
 
@@ -286,7 +288,8 @@ struct cfg _cfg = {
     {},				// seeds
     false,			// reopen
     true,			// restart
-    false};			// verbose
+    false,			// verbose
+    false};			// existing
 
 off_t parseint(char *s)
 {
@@ -342,6 +345,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	break;
     case 'R':
 	__lsvd_dbg_reverse = true;
+	break;
+    case 'x':
+	_cfg.existing = true;
 	break;
     case ARGP_KEY_END:
         break;
