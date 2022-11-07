@@ -54,7 +54,8 @@ struct rbd_image {
     translate   *xlate;
     write_cache *wcache;
     read_cache  *rcache;
-
+    int          fd;            /* cache file */
+    
     std::mutex   m;             /* protects completions */
     event_socket ev;
     std::queue<rbd_completion_t> completions;

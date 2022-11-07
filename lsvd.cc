@@ -88,7 +88,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	    return -1;
     }
 
-    int fd = open(cache.c_str(), O_RDWR | O_DIRECT);
+    fd = open(cache.c_str(), O_RDWR | O_DIRECT);
     if (fd < 0)
 	return -1;
     
@@ -154,6 +154,7 @@ int rbd_image::image_close(void) {
     xlate->checkpoint();
     delete xlate;
     delete objstore;
+    close(fd);
     return 0;
 }
 
@@ -162,6 +163,7 @@ void rbd_image::image_kill(void) {
     wcache->kill();
     objstore->kill();
     xlate->kill();
+    close(fd);
     delete this;
 }
 
