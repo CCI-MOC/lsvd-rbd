@@ -153,6 +153,7 @@ int rbd_image::image_close(void) {
     xlate->wait_for_gc();
     xlate->checkpoint();
     delete xlate;
+    delete objstore;
     return 0;
 }
 
