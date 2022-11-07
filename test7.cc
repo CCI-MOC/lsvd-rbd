@@ -11,6 +11,7 @@ namespace fs = std::experimental::filesystem;
 #include <queue>
 #include <map>
 #include <mutex>
+#include <atomic>
 
 #include "fake_rbd.h"
 #include "objects.h"
@@ -26,8 +27,10 @@ struct cfg {
     int    image_sectors;
     float  read_fraction;
     int    n_runs;
-    long   seed;
+    std::vector<long> seeds;
     bool   reopen;
+    bool   restart;
+    bool   verbose;
 };
 
 
@@ -67,13 +70,15 @@ void init_random(void) {
 	*p = rng();
 }
 
-void get_random(char *buf, int lba, int sectors) {
+void get_random(char *buf, int lba, int sectors, int seq) {
     int slack = (max_sectors - sectors) * 512;
     std::uniform_int_distribution<int> uni(0,slack);
     int offset = uni(rng);
     memcpy(buf, rnd_data+offset, sectors*512);
-    for (auto p = (int*)buf; sectors > 0; sectors--, p += 512/4)
-	*p = lba++;
+    for (auto p = (int*)buf; sectors > 0; sectors--, p += 512/4) {
+	p[0] = lba++;
+	p[1] = seq;
+    }
 }
 
 void clean_image(std::string name) {
@@ -126,17 +131,26 @@ void create_image(std::string name, int sectors) {
 
 #include <zlib.h>
 static std::map<int,uint32_t> sector_crc;
+static std::map<int,int> sector_seq;
 char _zbuf[512];
+static std::atomic<int> _seq;
 static std::mutex zm;
 
-void add_crc(sector_t sector, const char *_buf, size_t bytes) {
+void add_crc(sector_t sector, const char *_buf, size_t bytes, int seq, bool verbose) {
     auto buf = (const unsigned char *)_buf;
     std::unique_lock lk(zm);
+    if (verbose)
+	printf("%d %ld", seq, sector);
     for (size_t i = 0; i < bytes; i += 512) {
 	const unsigned char *ptr = buf + i;
-	sector_crc[sector] = (uint32_t)crc32(0, ptr, 512);
+	auto crc = sector_crc[sector] = (uint32_t)crc32(0, ptr, 512);
+	sector_seq[sector] = seq;
+	if (verbose)
+	    printf(" %x", crc);
 	sector++;
     }
+    if (verbose)
+	printf("\n");
 }
 
 void check_crc(sector_t sector, const char *_buf, size_t bytes) {
@@ -155,6 +169,13 @@ void check_crc(sector_t sector, const char *_buf, size_t bytes) {
     }
 }
 
+unsigned show_crc(sector_t sector) {
+    return sector_crc[sector];
+}
+unsigned show_seq(sector_t sector) {
+    return sector_seq[sector];
+}
+
 typedef std::pair<rbd_completion_t,char*> opinfo;
 
 void drain(std::queue<opinfo> &q, size_t window) {
@@ -167,15 +188,21 @@ void drain(std::queue<opinfo> &q, size_t window) {
     }
 }
 
+bool started = false;
+
 void run_test(unsigned long seed, struct cfg *cfg) {
     printf("seed: 0x%lx\n", seed);
     rng.seed(seed);
 
     init_random();
 
-    clean_cache(cfg->cache_dir);
-    clean_image(cfg->obj_prefix);
-    create_image(cfg->obj_prefix, cfg->image_sectors);
+    if (!started || cfg->restart) {
+	clean_cache(cfg->cache_dir);
+	clean_image(cfg->obj_prefix);
+	create_image(cfg->obj_prefix, cfg->image_sectors);
+	sector_crc.clear();
+	started = true;
+    }
 
     setenv("LSVD_CACHE_SIZE", "100M", 1);
     setenv("LSVD_BACKEND", "file", 1);
@@ -200,19 +227,20 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	int n = n_sectors();
 	int lba = gen_lba(cfg->image_sectors, n);
 	auto ptr = (char*)aligned_alloc(512, n*512);
-
+	
 	q.push(std::make_pair(c, ptr));
 	if (uni(rng) < cfg->read_fraction) {
 	    rbd_aio_read(img, 512L * lba, 512L * n, ptr, c);
 	}
 	else {
-	    get_random(ptr, lba, n);
+	    auto s = ++_seq;
+	    get_random(ptr, lba, n, s);
 	    rbd_aio_write(img, 512L * lba, 512L * n, ptr, c);
-	    add_crc(lba, ptr, n*512L);
+	    add_crc(lba, ptr, n*512L, s, cfg->verbose);
 	}
     }
     drain(q, 0);
-    printf("\ndone\n");
+    printf("\n");
 
     if (cfg->reopen) {
 	rbd_close(img);
@@ -227,7 +255,6 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     }
     free(buf);
     rbd_close(img);
-    sector_crc.clear();
 }
 
 
@@ -242,6 +269,9 @@ static struct argp_option options[] = {
     {"prefix",   'p', "PREFIX", 0, "object prefix"},
     {"reads",    'r', "FRAC", 0, "fraction reads (0.0-1.0)"},
     {"close",    'c', 0,      0, "close and re-open"},
+    {"keep",     'k', 0,      0, "keep data between tests"},
+    {"verbose",  'v', 0,      0, "print LBAs and CRCs"},
+    {"reverse",  'R', 0,      0, "reverse NVMe completion order"},    
     {0},
 };
 
@@ -253,8 +283,10 @@ struct cfg _cfg = {
     1024*1024*2,		// image_sectors,
     0.0,			// read_fraction
     1,				// n_runs
-    0,				// seed
-    false};			// reopen
+    {},				// seeds
+    false,			// reopen
+    true,			// restart
+    false};			// verbose
 
 off_t parseint(char *s)
 {
@@ -268,6 +300,8 @@ off_t parseint(char *s)
     return val;
 }
 
+extern bool __lsvd_dbg_reverse;
+
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
     switch (key) {
@@ -277,7 +311,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         _cfg.n_runs = atoi(arg);
         break;
     case 's':
-	_cfg.seed = strtoul(arg, NULL, 0);
+	_cfg.seeds.push_back(strtoul(arg, NULL, 0));
 	break;
     case 'l':
 	_cfg.run_len = atoi(arg);
@@ -300,6 +334,15 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'c':
 	_cfg.reopen = true;
 	break;
+    case 'k':
+	_cfg.restart = false;
+	break;
+    case 'v':
+	_cfg.verbose = true;
+	break;
+    case 'R':
+	__lsvd_dbg_reverse = true;
+	break;
     case ARGP_KEY_END:
         break;
     }
@@ -310,9 +353,10 @@ static struct argp argp = { options, parse_opt, NULL, args_doc};
 int main(int argc, char **argv) {
     argp_parse (&argp, argc, argv, 0, 0, 0);
 
-    if (_cfg.seed) {
+    if (_cfg.seeds.size() > 0) {
 	for (int i = 0; i < _cfg.n_runs; i++)
-	    run_test(_cfg.seed, &_cfg);
+	    for (auto s : _cfg.seeds)
+		run_test(s, &_cfg);
     }
     else {
 	auto now = std::chrono::system_clock::now();
