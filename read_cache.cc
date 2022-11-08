@@ -77,6 +77,8 @@ class read_cache_impl : public read_cache {
 	int64_t       user = 1000; // hack to get test4/test_2_fakemap to work
 	int64_t       backend = 0;
     } hit_stats;
+    size_t            outstanding_writes = 0; // NVMe writes to cache
+    size_t            maxbufs = 100;
     
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads = false;	// for debug
@@ -316,23 +318,27 @@ void read_cache_impl::evict_thread(thread_pool<int> *p) {
  * TODO: double-check written[n] and recycle if it isn't?
  */
 char *read_cache_impl::get_cacheline_buf(int n) {
-    char *buf;
+    char *buf = NULL;
     int len = 65536;
-    const int maxbufs = 300;	// 20MB with 64K blocks
     if (buf_loc.size() < maxbufs) {
 	buf = (char*)aligned_alloc(512, len);
 	memset(buf, 0, len);
     }
     else {
-	int j = buf_loc.front();
-	buf_loc.pop();
-	assert(buffer[j] != NULL);
-	buf = buffer[j];
-	buffer[j] = NULL;
-	in_use[j]--;
+	for (int i = 0; i < 10; i++) {
+	    int j = buf_loc.front();
+	    buf_loc.pop();
+	    if (buffer[j] != NULL) {
+		buf = buffer[j];
+		buffer[j] = NULL;
+		in_use[j]--;
+		break;
+	    }
+	    buf_loc.push(j);
+	}
+	assert(buf != NULL);
     }
     buf_loc.push(n);
-    assert(buf != NULL);
     return buf;
 }
 
@@ -472,7 +478,9 @@ void rcache_req::notify(request *child) {
 	sub_req->run(this);
     }
     else if (state == RCACHE_BLOCK_WRITE) {
+	std::unique_lock lk(rci->m);
 	rci->written[n] = true;
+	rci->outstanding_writes++;
 	next_state = RCACHE_DONE;
     }
     else if (state == RCACHE_DIRECT_READ) {
@@ -604,7 +612,9 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
      */
     bool use_cache = free_blks.size() > 0 &&
 	hit_stats.user * 3 > hit_stats.backend * 2;
-
+    if (outstanding_writes > maxbufs - 10)
+	use_cache = false;
+    
     if (in_cache) {		// lk2 held through this section
 	sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 	    start = blk_in_ssd + blk_offset,
@@ -662,6 +672,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	objname name(be->prefix(), unit.obj);
 	r->sub_req = io->make_read_req(name.c_str(), 512L*blk_base,
 				       _buf, 512L*unit_sectors);
+	outstanding_writes++;	// bound # of write bufs
     }
     else {
 	hit_stats.user += read_sectors;
