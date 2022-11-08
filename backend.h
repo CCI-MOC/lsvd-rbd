@@ -8,6 +8,8 @@
 #include <sys/uio.h>
 #include <string>
 
+#include "fake_rbd.h"
+
 class request;
 
 class backend {
@@ -31,5 +33,8 @@ public:
                                    char *buf, size_t len) = 0;
     virtual void kill(void) = 0;
 };
+
+extern backend *make_file_backend();
+extern backend *make_rados_backend(rados_ioctx_t io);
 
 #endif

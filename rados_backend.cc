@@ -23,7 +23,6 @@
 #include "extent.h"
 #include "request.h"
 #include "backend.h"
-#include "rados_backend.h"
 
 void do_log(const char*, ...);
 
@@ -59,7 +58,7 @@ public:
 
 /* needed for implementation hiding
  */
-backend *make_rados_backend() {
+backend *make_rados_backend(rados_ioctx_t io) {
     return new rados_backend;
 }
 

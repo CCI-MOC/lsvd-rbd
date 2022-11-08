@@ -41,8 +41,6 @@
 #include "nvme.h"
 #include "read_cache.h"
 #include "write_cache.h"
-#include "file_backend.h"
-#include "rados_backend.h"
 
 #include "fake_rbd.h"
 #include "config.h"
@@ -65,10 +63,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	return -1;
     switch (cfg.backend) {
     case BACKEND_FILE:
-	objstore = new file_backend;
+	objstore = make_file_backend();
 	break;
     case BACKEND_RADOS:
-	objstore = make_rados_backend();
+	objstore = make_rados_backend(io);
 	break;
     default:
 	return -1;

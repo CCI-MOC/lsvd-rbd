@@ -10,18 +10,44 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/uio.h>
+#include <libaio.h>
 
 #include <map>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <thread>
 
 #include "lsvd_types.h"
 #include "backend.h"
-#include "file_backend.h"
 #include "request.h"
 #include "smartiov.h"
 #include "io.h"
+
+class file_backend : public backend {
+    bool e_io_running = false;
+    io_context_t ioctx;
+    std::thread e_io_th;
+
+public:
+    file_backend();
+    ~file_backend();
+
+    /* see backend.h 
+     */
+    int write_object(const char *name, iovec *iov, int iovcnt);
+    int read_object(const char *name, iovec *iov, int iovcnt, size_t offset);
+    int delete_object(const char *name);
+    
+    /* async I/O
+     */
+    request *make_write_req(const char *name, iovec *iov, int iovcnt);
+    request *make_read_req(const char *name, size_t offset,
+                           iovec *iov, int iovcnt);
+    request *make_read_req(const char *name, size_t offset,
+                           char *buf, size_t len);
+    void kill(void);
+};
 
 file_backend::file_backend() {
     e_io_running = true;
@@ -144,4 +170,8 @@ request *file_backend::make_read_req(const char *name, size_t offset,
 				     char *buf, size_t len) {
     iovec iov = {buf, len};
     return new file_backend_req(OP_READ, name, &iov, 1, offset, ioctx);
+}
+
+backend *make_file_backend(void) {
+    return new file_backend;
 }
