@@ -17,6 +17,11 @@ namespace fs = std::experimental::filesystem;
 #include "objects.h"
 #include "lsvd_types.h"
 
+extern bool __lsvd_dbg_reverse;
+extern bool __lsvd_dbg_be_delay;
+extern bool __lsvd_dbg_be_delay_ms;
+extern bool __lsvd_dbg_be_threads;
+
 std::mt19937_64 rng;
 
 struct cfg {
@@ -249,13 +254,22 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    printf("failed: rbd_open\n"), exit(1);
     }
 
+    auto tmp = __lsvd_dbg_be_delay;
+    __lsvd_dbg_be_delay = false;
     auto buf = (char*)aligned_alloc(512, 64*1024);
+    int i = 0;
     for (int sector = 0; sector < cfg->image_sectors; sector += 64*2) {
 	rbd_read(img, sector*512L, 64*1024, buf);
 	check_crc(sector, buf, 64*1024);
+	if (++i > cfg->image_sectors / 128 / 10) {
+	    printf("-"); fflush(stdout);
+	    i = 0;
+	}
     }
+    printf("\n");
     free(buf);
     rbd_close(img);
+    __lsvd_dbg_be_delay = tmp;
 }
 
 
@@ -303,9 +317,6 @@ off_t parseint(char *s)
         val *= 1024;
     return val;
 }
-
-extern bool __lsvd_dbg_reverse;
-extern bool __lsvd_dbg_be_delay;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
