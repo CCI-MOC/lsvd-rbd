@@ -63,6 +63,19 @@ public:
         delete this;
     }
     
+    void kill(void (*f)(T)) {
+        running = false;
+	while (!pool.empty()) {
+	    pthread_cancel(pool.front().native_handle());
+	    pool.pop();
+	}
+        while (q.size() > 0) {
+            f(q.front());
+            q.pop();
+        }
+        delete this;
+    }
+
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
         while (running && q.empty())
             cv.wait(lk);
@@ -71,6 +84,11 @@ public:
         val = q.front();
         q.pop();
         return val;
+    }
+
+    bool get(T &val) {
+        std::unique_lock lk(*m);
+        return get_locked(lk, val);
     }
 
     void put_locked(T work) {

@@ -17,18 +17,26 @@
 #include <mutex>
 #include <condition_variable>
 #include <thread>
+#include <random>
 
 #include "lsvd_types.h"
 #include "backend.h"
 #include "request.h"
 #include "smartiov.h"
 #include "io.h"
+#include "misc_cache.h"
+
+bool __lsvd_dbg_be_delay = false;
+long __lsvd_dbg_be_seed = 1;
+int __lsvd_dbg_bd_threads = 10;
+static std::mt19937_64 rng;
+
+class file_backend_req;
 
 class file_backend : public backend {
-    bool e_io_running = false;
-    io_context_t ioctx;
-    std::thread e_io_th;
-
+    void worker(thread_pool<file_backend_req*> *p);
+    std::mutex m;
+    
 public:
     file_backend();
     ~file_backend();
@@ -47,29 +55,11 @@ public:
     request *make_read_req(const char *name, size_t offset,
                            char *buf, size_t len);
     void kill(void);
+    thread_pool<file_backend_req*> workers;
 };
 
-file_backend::file_backend() {
-    e_io_running = true;
-    io_queue_init(64, &ioctx);
-    const char *name = "file_backend_cb";
-    e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name);
-}
-
-file_backend::~file_backend() {
-    auto tmp = e_io_running;
-    e_io_running = false;
-    io_queue_release(ioctx);
-    if (tmp)
-	e_io_th.join();
-}
-
-void file_backend::kill(void) {
-    e_io_running = false;
-    pthread_cancel(e_io_th.native_handle());
-    delete this;
-}
-
+/* trivial methods 
+ */
 int file_backend::write_object(const char *name, iovec *iov, int iovcnt) {
     int fd;
     if ((fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0777)) < 0)
@@ -104,18 +94,17 @@ class file_backend_req : public request {
     smartiov        _iovs;
     size_t          offset;
     std::string     name;
-    io_context_t    ioctx;
     request        *parent = NULL;
-    e_iocb          eio;
+    file_backend   *be;
     int             fd;
     
 public:
     file_backend_req(enum lsvd_op op_, const char *name_,
 		     iovec *iov, int iovcnt, size_t offset_,
-		     io_context_t ioctx_) : _iovs(iov, iovcnt), name(name_) {
+		     file_backend *be_) : _iovs(iov, iovcnt), name(name_) {
 	op = op_;
 	offset = offset_;
-	ioctx = ioctx_;
+	be = be_;
     }
     ~file_backend_req() {}
 
@@ -128,7 +117,57 @@ public:
 	auto req = (file_backend_req*)ptr;
 	req->notify(NULL);
     }
+
+    void exec(void) {
+	auto [iov,niovs] = _iovs.c_iov();
+	if (op == OP_READ) 
+	    preadv(fd, iov, niovs, offset);
+	else
+	    pwritev(fd, iov, niovs, offset);
+	notify(NULL);
+    }
+
+    void kill(void) {
+	close(fd);
+	delete this;
+    }
 };
+
+
+/* methods that depend on file_backend_req
+ */
+file_backend::file_backend() : workers(&m) {
+    rng.seed(__lsvd_dbg_be_seed);
+    for (int i = 0; i < __lsvd_dbg_bd_threads; i++) 
+	workers.pool.push(std::thread(&file_backend::worker, this, &workers));
+}
+
+file_backend::~file_backend() {
+}
+
+void file_backend::worker(thread_pool<file_backend_req*> *p) {
+    pthread_setname_np(pthread_self(), "file_worker");
+    while (p->running) {
+	file_backend_req *req;
+	if (!p->get(req)) 
+	    return;
+	if (__lsvd_dbg_be_delay) {
+	    std::uniform_int_distribution<int> uni(0,5000);
+	    useconds_t usecs = uni(rng);
+	    usleep(usecs);
+	}
+	req->exec();
+    }
+}
+
+static void close_req(file_backend_req *req) {
+    req->kill();
+}
+
+void file_backend::kill(void) {
+    workers.kill(close_req);
+    delete this;
+}
 
 /* TODO: run() ought to return error/success
  */
@@ -137,15 +176,7 @@ void file_backend_req::run(request *parent_) {
     int mode = (op == OP_READ) ? O_RDONLY : O_RDWR | O_CREAT | O_TRUNC;
     if ((fd = open(name.c_str(), mode, 0777)) < 0)
 	throw("file object error");
-
-    auto [iov,iovcnt] = _iovs.c_iov();
-    if (op == OP_WRITE)
-	e_io_prep_pwritev(&eio, fd, iov, iovcnt, offset, rw_cb_fn, this);
-    else if (op == OP_READ) 
-	e_io_prep_preadv(&eio, fd, iov, iovcnt, offset, rw_cb_fn, this);
-    else
-	assert(false);
-    e_io_submit(ioctx, &eio);
+    be->workers.put(this);
 }
 
 /* TODO: this assumes no use of wait/release
@@ -158,18 +189,18 @@ void file_backend_req::notify(request *unused) {
 
 request *file_backend::make_write_req(const char*name, iovec *iov, int niov) {
     assert(access(name, F_OK) != 0);
-    return new file_backend_req(OP_WRITE, name, iov, niov, 0, ioctx);
+    return new file_backend_req(OP_WRITE, name, iov, niov, 0, this);
 }
 
 request *file_backend::make_read_req(const char *name, size_t offset,
 				     iovec *iov, int iovcnt) {
-    return new file_backend_req(OP_READ, name, iov, iovcnt, offset, ioctx);
+    return new file_backend_req(OP_READ, name, iov, iovcnt, offset, this);
 }
 
 request *file_backend::make_read_req(const char *name, size_t offset,
 				     char *buf, size_t len) {
     iovec iov = {buf, len};
-    return new file_backend_req(OP_READ, name, &iov, 1, offset, ioctx);
+    return new file_backend_req(OP_READ, name, &iov, 1, offset, this);
 }
 
 backend *make_file_backend(void) {

@@ -274,6 +274,7 @@ static struct argp_option options[] = {
     {"verbose",  'v', 0,      0, "print LBAs and CRCs"},
     {"reverse",  'R', 0,      0, "reverse NVMe completion order"},    
     {"existing", 'x', 0,      0, "don't delete existing cache"},    
+    {"delay",    'D', 0,      0, "add random backend delays"},    
     {0},
 };
 
@@ -304,6 +305,7 @@ off_t parseint(char *s)
 }
 
 extern bool __lsvd_dbg_reverse;
+extern bool __lsvd_dbg_be_delay;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -348,6 +350,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	break;
     case 'x':
 	_cfg.existing = true;
+	break;
+    case 'D':
+	__lsvd_dbg_be_delay = true;
 	break;
     case ARGP_KEY_END:
         break;
