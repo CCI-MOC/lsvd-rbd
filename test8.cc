@@ -18,6 +18,11 @@ namespace fs = std::experimental::filesystem;
 #include "objects.h"
 #include "lsvd_types.h"
 
+extern bool __lsvd_dbg_reverse;
+extern bool __lsvd_dbg_be_delay;
+extern bool __lsvd_dbg_be_delay_ms;
+extern bool __lsvd_dbg_be_threads;
+
 std::mt19937_64 rng;
 
 struct cfg {
@@ -228,14 +233,24 @@ struct lba_info {
 };
 
 void test_img(rbd_image_t img, struct cfg *cfg) {
+    auto tmp = __lsvd_dbg_be_delay;
+    __lsvd_dbg_be_delay = false;
+
     std::vector<std::vector<lba_info>> per_lba_ops(cfg->image_sectors);
+    int q = 0;
     for (auto [s,l,lba,crcs] : all_info) {
 	for (auto c : *crcs) {
 	    per_lba_ops[lba].push_back((lba_info){l,s,c});
 	    lba++;
 	}
+	if (++q > (int) all_info.size() / 10) {
+	    printf("."); fflush(stdout);
+	    q = 0;
+	}
     }
+
     std::vector<std::vector<uint32_t>> all_crcs(cfg->image_sectors);
+    q = 0;
     for (int i = 0; i < cfg->image_sectors; i++) {
 	auto op = &per_lba_ops[i];
 	if (op->size() == 0) {
@@ -245,6 +260,8 @@ void test_img(rbd_image_t img, struct cfg *cfg) {
 	int last = 0, count = 0;
 	for (size_t j = 0; j < op->size()-1; j++) {
 	    auto [launch, seq, crc] = (*op)[j];
+	    (void) crc;
+	    (void) seq;
 	    if (launch) count++;
 	    else count--;
 	    if (count == 0)
@@ -252,12 +269,18 @@ void test_img(rbd_image_t img, struct cfg *cfg) {
 	}
 	for (size_t j = last; j < op->size(); j++) {
 	    auto [launch, seq, crc] = (*op)[j];
+	    (void)seq;
 	    if (launch)
 		all_crcs[i].push_back(crc);
+	}
+	if (++q > cfg->image_sectors / 10) {
+	    printf(","); fflush(stdout);
+	    q = 0;
 	}
     }
 
     auto buf = (char*)aligned_alloc(512, 64*1024);
+    q = 0;
     for (int i = 0; i < cfg->image_sectors; i += 128) {
 	rbd_read(img, i * 512L, 64*1024, buf);
 	for (int j = 0; j < 128; j++) {
@@ -269,13 +292,23 @@ void test_img(rbd_image_t img, struct cfg *cfg) {
 		    found = true;
 	    assert(found);
 	}
+	if (++q > cfg->image_sectors / 128 / 10) {
+	    printf("-"); fflush(stdout);
+	    q = 0;
+	}
     }
+    printf("\n");
     free(buf);
 
-    for (auto [seq, launch, sector, crcs] : all_info)
+    for (auto [seq, launch, sector, crcs] : all_info) {
+	(void) seq;
+	(void) sector;
 	if (launch)
 	    delete crcs;
+    }
     all_info.clear();
+
+    __lsvd_dbg_be_delay = tmp;
 }
 
 static char args_doc[] = "RUNS";
@@ -292,6 +325,7 @@ static struct argp_option options[] = {
     {"reverse",  'R', 0,      0, "reverse NVMe completion order"},    
     {"existing", 'x', 0,      0, "don't delete existing cache"},    
     {"threads",  't', "N",    0, "number of threads"},
+    {"delay",    'D', 0,      0, "add random backend delays"},    
     {0},
 };
 
@@ -319,8 +353,6 @@ off_t parseint(char *s)
         val *= 1024;
     return val;
 }
-
-extern bool __lsvd_dbg_reverse;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -359,6 +391,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	break;
     case 'x':
 	_cfg.existing = true;
+	break;
+    case 'D':
+	__lsvd_dbg_be_delay = true;
 	break;
     case ARGP_KEY_END:
         break;
