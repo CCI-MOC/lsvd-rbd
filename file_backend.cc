@@ -28,7 +28,8 @@
 
 bool __lsvd_dbg_be_delay = false;
 long __lsvd_dbg_be_seed = 1;
-int __lsvd_dbg_bd_threads = 10;
+int __lsvd_dbg_be_threads = 10;
+int __lsvd_dbg_be_delay_ms = 5;
 static std::mt19937_64 rng;
 
 class file_backend_req;
@@ -96,7 +97,7 @@ class file_backend_req : public request {
     std::string     name;
     request        *parent = NULL;
     file_backend   *be;
-    int             fd;
+    int             fd = -1;
     
 public:
     file_backend_req(enum lsvd_op op_, const char *name_,
@@ -119,6 +120,10 @@ public:
     }
 
     void exec(void) {
+	int mode = (op == OP_READ) ? O_RDONLY : O_RDWR | O_CREAT | O_TRUNC;
+	if ((fd = open(name.c_str(), mode, 0777)) < 0)
+	    throw("file object error");
+
 	auto [iov,niovs] = _iovs.c_iov();
 	if (op == OP_READ) 
 	    preadv(fd, iov, niovs, offset);
@@ -128,7 +133,8 @@ public:
     }
 
     void kill(void) {
-	close(fd);
+	if (fd != -1)
+	    close(fd);
 	delete this;
     }
 };
@@ -138,7 +144,7 @@ public:
  */
 file_backend::file_backend() : workers(&m) {
     rng.seed(__lsvd_dbg_be_seed);
-    for (int i = 0; i < __lsvd_dbg_bd_threads; i++) 
+    for (int i = 0; i < __lsvd_dbg_be_threads; i++) 
 	workers.pool.push(std::thread(&file_backend::worker, this, &workers));
 }
 
@@ -152,7 +158,7 @@ void file_backend::worker(thread_pool<file_backend_req*> *p) {
 	if (!p->get(req)) 
 	    return;
 	if (__lsvd_dbg_be_delay) {
-	    std::uniform_int_distribution<int> uni(0,5000);
+	    std::uniform_int_distribution<int> uni(0,__lsvd_dbg_be_delay_ms*1000);
 	    useconds_t usecs = uni(rng);
 	    usleep(usecs);
 	}
@@ -173,9 +179,6 @@ void file_backend::kill(void) {
  */
 void file_backend_req::run(request *parent_) {
     parent = parent_;
-    int mode = (op == OP_READ) ? O_RDONLY : O_RDWR | O_CREAT | O_TRUNC;
-    if ((fd = open(name.c_str(), mode, 0777)) < 0)
-	throw("file object error");
     be->workers.put(this);
 }
 
