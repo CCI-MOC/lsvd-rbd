@@ -94,6 +94,8 @@ extern "C" void fakemap_update(_dbg *d, int base, int limit,
                                int obj, int offset);
 extern "C" void fakemap_reset(_dbg *d);
 
+extern "C" void get_rbd_uuid(rbd_image_t image, uuid_t *uuid);
+
 /* lightweight printf to buffer, retrieve via get_logbuf or lsvd.logbuf
  */
 extern void do_log(const char *fmt, ...);

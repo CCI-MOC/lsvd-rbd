@@ -570,6 +570,11 @@ extern "C" int do_rbd_aio_readv(rbd_image_t image, const iovec *iov,
     return 0;
 }
 
+extern "C" void get_rbd_uuid(rbd_image_t image, uuid_t *uuid) {
+    auto img = (rbd_image *)image;
+    memcpy(uuid, img->xlate->uuid, sizeof(*uuid));
+}
+    
 /* random run-time debugging stuff, not used at the moment...
  */
 #if 1
