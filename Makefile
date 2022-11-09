@@ -18,19 +18,21 @@ liblsvd.so:  $(OBJS)
 
 %.o: %.d
 
+# CRC_OBJS = crc32.o crc32_simd.o
+
 test-1: test-1.o $(OBJS)
 	$(CXX) -o $@ test-1.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
 test-2: test-2.o $(OBJS)
 	$(CXX) -o $@ test-2.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
 
 test7: test7.o $(OBJS)
-	$(CXX) -o $@ test7.o $(OBJS) crc32.o crc32_simd.o -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test7.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
 
 test8: test8.o $(OBJS)
-	$(CXX) -o $@ test8.o $(OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test8.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
 
 test9: test9.o $(OBJS)
-	$(CXX) -o $@ test9.o $(OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test9.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
 
 # Add .d to Make's recognized suffixes.
 SUFFIXES += .d
