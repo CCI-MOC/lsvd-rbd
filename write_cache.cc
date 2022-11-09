@@ -81,25 +81,21 @@ class write_cache_impl : public write_cache {
     friend void print_pages(write_cache_impl*, const char*);
     
     /* track outstanding requests and point before which
-     * all writes are durable in SSD. Set ordering only works
-     * if <1/2 cache is outstanding at once.
+     * all writes are durable in SSD. Pad
      */
     struct write_record {
-	page_t start, len;
-	page_t wrap;
+	uint64_t          seq;
 	wcache_write_req *req = NULL;
-	mutable bool done = false;
+	page_t            next = 0; // next acked page
+	mutable bool      done = false;
 	bool operator<(const write_record &other) const {
-	    auto offset = ((start - other.start) + wrap) % wrap;
-	    return offset > wrap/2;
+	    return seq < other.seq;
 	}
     };
     std::set<write_record> outstanding;
     page_t next_acked_page = 0;
-    void notify_complete(page_t start, page_t len,
-			 std::unique_lock<std::mutex> &lk);
-    void record_outstanding(page_t start, page_t len,
-			    wcache_write_req *req);
+    void notify_complete(uint64_t seq, std::unique_lock<std::mutex> &lk);
+    void record_outstanding(uint64_t seq, page_t next, wcache_write_req *req);
 
     thread_pool<int>          *misc_threads;
 
@@ -189,11 +185,7 @@ class wcache_write_req : public request {
     std::atomic<int> reqs = 0;
 
     sector_t      plba;
-
-    page_t        hdr_page;	// for tracking completions
-    page_t        n_hdr_pages;
-    page_t        pad_page = 0;
-    page_t        n_pad_pages;
+    uint64_t      seq;
     
     std::vector<write_cache_work*> work;
     request      *r_data = NULL;
@@ -236,10 +228,6 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
 	pad_hdr = (char*)aligned_alloc(512, 4096);
 	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
 
-	pad_page = pad;	// track completion
-	n_pad_pages = n_pad+1;
-	wcache->record_outstanding(pad, n_pad+1, NULL);
-
 	pad_iov.push_back((iovec){pad_hdr, 4096});
 	reqs++;
 	r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad*4096L);
@@ -249,13 +237,16 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
     for (auto w : work) {
 	extents.push_back((j_extent){(uint64_t)w->lba, w->iov->bytes() / 512});
     }
-  
+
+    /* TODO: don't assign seq# in mk_header
+     */
     hdr = (char*)aligned_alloc(512, 4096);
     j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, 1+n_pages);
-
-    hdr_page = page;		// track completion
-    n_hdr_pages = 1+n_pages;
-    wcache->record_outstanding(page, 1+n_pages, this);
+    seq = j->seq;
+    
+    /* track completion 
+     */
+    wcache->record_outstanding(seq, page+n_pages+1, this);
 
     j->extent_offset = sizeof(*j);
     size_t e_bytes = extents.size() * sizeof(j_extent);
@@ -330,9 +321,7 @@ void wcache_write_req::notify(request *child) {
 	return;
 
     std::unique_lock lk(wcache->m);
-    if (pad_page != 0)
-	wcache->notify_complete(pad_page, n_pad_pages, lk);
-    wcache->notify_complete(hdr_page, n_hdr_pages, lk);
+    wcache->notify_complete(seq, lk);
 }
 
 void wcache_write_req::run(request *parent /* unused */) {
@@ -464,29 +453,30 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     return val;
 }
 
-void write_cache_impl::notify_complete(page_t start, page_t len,
+void write_cache_impl::notify_complete(uint64_t seq,
 				       std::unique_lock<std::mutex> &lk) {
     //assert(!m.try_lock());	// must be locked
-    write_record r = {start, len, super->limit - super->base, NULL};
+    write_record r = {seq, NULL, 0, false};
     auto it = outstanding.find(r);
-    assert(it != outstanding.end());
+    assert(it != outstanding.end() && it->seq == seq);
     it->done = true;
 
-    it = outstanding.begin();
-    while (it != outstanding.end() && it->done) {
-	next_acked_page = it->start + it->len;
-	if (it->req)
-	    it->req->notify_in_order(lk);
+    std::vector<wcache_write_req*> reqs;
+    for (it = outstanding.begin(); it != outstanding.end() && it->done;) {
+	next_acked_page = it->next;
+	reqs.push_back(it->req);
 	it = outstanding.erase(it);
     }
+
+    for (auto r : reqs)
+	r->notify_in_order(lk);
     write_cv.notify_all();
 }
 
-void write_cache_impl::record_outstanding(page_t start, page_t len,
-    wcache_write_req *req) {
+void write_cache_impl::record_outstanding(uint64_t seq, page_t next,
+					  wcache_write_req *req) {
     //assert(!m.try_lock());	// must be locked
-    write_record r = {start, len, super->limit - super->base,
-		      req, false};
+    write_record r = {seq, req, next, false};
     outstanding.insert(r);
 }
 
