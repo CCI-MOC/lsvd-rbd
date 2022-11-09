@@ -953,6 +953,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
 	    req->run(t_req);
+	    do_log("gc write %s\n", name.c_str());
 	}
 	close(fd);
 	unlink(temp);
@@ -962,35 +963,20 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) 
 	object_info.erase(object_info.find(it->first));
 
-#if 0
-    /* trim checkpoints - no, do it in write_checkpoint
-     */
-    std::vector<int> ckpts_to_delete;
-    while (checkpoints.size() > 3) {
-	ckpts_to_delete.push_back(checkpoints.front());
-	checkpoints.erase(checkpoints.begin());
-    }
-#endif
-    
     /* write checkpoint *before* deleting any objects
      */
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
+	do_log("gc ckpt %d\n", ckpt_seq);
 	write_checkpoint(ckpt_seq, lk);
     
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(), it->first);
+	    do_log("gc delete %s\n", name.c_str());
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
     }
-
-#if 0
-    for (auto c : ckpts_to_delete) {
-	objname name(prefix(), c);
-	objstore->delete_object(name.c_str());
-    }
-#endif
 }
 
 void translate_impl::wait_for_gc(void) {
