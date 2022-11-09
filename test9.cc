@@ -12,6 +12,7 @@ namespace fs = std::experimental::filesystem;
 #include <map>
 #include <mutex>
 #include <atomic>
+#include <algorithm>
 
 #include "fake_rbd.h"
 #include "objects.h"
@@ -37,6 +38,7 @@ struct cfg {
     bool   restart;
     bool   verbose;
     bool   existing;
+    int    objdelete;
 };
 
 
@@ -151,6 +153,36 @@ void drain(std::queue<opinfo> &q, size_t window) {
 }
 
 bool started = false;
+std::vector<std::tuple<int,int>> io_list;
+void print_iolist(void) {
+    for (auto [lba,len] : io_list)
+	printf("%d %d\n", lba, len);
+}
+
+void obj_delete(struct cfg *cfg) {
+    std::vector<std::pair<int, std::string>> files;
+    std::string dir = fs::path(cfg->obj_prefix).parent_path();
+    auto stem = fs::path(cfg->obj_prefix).filename();
+    size_t stem_len = strlen(stem.c_str());
+    
+    for (auto const& dir_entry : fs::directory_iterator{dir}) {
+	std::string entry{dir_entry.path().filename()};
+	if (strncmp(entry.c_str(), stem.c_str(), stem_len) == 0)
+	    if (entry.size() == stem_len + 9) {
+		int seq = strtol(entry.c_str() + stem_len+1, NULL, 16);
+		files.push_back(std::make_pair(seq, entry));
+	    }
+	}
+
+    std::sort(files.begin(), files.end());
+    std::uniform_real_distribution<> uni(0.0,1.0);
+
+    for (int i = 0, j = files.size() - 1; i < cfg->objdelete; i++, j--)
+	if (uni(rng) < 0.5) {
+	    fs::remove(dir + "/" + files[j].second);
+	    printf("rm %s\n", files[j].second.c_str());
+	}
+}
 
 void run_test(unsigned long seed, struct cfg *cfg) {
     printf("seed: 0x%lx\n", seed);
@@ -178,15 +210,25 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     std::queue<std::pair<rbd_completion_t,char*>> q;
     std::uniform_real_distribution<> uni(0.0,1.0);
 
+    int n_requests = cfg->run_len + (uni(rng)-0.5)*100;
     int seq = 0;
+
+    struct op {
+	int sector;
+	int len;
+	int seq;
+	std::vector<uint32_t> *crcs;
+    };
     
     struct triple {
 	int lba;
 	int seq;
 	uint32_t crc;
     };
-    std::vector<triple> lba_crc;
-    for (int i = 0; i < cfg->run_len; i++) {
+
+    std::vector<op> op_crcs;
+    
+    for (int i = 0; i < n_requests; i++) {
 	drain(q, cfg->window-1);
 	if (i % 1000 == 999)
 	    printf("+"), fflush(stdout);
@@ -195,6 +237,8 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 
 	int n = n_sectors();
 	int lba = gen_lba(cfg->image_sectors, n);
+	io_list.push_back(std::make_tuple(lba, n));
+	
 	auto ptr = (char*)aligned_alloc(512, n*512);
 	
 	q.push(std::make_pair(c, ptr));
@@ -205,14 +249,15 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    auto s = ++seq;
 	    get_random(ptr, lba, n, s);
 	    rbd_aio_write(img, 512L * lba, 512L * n, ptr, c);
+	    auto crc_list = new std::vector<uint32_t>();
 	    for (size_t j = 0; j < 512UL*n; j += 512) {
 		auto p = (const unsigned char*)ptr + j;
 		auto crc = (uint32_t)crc32(0, p, 512);
-		lba_crc.push_back((triple){lba,s,crc});
+		crc_list->push_back(crc);
 	    }
+	    op_crcs.push_back((op){lba, n, s, crc_list});
 	}
     }
-    printf("\n");
     rbd_kill(img);
     
     if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
@@ -244,22 +289,28 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     rbd_close(img);
     __lsvd_dbg_be_delay = tmp;
 
+    if (cfg->objdelete)
+	obj_delete(cfg);
+    
     int max_seq = 0;
     for (int i = 0; i < cfg->image_sectors; i++)
 	if (image_info[i].seq > max_seq)
 	    max_seq = image_info[i].seq;
 
-    printf("lost %d writes\n", cfg->run_len - max_seq - 1);
+    printf("lost %d writes\n", n_requests - max_seq);
     
     std::vector<triple> should_be_crcs(cfg->image_sectors);
     for (int i = 0; i < cfg->image_sectors; i++)
 	should_be_crcs[i].crc = 0xb2aa7578;
 
-    for (auto [lba,seq,crc] : lba_crc) {
-	if (seq >= max_seq)
-	    break;
-	should_be_crcs[lba].crc = crc;
-	should_be_crcs[lba].seq = seq;
+    for (int i = 0; i < max_seq; i++) {
+	auto [lba,len,seq,crcs] = op_crcs[i];
+	assert(seq == i+1);
+	int j = 0;
+	for (auto c : *crcs) {
+	    should_be_crcs[lba+j] = (triple){lba+j,seq,c};
+	    j++;
+	}
     }
     bool failed = false;
     for (int i = 0; i < cfg->image_sectors; i++)
@@ -270,6 +321,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    failed = true;
 	}
     assert(!failed);
+    printf("ok\n");
 }
 
 
@@ -285,9 +337,10 @@ static struct argp_option options[] = {
     {"reads",    'r', "FRAC", 0, "fraction reads (0.0-1.0)"},
     {"keep",     'k', 0,      0, "keep data between tests"},
     {"verbose",  'v', 0,      0, "print LBAs and CRCs"},
-    {"reverse",  'R', 0,      0, "reverse NVMe completion order"},    
-    {"existing", 'x', 0,      0, "don't delete existing cache"},    
-    {"delay",    'D', 0,      0, "add random backend delays"},    
+    {"reverse",  'R', 0,      0, "reverse NVMe completion order"},
+    {"existing", 'x', 0,      0, "don't delete existing cache"},
+    {"delay",    'D', 0,      0, "add random backend delays"},
+    {"objdelete",'o', "N",    0, "delete some of last N objects"},
     {0},
 };
 
@@ -302,7 +355,8 @@ struct cfg _cfg = {
     {},				// seeds
     true,			// restart
     false,			// verbose
-    false};			// existing
+    false,			// existing
+    0};				// objdelete
 
 off_t parseint(char *s)
 {
@@ -359,6 +413,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	break;
     case 'D':
 	__lsvd_dbg_be_delay = true;
+	break;
+    case 'o':
+	_cfg.objdelete = atoi(arg);
 	break;
     case ARGP_KEY_END:
         break;
