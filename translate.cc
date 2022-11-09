@@ -953,7 +953,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
 	    req->run(t_req);
-	    do_log("gc write %s\n", name.c_str());
+	    //do_log("gc write %s\n", name.c_str());
 	}
 	close(fd);
 	unlink(temp);
@@ -967,12 +967,12 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
      */
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
-	do_log("gc ckpt %d\n", ckpt_seq);
+	//do_log("gc ckpt %d\n", ckpt_seq);
 	write_checkpoint(ckpt_seq, lk);
     
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(), it->first);
-	    do_log("gc delete %s\n", name.c_str());
+	    //do_log("gc delete %s\n", name.c_str());
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
