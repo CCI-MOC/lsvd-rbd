@@ -141,7 +141,6 @@ public:
     void kill(void) {
 	if (fd != -1)
 	    close(fd);
-	delete this;
     }
 };
 
@@ -178,7 +177,6 @@ static void close_req(file_backend_req *req) {
 
 void file_backend::kill(void) {
     workers.kill(close_req);
-    delete this;
 }
 
 /* TODO: run() ought to return error/success

@@ -215,7 +215,6 @@ read_cache_impl::~read_cache_impl() {
 void read_cache_impl::kill(void) {
     ssd->kill();
     misc_threads.kill();
-    delete this;
 }
 
 #if 0

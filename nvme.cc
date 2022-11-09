@@ -116,8 +116,8 @@ public:
     }
 
     void kill(void) {
-	e_io_running = false;
-	pthread_cancel(e_io_th.native_handle());
+	//e_io_running = false;
+	//pthread_cancel(e_io_th.native_handle());
 	delete this;
     }
 };

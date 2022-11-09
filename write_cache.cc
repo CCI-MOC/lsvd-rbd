@@ -840,7 +840,6 @@ write_cache_impl::~write_cache_impl() {
 void write_cache_impl::kill(void) {
     nvme_w->kill();
     misc_threads->kill();
-    delete this;
 }
 
 void write_cache_impl::send_writes(void) {

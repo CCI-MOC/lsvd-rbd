@@ -57,23 +57,23 @@ public:
     void kill(void) {
         running = false;
 	while (!pool.empty()) {
-	    pthread_cancel(pool.front().native_handle());
+	    pool.front().detach();
 	    pool.pop();
 	}
-        delete this;
+        cv.notify_all();
     }
     
     void kill(void (*f)(T)) {
         running = false;
 	while (!pool.empty()) {
-	    pthread_cancel(pool.front().native_handle());
+	    pool.front().detach();
 	    pool.pop();
 	}
         while (q.size() > 0) {
             f(q.front());
             q.pop();
         }
-        delete this;
+        cv.notify_all();
     }
 
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
