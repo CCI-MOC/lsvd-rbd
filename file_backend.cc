@@ -30,6 +30,7 @@ bool __lsvd_dbg_be_delay = false;
 long __lsvd_dbg_be_seed = 1;
 int __lsvd_dbg_be_threads = 10;
 int __lsvd_dbg_be_delay_ms = 5;
+bool __lsvd_dbg_rename = false;
 static std::mt19937_64 rng;
 
 class file_backend_req;
@@ -85,9 +86,14 @@ int file_backend::read_object(const char *name, iovec *iov, int iovcnt,
 }
 
 int file_backend::delete_object(const char *name) {
-    if (unlink(name) < 0)
-	return -1;
-    return 0;
+    int rv;
+    if (__lsvd_dbg_rename) {
+	std::string newname = std::string(name) + ".bak";
+	rv = rename(name, newname.c_str());
+    }
+    else
+	rv = unlink(name);
+    return rv < 0 ? -1 : 0;
 }
 
 class file_backend_req : public request {
