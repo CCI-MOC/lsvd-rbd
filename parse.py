@@ -9,6 +9,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Read backend object')
 parser.add_argument('--rados', help='fetch from RADOS', action='store_true')
+parser.add_argument('--nowrap', help='one entry per line', action='store_true')
 parser.add_argument('object', help='object path')
 args = parser.parse_args()
 
@@ -23,7 +24,7 @@ if args.rados:
     obj = ioctx.read(oid)
     ioctx.close()
 else:
-    f = open(sys.argv[1], 'rb')
+    f = open(args.object, 'rb')
     obj = f.read(None)
     f.close()
 
@@ -68,7 +69,7 @@ if h.type == lsvd.LSVD_SUPER:
     o3 = o2+lsvd.sizeof_super_hdr
     sh = lsvd.super_hdr.from_buffer(bytearray(obj[o2:o3]))
     uu = uuid.UUID(bytes=bytes(h.vol_uuid))
-    print('name:     ', sys.argv[1])
+    print('name:     ', args.object)
     print('magic:    ', 'OK' if h.magic == lsvd.LSVD_MAGIC else '**BAD**')
     print('UUID:     ', str(uu))
     print('version:  ', h.version)
@@ -101,7 +102,7 @@ elif h.type == lsvd.LSVD_DATA:
     o6 = dh.map_offset; l6 = dh.map_len
     maps = (lsvd.data_map * (l6//lsvd.sizeof_data_map)).from_buffer(bytearray(obj[o6:o6+l6]))
 
-    print('name:     ', sys.argv[1])
+    print('name:     ', args.object)
     print('magic:    ', 'OK' if h.magic == lsvd.LSVD_MAGIC else '**BAD**')
     print('version:  ', h.version)
     print('type:     ', 'DATA')
@@ -112,7 +113,11 @@ elif h.type == lsvd.LSVD_DATA:
     print('last_data:', dh.last_data_obj, "(0x%x)" % dh.last_data_obj)
     print('ckpts:    ', dh.ckpts_offset, ':', ', '.join(fmt_ckpt(ckpts)))
     print('cleaned:  ', dh.objs_cleaned_offset, ':', ', '.join(fmt_obj_cleaned(objs)))
-    print('map:      ', dh.map_offset, ':', ', '.join(fmt_data_map(maps)))
+    if args.nowrap:
+            print('map:')
+            print(' ' + '\n '.join(fmt_data_map(maps)))
+    else:
+        print('map:      ', dh.map_offset, ':', ', '.join(fmt_data_map(maps)))
     
 elif h.type == lsvd.LSVD_CKPT:
     o3 = o2+lsvd.sizeof_ckpt_hdr
@@ -137,9 +142,12 @@ elif h.type == lsvd.LSVD_CKPT:
         map_txt = 'OBJECT TOO SHORT (%d bytes)' % len(obj)
     else:
         maps = (lsvd.ckpt_mapentry * (l7//lsvd.sizeof_ckpt_mapentry)).from_buffer(bytearray(obj[o7:o7+l7]))
-        map_txt = ', '.join(fmt_ckpt_map(maps))
+        if args.nowrap:
+            map_txt = '\n ' + ' \n'.join(fmt_ckpt_map(maps))
+        else:
+            map_txt = ', '.join(fmt_ckpt_map(maps))
 
-    print('name:     ', sys.argv[1])
+    print('name:     ', args.object)
     print('magic:    ', 'OK' if h.magic == lsvd.LSVD_MAGIC else '**BAD**')
     print('version:  ', h.version)
     print('type:     ', 'CKPT')
