@@ -22,6 +22,7 @@ extern bool __lsvd_dbg_reverse;
 extern bool __lsvd_dbg_be_delay;
 extern bool __lsvd_dbg_be_delay_ms;
 extern bool __lsvd_dbg_be_threads;
+extern bool __lsvd_dbg_rename;
 
 std::mt19937_64 rng;
 
@@ -134,15 +135,9 @@ void create_image(std::string name, int sectors) {
 }
 
 #include <zlib.h>
-static std::map<int,uint32_t> sector_crc;
-static std::map<int,int> sector_seq;
-char _zbuf[512];
-static std::atomic<int> _seq;
-static std::mutex zm;
 
 void calc_crcs(const char *_buf, size_t bytes, std::vector<uint32_t> *crcs) {
     auto buf = (const unsigned char *)_buf;
-    std::unique_lock lk(zm);
     for (size_t i = 0; i < bytes; i += 512) {
 	const unsigned char *ptr = buf + i;
 	crcs->push_back((uint32_t)crc32(0, ptr, 512));
@@ -175,6 +170,13 @@ struct x_info {
 std::vector<x_info> all_info;
 std::mutex aim;
 
+void print_allinfo(void) {
+    for (int i = 0; i < (int)all_info.size(); i++)
+	if (all_info[i].launch)
+	    printf("%d %d %d %d\n", i, all_info[i].seq, (int)all_info[i].sector,
+		   (int)all_info[i].crcs->size());
+}
+
 void drain(std::queue<opinfo> &q, size_t window) {
     while (q.size() > window) {
 	auto [c,ptr,sector,crcs] = q.front();
@@ -184,6 +186,8 @@ void drain(std::queue<opinfo> &q, size_t window) {
 
 	std::unique_lock lk(aim);
 	auto seq = op_sequence++;
+	if (seq % 2000 == 1999)
+	    printf("+"), fflush(stdout);
 	all_info.emplace_back(seq, false, sector, crcs);
 	rbd_aio_release(c);
 	free(ptr);
@@ -197,7 +201,8 @@ void stamp_seq(char *buf, int sectors, uint32_t seq) {
 
 void run_test(rbd_image_t img, struct cfg *cfg) {
     std::queue<opinfo> q;
-    while (op_sequence < 2U * cfg->run_len) {
+    int start = op_sequence;
+    while (op_sequence - start < 2U * cfg->run_len) {
 	drain(q, cfg->window-1);
 	rbd_completion_t c;
 	rbd_aio_create_completion(NULL, NULL, &c);
@@ -209,7 +214,7 @@ void run_test(rbd_image_t img, struct cfg *cfg) {
 	get_random(ptr, lba, n);
 	auto crcs = new std::vector<uint32_t>();
 	auto seq = op_sequence++;
-	if (seq > 2U * cfg->run_len)
+	if (seq - start > 2U * cfg->run_len)
 	    break;
 
 	stamp_seq(ptr, n, seq);
@@ -300,14 +305,6 @@ void test_img(rbd_image_t img, struct cfg *cfg) {
     printf("\n");
     free(buf);
 
-    for (auto [seq, launch, sector, crcs] : all_info) {
-	(void) seq;
-	(void) sector;
-	if (launch)
-	    delete crcs;
-    }
-    all_info.clear();
-
     __lsvd_dbg_be_delay = tmp;
 }
 
@@ -392,6 +389,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'x':
 	_cfg.existing = true;
 	break;
+    case 't':
+	_cfg.threads = atoi(arg);
+	break;
     case 'D':
 	__lsvd_dbg_be_delay = true;
 	break;
@@ -418,37 +418,44 @@ int main(int argc, char **argv) {
     setenv("LSVD_CACHE_SIZE", "100M", 1);
     setenv("LSVD_BACKEND", "file", 1);
     setenv("LSVD_CACHE_DIR", _cfg.cache_dir, 1);
+    __lsvd_dbg_rename = true;
     
-    for (int i = 0; i < _cfg.n_runs; i++) {
-	for (auto s : _cfg.seeds) {
-	    if (!_cfg.restart || (i == 0 && !_cfg.existing)) {
-		clean_cache(_cfg.cache_dir);
-		clean_image(_cfg.obj_prefix);
-		create_image(_cfg.obj_prefix, _cfg.image_sectors);
+    bool started = false;
+    for (auto s : _cfg.seeds) {
+	if (_cfg.restart || (!started && !_cfg.existing)) {
+	    clean_cache(_cfg.cache_dir);
+	    clean_image(_cfg.obj_prefix);
+	    create_image(_cfg.obj_prefix, _cfg.image_sectors);
+	    started = true;
+
+	    for (auto [seq, launch, sector, crcs] : all_info) {
+		(void) seq; (void) sector;
+		if (launch)
+		    delete crcs;
 	    }
 	    all_info.clear();
 	    op_sequence.store(0);
-	    
-	    rng.seed(s);
-	    init_random();
-	    printf("seed: 0x%lx\n", s);
-
-	    rados_ioctx_t io = 0;
-	    rbd_image_t img;
-	    if (rbd_open(io, _cfg.obj_prefix, &img, NULL) < 0)
-		printf("failed: rbd_open\n"), exit(1);
-
-	    std::vector<std::thread> threads;
-	    for (int i = 0; i < _cfg.threads; i++)
-		threads.push_back(std::thread(run_test, img, &_cfg));
-
-	    while (threads.size() > 0) {
-		threads.back().join();
-		threads.pop_back();
-	    }
-
-	    test_img(img, &_cfg);
 	}
+	    
+	rng.seed(s);
+	init_random();
+	printf("seed: 0x%lx\n", s);
+
+	rados_ioctx_t io = 0;
+	rbd_image_t img;
+	if (rbd_open(io, _cfg.obj_prefix, &img, NULL) < 0)
+	    printf("failed: rbd_open\n"), exit(1);
+
+	std::vector<std::thread> threads;
+	for (int i = 0; i < _cfg.threads; i++)
+	    threads.push_back(std::thread(run_test, img, &_cfg));
+
+	while (threads.size() > 0) {
+	    threads.back().join();
+	    threads.pop_back();
+	}
+
+	test_img(img, &_cfg);
     }
 }
     
