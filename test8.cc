@@ -456,6 +456,7 @@ int main(int argc, char **argv) {
 	}
 
 	test_img(img, &_cfg);
+	rbd_close(img);
     }
 }
     
