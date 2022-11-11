@@ -26,7 +26,6 @@ public:
     virtual request* make_read_request(smartiov *iov, size_t offset) = 0;
 
     virtual request* make_read_request(char *buf, size_t len, size_t offset) = 0;
-    virtual void kill(void) = 0;
 };
 
 enum {

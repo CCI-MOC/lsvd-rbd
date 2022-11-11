@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/uio.h>
 #include <uuid/uuid.h>
+#include <signal.h>
 
 #include <mutex>
 #include <shared_mutex>
@@ -62,19 +63,25 @@ public:
     std::thread e_io_th;
     io_context_t ioctx;
 
+    static void sighandler(int sig) {
+	pthread_exit(NULL);
+    }
+    
     nvme_impl(int fd_, const char *name_) {
 	fd = fd_;
 	e_io_running = true;
 	io_queue_init(64, &ioctx);
+	signal(SIGUSR2, sighandler);
 	e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name_);
     }
 
     ~nvme_impl() {
-	auto tmp = e_io_running;
 	e_io_running = false;
+	//e_io_th.join();
+	//pthread_cancel(e_io_th.native_handle());
+	pthread_kill(e_io_th.native_handle(), SIGUSR2);
+	e_io_th.join();
 	io_queue_release(ioctx);
-	if (tmp)
-	    e_io_th.join();
     }
 
     int read(void *buf, size_t count, off_t offset) {
@@ -113,12 +120,6 @@ public:
     request* make_read_request(char *buf, size_t len, size_t offset) {
 	auto req = new nvme_request(buf, len, offset, READ_REQ, this);
 	return (request*) req;
-    }
-
-    void kill(void) {
-	//e_io_running = false;
-	//pthread_cancel(e_io_th.native_handle());
-	delete this;
     }
 };
 

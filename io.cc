@@ -102,7 +102,7 @@ int io_queue_run2(io_context_t ctx, struct timespec *timeout)
 
 void e_iocb_runner(io_context_t ctx, bool *running, const char *name)
 {
-    struct timespec timeout = {0, 1000*500}; // 500 microseconds
+    struct timespec timeout = {0, 1000*100}; // 100 microseconds
     pthread_setname_np(pthread_self(), name);
     while (*running) 
 	io_queue_run2(ctx, &timeout);

@@ -56,7 +56,6 @@ public:
                            iovec *iov, int iovcnt);
     request *make_read_req(const char *name, size_t offset,
                            char *buf, size_t len);
-    void kill(void);
     thread_pool<file_backend_req*> workers;
 };
 
@@ -137,11 +136,6 @@ public:
 	    pwritev(fd, iov, niovs, offset);
 	notify(NULL);
     }
-
-    void kill(void) {
-	if (fd != -1)
-	    close(fd);
-    }
 };
 
 
@@ -169,14 +163,6 @@ void file_backend::worker(thread_pool<file_backend_req*> *p) {
 	}
 	req->exec();
     }
-}
-
-static void close_req(file_backend_req *req) {
-    req->kill();
-}
-
-void file_backend::kill(void) {
-    workers.kill(close_req);
 }
 
 /* TODO: run() ought to return error/success

@@ -130,6 +130,7 @@ class translate_impl : public translate {
     bool gc_running = false;
     std::condition_variable gc_cv;
     void wait_for_gc(void);
+    bool killed = false;
     
     object_reader *parser;
     
@@ -142,7 +143,7 @@ class translate_impl : public translate {
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
 
-    void do_gc(std::unique_lock<std::mutex> &lk);
+    void do_gc(std::unique_lock<std::mutex> &lk, bool *running);
     void gc_thread(thread_pool<int> *p);
     void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
     void worker_thread(thread_pool<batch*> *p);
@@ -194,8 +195,7 @@ public:
     int frontier(void) { return b->len / 512; }
     int batch_seq(void) { return seq; }
     void set_completion(int next);
-
-    void kill(void);
+    void kill(void) {killed = true;}
 };
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
@@ -219,12 +219,6 @@ translate_impl::~translate_impl() {
     delete parser;
     if (super_buf)
 	free(super_buf);
-}
-
-void translate_impl::kill(void) {
-    workers.kill();
-    misc_threads.kill();
-    delete this;
 }
 
 ssize_t translate_impl::init(const char *prefix_,
@@ -259,19 +253,25 @@ ssize_t translate_impl::init(const char *prefix_,
     /* read in the last checkpoint, then roll forward from there;
      */
     if (ckpts.size() > 0) {
-	int last_ckpt = 0;
-	for (auto c : ckpts) {
-	    last_ckpt = c;
+	int last_ckpt = -1;
+	for (auto c : ckpts) 
 	    checkpoints.push_back(c); // so we can delete them later
-	}
 
 	std::vector<ckpt_obj> objects;
 	std::vector<deferred_delete> deletes;
 	std::vector<ckpt_mapentry> entries;
-	objname name(prefix(), last_ckpt);
-	if (parser->read_checkpoint(name.c_str(), ckpts, objects,
-				    deletes, entries) < 0)
+
+	for (int i = checkpoints.size() - 1; i >= 0; i--) {
+	    objname name(prefix(), checkpoints[i]);
+	    if (parser->read_checkpoint(name.c_str(), ckpts, objects,
+					deletes, entries) >= 0) {
+		last_ckpt = checkpoints[i];
+		break;
+	    }
+	}
+	if (last_ckpt == -1)
 	    return -1;
+	
 	for (auto o : objects) {
 	    object_info[o.seq] = (obj_info){.hdr = (int)o.hdr_sectors,
 					    .data = (int)o.data_sectors,
@@ -403,6 +403,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 /* NOTE: offset is in bytes
  */
 ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
+    if (killed)			// crash testing
+	return -1;
     std::unique_lock lk(m);
     smartiov siov(iov, iovcnt);
     size_t len = siov.bytes();
@@ -530,6 +532,9 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     t_req->to_free.push_back(hdr);
     t_req->b = b;
 	
+    if (killed)			// crash testing
+	return;
+
     objname name(prefix(), b->seq);
     auto req = objstore->make_write_req(name.c_str(), iov, 2);
     req->run(t_req);
@@ -676,6 +681,10 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     /* and write it
      */
     lk.unlock();
+
+    if (killed) 		// for crash testing
+	return;
+    
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, 4);
     notify_complete(ckpt_seq);
@@ -708,6 +717,10 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 	*pc++ = c;
 
     lk.unlock();
+
+    if (killed)			// crash testing
+	return;
+
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
 
@@ -754,7 +767,8 @@ int translate_impl::checkpoint(void) {
 /* Needs a lot of work. Note that all reads/writes are synchronous
  * for now...
  */
-void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
+void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
+			   bool *running) {
     gc_cycles++;
     int max_obj = seq.load();
 
@@ -827,6 +841,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	char *buf = (char*)malloc(20*1024*1024);
 
 	for (auto [i,sectors] : objs_to_clean) {
+	    if (killed)		// crash testing
+		return;
 	    objname name(prefix(), i);
 	    iovec iov = {buf, (size_t)(sectors*512)};
 	    objstore->read_object(name.c_str(), &iov, 1, /*offset=*/ 0);
@@ -881,10 +897,10 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	     */
 	    for (auto [base, limit, ptr] : extents) {
 		for (auto it2 = map->lookup(base);
+		     it2->base() < limit && it2 != map->end(); it2++) {
 		     /* [_base,_limit] is a piece of the extent
 		      * obj_base is where that piece starts in the object
 		      */
-		     it2->base() < limit && it2 != map->end(); it2++) {
 		    auto [_base, _limit, obj_base] = it2->vals(base, limit);
 
 		    /* skip if it's not still in the object, otherwise
@@ -941,6 +957,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	    objlock2.unlock();
 	    lk2.unlock();
 
+	    if (killed)		// for crash testing
+		return;
+	    
 	    smartiov iovs;
 	    iovs.push_back((iovec){hdr, (size_t)hdr_sectors*512});
 	    iovs.push_back((iovec){buf, (size_t)byte_offset});
@@ -959,6 +978,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk) {
 	unlink(temp);
     }
 
+    if (killed)			// for crash test
+	return;
+    
     lk.lock();
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) 
 	object_info.erase(object_info.find(it->first));
@@ -1005,7 +1027,7 @@ void translate_impl::gc_thread(thread_pool<int> *p) {
 	    continue;
 
 	gc_running = true;
-	do_gc(lk);
+	do_gc(lk, &p->running);
 	gc_running = false;
 	gc_cv.notify_all();
     }
@@ -1073,6 +1095,37 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
     }
     
     return 0;
+}
+
+int translate_create_image(backend *objstore, const char *name,
+			   uint64_t size) {
+    auto buf = (char*)aligned_alloc(512, 4096);
+    memset(buf, 0, 4096);
+
+    auto _hdr = (obj_hdr*) buf;
+    *_hdr = (obj_hdr){LSVD_MAGIC,
+		      1,	  // version
+		      {0},	  // UUID
+		      LSVD_SUPER, // type
+		      0,	  // seq
+		      8,	  // hdr_sectors
+		      0};	  // data_sectors
+    uuid_generate_random(_hdr->vol_uuid);
+
+    auto _super = (super_hdr*)(_hdr + 1);
+    uint64_t sectors = size / 512;
+    *_super = (super_hdr){sectors, // vol_size
+			  0,	   // total data sectors
+			  0,	   // live sectors
+			  1,	   // next object
+			  0, 0,	   // checkpoint offset, len
+			  0, 0,	   // clone offset, len
+			  0, 0};   // snap offset, len
+    
+    iovec iov = {buf, 4096};
+    auto rv = objstore->write_object(name, &iov, 1);
+    free(buf);
+    return rv;
 }
 
 void translate_impl::getmap(int base, int limit,

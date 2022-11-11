@@ -108,12 +108,9 @@ class read_cache_impl : public read_cache {
     
     /* evict 'n' blocks - random replacement
      */
-// evict :	Frees n number of blocks and erases oo from the map
     void evict(int n);
-
     void evict_thread(thread_pool<int> *p);
-    
-    char *get_cacheline_buf(int n); /* TODO: document this */
+    char *get_cacheline_buf(int n);
 
 public:
     read_cache_impl(uint32_t blkno, int _fd, bool nt,
@@ -137,8 +134,6 @@ public:
     void do_add(extmap::obj_offset unit, char *buf); /* TODO: document */
     void do_evict(int n);       /* TODO: document */
     void write_map(void);
-
-    void kill(void);
 };
 
 /* factory function so we can hide implementation
@@ -203,18 +198,13 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, bool nt,
 
 read_cache_impl::~read_cache_impl() {
     misc_threads.stop();	// before we free anything threads might touch
+    delete ssd;
 	
     free((void*)flat_map);
     for (auto i = 0; i < super->units; i++)
 	if (buffer[i] != NULL)
 	    free(buffer[i]);
     free((void*)super);
-    delete ssd;
-}
-
-void read_cache_impl::kill(void) {
-    ssd->kill();
-    misc_threads.kill();
 }
 
 #if 0

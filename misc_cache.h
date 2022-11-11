@@ -54,28 +54,6 @@ public:
             stop();
     }
 
-    void kill(void) {
-        running = false;
-	while (!pool.empty()) {
-	    pool.front().detach();
-	    pool.pop();
-	}
-        cv.notify_all();
-    }
-    
-    void kill(void (*f)(T)) {
-        running = false;
-	while (!pool.empty()) {
-	    pool.front().detach();
-	    pool.pop();
-	}
-        while (q.size() > 0) {
-            f(q.front());
-            q.pop();
-        }
-        cv.notify_all();
-    }
-
     bool get_locked(std::unique_lock<std::mutex> &lk, T &val) {
         while (running && q.empty())
             cv.wait(lk);

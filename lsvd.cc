@@ -157,17 +157,19 @@ int rbd_image::image_close(void) {
 }
 
 void rbd_image::image_kill(void) {
-    rcache->kill();
-    wcache->kill();
-    objstore->kill();
+    wcache->stop();
     xlate->kill();
+    delete objstore;
+    delete xlate;
+    delete rcache;
+    delete wcache;
     close(fd);
-    delete this;
 }
 
 extern "C" int rbd_kill(rbd_image_t image) {
     rbd_image *img = (rbd_image*)image;
     img->image_kill();
+    delete img;
     return 0;
 }
 
@@ -685,8 +687,27 @@ extern "C" int rbd_invalidate_cache(rbd_image_t image)
 extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
                             int *order)
 {
-    return -1;
+    lsvd_config  cfg;
+    if (cfg.read() < 0)
+	return -1;
+
+    backend *objstore;
+    switch (cfg.backend) {
+    case BACKEND_FILE:
+	objstore = make_file_backend();
+	break;
+    case BACKEND_RADOS:
+	objstore = make_rados_backend(io);
+	break;
+    default:
+	return -1;
+    }
+    
+    auto rv = translate_create_image(objstore, name, size);
+    delete objstore;
+    return rv;
 }
+
 extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
 {
     return -1;

@@ -45,7 +45,7 @@ public:
     virtual void do_write_checkpoint(void) = 0;
     virtual std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) = 0;
 
-    virtual void kill(void) = 0;
+    virtual void stop(void) = 0; /* don't talk to translate */
 };
 
 extern write_cache *make_write_cache(uint32_t blkno, int fd,

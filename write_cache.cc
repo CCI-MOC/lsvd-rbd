@@ -118,6 +118,10 @@ class write_cache_impl : public write_cache {
     j_hdr *mk_header(char *buf, uint32_t type, page_t blks);
     nvme 		      *nvme_w = NULL;
 
+    /* debug stuff
+     */
+    bool stopped = false;
+    
 public:
 
     /* throttle writes with window of max_write_pages
@@ -145,6 +149,8 @@ public:
     void reset(void);
     void get_super(j_write_super *s); /* copies superblock */
 
+    void stop(void) {stopped = true;}
+    
     /*  @blk - header to read
      *  @extents - data to move. empty if J_PAD or J_CKPT
      *  return value - first page of next record
@@ -155,8 +161,6 @@ public:
     std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) {
 	return std::make_pair(&m, &map);
     }
-
-    void kill(void);
 };
 
 void print_pages(write_cache_impl *w, const char *file) {
@@ -301,7 +305,8 @@ void wcache_write_req::notify_in_order(std::unique_lock<std::mutex> &lk) {
     for (auto w : work) {
 	auto [iov, iovcnt] = w->iov->c_iov();
 	//check_crc(lba, iov, iovcnt, "3");
-	wcache->be->writev(w->lba*512, iov, iovcnt);
+	if (!wcache->stopped)
+	    wcache->be->writev(w->lba*512, iov, iovcnt);
     }
     lk.unlock();
     for (auto w : work) {
@@ -648,7 +653,7 @@ void write_cache_impl::read_map_entries() {
 std::tuple<bool,page_t,uint64_t> chase(page_t page, uint64_t seq, page_t limit,
 				       j_hdr *hdrs) {
     auto hdr = hdrs + page;
-    while (hdr->magic == LSVD_MAGIC && hdr->seq == seq && page < limit) {
+    while (page < limit && hdr->magic == LSVD_MAGIC && hdr->seq == seq) {
 	page += hdr->len;
 	seq++;
 	hdr = hdrs + page;
@@ -733,7 +738,8 @@ int write_cache_impl::roll_log_forward() {
 	 */
 	if (hdr->type == LSVD_J_PAD) {
 	    cache_blocks[idx++] =
-		(page_desc){WCACHE_PAD, (int)(super->limit - super->next)};
+		(page_desc){WCACHE_PAD,
+			    (int)(super->limit - idx - super->base)};
 	    while (idx < (page_t)(super->limit - super->base))
 		cache_blocks[idx++].type = WCACHE_NONE;
 	    b = super->base;
@@ -767,7 +773,8 @@ int write_cache_impl::roll_log_forward() {
 
 	    size_t bytes = e.len * 512;
 	    iovec iov = {data+offset, bytes};
-	    be->writev(e.lba*512, &iov, 1);
+	    if (!stopped)
+		be->writev(e.lba*512, &iov, 1);
 	    offset += bytes;
 	    plba += e.len;
 	}
@@ -835,11 +842,6 @@ write_cache_impl::~write_cache_impl() {
     free(super);
     free(_hdrbuf);
     delete nvme_w;
-}
-
-void write_cache_impl::kill(void) {
-    nvme_w->kill();
-    misc_threads->kill();
 }
 
 void write_cache_impl::send_writes(void) {

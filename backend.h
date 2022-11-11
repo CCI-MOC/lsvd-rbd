@@ -31,7 +31,6 @@ public:
                                     iovec *iov, int iovcnt) = 0;
     virtual request *make_read_req(const char *name, size_t offset,
                                    char *buf, size_t len) = 0;
-    virtual void kill(void) = 0;
 };
 
 extern backend *make_file_backend();

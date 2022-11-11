@@ -46,11 +46,13 @@ public:
     virtual void reset(void) = 0;
     virtual int frontier(void) = 0;
     virtual void set_completion(int next) = 0;
-
     virtual void kill(void) = 0;
 };
 
 extern translate *make_translate(backend *_io, lsvd_config *cfg,
                                  extmap::objmap *map, std::shared_mutex *m);
+
+extern int translate_create_image(backend *objstore, const char *name,
+                                  uint64_t size);
 
 #endif
