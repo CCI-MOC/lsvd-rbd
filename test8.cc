@@ -126,6 +126,15 @@ void create_image(std::string name, int sectors) {
 		      0};	  // data_sectors
     uuid_generate_random(_hdr->vol_uuid);
 
+    auto _super = (super_hdr*)(_hdr + 1);
+    *_super = (super_hdr){(uint64_t)sectors, // vol_size
+			  0,	   // total data sectors
+			  0,	   // live sectors
+			  1,	   // next object
+			  0, 0,	   // checkpoint offset, len
+			  0, 0,	   // clone offset, len
+			  0, 0};   // snap offset, len
+
     unlink(name.c_str());
     FILE *fp = fopen(name.c_str(), "w");
     if (fp == NULL)
