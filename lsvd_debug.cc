@@ -658,4 +658,17 @@ extern "C" int rbd_getmap(sector_t base, sector_t limit, rbd_image *img, int max
     return s.i;
 }
 
+extern "C" void map_lookup(extmap::objmap *map, sector_t sector, int len) {
+    sector_t base = sector, limit = base+len;
+    auto it = map->lookup(base);
+    if (it == map->end())
+	printf("not found\n");
+    else if (it->base() >= limit)
+	printf("next entry: %d\n", (int)it->base());
+    else {
+	auto [_base, _limit, _ptr] = it->vals(base, limit);
+	printf("%ld %ld %ld+%d\n", _base, _limit, _ptr.obj, _ptr.offset);
+    }
+}
+
 #endif
