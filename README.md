@@ -31,9 +31,11 @@ Notes:
 Unit tests included here:
 - test1.py through test5.py - really simple functional tests
 - test6.py - replays a trace from the Ubuntu 14 install
-- test7.cc - random writes followed by readback, with CRC verification
-- test8.cc - random writes and reads from multiple threads, CRC verification
+- test7.cc - random writes and reads followed by readback, with CRC verification
+- test8.cc - random writes from multiple threads, CRC verification
 - test9.cc - similar, but crash and restart
+
+Writes are done with a size distribution vaguely based on the test6 QEMU trace - mostly small, with a few up to 16MB.
 
 ## Overview
 
