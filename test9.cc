@@ -50,21 +50,26 @@ struct cfg {
  * except it has lots more writes in the 128..32768 sector range
  */
 int n_sectors(void) {
-    std::uniform_int_distribution<int> uni16(0,16);
-    auto n = uni16(rng);
-    if (n < 8)
-	return 8;
-    int max;
-    if (n < 12)
-	max = 32;
-    else if (n < 14)
-	max = 64;
-    else if (n < 15)
-	max = 128;
-    else
-	max = 32768;
-    std::uniform_int_distribution<int> uni(8/8,max/8);
-    return uni(rng) * 8;
+    struct { float p; int max; } params[] = {
+	{0.5, 8},
+	{0.25, 32},
+	{0.125, 64},
+	{0.0625, 128},
+	{1.0, 4096}};
+    std::uniform_real_distribution<> uni(0.0,1.0);
+    float r = uni(rng);
+    int max = 8;
+
+    for (size_t i = 0; i < sizeof(params) / sizeof(params[0]); i++) {
+	if (r < params[i].p) {
+	    max = params[i].max;
+	    break;
+	}
+	r -= params[i].p;
+    }
+
+    std::uniform_int_distribution<int> uni_max(8/8,max/8);
+    return uni_max(rng) * 8;
 }
 
 int gen_lba(int max, int n) {
@@ -203,18 +208,83 @@ void obj_delete(struct cfg *cfg) {
 	    last_ckpt = seq;
     }
 
+    printf("last_ckpt %08x last_file %08x\n", last_ckpt, files[files.size()-1].first);
+    
     std::uniform_real_distribution<> uni(0.0,1.0);
 
-    for (int i = 0, j = files.size() - 1;
-	 i < cfg->lose_objs && j > last_ckpt; i++, j--)
+    for (int i = 0, j = files.size()-1; i < cfg->lose_objs; i++, j--) {
+	auto [seq, file] = files[j];
+	if (seq <= last_ckpt)
+	    break;
 	if (uni(rng) < 0.5) {
-	    fs::remove(dir + "/" + files[j].second);
-	    printf("rm %s\n", files[j].second.c_str());
+	    fs::remove(dir + "/" + file);
+	    printf("rm %s\n", file.c_str());
 	}
+    }
 }
 
 void lose_writes(struct cfg *cfg) {
     printf("lose_writes: not implemented\n");
+}
+
+void kill_image(rbd_image_t img, struct cfg *cfg) {
+    auto prefix = std::string(cfg->obj_prefix);
+    auto stem = fs::path(prefix).filename();
+    auto parent = fs::path(prefix).parent_path();
+    size_t stem_len = strlen(stem.c_str());
+
+    /* save a copy of the superblock
+     */
+    char buf[4096];
+    std::ifstream fp(prefix, std::ios::binary);
+    assert(fp.read(buf, sizeof(buf)));
+    fp.close();
+    auto _hdr = (obj_hdr*)buf;
+    auto super = (super_hdr*)(_hdr+1);
+
+    std::vector<uint32_t> ckpts;
+    decode_offset_len<uint32_t>(buf, super->ckpts_offset, super->ckpts_len, ckpts);
+    
+    printf("ckpts: ");
+    for (auto c : ckpts)
+	printf(" %x", c);
+    printf("\n");
+    
+    /* find the most recent object written
+     */
+    std::vector<std::pair<int, std::string>> files;
+    for (auto const& dir_entry : fs::directory_iterator{parent}) {
+	std::string entry{dir_entry.path().filename()};
+	if (strncmp(entry.c_str(), stem.c_str(), stem_len) == 0)
+	    if (entry.size() == stem_len + 9) {
+		int seq = strtol(entry.c_str() + stem_len+1, NULL, 16);
+		files.push_back(std::make_pair(seq, entry));
+	    }
+	}
+
+    std::sort(files.begin(), files.end());
+    auto latest = files[files.size()-1].first;
+
+    /* after we close the image, set everything back to the state from just
+     * before closing
+     */
+    rbd_kill(img);
+    std::ofstream fp2(prefix, std::ios::binary);
+    assert(fp2.write(buf, sizeof(buf)));
+    fp2.close();
+
+    for (auto const& dir_entry : fs::directory_iterator{parent}) {
+	std::string entry{dir_entry.path().filename()};
+	if (strncmp(entry.c_str(), stem.c_str(), stem_len) == 0) {
+	    if (entry.size() == stem_len + 9) {
+		int seq = strtol(entry.c_str() + stem_len+1, NULL, 16);
+		if (seq > latest) {
+		    printf("kill: removing %s\n", entry.c_str());
+		    fs::remove(dir_entry.path());
+		}
+	    }
+	}
+    }
 }
 
 void run_test(unsigned long seed, struct cfg *cfg) {
@@ -292,7 +362,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	}
     }
     printf(" K "); fflush(stdout);
-    rbd_kill(img);
+    kill_image(img, cfg);
     
     if (cfg->lose_objs)
 	obj_delete(cfg);
@@ -319,6 +389,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    uint32_t crc = crc32(0, p, 512);
 	    image_info[sector + j/512] = (triple){sector+j/512,
 						  *(int*)(p+4), crc};
+	    assert(*(int*)(p+4) <= (int)image_info.size()+1);
 	}
 	if (++i > cfg->image_sectors / 128 / 10) {
 	    printf("-"); fflush(stdout);
@@ -332,8 +403,10 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     
     int max_seq = 0;
     for (int i = 0; i < cfg->image_sectors; i++)
-	if (image_info[i].seq > max_seq)
+	if (image_info[i].seq > max_seq) {
+	    assert(max_seq <= (int)image_info.size()+1);
 	    max_seq = image_info[i].seq;
+	}
 
     printf("lost %d writes\n", n_requests - max_seq);
     
