@@ -16,18 +16,24 @@ Pick a RADOS pool, an image name, and a directory on an SSD-based file system (`
 
 2. initialize the cache, using the same UUID. 
 
-    `sudo python3 mkcache.py --size 300M --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 /mnt/nvme/lsvd/img1.cache`
+    `sudo python3 mkcache.py --size 400M --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 /mnt/nvme/lsvd/img1.cache`
+
+Note that the cache needs to be at least this big because the write cache is only 1/2 of it, and if it's too small (a) really large writes can deadlock it, and (b) it might not be able to hold all the outstanding writes to the backend, risking data loss if you crash and restart.
 
 3. start KVM using the virtual disk. (note - you can use the file `lsvd.conf` instead of environment variables - see config.h / config.cc for details. Keywords are the same as field names.
 
     `sudo env LSVD_CACHE_DIR=/mnt/nvme/lsvd LD_PRELOAD=$PWD/liblsvd.so qemu-system-x86_64 -m 1024 -cdrom whatever.iso -blockdev '{"driver":"rbd","pool":"rbd","image":"rbd/img1","server":[{"host":"10.1.0.4","port":"6789"}],"node-name":"libvirt-2-storage","auto-read-only":true,"discard":"unmap"}' -device virtio-blk,drive=libvirt-2-storage -k en-us -machine accel=kvm -smp 2 -m 1024`
 
 Notes:
-- cache gets divided 2/3 read cache, 1/3 write cache
+- cache gets divided 1/2 read cache, 1/2 write cache
 - LSVD looks in `$LSVD_CACHE_DIR` (or `cache_dir` from `lsvd.conf`) for (a) `<img>.cache`, then `<uuid>.cache`. If it doesn't find either it creates a cache with default parameters, but that's currently broken.
-- there's a lot of debug code in there at the moment - on write it saves CRC32s of every sector, and verifies them on read
-- unit tests are in test1.py through test6.py, using Python ctypes to access the shared library. Kind of gross, but it works.
-- I've successfully installed Ubuntu 14, rebooted, and shut down, but I think there are still some bugs with the cache. (plus I need to disable the CRC checking before it can restart properly anyway - it doesn't load the table on restart)
+
+Unit tests included here:
+- test1.py through test5.py - really simple functional tests
+- test6.py - replays a trace from the Ubuntu 14 install
+- test7.cc - random writes followed by readback, with CRC verification
+- test8.cc - random writes and reads from multiple threads, CRC verification
+- test9.cc - similar, but crash and restart
 
 ## Overview
 
