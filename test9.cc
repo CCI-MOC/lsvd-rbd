@@ -13,11 +13,13 @@ namespace fs = std::experimental::filesystem;
 #include <mutex>
 #include <atomic>
 #include <algorithm>
+#include <fstream>
 
 #include "fake_rbd.h"
 #include "objects.h"
 #include "lsvd_types.h"
 #include "lsvd_debug.h"
+#include "objname.h"
 
 extern bool __lsvd_dbg_reverse;
 extern bool __lsvd_dbg_be_delay;
@@ -38,7 +40,9 @@ struct cfg {
     bool   restart;
     bool   verbose;
     bool   existing;
-    int    objdelete;
+    int    lose_objs;
+    bool   wipe_cache;
+    int    lose_writes;
 };
 
 
@@ -129,6 +133,15 @@ void create_image(std::string name, int sectors) {
 		      0};	  // data_sectors
     uuid_generate_random(_hdr->vol_uuid);
 
+    auto _super = (super_hdr*)(_hdr + 1);
+    *_super = (super_hdr){(uint64_t)sectors, // vol_size
+			  0,	   // total data sectors
+			  0,	   // live sectors
+			  1,	   // next object
+			  0, 0,	   // checkpoint offset, len
+			  0, 0,	   // clone offset, len
+			  0, 0};   // snap offset, len
+
     unlink(name.c_str());
     FILE *fp = fopen(name.c_str(), "w");
     if (fp == NULL)
@@ -175,13 +188,33 @@ void obj_delete(struct cfg *cfg) {
 	}
 
     std::sort(files.begin(), files.end());
+
+    /* find the last checkpoint - we're guaranteed not to have lost
+     * that or any preceding objects
+     */
+    int last_ckpt = 0;
+    for (auto [seq, name] : files) {
+	std::string path = dir + "/" + name;
+	std::ifstream fp(path, std::ios::binary);
+	char buf[512];
+	assert(fp.read(buf, sizeof(buf)));
+	auto _hdr = (obj_hdr*) buf;
+	if (_hdr->type == LSVD_CKPT)
+	    last_ckpt = seq;
+    }
+
     std::uniform_real_distribution<> uni(0.0,1.0);
 
-    for (int i = 0, j = files.size() - 1; i < cfg->objdelete; i++, j--)
+    for (int i = 0, j = files.size() - 1;
+	 i < cfg->lose_objs && j > last_ckpt; i++, j--)
 	if (uni(rng) < 0.5) {
 	    fs::remove(dir + "/" + files[j].second);
 	    printf("rm %s\n", files[j].second.c_str());
 	}
+}
+
+void lose_writes(struct cfg *cfg) {
+    printf("lose_writes: not implemented\n");
 }
 
 void run_test(unsigned long seed, struct cfg *cfg) {
@@ -258,8 +291,16 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    op_crcs.push_back((op){lba, n, s, crc_list});
 	}
     }
+    printf(" K "); fflush(stdout);
     rbd_kill(img);
     
+    if (cfg->lose_objs)
+	obj_delete(cfg);
+    if (cfg->wipe_cache)
+	clean_cache(cfg->cache_dir);
+    else if (cfg->lose_writes)
+	lose_writes(cfg);
+
     if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	printf("failed: rbd_open\n"), exit(1);
 
@@ -288,9 +329,6 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     free(buf);
     rbd_close(img);
     __lsvd_dbg_be_delay = tmp;
-
-    if (cfg->objdelete)
-	obj_delete(cfg);
     
     int max_seq = 0;
     for (int i = 0; i < cfg->image_sectors; i++)
@@ -312,13 +350,13 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    j++;
 	}
     }
-    bool failed = false;
-    for (int i = 0; i < cfg->image_sectors; i++)
+    int failed = 0;
+    for (int i = 0; i < cfg->image_sectors && failed < 100; i++)
 	if (should_be_crcs[i].crc != image_info[i].crc) {
 	    printf("%d : %08x (seq %d) should be: %08x (%d)\n", i,
 		   image_info[i].crc, image_info[i].seq,
 		   should_be_crcs[i].crc, should_be_crcs[i].seq);
-	    failed = true;
+	    failed++;
 	}
     assert(!failed);
     printf("ok\n");
@@ -340,7 +378,9 @@ static struct argp_option options[] = {
     {"reverse",  'R', 0,      0, "reverse NVMe completion order"},
     {"existing", 'x', 0,      0, "don't delete existing cache"},
     {"delay",    'D', 0,      0, "add random backend delays"},
-    {"objdelete",'o', "N",    0, "delete some of last N objects"},
+    {"lose-objs",'o', "N",    0, "delete some of last N objects"},
+    {"wipe-cache",'W', 0,     0, "delete cache on restart"},
+    {"lose-writes",'L', "N",    0, "delete some of last N cache writes"},
     {0},
 };
 
@@ -356,7 +396,9 @@ struct cfg _cfg = {
     true,			// restart
     false,			// verbose
     false,			// existing
-    0};				// objdelete
+    0,				// lose_objs
+    false,			// wipe_cache
+    0};				// lose_writes
 
 off_t parseint(char *s)
 {
@@ -415,7 +457,13 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	__lsvd_dbg_be_delay = true;
 	break;
     case 'o':
-	_cfg.objdelete = atoi(arg);
+	_cfg.lose_objs = atoi(arg);
+	break;
+    case 'W':
+	_cfg.wipe_cache = true;
+	break;
+    case 'L':
+	_cfg.lose_writes = atoi(arg);
 	break;
     case ARGP_KEY_END:
         break;
