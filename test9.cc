@@ -245,11 +245,6 @@ void kill_image(rbd_image_t img, struct cfg *cfg) {
     std::vector<uint32_t> ckpts;
     decode_offset_len<uint32_t>(buf, super->ckpts_offset, super->ckpts_len, ckpts);
     
-    printf("ckpts: ");
-    for (auto c : ckpts)
-	printf(" %x", c);
-    printf("\n");
-    
     /* find the most recent object written
      */
     std::vector<std::pair<int, std::string>> files;
@@ -300,7 +295,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	started = true;
     }
 
-    setenv("LSVD_CACHE_SIZE", "100M", 1);
+    setenv("LSVD_CACHE_SIZE", "200M", 1);
     setenv("LSVD_BACKEND", "file", 1);
     setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
     
@@ -408,7 +403,10 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    max_seq = image_info[i].seq;
 	}
 
-    printf("lost %d writes\n", n_requests - max_seq);
+    int secs = 0;
+    for (size_t i = max_seq; i < op_crcs.size(); i++)
+	secs += op_crcs[i].len;
+    printf("lost %d writes (%.1f MB)\n", n_requests - max_seq, secs / 2.0 / 1024);
     
     std::vector<triple> should_be_crcs(cfg->image_sectors);
     for (int i = 0; i < cfg->image_sectors; i++)
