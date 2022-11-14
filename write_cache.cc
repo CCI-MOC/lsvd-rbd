@@ -688,10 +688,15 @@ bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
 	auto _seq0 = hdr->seq;
 	auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs);
 	if (rv && _page == (page_t)limit) {
-	    part2_min = part1_min;
-	    part2_max = part1_max;
-	    part1_min = std::make_pair(b, _seq0);
-	    part1_max = std::make_pair(_page, _seq);
+	    /* if we overwrote PAD, there might be dangling old 
+	     * data - check and ignore that.
+	     */
+	    if (part1_min.second == _seq) {
+		part2_min = part1_min;
+		part2_max = part1_max;
+		part1_min = std::make_pair(b, _seq0);
+		part1_max = std::make_pair(_page, _seq);
+	    }
 	    return true;
 	}
     }
@@ -725,6 +730,8 @@ int write_cache_impl::roll_log_forward() {
     page_t end = super->next = part2_max.first;
     if (end == 0)
 	end = part1_max.first;
+    else
+	assert(part1_max.second == part2_min.second);
     
     for (int b = start; b != end; ) {
 	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
@@ -768,6 +775,7 @@ int write_cache_impl::roll_log_forward() {
 	std::vector<extmap::lba2lba> garbage;
 	
 	for (auto e : entries) {
+	    do_log("rlf %d+%d\n", (int)e.lba, (int)e.len);
 	    map.update(e.lba, e.lba+e.len, plba, &garbage);
 	    rmap.update(plba, plba+e.len, e.lba);
 
@@ -786,7 +794,9 @@ int write_cache_impl::roll_log_forward() {
 	if (b >= (page_t)super->limit)
 	    b = super->base;
     }
-
+    be->flush();
+    usleep(10000);
+    
     return 0;
 }
 

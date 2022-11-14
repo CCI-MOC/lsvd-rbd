@@ -58,12 +58,14 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
 
 extern int make_cache(std::string name, uuid_t &uuid, int n_pages);
 
+bool __lsvd_dbg_no_gc = false;
+
 int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     if (cfg.read() < 0)
 	return -1;
     switch (cfg.backend) {
     case BACKEND_FILE:
-	objstore = make_file_backend();
+	objstore = make_file_backend(name);
 	break;
     case BACKEND_RADOS:
 	objstore = make_rados_backend(io);
@@ -102,6 +104,9 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     rcache = make_read_cache(js->read_super, fd, false,
 			     xlate, &map, &map_lock, objstore);
     free(js);
+
+    if (!__lsvd_dbg_no_gc)
+	xlate->start_gc();
     
     return 0;
 }
@@ -320,7 +325,7 @@ enum rbd_req_status {
     REQ_LAUNCHED = 2,
     REQ_WAIT = 4
 };
-    
+
 /* rbd_aio_req - state machine for rbd_aio_read, rbd_aio_write
  *
  * TODO: fix this. I merged separate read & write classes in the
@@ -330,7 +335,7 @@ class rbd_aio_req : public request {
     rbd_image        *img;
     lsvd_completion  *p;
     char             *aligned_buf = NULL;
-    uint64_t          offset;
+    uint64_t          offset;	// in bytes
     sector_t          _sector;
     lsvd_op           op;
     smartiov          iovs;
@@ -443,16 +448,21 @@ class rbd_aio_req : public request {
 	    smartiov wcache_iov = aligned_iovs.slice(_offset,_end);
             auto [skip,wait,req] =
                 img->wcache->async_readv(offset, &wcache_iov);
-	    if (req != NULL)
+	    if (req != NULL) {
 		requests.push_back(req);
-
+		do_log("w %d %d %d\n", (int)_sector, (int)(offset+skip)/512, (int)wait/512);
+	    }
             while (skip > 0) {
 		smartiov rcache_iov = aligned_iovs.slice(_offset, _offset+skip);
                 auto [skip2, wait2, req2] =
                     img->rcache->async_readv(offset, &rcache_iov);
-		if (req2)
+		if (req2) {
 		    requests.push_back(req2);
+		    do_log("r %d %d %d\n", (int)_sector, (int)(offset+skip2)/512, (int)wait2/512);
+		}
 
+		if (skip2)
+		    do_log("z %d %d %d\n", (int)_sector, (int)(offset/512), (int)skip2/512);
 		aligned_iovs.zero(_offset, _offset+skip2);
                 skip -= (skip2 + wait2);
                 _offset += (skip2 + wait2);
@@ -617,11 +627,14 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
-    //do_log("rbd_read\n");
+    do_log("rbd_read %d\n", (int)(off / 512));
     rbd_image *img = (rbd_image*)image;
     auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
+    
     req->run(NULL);
+    do_log("rbd_read(2)\n");
     req->wait();
+    do_log("rbd_read(3)\n");
     return 0;
 }
 
@@ -651,11 +664,17 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
     return 0;
 }
 
+/* note that obj_size and order should match chunk size in
+ * rbd_aio_req::run_w
+ */
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
     //do_log("rbd_stat\n");
     rbd_image *img = (rbd_image*)image;
+    memset(info, 0, sizeof(*info));
     info->size = img->size;
+    info->obj_size = 2*1024*1024; // 2^21 bytes
+    info->order = 21;		  // 2^21 bytes
     return 0;
 }
 
@@ -694,7 +713,7 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
     backend *objstore;
     switch (cfg.backend) {
     case BACKEND_FILE:
-	objstore = make_file_backend();
+	objstore = make_file_backend(NULL);
 	break;
     case BACKEND_RADOS:
 	objstore = make_rados_backend(io);

@@ -33,7 +33,7 @@ public:
                                    char *buf, size_t len) = 0;
 };
 
-extern backend *make_file_backend();
+extern backend *make_file_backend(const char *prefix);
 extern backend *make_rados_backend(rados_ioctx_t io);
 
 #endif

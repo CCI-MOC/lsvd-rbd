@@ -183,7 +183,8 @@ public:
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
     bool check_object_ready(int obj);
     void wait_object_ready(int obj);
-
+    void start_gc(void);
+    
     const char *prefix() { return single_prefix; }
     
     /* debug functions
@@ -271,7 +272,8 @@ ssize_t translate_impl::init(const char *prefix_,
 	}
 	if (last_ckpt == -1)
 	    return -1;
-	
+
+	do_log("read checkpoint %d 0x%d\n", last_ckpt, last_ckpt);
 	for (auto o : objects) {
 	    object_info[o.seq] = (obj_info){.hdr = (int)o.hdr_sectors,
 					    .data = (int)o.data_sectors,
@@ -288,6 +290,8 @@ ssize_t translate_impl::init(const char *prefix_,
 	seq = next_compln = last_ckpt + 1;
     }
 
+    do_log("start roll forward: %d\n", (int)seq);
+    
     /* roll forward
      */
     for (; ; seq++) {
@@ -305,6 +309,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	    continue;
 	}
 
+	do_log("read object: %d 0x%x\n", (int)seq, (int)seq);
 	assert(h.type == LSVD_DATA);
 	object_info[seq] = (obj_info){.hdr = (int)h.hdr_sectors,
 				      .data = (int)h.data_sectors,
@@ -344,12 +349,14 @@ ssize_t translate_impl::init(const char *prefix_,
     if (timedflush)
 	misc_threads.pool.push(std::thread(&translate_impl::flush_thread,
 					   this, &misc_threads));
-    misc_threads.pool.push(std::thread(&translate_impl::gc_thread,
-				       this, &misc_threads));
-
     return bytes;
 }
 
+void translate_impl::start_gc(void) {
+    misc_threads.pool.push(std::thread(&translate_impl::gc_thread,
+				       this, &misc_threads));
+}
+    
 void translate_impl::shutdown(void) {
 }
 

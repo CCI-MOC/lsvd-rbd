@@ -92,7 +92,7 @@ extern "C" int dbg_lsvd_flush(rbd_image_t image)
 extern "C" int xlate_open(char *name, int n, bool flushthread, void **p)
 {
     auto d = new _dbg();
-    d->io = make_file_backend();
+    d->io = make_file_backend(name);
     d->lsvd = make_translate(d->io, &d->cfg, &d->obj_map, &d->obj_lock);
     auto rv = d->lsvd->init(name, n, flushthread);
     *p = (void*)d;
