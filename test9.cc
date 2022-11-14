@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <argp.h>
+#include <fcntl.h>
 
 #include <random>
 #include <chrono>
@@ -17,6 +18,7 @@ namespace fs = std::experimental::filesystem;
 
 #include "fake_rbd.h"
 #include "objects.h"
+#include "journal.h"
 #include "lsvd_types.h"
 #include "lsvd_debug.h"
 #include "objname.h"
@@ -42,7 +44,7 @@ struct cfg {
     bool   existing;
     int    lose_objs;
     bool   wipe_cache;
-    int    lose_writes;
+    size_t lose_writes;
 };
 
 
@@ -177,6 +179,27 @@ void print_iolist(void) {
 	printf("%d %d\n", lba, len);
 }
 
+std::string get_cache_filename(struct cfg *cfg) {
+    char buf[4096];
+
+    std::ifstream obj_fp(std::string(cfg->obj_prefix), std::ios::binary);
+    assert(obj_fp.read(buf, sizeof(buf)));
+    auto super = (obj_hdr*)buf;
+
+    char uuid_str[64];
+    uuid_unparse(super->vol_uuid, uuid_str);
+    auto uuid_name = std::string(cfg->cache_dir) + "/" + std::string(uuid_str) + ".cache";
+    
+    auto stem = fs::path(cfg->obj_prefix).filename();
+    auto obj_name = std::string(cfg->cache_dir) + "/" + std::string(stem) + ".cache";
+
+    if (fs::exists(obj_name))
+	return obj_name;
+    if (fs::exists(uuid_name))
+	return uuid_name;
+    assert(false);
+}
+
 void obj_delete(struct cfg *cfg) {
     std::vector<std::pair<int, std::string>> files;
     std::string dir = fs::path(cfg->obj_prefix).parent_path();
@@ -224,7 +247,45 @@ void obj_delete(struct cfg *cfg) {
 }
 
 void lose_writes(struct cfg *cfg) {
-    printf("lose_writes: not implemented\n");
+    auto cache = get_cache_filename(cfg);
+    int fd = open(cache.c_str(), O_RDWR, 0777);
+    
+    char buf[4096];
+    assert(pread(fd, buf, sizeof(buf), 0) == sizeof(buf));
+    auto super = (j_super*)buf;
+    assert(super->magic == LSVD_MAGIC && super->type == LSVD_J_SUPER);
+
+    assert(pread(fd, buf, sizeof(buf), super->write_super * 4096) == 4096);
+    auto w_super = (j_write_super*)buf;
+    assert(w_super->magic == LSVD_MAGIC && w_super->type == LSVD_J_W_SUPER);
+
+    auto base = w_super->base, limit = w_super->limit;
+    std::vector<int> header_pages;
+    uint32_t seq = 0;
+    
+    for (int i = base; i < limit; ) {
+	assert(pread(fd, buf, sizeof(buf), i * 4096) == 4096);
+	auto hdr = (j_hdr*)buf;
+	if (seq == 0)
+	    seq = hdr->seq - 1;
+	if (hdr->magic != LSVD_MAGIC || hdr->type != LSVD_J_DATA || hdr->seq != seq+1)
+	    break;
+	seq++;
+	header_pages.push_back(i);
+	i += hdr->len;
+    }
+    
+    memset(buf, 0, sizeof(buf));
+
+    std::uniform_real_distribution<> uni(0.0,1.0);
+    std::reverse(header_pages.begin(), header_pages.end());
+    for (size_t i = 0; i < cfg->lose_writes && i < header_pages.size(); i++)
+	if (uni(rng) < 0.5) {
+	    int n = header_pages[i];
+	    assert(pwrite(fd, buf, sizeof(buf), n * 4096) == 4096);
+	    printf("overwriting %d\n", n);
+	}
+    close(fd);
 }
 
 void kill_image(rbd_image_t img, struct cfg *cfg) {
@@ -356,7 +417,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    op_crcs.push_back((op){lba, n, s, crc_list});
 	}
     }
-    printf(" K "); fflush(stdout);
+    printf(" K\n");
     kill_image(img, cfg);
     
     if (cfg->lose_objs)
