@@ -34,6 +34,9 @@ test8: test8.o $(OBJS)
 test9: test9.o $(OBJS)
 	$(CXX) -o $@ test9.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
 
+test10: test10.o $(OBJS)
+	$(CXX) -o $@ test10.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+
 # Add .d to Make's recognized suffixes.
 SUFFIXES += .d
 
