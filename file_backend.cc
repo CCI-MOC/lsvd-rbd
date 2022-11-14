@@ -83,7 +83,6 @@ int file_backend::get_fd(const char* f) {
 	    auto it = fds.find(evictee);
 	    assert(it != fds.end());
 	    close(it->second);
-	    do_log("close %d\n", it->second);
 	    fds.erase(it);
 	    lru.erase(lru.begin());
 	}
@@ -93,7 +92,6 @@ int file_backend::get_fd(const char* f) {
 	auto hdr = (obj_hdr*)buf;
 	uint32_t seq = strtol(f + strlen(f) - 8, NULL, 16);
 	assert(seq == hdr->seq);
-	do_log("%s validated %d = %d\n", f+15, (int)seq, fd);
 	lru.push_back(s);
 	fds[s] = fd;
     }
@@ -161,9 +159,11 @@ void trim_partial(const char *_prefix) {
 	    int rv = read(fd, buf, sizeof(buf));
 	    if (rv < 512 || h->magic != LSVD_MAGIC ||
 		(h->hdr_sectors + h->data_sectors)*512 != sb.st_size) {
-		printf("deleting partial object: %s\n",
-		       dir_entry.path().c_str());
-		unlink(dir_entry.path().c_str());
+		printf("deleting partial object: %s (%d vs %d)\n",
+		       dir_entry.path().c_str(), (int)sb.st_size,
+		       (int)(h->hdr_sectors + h->data_sectors));
+		rename(dir_entry.path().c_str(),
+		       (std::string(dir_entry.path()) + ".bak").c_str());
 	    }
 	    close(fd);
 	}
@@ -212,7 +212,6 @@ public:
 	if (op == OP_READ) {
 	    fd = be->get_fd(name);
 	    auto rv = preadv(fd, iov, niovs, offset);
-	    int e = errno;
 	    assert(rv > 0);
 	}
 	else {
@@ -262,8 +261,6 @@ void file_backend::worker(thread_pool<file_backend_req*> *p) {
  */
 void file_backend_req::run(request *parent_) {
     parent = parent_;
-    do_log("f %s %d+%d\n", name+15, (int)offset/512,
-	   (int)(_iovs.bytes()/512));
     be->workers.put(this);
 }
 

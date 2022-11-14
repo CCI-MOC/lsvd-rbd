@@ -273,7 +273,6 @@ ssize_t translate_impl::init(const char *prefix_,
 	if (last_ckpt == -1)
 	    return -1;
 
-	do_log("read checkpoint %d 0x%d\n", last_ckpt, last_ckpt);
 	for (auto o : objects) {
 	    object_info[o.seq] = (obj_info){.hdr = (int)o.hdr_sectors,
 					    .data = (int)o.data_sectors,
@@ -290,8 +289,6 @@ ssize_t translate_impl::init(const char *prefix_,
 	seq = next_compln = last_ckpt + 1;
     }
 
-    do_log("start roll forward: %d\n", (int)seq);
-    
     /* roll forward
      */
     for (; ; seq++) {
@@ -309,7 +306,6 @@ ssize_t translate_impl::init(const char *prefix_,
 	    continue;
 	}
 
-	do_log("read object: %d 0x%x\n", (int)seq, (int)seq);
 	assert(h.type == LSVD_DATA);
 	object_info[seq] = (obj_info){.hdr = (int)h.hdr_sectors,
 				      .data = (int)h.data_sectors,
@@ -680,11 +676,16 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 			 .deletes_offset = 0, .deletes_len = 0,
 			 .map_offset = o3, .map_len = (uint32_t)map_bytes};
 
+    size_t tail = sectors * 512 -
+	(hdr_bytes + sizeof(ckpt_seq) + objs_bytes + map_bytes);
+    char tailbuf[512] = {0};
+    
     iovec iov[] = {{.iov_base = buf, .iov_len = hdr_bytes},
 		   {.iov_base = (char*)&ckpt_seq, .iov_len = sizeof(ckpt_seq)},
 		   {.iov_base = (char*)objects.data(), objs_bytes},
-		   {.iov_base = (char*)entries.data(), map_bytes}};
-
+		   {.iov_base = (char*)entries.data(), map_bytes},
+		   {.iov_base = tailbuf, tail}};
+    int niovs = (tail == 0) ? 4 : 5;
     /* and write it
      */
     lk.unlock();
@@ -693,7 +694,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 	return;
     
     objname name(prefix(), ckpt_seq);
-    objstore->write_object(name.c_str(), iov, 4);
+    objstore->write_object(name.c_str(), iov, niovs);
     notify_complete(ckpt_seq);
     lk.lock();
     

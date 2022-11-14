@@ -456,12 +456,9 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     else if (cfg->lose_writes)
 	lose_writes(cfg);
 
-    usleep(10000);
-    extern bool __lsvd_dbg_no_gc;
-    __lsvd_dbg_no_gc = true;
+    usleep(100000);
     if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	printf("failed: rbd_open\n"), exit(1);
-    usleep(500000);
 
     auto tmp = __lsvd_dbg_be_delay;
     __lsvd_dbg_be_delay = false;
@@ -479,11 +476,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     int i = 0;
     for (int sector = 0; sector < cfg->image_sectors; sector += bufsize/512) {
 	memset(buf, 0, bufsize);
-	auto p = (int*)buf;
 	rbd_read(img, sector*512L, bufsize, buf);
-	do_log("%d done\n", sector);
-	//for (int k = 0; k < bufsize/512; k++)
-	//    assert(!bitmap[sector+k] || (p[k*128] != 0 || p[k*128+1] != 0));
 	for (int j = 0; j < bufsize; j += 512) {
 	    auto p = (const unsigned char*)buf + j;
 	    uint32_t crc = crc32(0, p, 512);

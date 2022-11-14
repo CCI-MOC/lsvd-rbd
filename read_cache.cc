@@ -604,12 +604,6 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     if (outstanding_writes > maxbufs - 10)
 	use_cache = false;
     
-    do_log("rc %d %d %d %d %d\n", (int)base, (int)skip_sectors,
-	   (int)read_sectors, (int)in_cache, (int)use_cache);
-    if (!use_cache)
-	do_log("u %d %d %d %d\n", (int)free_blks.size(), (int)hit_stats.user,
-	       (int)hit_stats.backend, (int)outstanding_writes);
-
     if (in_cache) {		// lk2 held through this section
 	sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 	    start = blk_in_ssd + blk_offset,
@@ -679,8 +673,6 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	auto [_iov, _niov] = tmp.c_iov();
 	r->sub_req = io->make_read_req(name.c_str(), 512L*oo.offset,
 				       _iov, _niov);
-	do_log("rd %d+%d %d.%d\n", (int)(base+skip_sectors),
-	       (int)read_sectors, (int)oo.obj, (int)oo.offset);
 	r->state = RCACHE_DIRECT_READ;
     }
     return std::make_tuple(skip_len, read_len, r);

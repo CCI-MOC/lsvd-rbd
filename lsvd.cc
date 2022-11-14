@@ -450,7 +450,6 @@ class rbd_aio_req : public request {
                 img->wcache->async_readv(offset, &wcache_iov);
 	    if (req != NULL) {
 		requests.push_back(req);
-		do_log("w %d %d %d\n", (int)_sector, (int)(offset+skip)/512, (int)wait/512);
 	    }
             while (skip > 0) {
 		smartiov rcache_iov = aligned_iovs.slice(_offset, _offset+skip);
@@ -458,11 +457,8 @@ class rbd_aio_req : public request {
                     img->rcache->async_readv(offset, &rcache_iov);
 		if (req2) {
 		    requests.push_back(req2);
-		    do_log("r %d %d %d\n", (int)_sector, (int)(offset+skip2)/512, (int)wait2/512);
 		}
 
-		if (skip2)
-		    do_log("z %d %d %d\n", (int)_sector, (int)(offset/512), (int)skip2/512);
 		aligned_iovs.zero(_offset, _offset+skip2);
                 skip -= (skip2 + wait2);
                 _offset += (skip2 + wait2);
@@ -627,14 +623,12 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
-    do_log("rbd_read %d\n", (int)(off / 512));
+    //do_log("rbd_read %d\n", (int)(off / 512));
     rbd_image *img = (rbd_image*)image;
     auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
     
     req->run(NULL);
-    do_log("rbd_read(2)\n");
     req->wait();
-    do_log("rbd_read(3)\n");
     return 0;
 }
 

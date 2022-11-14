@@ -775,7 +775,6 @@ int write_cache_impl::roll_log_forward() {
 	std::vector<extmap::lba2lba> garbage;
 	
 	for (auto e : entries) {
-	    do_log("rlf %d+%d\n", (int)e.lba, (int)e.len);
 	    map.update(e.lba, e.lba+e.len, plba, &garbage);
 	    rmap.update(plba, plba+e.len, e.lba);
 
