@@ -469,7 +469,7 @@ void rcache_req::notify(request *child) {
     else if (state == RCACHE_BLOCK_WRITE) {
 	std::unique_lock lk(rci->m);
 	rci->written[n] = true;
-	rci->outstanding_writes++;
+	rci->outstanding_writes--;
 	next_state = RCACHE_DONE;
     }
     else if (state == RCACHE_DIRECT_READ) {
