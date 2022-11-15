@@ -43,7 +43,7 @@ fail:
 std::pair<char*,ssize_t>
 object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
 			  std::vector<clone_info*> &clones,
-			  std::vector<snap_info> &snaps,
+			  std::vector<snap_info*> &snaps,
 			  uuid_t &uuid) {
     char *super_buf = read_object_hdr(name, false);
     auto super_h = (obj_hdr*)super_buf;
@@ -57,20 +57,10 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
 
     decode_offset_len<uint32_t>(super_buf, super_sh->ckpts_offset,
 				super_sh->ckpts_len, ckpts);
-    decode_offset_len<snap_info>(super_buf, super_sh->snaps_offset,
-				 super_sh->snaps_len, snaps);
-
-    /* iterate through list of variable-length structures, storing
-     * pointers (note - underlying memory never gets freed)
-     */
-    clone_info *p_clone = (clone_info*)(super_buf + super_sh->clones_offset),
-	*end_clone = (clone_info*)(super_buf + super_sh->clones_offset +
-				   super_sh->clones_len);
-    for (; p_clone < end_clone; ) {
-	clones.push_back(p_clone);
-	p_clone = (clone_info*)(p_clone->name_len +
-				sizeof(clone_info) + (char *)p_clone);
-    }
+    decode_offset_len_ptr<clone_info>(super_buf, super_sh->clones_offset,
+				      super_sh->clones_len, clones);
+    decode_offset_len_ptr<snap_info>(super_buf, super_sh->snaps_offset,
+				     super_sh->snaps_len, snaps);
 
     return std::make_pair(super_buf,super_sh->vol_size * 512);
 }

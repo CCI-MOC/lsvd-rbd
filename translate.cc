@@ -226,7 +226,7 @@ ssize_t translate_impl::init(const char *prefix_,
 			     int nthreads, bool timedflush) {
     std::vector<uint32_t>    ckpts;
     std::vector<clone_info*> clones;
-    std::vector<snap_info>   snaps;
+    std::vector<snap_info*>  snaps;
 
     /* note prefix = superblock name
      */

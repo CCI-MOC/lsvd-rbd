@@ -48,9 +48,9 @@ class clone(Structure):
 sizeof_clone = sizeof(clone) # 21
 
 class snap(Structure):
-    _fields_ = [("snap_uuid",           c_ubyte*16),
-                ("seq",                 c_uint)]
-sizeof_snap = sizeof(snap) # 20
+    _fields_ = [("seq",                 c_uint),
+                ("name_len",            c_ubyte)]
+sizeof_snap = sizeof(snap) # 5
 
 class data_hdr(Structure):
     _fields_ = [("last_data_obj",       c_uint),

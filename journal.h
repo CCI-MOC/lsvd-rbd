@@ -46,6 +46,7 @@ struct j_hdr {
     uint32_t crc32;		// TODO: implement this
     int32_t  extent_offset;	// in bytes
     int32_t  extent_len;        // in bytes
+    int32_t  prev;              // TODO
 };
 
 /* probably in the second 4KB block of the parition

@@ -72,9 +72,10 @@ struct clone_info {
 } __attribute__((packed));
 
 struct snap_info {
-    uuid_t   snap_uuid;
     uint32_t seq;
-};
+    uint8_t  name_len;
+    char     name[0];
+} __attribute__((packed));
 
 
 struct obj_data_hdr {
@@ -140,7 +141,7 @@ public:
     std::pair<char*,ssize_t> read_super(const char *name,
 					std::vector<uint32_t> &ckpts,
 					std::vector<clone_info*> &clones,
-					std::vector<snap_info> &snaps,
+					std::vector<snap_info*> &snaps,
 					uuid_t &uuid);
 
     ssize_t read_data_hdr(const char *name, obj_hdr &h, obj_data_hdr &dh,
