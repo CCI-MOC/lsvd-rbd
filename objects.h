@@ -79,8 +79,6 @@ struct snap_info {
 
 struct obj_data_hdr {
     uint32_t last_data_obj;
-    uint32_t ckpts_offset;      // TODO - do we really need this?
-    uint32_t ckpts_len;
     uint32_t objs_cleaned_offset;
     uint32_t objs_cleaned_len;
     uint32_t data_map_offset;
@@ -146,7 +144,6 @@ public:
 					uuid_t &uuid);
 
     ssize_t read_data_hdr(const char *name, obj_hdr &h, obj_data_hdr &dh,
-			  std::vector<uint32_t> &ckpts,
 			  std::vector<obj_cleaned> &cleaned,
 			  std::vector<data_map> &dmap);
 

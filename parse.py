@@ -111,7 +111,6 @@ elif h.type == lsvd.LSVD_DATA:
     print('n_data:   ', h.data_sectors)
 
     print('last_data:', dh.last_data_obj, "(0x%x)" % dh.last_data_obj)
-    print('ckpts:    ', dh.ckpts_offset, ':', ', '.join(fmt_ckpt(ckpts)))
     print('cleaned:  ', dh.objs_cleaned_offset, ':', ', '.join(fmt_obj_cleaned(objs)))
     if args.nowrap:
             print('map:')

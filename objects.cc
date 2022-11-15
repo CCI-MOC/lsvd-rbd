@@ -80,7 +80,6 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
  */
 ssize_t object_reader::read_data_hdr(const char *name, obj_hdr &h,
 				     obj_data_hdr &dh,
-				     std::vector<uint32_t> &ckpts,
 				     std::vector<obj_cleaned> &cleaned,
 				     std::vector<data_map> &dmap) {
     char *buf = read_object_hdr(name, false);
@@ -96,8 +95,6 @@ ssize_t object_reader::read_data_hdr(const char *name, obj_hdr &h,
     h = *tmp_h;
     dh = *tmp_dh;
 
-    decode_offset_len<uint32_t>(buf, tmp_dh->ckpts_offset,
-				tmp_dh->ckpts_len, ckpts);
     decode_offset_len<obj_cleaned>(buf, tmp_dh->objs_cleaned_offset,
 				   tmp_dh->objs_cleaned_len, cleaned);
     decode_offset_len<data_map>(buf, tmp_dh->data_map_offset,
@@ -166,16 +163,11 @@ size_t make_data_hdr(char *hdr, size_t bytes, std::vector<uint32_t> *ckpts,
 		   .data_sectors = (uint32_t)(bytes / 512)};
     memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
 
-    *dh = (obj_data_hdr){.last_data_obj = seq, .ckpts_offset = o1,
-			 .ckpts_len = l1, .objs_cleaned_offset = 0, .
+    *dh = (obj_data_hdr){.last_data_obj = seq, .objs_cleaned_offset = 0, .
 			 objs_cleaned_len = 0, .data_map_offset = o2,
 			 .data_map_len = l2};
 
-    auto p_ckpt = (uint32_t*)(dh+1);
-    for (auto c : *ckpts) 
-	*p_ckpt++ = c;
-    auto dm = (data_map*)(p_ckpt);
-
+    auto dm = (data_map*)(dh+1);
     for (auto e : *entries)
 	*dm++ = e;
 

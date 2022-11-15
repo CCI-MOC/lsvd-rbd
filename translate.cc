@@ -292,14 +292,12 @@ ssize_t translate_impl::init(const char *prefix_,
     /* roll forward
      */
     for (; ; seq++) {
-	std::vector<uint32_t>    ckpts;
 	std::vector<obj_cleaned> cleaned;
 	std::vector<data_map>    entries;
 	obj_hdr h; obj_data_hdr dh;
 
 	objname name(prefix(), seq);
-	if (parser->read_data_hdr(name.c_str(), h, dh, ckpts,
-				  cleaned, entries) < 0)
+	if (parser->read_data_hdr(name.c_str(), h, dh, cleaned, entries) < 0)
 	    break;
 	if (h.type == LSVD_CKPT) {
 	    checkpoints.push_back(seq);
@@ -334,7 +332,7 @@ ssize_t translate_impl::init(const char *prefix_,
     for (int i = 1; i < 32; i++) {
 	objname name(prefix(), i + seq);
 	if (objstore->delete_object(name.c_str()) == 0)
-	    printf("deleted %s\n", name.c_str());
+	    printf("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
     }
 
     for (int i = 0; i < nthreads; i++) 
@@ -382,8 +380,7 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 		   .data_sectors = (uint32_t)sectors};
     memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
-    *dh = (obj_data_hdr){.last_data_obj = _seq, .ckpts_offset = o1,
-			 .ckpts_len = l1,
+    *dh = (obj_data_hdr){.last_data_obj = _seq,
 			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
 			 .data_map_offset = o2, .data_map_len = l2};
 

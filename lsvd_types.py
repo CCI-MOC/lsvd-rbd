@@ -54,13 +54,11 @@ sizeof_snap = sizeof(snap) # 20
 
 class data_hdr(Structure):
     _fields_ = [("last_data_obj",       c_uint),
-                ("ckpts_offset",        c_uint),
-                ("ckpts_len",           c_uint),
                 ("objs_cleaned_offset", c_uint),
                 ("objs_cleaned_len",    c_uint),
                 ("map_offset",          c_uint),
                 ("map_len",             c_uint)]
-sizeof_data_hdr = sizeof(data_hdr) # 28
+sizeof_data_hdr = sizeof(data_hdr) # 20
 
 class obj_cleaned(Structure):
     _fields_ = [("seq",                 c_uint),
