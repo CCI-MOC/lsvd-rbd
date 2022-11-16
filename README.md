@@ -27,6 +27,8 @@ Note that the cache needs to be at least this big because the write cache is onl
 Notes:
 - cache gets divided 1/2 read cache, 1/2 write cache
 - LSVD looks in `$LSVD_CACHE_DIR` (or `cache_dir` from `lsvd.conf`) for (a) `<img>.cache`, then `<uuid>.cache`. If it doesn't find either it creates a cache with default parameters, but that's currently broken.
+- you can omit the UUID, but then you'll want to have LSVD create the cache file so that it matches the remote image. In that case you'll need to set LSVD_CACHE_SIZE=400m or you'll deadlock eventually.
+- also you'll want to set XAUTHORITY=$HOME/.Xauthority
 
 Unit tests included here:
 - test1.py through test5.py - really simple functional tests
