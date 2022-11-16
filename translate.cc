@@ -313,7 +313,8 @@ ssize_t translate_impl::init(const char *prefix_,
 				      .type = LSVD_DATA};
 	total_sectors += h.data_sectors;
 	total_live_sectors += h.data_sectors;
-	max_cache_seq = dh.cache_seq;
+	if (dh.cache_seq)	// skip GC writes
+	    max_cache_seq = dh.cache_seq;
 	
 	int offset = 0, hdr_len = h.hdr_sectors;
 	for (auto m : entries) {
@@ -384,7 +385,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 		   .data_sectors = (uint32_t)sectors, .crc = 0};
     memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
-    *dh = (obj_data_hdr){.objs_cleaned_offset = 0, .objs_cleaned_len = 0,
+    *dh = (obj_data_hdr){.cache_seq = 0,
+			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
 			 .data_map_offset = o2, .data_map_len = l2};
 
     uint32_t *p_ckpt = (uint32_t*)(dh+1);
@@ -528,7 +530,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
 	next_compln = b->seq;
 
     char *hdr = (char*)calloc(hdr_sectors*512, 1);
-    make_data_hdr(hdr, b->len, 0, &b->entries, b->seq, &uuid);
+    make_data_hdr(hdr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
     iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
 		   {b->buf, b->len}};
     lk.unlock();

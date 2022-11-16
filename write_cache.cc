@@ -645,20 +645,25 @@ void write_cache_impl::read_map_entries() {
     free(len_buf);
 }
 
+/* TODO: get rid of this BS and use 'prev' pointer to read backwards
+ * from cache[base] to find the oldest entry in cache.
+ */
+
 /* returns:
  *   bool: false for failure
  *   page: next page after last record (super.limit if we hit end)
  *   seq: sequence number next for next record
+ * @strict: return false if run doesn't consume the rest of the cache
  */
 std::tuple<bool,page_t,uint64_t> chase(page_t page, uint64_t seq, page_t limit,
-				       j_hdr *hdrs) {
+				       j_hdr *hdrs, bool strict) {
     auto hdr = hdrs + page;
     while (page < limit && hdr->magic == LSVD_MAGIC && hdr->seq == seq) {
 	page += hdr->len;
 	seq++;
 	hdr = hdrs + page;
     }
-    if (page < limit && hdr->magic == LSVD_MAGIC)
+    if (page < limit && hdr->magic == LSVD_MAGIC && strict)
 	return std::make_tuple(false, 0, 0);
 
     return std::make_tuple(true, page, seq);
@@ -672,7 +677,7 @@ bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
     auto b = base;
     auto hdr = &hdrs[b];
     part1_min = std::make_pair(b, hdr->seq);
-    auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs);
+    auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs, false);
 
     if (!rv)
 	return rv;
@@ -686,7 +691,7 @@ bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
 	    continue;
 	    
 	auto _seq0 = hdr->seq;
-	auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs);
+	auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs, true);
 	if (rv && _page == (page_t)limit) {
 	    /* if we overwrote PAD, there might be dangling old 
 	     * data - check and ignore that.
@@ -703,12 +708,15 @@ bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
     return false;
 }
 
+std::vector<j_hdr> __hdrs;
+
 int write_cache_impl::roll_log_forward() {
-    auto hdrs = new j_hdr[super->limit];
+    __hdrs.clear();
+    __hdrs.reserve(super->limit);
     for (int i = super->base; i < super->limit; i++) {
 	if (nvme_w->read(_hdrbuf, 4096, 4096L * i) < 0)
 	    throw_fs_error("cache log roll-forward");
-	hdrs[i] = *(j_hdr*)_hdrbuf;
+	__hdrs[i] = *(j_hdr*)_hdrbuf;
     }
     
     /* locate the ranges of valid records - from part1_min to part1_max
@@ -718,9 +726,9 @@ int write_cache_impl::roll_log_forward() {
     std::pair<page_t,uint64_t> part1_min(0,0), part1_max(0,0),
 	part2_min(0,0), part2_max(0,0);
     if (!decode_journal(part1_min, part1_max, part2_min, part2_max,
-			super->base, super->limit, hdrs))
+			super->base, super->limit, __hdrs.data()))
 	return -1;
-    delete[] hdrs;
+    //delete[] hdrs;
     
     /* Now read all the records in, update lengths and map,
      * and write to backend.
@@ -732,12 +740,17 @@ int write_cache_impl::roll_log_forward() {
 	end = part1_max.first;
     else
 	assert(part1_max.second == part2_min.second);
-    
-    for (int b = start; b != end; ) {
+
+    printf("roll forward %d %d\n", start, end);
+    /* use a do-while loop because start and end might be the same
+     */
+    int b = start;
+    do {			// while b != end
 	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
 	    throw_fs_error("wcache");
 
 	auto hdr = (j_hdr*)_hdrbuf;
+	assert(hdr->seq == sequence);
 	sequence++;
 	page_t idx = b - super->base;
 
@@ -783,8 +796,12 @@ int write_cache_impl::roll_log_forward() {
 
 	    size_t bytes = e.len * 512;
 	    iovec iov = {data+offset, bytes};
-	    if (!stopped && sequence >= be->max_cache_seq)
+	    if (!stopped && sequence >= be->max_cache_seq) {
+		do_log("write %ld %d+%d\n", sequence.load(), (int)e.lba, e.len);
 		be->writev(sequence, e.lba*512, &iov, 1);
+	    }
+	    else
+		do_log("skip %ld %d (max %d) %ld+%d\n", b, sequence.load(), be->max_cache_seq, e.lba, e.len);
 	    offset += bytes;
 	    plba += e.len;
 	}
@@ -795,7 +812,7 @@ int write_cache_impl::roll_log_forward() {
 	b += hdr->len;
 	if (b >= (page_t)super->limit)
 	    b = super->base;
-    }
+    } while (b != end);
     be->flush();
     usleep(10000);
     
@@ -829,8 +846,10 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 	sequence = super->seq;
 	read_map_entries();	// length, too
     }
-    else
-	roll_log_forward();
+    else {
+	auto rv = roll_log_forward();
+	assert(rv == 0);
+    }
     super->clean = false;
     if (nvme_w->write(buf, 4096, 4096L*super_blkno) < 4096)
 	throw_fs_error("wcache");
