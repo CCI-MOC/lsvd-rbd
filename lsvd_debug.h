@@ -54,7 +54,6 @@ struct j_extent;
 struct j_write_super;
 struct j_read_super;
 
-extern "C" int rbd_kill(rbd_image_t image);
 extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size);
 extern "C" int dbg_lsvd_read(rbd_image_t image, char *buffer, uint64_t offset, uint32_t size);;
 extern "C" int dbg_lsvd_flush(rbd_image_t image);

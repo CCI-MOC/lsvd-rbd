@@ -117,10 +117,6 @@ class write_cache_impl : public write_cache {
     translate        *be;
     j_hdr *mk_header(char *buf, uint32_t type, page_t blks);
     nvme 		      *nvme_w = NULL;
-
-    /* debug stuff
-     */
-    bool stopped = false;
     
 public:
 
@@ -149,8 +145,6 @@ public:
     void reset(void);
     void get_super(j_write_super *s); /* copies superblock */
 
-    void stop(void) {stopped = true;}
-    
     /*  @blk - header to read
      *  @extents - data to move. empty if J_PAD or J_CKPT
      *  return value - first page of next record
@@ -305,8 +299,7 @@ void wcache_write_req::notify_in_order(std::unique_lock<std::mutex> &lk) {
     for (auto w : work) {
 	auto [iov, iovcnt] = w->iov->c_iov();
 	//check_crc(lba, iov, iovcnt, "3");
-	if (!wcache->stopped)
-	    wcache->be->writev(seq, w->lba*512, iov, iovcnt);
+	wcache->be->writev(seq, w->lba*512, iov, iovcnt);
     }
     lk.unlock();
     for (auto w : work) {
@@ -796,7 +789,7 @@ int write_cache_impl::roll_log_forward() {
 
 	    size_t bytes = e.len * 512;
 	    iovec iov = {data+offset, bytes};
-	    if (!stopped && sequence >= be->max_cache_seq) {
+	    if (sequence >= be->max_cache_seq) {
 		do_log("write %ld %d+%d\n", sequence.load(), (int)e.lba, e.len);
 		be->writev(sequence, e.lba*512, &iov, 1);
 	    }

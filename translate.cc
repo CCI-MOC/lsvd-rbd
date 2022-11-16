@@ -132,7 +132,6 @@ class translate_impl : public translate {
     bool gc_running = false;
     std::condition_variable gc_cv;
     void wait_for_gc(void);
-    bool killed = false;
     
     object_reader *parser;
     
@@ -198,7 +197,6 @@ public:
     int frontier(void) { return b->len / 512; }
     int batch_seq(void) { return seq; }
     void set_completion(int next);
-    void kill(void) {killed = true;}
 };
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
@@ -410,8 +408,6 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
  */
 ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
 			       iovec *iov, int iovcnt) {
-    if (killed)			// crash testing
-	return -1;
     std::unique_lock lk(m);
     smartiov siov(iov, iovcnt);
     size_t len = siov.bytes();
@@ -541,9 +537,6 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     t_req->to_free.push_back(hdr);
     t_req->b = b;
 	
-    if (killed)			// crash testing
-	return;
-
     objname name(prefix(), b->seq);
     auto req = objstore->make_write_req(name.c_str(), iov, 2);
     req->run(t_req);
@@ -696,9 +689,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      */
     lk.unlock();
 
-    if (killed) 		// for crash testing
-	return;
-    
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, niovs);
     notify_complete(ckpt_seq);
@@ -731,9 +721,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 	*pc++ = c;
 
     lk.unlock();
-
-    if (killed)			// crash testing
-	return;
 
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
@@ -855,8 +842,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	char *buf = (char*)malloc(20*1024*1024);
 
 	for (auto [i,sectors] : objs_to_clean) {
-	    if (killed)		// crash testing
-		return;
 	    objname name(prefix(), i);
 	    iovec iov = {buf, (size_t)(sectors*512)};
 	    objstore->read_object(name.c_str(), &iov, 1, /*offset=*/ 0);
@@ -971,9 +956,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    objlock2.unlock();
 	    lk2.unlock();
 
-	    if (killed)		// for crash testing
-		return;
-	    
 	    smartiov iovs;
 	    iovs.push_back((iovec){hdr, (size_t)hdr_sectors*512});
 	    iovs.push_back((iovec){buf, (size_t)byte_offset});
@@ -992,9 +974,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	unlink(temp);
     }
 
-    if (killed)			// for crash test
-	return;
-    
     lk.lock();
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) 
 	object_info.erase(object_info.find(it->first));

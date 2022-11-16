@@ -67,8 +67,6 @@ struct rbd_image {
     int image_close(void);
     int poll_io_events(rbd_completion_t *comps, int numcomp);
     void notify(void);
-
-    void image_kill(void);
 };
 
 #endif
