@@ -28,11 +28,13 @@ extern bool __lsvd_dbg_reverse;
 extern bool __lsvd_dbg_be_delay;
 extern bool __lsvd_dbg_be_delay_ms;
 extern bool __lsvd_dbg_be_threads;
+extern bool __lsvd_dbg_rename;
 
 std::mt19937_64 rng;
 
 struct cfg {
     const char *cache_dir;
+    const char *cache_size;
     const char *obj_prefix;
     int    run_len;
     size_t window;
@@ -224,10 +226,11 @@ void obj_delete(struct cfg *cfg) {
 	std::string path = dir + "/" + name;
 	std::ifstream fp(path, std::ios::binary);
 	char buf[512];
-	assert(fp.read(buf, sizeof(buf)));
-	auto _hdr = (obj_hdr*) buf;
-	if (_hdr->type == LSVD_CKPT)
-	    last_ckpt = seq;
+	if (fp.read(buf, sizeof(buf))) {
+	    auto _hdr = (obj_hdr*) buf;
+	    if (_hdr->type == LSVD_CKPT)
+		last_ckpt = seq;
+	}
     }
 
     printf("last_ckpt %08x last_file %08x\n", last_ckpt, files[files.size()-1].first);
@@ -239,7 +242,8 @@ void obj_delete(struct cfg *cfg) {
 	if (seq <= last_ckpt)
 	    break;
 	if (uni(rng) < 0.5) {
-	    fs::remove(dir + "/" + file);
+	    fs::rename(dir + "/" + file, dir + "/" + file + ".bak");
+	    //fs::remove(dir + "/" + file);
 	    printf("rm %s\n", file.c_str());
 	}
     }
@@ -354,6 +358,8 @@ extern char *p_log, *logbuf;
 
 void run_test(unsigned long seed, struct cfg *cfg) {
     p_log = logbuf;
+    if (p_log)
+	*p_log = 0;
     printf("seed: 0x%lx\n", seed);
     rng.seed(seed);
 
@@ -380,7 +386,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 
     rados_ioctx_t io = 0;
     rbd_image_t img;
-    setenv("LSVD_CACHE_SIZE", "200M", 1);
+    setenv("LSVD_CACHE_SIZE", cfg->cache_size, 1);
     setenv("LSVD_BACKEND", "file", 1);
     setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
 
@@ -503,6 +509,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     for (size_t i = max_seq; i < op_crcs.size(); i++)
 	secs += op_crcs[i].len;
     printf("lost %d writes (%.1f MB)\n", n_requests - max_seq, secs / 2.0 / 1024);
+    assert(cfg->lose_writes || (n_requests - max_seq) < (int)cfg->window);
     
     std::vector<triple> should_be_crcs(cfg->image_sectors);
     for (int i = 0; i < cfg->image_sectors; i++)
@@ -552,11 +559,13 @@ static struct argp_option options[] = {
     {"lose-objs",'o', "N",    0, "delete some of last N objects"},
     {"wipe-cache",'W', 0,     0, "delete cache on restart"},
     {"lose-writes",'L', "N",    0, "delete some of last N cache writes"},
+    {"cache-size",'Z', "N",    0, "cache size (K/M/G)"},
     {0},
 };
 
 struct cfg _cfg = {
     "/tmp",			// cache_dir
+    "200M",			// cache_size
     "/tmp/bkt/obj",		// obj_prefix
     10000, 			// run_len
     16,				// window
@@ -636,6 +645,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'L':
 	_cfg.lose_writes = atoi(arg);
 	break;
+    case 'Z':
+	_cfg.cache_size = arg;
+	break;
     case ARGP_KEY_END:
         break;
     }
@@ -645,7 +657,8 @@ static struct argp argp = { options, parse_opt, NULL, args_doc};
 
 int main(int argc, char **argv) {
     argp_parse (&argp, argc, argv, 0, 0, 0);
-
+    __lsvd_dbg_rename = true;
+    
     if (_cfg.seeds.size() > 0) {
 	for (int i = 0; i < _cfg.n_runs; i++)
 	    for (auto s : _cfg.seeds)
