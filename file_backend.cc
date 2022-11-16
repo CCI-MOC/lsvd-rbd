@@ -41,6 +41,19 @@ static std::mt19937_64 rng;
 
 class file_backend_req;
 
+void verify_obj(iovec *iov, int iovcnt) {
+    auto h = (obj_hdr*)iov[0].iov_base;
+    if (h->type != LSVD_DATA)
+	return;
+    auto dh = (obj_data_hdr*)(h+1);
+    auto map = (data_map*)((char*)h + dh->data_map_offset);
+    int n_map = dh->data_map_len / sizeof(data_map);
+    uint32_t sum = 0;
+    for (int i = 0; i < n_map; i++)
+	sum += map[i].len;
+    assert(sum == h->data_sectors);
+}
+
 class file_backend : public backend {
     void worker(thread_pool<file_backend_req*> *p);
     std::mutex m;
@@ -273,6 +286,7 @@ void file_backend_req::notify(request *unused) {
 
 request *file_backend::make_write_req(const char*name, iovec *iov, int niov) {
     assert(access(name, F_OK) != 0);
+    verify_obj(iov, niov);
     return new file_backend_req(OP_WRITE, name, iov, niov, 0, this);
 }
 
