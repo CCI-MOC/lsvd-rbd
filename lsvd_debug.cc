@@ -68,7 +68,7 @@ extern "C" int dbg_lsvd_write(rbd_image_t image, char *buffer, uint64_t offset, 
 {
     auto xlate = image_2_xlate(image);
     iovec iov = {buffer, size};
-    size_t val = xlate->writev(offset, &iov, 1);
+    size_t val = xlate->writev(0, offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
 
@@ -122,7 +122,7 @@ extern "C" int xlate_read(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
 extern "C" int xlate_write(_dbg *d, char *buffer, uint64_t offset, uint32_t size)
 {
     iovec iov = {buffer, size};
-    size_t val = d->lsvd->writev(offset, &iov, 1);
+    size_t val = d->lsvd->writev(0, offset, &iov, 1);
     return val < 0 ? -1 : 0;
 }
 int getmap_cb(void *ptr, int base, int limit, int obj, int offset)
