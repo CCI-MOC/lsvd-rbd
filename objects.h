@@ -41,6 +41,7 @@ struct obj_hdr {
     uint32_t seq;		// same as in name
     uint32_t hdr_sectors;
     uint32_t data_sectors;	// hdr_sectors + data_sectors = size
+    uint32_t crc;
 };
 
 // super_hdr :	super block style structure for the header structure, containing various metadata on the current
@@ -79,7 +80,7 @@ struct snap_info {
 
 
 struct obj_data_hdr {
-    uint32_t last_data_obj;
+    uint64_t cache_seq;
     uint32_t objs_cleaned_offset;
     uint32_t objs_cleaned_len;
     uint32_t data_map_offset;
@@ -101,11 +102,11 @@ struct data_map {
 struct obj_ckpt_hdr {
     uint32_t ckpts_offset;	// list includes self (TODO - not needed?)
     uint32_t ckpts_len;
-    uint32_t objs_offset;	// objects and sizes
+    uint32_t objs_offset;	// ckpt_obj[]
     uint32_t objs_len;
-    uint32_t deletes_offset;	// deferred deletes
+    uint32_t deletes_offset;	// deferred_delete[]
     uint32_t deletes_len;
-    uint32_t map_offset;
+    uint32_t map_offset;        // ckpt_mapentry[]
     uint32_t map_len;
 };
 
@@ -157,8 +158,7 @@ public:
 
 extern size_t obj_hdr_len(int n_entries, int n_ckpts);
 
-extern size_t make_data_hdr(char *hdr, size_t bytes,
-                            std::vector<uint32_t> *ckpts, 
+extern size_t make_data_hdr(char *hdr, size_t bytes, uint64_t cache_seq,
                             std::vector<data_map> *entries,
                             uint32_t seq, uuid_t *uuid);
 

@@ -9,6 +9,7 @@
 
 #include <sys/uio.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "lsvd_types.h"
 #include "backend.h"
@@ -136,30 +137,31 @@ size_t obj_hdr_len(int n_entries, int n_ckpts) {
  * unfortunately we need the length earlier in the code, so
  * we duplicate some of this logic in obj_hdr_len()
  */
-size_t make_data_hdr(char *hdr, size_t bytes, std::vector<uint32_t> *ckpts,
+size_t make_data_hdr(char *hdr, size_t bytes, uint64_t cache_seq,
 		     std::vector<data_map> *entries, uint32_t seq,
 		     uuid_t *uuid) {
     auto h = (obj_hdr*)hdr;
     auto dh = (obj_data_hdr*)(h+1);
     uint32_t o1 = sizeof(*h) + sizeof(*dh),
-	l1 = ckpts->size() * sizeof(uint32_t),
-	o2 = o1 + l1, l2 = entries->size() * sizeof(data_map),
+	o2 = o1, l2 = entries->size() * sizeof(data_map),
 	hdr_bytes = o2 + l2;
     uint32_t hdr_sectors = div_round_up(hdr_bytes, 512);
 
     *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_DATA, .seq = seq,
 		   .hdr_sectors = hdr_sectors,
-		   .data_sectors = (uint32_t)(bytes / 512)};
+		   .data_sectors = (uint32_t)(bytes / 512), .crc = 0};
     memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
 
-    *dh = (obj_data_hdr){.last_data_obj = seq, .objs_cleaned_offset = 0, .
-			 objs_cleaned_len = 0, .data_map_offset = o2,
-			 .data_map_len = l2};
+    *dh = (obj_data_hdr){.cache_seq = cache_seq,
+			 .objs_cleaned_offset = 0, . objs_cleaned_len = 0,
+			 .data_map_offset = o2, .data_map_len = l2};
 
     auto dm = (data_map*)(dh+1);
     for (auto e : *entries)
 	*dm++ = e;
+    auto ptr = (const unsigned char *)hdr;
+    h->crc = (uint32_t)crc32(0, ptr, hdr_sectors*512);
 
     return (char*)dm - (char*)hdr;
 }
