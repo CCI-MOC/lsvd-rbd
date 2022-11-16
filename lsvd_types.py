@@ -138,7 +138,8 @@ class j_hdr(Structure):
                 ("len",           c_uint),
                 ("crc32",         c_uint),
                 ("extent_offset", c_uint),
-                ("extent_len",    c_uint)]
+                ("extent_len",    c_uint),
+                ("prev",          c_uint)]
 sizeof_j_hdr = sizeof(j_hdr)
 
 class j_write_super(Structure):
