@@ -18,7 +18,8 @@ class lsvd_config;
 class translate {
 public:
     uuid_t    uuid;
-
+    uint64_t  max_cache_seq;
+    
     translate() {}
     virtual ~translate() {}
 
@@ -28,7 +29,8 @@ public:
     virtual int flush(void) = 0;      /* write out current batch */
     virtual int checkpoint(void) = 0; /* flush, then write checkpoint */
 
-    virtual ssize_t writev(size_t offset, iovec *iov, int iovcnt) = 0;
+    virtual ssize_t writev(uint64_t cache_seq, size_t offset,
+                           iovec *iov, int iovcnt) = 0;
     virtual void wait_for_room(void) = 0;
     virtual ssize_t readv(size_t offset, iovec *iov, int iovcnt) = 0;
     virtual bool check_object_ready(int obj) = 0; /* GC stalls */

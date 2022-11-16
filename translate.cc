@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include <uuid/uuid.h>
+#include <zlib.h>
 
 #include <vector>
 #include <mutex>
@@ -64,7 +65,8 @@ class translate_impl : public translate {
 	size_t max;		// done when len hits here
 	std::vector<data_map> entries;
 	int    seq = 0;		// sequence number for backend
-
+	uint64_t cache_seq = 0;
+	
 	batch(size_t bytes){
 	    buf = (char*)malloc(bytes);
 	    max = bytes;
@@ -178,7 +180,7 @@ public:
     int flush(void);            /* write out current batch */
     int checkpoint(void);       /* flush, then write checkpoint */
 
-    ssize_t writev(size_t offset, iovec *iov, int iovcnt);
+    ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov, int iovcnt);
     void wait_for_room(void);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
     bool check_object_ready(int obj);
@@ -311,6 +313,8 @@ ssize_t translate_impl::init(const char *prefix_,
 				      .type = LSVD_DATA};
 	total_sectors += h.data_sectors;
 	total_live_sectors += h.data_sectors;
+	max_cache_seq = dh.cache_seq;
+	
 	int offset = 0, hdr_len = h.hdr_sectors;
 	for (auto m : entries) {
 	    std::vector<extmap::lba2obj> deleted;
@@ -377,11 +381,10 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
     *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
 		   .type = LSVD_DATA, .seq = _seq,
 		   .hdr_sectors = (uint32_t)hdr_sectors,
-		   .data_sectors = (uint32_t)sectors};
+		   .data_sectors = (uint32_t)sectors, .crc = 0};
     memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
-    *dh = (obj_data_hdr){.last_data_obj = _seq,
-			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
+    *dh = (obj_data_hdr){.objs_cleaned_offset = 0, .objs_cleaned_len = 0,
 			 .data_map_offset = o2, .data_map_len = l2};
 
     uint32_t *p_ckpt = (uint32_t*)(dh+1);
@@ -394,7 +397,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 
     assert(hdr_bytes == ((char*)dm - buf));
     memset(buf + hdr_bytes, 0, 512*hdr_sectors - hdr_bytes); // valgrind
-
+    h->crc = (uint32_t)crc32(0, (const unsigned char*)buf, 512*hdr_sectors);
+    
     return hdr_sectors;
 }
 
@@ -402,7 +406,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 
 /* NOTE: offset is in bytes
  */
-ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
+ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
+			       iovec *iov, int iovcnt) {
     if (killed)			// crash testing
 	return -1;
     std::unique_lock lk(m);
@@ -415,6 +420,8 @@ ssize_t translate_impl::writev(size_t offset, iovec *iov, int iovcnt) {
 	b = new batch(cfg->batch_size);
     }
 
+    if (b->cache_seq == 0)	// lowest sequence number
+	b->cache_seq = cache_seq;
     b->append(offset / 512, &siov);
 
     return len;
@@ -521,7 +528,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
 	next_compln = b->seq;
 
     char *hdr = (char*)calloc(hdr_sectors*512, 1);
-    make_data_hdr(hdr, b->len, &checkpoints, &b->entries, b->seq, &uuid);
+    make_data_hdr(hdr, b->len, 0, &b->entries, b->seq, &uuid);
     iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
 		   {b->buf, b->len}};
     lk.unlock();
