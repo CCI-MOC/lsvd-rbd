@@ -306,7 +306,7 @@ void wcache_write_req::notify_in_order(std::unique_lock<std::mutex> &lk) {
 	auto [iov, iovcnt] = w->iov->c_iov();
 	//check_crc(lba, iov, iovcnt, "3");
 	if (!wcache->stopped)
-	    wcache->be->writev(w->lba*512, iov, iovcnt);
+	    wcache->be->writev(seq, w->lba*512, iov, iovcnt);
     }
     lk.unlock();
     for (auto w : work) {
@@ -773,15 +773,18 @@ int write_cache_impl::roll_log_forward() {
 	sector_t plba = (b+1) * 8;
 	size_t offset = 0;
 	std::vector<extmap::lba2lba> garbage;
-	
+
+	/* all write batches with sequence < max_cache_seq are
+	 * guaranteed to be persisted in the backend already
+	 */
 	for (auto e : entries) {
 	    map.update(e.lba, e.lba+e.len, plba, &garbage);
 	    rmap.update(plba, plba+e.len, e.lba);
 
 	    size_t bytes = e.len * 512;
 	    iovec iov = {data+offset, bytes};
-	    if (!stopped)
-		be->writev(e.lba*512, &iov, 1);
+	    if (!stopped && sequence >= be->max_cache_seq)
+		be->writev(sequence, e.lba*512, &iov, 1);
 	    offset += bytes;
 	    plba += e.len;
 	}
