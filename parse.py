@@ -108,7 +108,7 @@ elif h.type == lsvd.LSVD_DATA:
     print('n_hdr:    ', h.hdr_sectors)
     print('n_data:   ', h.data_sectors)
     print('crc:      ', '%08x' % h.crc)
-
+    print('wseq:     ', dh.cache_seq)
     print('cleaned:  ', dh.objs_cleaned_offset, ':', ', '.join(fmt_obj_cleaned(objs)))
     if args.nowrap:
             print('map:')
