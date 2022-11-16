@@ -101,12 +101,17 @@ $  ls -lh /tmp/z1
 -rw-r--r-- 1 pjd pjd 640M Mar 15 21:19 /tmp/z1
 ```
 
+## Tests
+
+- test1.py .. test5.py - really basic unit tests using ctypes
+- test6.py - replays a trace from installing ubuntu on KVM/QEMU
+- test7.cc - simple random writes, read back and verify CRC
+- test8.cc - same, but with multiple threads
+- test10.cc - crash test - forked writer calls exit, then parent verifies image
+
 ## To-do list
 
 To do in the near term
-- RADOS and S3 backends, 
-- corresponding RADOS and S3 mods to `mkdisk.py` (and optionally `parse.py`)
-- basic greedy garbage collection
 - write coalescing
 - LRU-ish read cache replacement
 - `io_uring` for reading and writing cache
@@ -114,12 +119,10 @@ To do in the near term
 
 Lower priority:
 - random starting sequence in `mkcache.py`
-- check cache vs volume UUID 
-- add local cache write sequence to backend object header, recover backend image from local cache on restart
 
 Longer-term:
 - fix the god-awful locking mess
-- incremental map checkpoints
+- incremental map checkpoints [maybe]
 - get the extent map working with unsigned ints, get rid of the 'A' field
 - snapshots
 - clones
