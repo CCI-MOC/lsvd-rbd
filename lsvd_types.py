@@ -21,8 +21,9 @@ class hdr(Structure):
                 ("type",                c_uint),
                 ("seq",                 c_uint),
                 ("hdr_sectors",         c_uint),
-                ("data_sectors",        c_uint)]
-sizeof_hdr = sizeof(hdr) # 40
+                ("data_sectors",        c_uint),
+                ("crc",                 c_uint)]
+sizeof_hdr = sizeof(hdr) # 44
 
 class super_hdr(Structure):
     _fields_ = [("vol_size",            c_ulong),
@@ -53,12 +54,12 @@ class snap(Structure):
 sizeof_snap = sizeof(snap) # 5
 
 class data_hdr(Structure):
-    _fields_ = [("last_data_obj",       c_uint),
+    _fields_ = [("cache_seq",           c_ulong),
                 ("objs_cleaned_offset", c_uint),
                 ("objs_cleaned_len",    c_uint),
                 ("map_offset",          c_uint),
                 ("map_len",             c_uint)]
-sizeof_data_hdr = sizeof(data_hdr) # 20
+sizeof_data_hdr = sizeof(data_hdr) # 24
 
 class obj_cleaned(Structure):
     _fields_ = [("seq",                 c_uint),
