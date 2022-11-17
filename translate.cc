@@ -102,7 +102,8 @@ class translate_impl : public translate {
     
     std::vector<bool> done;
     std::condition_variable cv;
-
+    bool stopped = false;	// stop GC from writing
+    
     /* various constant state
      */
     char      single_prefix[128];
@@ -116,7 +117,7 @@ class translate_impl : public translate {
     size_t     super_len;
 
     thread_pool<batch*> workers;
-    thread_pool<int>    misc_threads;
+    thread_pool<int>   *misc_threads; // so we can stop ckpt, gc first
 
     /* for triggering GC
      */
@@ -201,7 +202,8 @@ public:
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
 			       extmap::objmap *map_, std::shared_mutex *m_) :
-    done(128,false), workers(&m), misc_threads(&m) {
+    done(128,false), workers(&m) {
+    misc_threads = new thread_pool<int>(&m);
     objstore = _io;
     parser = new object_reader(objstore);
     map = map_;
@@ -215,7 +217,10 @@ translate *make_translate(backend *_io, lsvd_config *cfg,
 }
 
 translate_impl::~translate_impl() {
-    if (b) 
+    stopped = true;
+    cv.notify_all();
+    delete misc_threads;
+    if (b)
 	delete b;
     delete parser;
     if (super_buf)
@@ -341,17 +346,17 @@ ssize_t translate_impl::init(const char *prefix_,
     for (int i = 0; i < nthreads; i++) 
 	workers.pool.push(std::thread(&translate_impl::worker_thread,
 				      this, &workers));
-    misc_threads.pool.push(std::thread(&translate_impl::ckpt_thread,
-				       this, &misc_threads));
+    misc_threads->pool.push(std::thread(&translate_impl::ckpt_thread,
+					this, misc_threads));
     if (timedflush)
-	misc_threads.pool.push(std::thread(&translate_impl::flush_thread,
-					   this, &misc_threads));
+	misc_threads->pool.push(std::thread(&translate_impl::flush_thread,
+					    this, misc_threads));
     return bytes;
 }
 
 void translate_impl::start_gc(void) {
-    misc_threads.pool.push(std::thread(&translate_impl::gc_thread,
-				       this, &misc_threads));
+    misc_threads->pool.push(std::thread(&translate_impl::gc_thread,
+				       this, misc_threads));
 }
     
 void translate_impl::shutdown(void) {
@@ -655,7 +660,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     
     /* wait until all prior objects have been acked by backend
      */
-    while (next_compln < ckpt_seq)
+    while (next_compln < ckpt_seq && !stopped)
 	cv.wait(lk);
 
     /* put it all together in memory
@@ -685,10 +690,13 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 		   {.iov_base = (char*)entries.data(), map_bytes},
 		   {.iov_base = tailbuf, tail}};
     int niovs = (tail == 0) ? 4 : 5;
+
     /* and write it
      */
     lk.unlock();
-
+    if (stopped)
+	return;
+    
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, niovs);
     notify_complete(ckpt_seq);
@@ -722,6 +730,8 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 
     lk.unlock();
 
+    if (stopped)
+	return;
     struct iovec iov2 = {super_buf, 4096};
     objstore->write_object(super_name, &iov2, 1);
 
@@ -964,6 +974,9 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    t_req->to_free.push_back(hdr);
 	    t_req->to_free.push_back(buf);
 
+	    if (stopped)
+		return;
+	    
 	    objname name(prefix(), _seq);
 	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
@@ -980,6 +993,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 
     /* write checkpoint *before* deleting any objects
      */
+    if (stopped)
+	return;
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
 	//do_log("gc ckpt %d\n", ckpt_seq);
