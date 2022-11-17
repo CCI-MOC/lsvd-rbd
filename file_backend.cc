@@ -70,6 +70,7 @@ public:
     int write_object(const char *name, iovec *iov, int iovcnt);
     int read_object(const char *name, iovec *iov, int iovcnt, size_t offset);
     int delete_object(const char *name);
+    int delete_prefix(const char *prefix);
     
     /* async I/O
      */
@@ -152,6 +153,19 @@ int file_backend::delete_object(const char *name) {
     else
 	rv = unlink(name);
     return rv < 0 ? -1 : 0;
+}
+
+int file_backend::delete_prefix(const char *prefix_) {
+    std::string prefix(prefix_);
+    auto dir = fs::path(prefix).parent_path();
+    std::string stem = fs::path(prefix).filename();
+
+    for (auto const& dir_entry : fs::directory_iterator{dir}) {
+	std::string entry{dir_entry.path().filename()};
+	if (strncmp(entry.c_str(), stem.c_str(), stem.size()) == 0)
+	    fs::remove(dir_entry.path());
+    }
+    return 0;
 }
 
 void trim_partial(const char *_prefix) {

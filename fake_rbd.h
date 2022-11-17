@@ -100,9 +100,14 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name,
 extern "C" int rbd_close(rbd_image_t image);
 extern "C" int rbd_invalidate_cache(rbd_image_t image);
 
+extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size, int *order);
+extern "C" int rbd_remove(rados_ioctx_t io, const char *name);
+typedef int (*librbd_progress_fn_t)(uint64_t offset, uint64_t total, void *ptr);
+extern "C" int rbd_remove_with_progress(rados_ioctx_t io, const char *name,
+                                        librbd_progress_fn_t cb, void *cbdata);
+
 /* These RBD functions are unimplemented and return errors
  */
-extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size, int *order);
 extern "C" int rbd_resize(rbd_image_t image, uint64_t size);
 extern "C" int rbd_snap_create(rbd_image_t image, const char *snapname);
 extern "C" int rbd_snap_list(rbd_image_t image, rbd_snap_info_t *snaps, int *max_snaps);

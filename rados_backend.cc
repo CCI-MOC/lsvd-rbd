@@ -44,6 +44,7 @@ public:
     int read_object(const char *name, iovec *iov, int iovcnt,
                     size_t offset);
     int delete_object(const char *name);
+    int delete_prefix(const char *prefix);
     
     /* async I/O
      */
@@ -108,7 +109,7 @@ int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
     char *buf = (char*)malloc(iovs.bytes());
     iovs.copy_out(buf);
 
-    int r = rados_write(io_ctx, oname, buf, iovs.bytes(), 0);
+    int r = rados_write_full(io_ctx, oname, buf, iovs.bytes());
 
     free(buf);
     return r;
@@ -131,6 +132,27 @@ int rados_backend::read_object(const char *name, iovec *iov,
 int rados_backend::delete_object(const char *name) {
     auto oname = pool_init(name);
     return rados_remove(io_ctx, oname);
+}
+
+int rados_backend::delete_prefix(const char *name) {
+    auto oname = pool_init(name);
+    std::vector<std::string> names;
+    
+    const char *key, *loc, *ns;
+    rados_list_ctx_t ls_ctx;
+
+    if (rados_nobjects_list_open(io_ctx, &ls_ctx) < 0)
+	return -1;
+    
+    while (rados_nobjects_list_next(ls_ctx, &key, &loc, &ns) >= 0)
+	if (strncmp(key, oname, strlen(oname)) == 0)
+	    names.push_back(std::string(key));
+    rados_nobjects_list_close(ls_ctx);
+    
+    for (auto key : names)
+	rados_remove(io_ctx, key.c_str());
+
+    return 0;
 }
 
 class rados_be_request : public request {
@@ -188,7 +210,7 @@ public:
 	if (op == OP_READ)
 	    rados_aio_read(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
 	else
-	    rados_aio_write(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
+	    rados_aio_write_full(io_ctx, oid, c, _buf, _iovs.bytes());
     }
 
     void release() {}

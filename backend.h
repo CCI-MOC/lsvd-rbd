@@ -22,6 +22,7 @@ public:
     virtual int read_object(const char *name, iovec *iov, int iovcnt,
                             size_t offset) = 0;
     virtual int delete_object(const char *name) = 0;
+    virtual int delete_prefix(const char *prefix) = 0;
     
     /* async I/O
      */

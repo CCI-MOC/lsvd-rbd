@@ -670,16 +670,6 @@ std::pair<std::string,std::string> split_string(std::string s,
 }
 
 
-/* any following functions are stubs only
- */
-extern "C" int rbd_invalidate_cache(rbd_image_t image)
-{
-    return 0;
-}
-
-/* These RBD functions are unimplemented and return errors
- */
-
 extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
                             int *order)
 {
@@ -704,6 +694,37 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
     return rv;
 }
 
+extern "C" int rbd_remove(rados_ioctx_t io, const char *name) {
+    lsvd_config  cfg;
+    if (cfg.read() < 0)
+	return -1;
+
+    backend *objstore;
+    switch (cfg.backend) {
+    case BACKEND_FILE:
+	objstore = make_file_backend(NULL);
+	break;
+    case BACKEND_RADOS:
+	objstore = make_rados_backend(io);
+	break;
+    default:
+	return -1;
+    }
+    
+    int rv = objstore->delete_prefix(name);
+    delete objstore;
+    return rv;
+}
+
+/* any following functions are stubs only
+ */
+extern "C" int rbd_invalidate_cache(rbd_image_t image)
+{
+    return 0;
+}
+
+/* These RBD functions are unimplemented and return errors
+ */
 extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
 {
     return -1;
