@@ -93,21 +93,6 @@ void get_random(char *buf, int lba, int sectors, int seq) {
     }
 }
 
-void clean_image(std::string name) {
-    auto dir = fs::path(name).parent_path();
-    std::string prefix = fs::path(name).filename();
-
-    if (!fs::exists(dir))
-	fs::create_directory(dir);
-    else {
-	for (auto const& dir_entry : fs::directory_iterator{dir}) {
-	    std::string entry{dir_entry.path().filename()};
-	    if (strncmp(entry.c_str(), prefix.c_str(), prefix.size()) == 0)
-		fs::remove(dir_entry.path());
-	}
-    }
-}
-
 void clean_cache(std::string cache_dir) {
     const char *suffix = ".cache";
     for (auto const& dir_entry : fs::directory_iterator{cache_dir}) {
@@ -195,8 +180,6 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     if (!started || cfg->restart) {
 	clean_cache(cfg->cache_dir);
 	rbd_remove(io, cfg->obj_prefix);
-	//clean_image(cfg->obj_prefix);
-	//create_image(cfg->obj_prefix, cfg->image_sectors);
 	rbd_create(io, cfg->obj_prefix, cfg->image_sectors, NULL);
 	sector_crc.clear();
 	started = true;
