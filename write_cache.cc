@@ -586,7 +586,6 @@ void write_cache_impl::write_checkpoint(void) {
     free(super_copy);
     free(e_buf);
     free(l_buf);
-
 }
 
 void write_cache_impl::read_map_entries() {
@@ -635,6 +634,7 @@ void write_cache_impl::read_map_entries() {
 	    cache_blocks[max + i - b].type = WCACHE_NONE;
     }
 
+    next_acked_page = super->next;
     free(len_buf);
 }
 
@@ -698,7 +698,7 @@ bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
 	    return true;
 	}
     }
-    return false;
+    return true;		// cache hasn't wrapped yet
 }
 
 std::vector<j_hdr> __hdrs;
@@ -728,9 +728,10 @@ int write_cache_impl::roll_log_forward() {
      */
     sequence = part1_min.second;
     page_t start = super->oldest = part1_min.first;
-    page_t end = super->next = part2_max.first;
+    page_t end = super->next = next_acked_page = part2_max.first;
+
     if (end == 0)
-	end = part1_max.first;
+	end = next_acked_page = super->next = part1_max.first;
     else
 	assert(part1_max.second == part2_min.second);
 
@@ -806,6 +807,7 @@ int write_cache_impl::roll_log_forward() {
 	if (b >= (page_t)super->limit)
 	    b = super->base;
     } while (b != end);
+
     be->flush();
     usleep(10000);
     
