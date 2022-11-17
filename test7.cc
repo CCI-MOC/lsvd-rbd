@@ -27,6 +27,7 @@ std::mt19937_64 rng;
 struct cfg {
     const char *cache_dir;
     const char *obj_prefix;
+    const char *backend;
     int    run_len;
     size_t window;
     int    image_sectors;
@@ -41,24 +42,29 @@ struct cfg {
 
 
 /* empirical fit to the pattern of writes in the ubuntu install,
- * except it has lots more writes in the 128..32768 sector range
+ * truncated to 2MB writes max
  */
 int n_sectors(void) {
-    std::uniform_int_distribution<int> uni16(0,16);
-    auto n = uni16(rng);
-    if (n < 8)
-	return 8;
-    int max;
-    if (n < 12)
-	max = 32;
-    else if (n < 14)
-	max = 64;
-    else if (n < 15)
-	max = 128;
-    else
-	max = 32768;
-    std::uniform_int_distribution<int> uni(8/8,max/8);
-    return uni(rng) * 8;
+    struct { float p; int max; } params[] = {
+	{0.5, 8},
+	{0.25, 32},
+	{0.125, 64},
+	{0.0625, 128},
+	{1.0, 4096}};
+    std::uniform_real_distribution<> uni(0.0,1.0);
+    float r = uni(rng);
+    int max = 8;
+
+    for (size_t i = 0; i < sizeof(params) / sizeof(params[0]); i++) {
+	if (r < params[i].p) {
+	    max = params[i].max;
+	    break;
+	}
+	r -= params[i].p;
+    }
+
+    std::uniform_int_distribution<int> uni_max(8/8,max/8);
+    return uni_max(rng) * 8;
 }
 
 int gen_lba(int max, int n) {
@@ -111,37 +117,6 @@ void clean_cache(std::string cache_dir) {
 	if (!strncmp(entry.c_str(), "gc.", 3))
 	    fs::remove(dir_entry.path());
     }
-}
-
-void create_image(std::string name, int sectors) {
-    char buf[4096];
-    memset(buf, 0, sizeof(buf));
-    auto _hdr = (obj_hdr*) buf;
-
-    *_hdr = (obj_hdr){LSVD_MAGIC,
-		      1,	  // version
-		      {0},	  // UUID
-		      LSVD_SUPER, // type
-		      0,	  // seq
-		      8,	  // hdr_sectors
-		      0};	  // data_sectors
-    uuid_generate_random(_hdr->vol_uuid);
-
-    auto _super = (super_hdr*)(_hdr + 1);
-    *_super = (super_hdr){(uint64_t)sectors, // vol_size
-			  0,	   // total data sectors
-			  0,	   // live sectors
-			  1,	   // next object
-			  0, 0,	   // checkpoint offset, len
-			  0, 0,	   // clone offset, len
-			  0, 0};   // snap offset, len
-    
-    unlink(name.c_str());
-    FILE *fp = fopen(name.c_str(), "w");
-    if (fp == NULL)
-	perror("image create");
-    fwrite(buf, sizeof(buf), 1, fp);
-    fclose(fp);
 }
 
 #include <zlib.h>
@@ -210,21 +185,22 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     rng.seed(seed);
 
     init_random();
+    rados_ioctx_t io = 0;
+    rbd_image_t img;
 
+    setenv("LSVD_CACHE_SIZE", "100M", 1);
+    setenv("LSVD_BACKEND", cfg->backend, 1);
+    setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
+    
     if (!started || cfg->restart) {
 	clean_cache(cfg->cache_dir);
-	clean_image(cfg->obj_prefix);
-	create_image(cfg->obj_prefix, cfg->image_sectors);
+	rbd_remove(io, cfg->obj_prefix);
+	//clean_image(cfg->obj_prefix);
+	//create_image(cfg->obj_prefix, cfg->image_sectors);
+	rbd_create(io, cfg->obj_prefix, cfg->image_sectors, NULL);
 	sector_crc.clear();
 	started = true;
     }
-
-    setenv("LSVD_CACHE_SIZE", "100M", 1);
-    setenv("LSVD_BACKEND", "file", 1);
-    setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
-    
-    rados_ioctx_t io = 0;
-    rbd_image_t img;
 
     if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	printf("failed: rbd_open\n"), exit(1);
@@ -298,12 +274,14 @@ static struct argp_option options[] = {
     {"reverse",  'R', 0,      0, "reverse NVMe completion order"},    
     {"existing", 'x', 0,      0, "don't delete existing cache"},    
     {"delay",    'D', 0,      0, "add random backend delays"},    
+    {"rados",    'O', 0,      0, "use RADOS"},
     {0},
 };
 
 struct cfg _cfg = {
     "/tmp",			// cache_dir
     "/tmp/bkt/obj",		// obj_prefix
+    "file",                	// backend
     10000, 			// run_len
     16,				// window
     1024*1024*2,		// image_sectors,
@@ -373,6 +351,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	break;
     case 'D':
 	__lsvd_dbg_be_delay = true;
+	break;
+    case 'O':
+	_cfg.backend = "rados";
 	break;
     case ARGP_KEY_END:
         break;
