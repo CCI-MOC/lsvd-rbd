@@ -209,6 +209,14 @@ public:
     void release() {}		// TODO: free properly
 };
 
+static char *z_page;
+void pad_out(smartiov &iov, int pages) {
+    if (z_page == NULL)
+	z_page = (char*)aligned_alloc(512, 4096);
+    for (int i = 0; i < pages; i++)
+	iov.push_back((iovec){z_page, 4096});
+}
+
 /* n_pages: number of 4KB data pages (not counting header)
  * page:    page number to begin writing 
  * n_pad:   number of pages to skip (not counting header)
@@ -226,9 +234,13 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
 	pad_hdr = (char*)aligned_alloc(512, 4096);
 	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
 
+	/* if we pad before journal wraparound, zero out the remaining
+	 * pages to make crash recovery easier.
+	 */
 	pad_iov.push_back((iovec){pad_hdr, 4096});
+	pad_out(pad_iov, n_pad);
 	reqs++;
-	r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad*4096L);
+	r_pad = wcache->nvme_w->make_write_request(&pad_iov, (n_pad+1)*4096L);
     }
   
     std::vector<j_extent> extents;
@@ -416,6 +428,9 @@ void write_cache_impl::evict(page_t page, page_t limit) {
  * <return>: page number for header
  * pad:      page number for pad header (or 0)
  * n_pad:    total pages for pad
+ *
+ * TODO: totally confusing that n_pad includes the header page here,
+ * while it excluses the header page in wcache_write_req constructor
  */
 uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
     //assert(!m.try_lock());
