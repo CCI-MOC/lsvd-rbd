@@ -60,7 +60,6 @@ int make_cache(std::string name, uuid_t &uuid, int n_pages) {
 			       3+w_meta,	   // base
 			       3+w_meta+w_pages,   // limit
 			       3+w_meta,	   // next
-			       3+w_meta,	   // oldest
 			       0,0,0,	   // map_start/blocks/entries
 			       0,0,0};	   // len_start/blocks/entries
     fwrite(buf, 4096, 1, fp);
