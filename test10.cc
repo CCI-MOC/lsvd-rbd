@@ -312,12 +312,20 @@ struct triple {
     uint32_t crc;
 };
 
+struct op {
+    int sector;
+    int len;
+    int seq;
+    std::vector<uint32_t> *crcs;
+};
+
 void run_test(struct cfg *cfg) {
     rados_ioctx_t io = 0;
     rbd_image_t img;
     bool started = false;
-    int seq = 0;
+    int seq = 0, min_seq = 0;
     std::vector<triple> should_be_crcs(cfg->image_sectors);
+    std::vector<op> op_crcs;
 
     setenv("LSVD_CACHE_SIZE", cfg->cache_size, 1);
     setenv("LSVD_BACKEND", "file", 1);
@@ -340,6 +348,8 @@ void run_test(struct cfg *cfg) {
 	    seq = 0;
 	    for (int i = 0; i < cfg->image_sectors; i++)
 		should_be_crcs[i] = (triple){0, 0, 0xb2aa7578};
+	    op_crcs.clear();
+	    min_seq = 0;
 	}
 
 	std::uniform_real_distribution<> uni(0.0,1.0);
@@ -353,13 +363,6 @@ void run_test(struct cfg *cfg) {
 	    io_list.push_back(std::make_tuple(lba, n));
 	}
 
-	struct op {
-	    int sector;
-	    int len;
-	    int seq;
-	    std::vector<uint32_t> *crcs;
-	};
-    
 	int pid = fork();
 	if (pid == 0) {
 	    if (cfg->sleep) {
@@ -397,7 +400,6 @@ void run_test(struct cfg *cfg) {
 	/* this relies on the random number stream being identical in 
 	 * the parent and child processes
 	 */
-	std::vector<op> op_crcs;
 	for (int i = 0; i < n_requests; i++) {
 	    if (uni(rng) < cfg->read_fraction)
 		continue;
@@ -463,14 +465,15 @@ void run_test(struct cfg *cfg) {
 		max_seq = image_info[i].seq;
 	    }
 
-	printf("max_seq = %d\n", max_seq);
+	printf("max_seq = %d min_seq = %d\n", max_seq, min_seq);
 	int secs = 0;
 	for (size_t i = max_seq; i < op_crcs.size(); i++)
 	    secs += op_crcs[i].len;
-	printf("lost %d writes (%.1f MB)\n", n_requests - max_seq, secs / 2.0 / 1024);
+	printf("lost %d writes (%.1f MB)\n",
+	       (int)op_crcs.size() - max_seq, secs / 2.0 / 1024);
 	assert(cfg->lose_writes || (n_requests - max_seq) < (int)cfg->window);
     
-	for (int i = 0; i < max_seq; i++) {
+	for (int i = min_seq; i < max_seq; i++) {
 	    auto [lba,len,seq,crcs] = op_crcs[i];
 	    assert(seq == i+1);
 	    int j = 0;
@@ -490,9 +493,43 @@ void run_test(struct cfg *cfg) {
 	assert(!failed);
 	printf("ok\n");
 
-	free(buf);
 	rbd_close(img);
+
+	printf("testing again...\n");
+	rbd_open(io, cfg->obj_prefix, &img, NULL);
+	std::vector<triple> image_info2(cfg->image_sectors);
+    
+	for (int i = 0, sector = 0;
+	     sector < cfg->image_sectors; sector += bufsize/512) {
+	    memset(buf, 0, bufsize);
+	    rbd_read(img, sector*512L, bufsize, buf);
+	    for (int j = 0; j < bufsize; j += 512) {
+		auto p = (const unsigned char*)buf + j;
+		uint32_t crc = crc32(0, p, 512);
+		image_info2[sector + j/512] = (triple){*(int*)p,
+						      *(int*)(p+4), crc};
+		assert(*(int*)(p+4) <= (int)image_info.size()+1);
+	    }
+	    if (++i > cfg->image_sectors / (bufsize/512) / 10) {
+		printf("-"); fflush(stdout);
+		i = 0;
+	    }
+	}
+	printf("\n");
+	int failed2 = 0;
+	for (int i = 0; i < cfg->image_sectors && failed < 100; i++)
+	    if (should_be_crcs[i].crc != image_info2[i].crc) {
+		printf("%d : %08x (seq %d) should be: %08x (%d)\n", i,
+		       image_info2[i].crc, image_info2[i].seq,
+		       should_be_crcs[i].crc, should_be_crcs[i].seq);
+		failed2++;
+	    }
+	assert(!failed2);
+	printf("ok\n");
+
+	free(buf);
 	__lsvd_dbg_be_delay = tmp;
+	min_seq = max_seq;
     }
 }
 
