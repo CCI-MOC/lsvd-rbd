@@ -632,138 +632,87 @@ void write_cache_impl::read_map_entries() {
     next_acked_page = super->next;
 }
 
-/* TODO: get rid of this BS and use 'prev' pointer to read backwards
- * from cache[base] to find the oldest entry in cache.
+/* needs to set the following variables:
+ *  super->next
+ *  next_acked_page
+ *  sequence
  */
-
-/* returns:
- *   bool: false for failure
- *   page: next page after last record (super.limit if we hit end)
- *   seq: sequence number next for next record
- * @strict: return false if run doesn't consume the rest of the cache
- */
-std::tuple<bool,page_t,uint64_t> chase(page_t page, uint64_t seq, page_t limit,
-				       j_hdr *hdrs, bool strict) {
-    auto hdr = hdrs + page;
-    while (page < limit && hdr->magic == LSVD_MAGIC && hdr->seq == seq) {
-	page += hdr->len;
-	seq++;
-	hdr = hdrs + page;
-    }
-    if (page < limit && hdr->magic == LSVD_MAGIC && strict)
-	return std::make_tuple(false, 0, 0);
-
-    return std::make_tuple(true, page, seq);
-}
-
-bool decode_journal(std::pair<page_t,uint64_t> &part1_min,
-		    std::pair<page_t,uint64_t> &part1_max,
-		    std::pair<page_t,uint64_t> &part2_min,
-		    std::pair<page_t,uint64_t> &part2_max,
-		    int base, int limit, j_hdr *hdrs) {
-    auto b = base;
-    auto hdr = &hdrs[b];
-    part1_min = std::make_pair(b, hdr->seq);
-    auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs, false);
-
-    if (!rv)
-	return rv;
-    
-    part1_max = std::make_pair(_page, _seq);
-    for (b = _page; b < (page_t)limit; b++) {
-	hdr = &hdrs[b];
-	if (hdr->magic != LSVD_MAGIC ||
-	    (hdr->type != LSVD_J_DATA && hdr->type != LSVD_J_PAD) ||
-	    (hdr->seq > part1_min.second))
-	    continue;
-	    
-	auto _seq0 = hdr->seq;
-	auto [rv, _page, _seq] = chase(b, hdr->seq, limit, hdrs, true);
-	if (rv && _page == (page_t)limit) {
-	    /* if we overwrote PAD, there might be dangling old 
-	     * data - check and ignore that.
-	     */
-	    if (part1_min.second == _seq) {
-		part2_min = part1_min;
-		part2_max = part1_max;
-		part1_min = std::make_pair(b, _seq0);
-		part1_max = std::make_pair(_page, _seq);
-	    }
-	    return true;
-	}
-    }
-    return true;		// cache hasn't wrapped yet
-}
-
-
 int write_cache_impl::roll_log_forward() {
-    std::vector<j_hdr> hdrs(super->limit);
-    for (int i = super->base; i < super->limit; i++) {
-	if (nvme_w->read(_hdrbuf, 4096, 4096L * i) < 0)
-	    throw_fs_error("cache log roll-forward");
-	hdrs[i] = *(j_hdr*)_hdrbuf;
+    page_t start = super->base, prev;
+    auto h = (j_hdr*)_hdrbuf;
+    
+    if (nvme_w->read(_hdrbuf, 4096, 4096L * start) < 0)
+	throw_fs_error("cache log roll-forward");
+
+    /* nothing in cache
+     */
+    if (h->magic != LSVD_MAGIC || h->type != LSVD_J_DATA) {
+	sequence = 1;
+	super->next = next_acked_page = super->base;
+	// before = after = {}
+	return 0;
     }
-    
-    /* locate the ranges of valid records - from part1_min to part1_max
-     * and optionally part2_min to part2_max (if we wrapped around)
-     * note that 0 is an invalid page number
+    sequence = h->seq;
+
+    /* find the oldest journal entry
      */
-    std::pair<page_t,uint64_t> part1_min(0,0), part1_max(0,0),
-	part2_min(0,0), part2_max(0,0);
-    if (!decode_journal(part1_min, part1_max, part2_min, part2_max,
-			super->base, super->limit, hdrs.data()))
-	return -1;
-    
-    /* Now read all the records in, update lengths and map,
-     * and write to backend.
+    while (true) {
+	prev = h->prev;
+	if (prev == 0)		// hasn't wrapped
+	    break;
+	if (nvme_w->read(_hdrbuf, 4096, 4096L * prev) < 0)
+	    throw_fs_error("cache log roll-forward");
+	if (h->magic != LSVD_MAGIC || h->type != LSVD_J_DATA ||
+	    h->seq != sequence-1)
+	    break;
+	sequence = h->seq;
+	start = prev;
+    }
+
+    /* Read all the records in, update lengths and map, and write
+     * to backend if they're newer than the last write the translation
+     * layer guarantees is persisted.
      */
-    sequence = part1_min.second;
-    page_t start = part1_min.first;
-    page_t end = super->next = next_acked_page = part2_max.first;
-
-    if (end == 0)
-	end = next_acked_page = super->next = part1_max.first;
-    else
-	assert(part1_max.second == part2_min.second);
-
-    printf("roll forward %d %d\n", start, end);
-
-    /* push records into 'before', flip them to 'after' if we see
-     * a pad and loop back to beginning.
-     * use a do-while loop because start and end might be the same
-     */
-    int b = start;
-    do {			// while b != end
-	if (nvme_w->read(_hdrbuf, 4096, 4096L * b) < 0)
-	    throw_fs_error("wcache");
-
-	auto hdr = (j_hdr*)_hdrbuf;
-	assert(hdr->seq == sequence);
-	sequence++;
-
-	if (hdr->type == LSVD_J_PAD) {
+    while (true) {
+	/* handle wrap-around
+	 */
+	if (start == super->limit) {
 	    after.insert(after.end(), before.begin(), before.end());
 	    before.clear();
-	    b = super->base;
+	    start = super->base;
 	    continue;
 	}
 
-	before.push_back({b, hdr->len});
+	/* is this another journal record?
+	 */
+	if (nvme_w->read(_hdrbuf, 4096, 4096L * start) < 0)
+	    throw_fs_error("cache log roll-forward");
+	if (h->magic != LSVD_MAGIC || h->seq != sequence ||
+	    (h->type != LSVD_J_DATA && h->type != LSVD_J_PAD))
+	    break;
+
+	if (h->type == LSVD_J_PAD) {
+	    start = super->limit;
+	    sequence++;
+	    continue;
+	}
+	
+	before.push_back({start, h->len});
 
 	/* read LBA info from header, read data, then 
 	 * - put mappings into cache map and rmap
 	 * - write data to backend
 	 */
 	std::vector<j_extent> entries;
-	decode_offset_len<j_extent>(_hdrbuf, hdr->extent_offset,
-				    hdr->extent_len, entries);
+	decode_offset_len<j_extent>(_hdrbuf, h->extent_offset,
+				    h->extent_len, entries);
 
-	size_t data_len = 4096L * (hdr->len - 1);
+	size_t data_len = 4096L * (h->len - 1);
 	char *data = (char*)aligned_alloc(512, data_len);
-	if (nvme_w->read(data, data_len, 4096L * (b+1)) < 0)
+	if (nvme_w->read(data, data_len, 4096L * (start+1)) < 0)
 	    throw_fs_error("wcache");
 
-	sector_t plba = (b+1) * 8;
+	sector_t plba = (start+1) * 8;
 	size_t offset = 0;
 	std::vector<extmap::lba2lba> garbage;
 
@@ -781,7 +730,7 @@ int write_cache_impl::roll_log_forward() {
 		be->writev(sequence, e.lba*512, &iov, 1);
 	    }
 	    else
-		do_log("skip %ld %d (max %d) %ld+%d\n", b,
+		do_log("skip %ld %d (max %d) %ld+%d\n", start,
 		       sequence.load(), be->max_cache_seq, e.lba, e.len);
 	    offset += bytes;
 	    plba += e.len;
@@ -790,12 +739,13 @@ int write_cache_impl::roll_log_forward() {
 	    rmap.trim(g.s.base, g.s.base+g.s.len);	    
 
 	free(data);
-	b += hdr->len;
-	if (b >= (page_t)super->limit)
-	    b = super->base;
-	super->next = b;
-    } while (b != end);
 
+	start += h->len;
+	sequence++;
+    }
+
+    super->next = next_acked_page = start;
+    
     be->flush();
     usleep(10000);
     
