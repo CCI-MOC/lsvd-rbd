@@ -108,10 +108,11 @@ class write_cache_impl : public write_cache {
     
     /* allocate journal entry, create a header
      */
-    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad);
+    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad, page_t &prev);
     std::vector<write_cache_work*> work;
     sector_t work_sectors;	// queued in work[]
     j_write_super *super;
+    page_t         previous_hdr;
 
     /* these are used by wcache_write_req
      */
@@ -119,7 +120,7 @@ class write_cache_impl : public write_cache {
     std::mutex                m;
     extmap::cachemap2 map;
     translate        *be;
-    j_hdr *mk_header(char *buf, uint32_t type, page_t blks);
+    j_hdr *mk_header(char *buf, uint32_t type, page_t blks, page_t prev);
     nvme 		      *nvme_w = NULL;
     
 public:
@@ -195,7 +196,7 @@ class wcache_write_req : public request {
     
 public:
     wcache_write_req(std::vector<write_cache_work*> *w, page_t n_pages,
-		     page_t page, page_t n_pad, page_t pad,
+		     page_t page, page_t n_pad, page_t pad, page_t prev,
 		     write_cache *wcache);
     ~wcache_write_req();
     void run(request *parent);
@@ -222,16 +223,16 @@ void pad_out(smartiov &iov, int pages) {
  * pad:     page number for pad entry (0 if none)
  */
 wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
-				       page_t n_pages, page_t page,
-				       page_t n_pad, page_t pad,
-				       write_cache* wcache_)  {
+				   page_t n_pages, page_t page,
+				   page_t n_pad, page_t pad,
+				   page_t prev, write_cache* wcache_)  {
     wcache = (write_cache_impl*)wcache_;
     for (auto w : *work_)
 	work.push_back(w);
     
     if (pad != 0) {
 	pad_hdr = (char*)aligned_alloc(512, 4096);
-	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1);
+	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1, 0);
 
 	/* if we pad before journal wraparound, zero out the remaining
 	 * pages to make crash recovery easier.
@@ -250,7 +251,7 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
     /* TODO: don't assign seq# in mk_header
      */
     hdr = (char*)aligned_alloc(512, 4096);
-    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, 1+n_pages);
+    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, 1+n_pages, prev);
     seq = j->seq;
     
     /* track completion 
@@ -391,15 +392,18 @@ void write_cache_impl::evict(page_t p_base, page_t p_limit) {
  * <return>: page number for header
  * pad:      page number for pad header (or 0)
  * n_pad:    total pages for pad
+ * prev_:    previously
  *
  * TODO: totally confusing that n_pad includes the header page here,
  * while it excluses the header page in wcache_write_req constructor
  */
-uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad) {
+uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad,
+				    page_t &prev) {
     //assert(!m.try_lock());
     assert(n > 0);
     assert(super->next >= super->base && super->next < super->limit);
 
+    prev = previous_hdr;
     pad = n_pad = 0;
     page_t start = super->next, end = start;
 
@@ -435,7 +439,8 @@ again:
 	after.insert(after.end(), before.begin(), before.end());
 	before.clear();
     }
-    
+
+    previous_hdr = start;
     return start;
 }
 
@@ -468,14 +473,15 @@ void write_cache_impl::record_outstanding(uint64_t seq, page_t next,
 
 /* call with lock held
  */
-j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks) {
+j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
+				   page_t prev) {
     //assert(!m.try_lock());
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr*)buf;
     // OH NO - am I using wcache->sequence or wcache->super->seq???
     *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1,
 		 .seq = sequence++, .len = blks, .crc32 = 0,
-		 .extent_offset = 0, .extent_len = 0};
+		 .extent_offset = 0, .extent_len = 0, .prev = prev};
     return h;
 }
 
@@ -857,10 +863,11 @@ void write_cache_impl::send_writes(void) {
     }
     
     page_t pages = div_round_up(sectors, 8);
-    page_t pad, n_pad;
-    page_t page = allocate(pages+1, pad, n_pad);
+    page_t pad, n_pad, prev;
+    page_t page = allocate(pages+1, pad, n_pad, prev);
 
-    auto req = new wcache_write_req(&work, pages, page, n_pad-1, pad, this);
+    auto req = new wcache_write_req(&work, pages, page,
+				    n_pad-1, pad, prev, this);
     work.clear();
     work_sectors = 0;
     outstanding_writes++;
