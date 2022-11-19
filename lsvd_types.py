@@ -153,7 +153,6 @@ class j_write_super(Structure):
                 ("base",        c_int),
                 ("limit",       c_int),
                 ("next",        c_int),
-                ("oldest",      c_int),
                 ("map_start",   c_int),
                 ("map_blocks",  c_int),
                 ("map_entries", c_int),
