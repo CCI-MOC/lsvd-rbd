@@ -211,8 +211,10 @@ public:
 
 static char *z_page;
 void pad_out(smartiov &iov, int pages) {
-    if (z_page == NULL)
+    if (z_page == NULL) {
 	z_page = (char*)aligned_alloc(512, 4096);
+	memset(z_page, 0, 4096); // make valgrind happy
+    }
     for (int i = 0; i < pages; i++)
 	iov.push_back((iovec){z_page, 4096});
 }
@@ -240,7 +242,7 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
 	pad_iov.push_back((iovec){pad_hdr, 4096});
 	pad_out(pad_iov, n_pad);
 	reqs++;
-	r_pad = wcache->nvme_w->make_write_request(&pad_iov, (n_pad+1)*4096L);
+	r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad*4096L);
     }
   
     std::vector<j_extent> extents;
@@ -294,13 +296,17 @@ void wcache_write_req::notify_in_order(std::unique_lock<std::mutex> &lk) {
     std::vector<extmap::lba2lba> garbage; 
     for (auto w : work) {
 	sector_t sectors = w->iov->bytes() / 512;
-	wcache->map.update(w->lba, w->lba + sectors, _plba, NULL);
+	wcache->map.update(w->lba, w->lba + sectors, _plba, &garbage);
 	wcache->rmap.update(_plba, _plba+sectors, w->lba);
 	_plba += sectors;
     }
+    /* remove old mappings from the reverse map
+     */
     for (auto it = garbage.begin(); it != garbage.end(); it++) 
-	wcache->rmap.trim(it->s.base, it->s.base+it->s.len);
+	wcache->rmap.trim(it->s.ptr, it->s.ptr+it->s.len);
 
+    /* if there are enough pending writes, send them
+     */
     wcache->outstanding_writes--;
     if (wcache->work.size() >= wcache->write_batch ||
 	wcache->work_sectors >= wcache->cfg->wcache_chunk / 512)
@@ -403,6 +409,7 @@ void write_cache_impl::evict(page_t page, page_t limit) {
 	for (auto it = rmap.lookup(s_base);
 	     it != rmap.end() && it->base() < s_limit; it++) {
 	    auto [_base, _limit, ptr] = it->vals(s_base, s_limit);
+	    assert(ptr != 131808);
 	    map.trim(ptr, ptr+(_limit-_base));
 	}
 	rmap.trim(s_base, s_limit);
