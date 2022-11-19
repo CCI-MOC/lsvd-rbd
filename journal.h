@@ -26,6 +26,9 @@ struct j_map_extent {
 struct j_length {
     int32_t page;		// in pages
     int32_t len;		// in pages
+    bool operator<(const j_length &other) const { // for sorting
+        return page < other.page;
+    }
 };
 
 enum {LSVD_J_DATA    = 10,
@@ -76,7 +79,6 @@ struct j_write_super {
     int32_t base;
     int32_t limit;
     int32_t next;
-    int32_t oldest;
     
     int32_t map_start;		// type: j_map_extent
     int32_t map_blocks;

@@ -32,7 +32,7 @@ hdr_pp = [['magic', magic], ['type', fieldnames], ['vol_uuid', fmt_uuid],
 
 wsup_pp = [['magic', magic], ['type', fieldnames], ['clean', lambda x: "YES" if x else "NO"],
                ['seq', '%d'], ['meta_base', '%d'], ['meta_limit', '%d'],
-               ['base', '%d'], ['limit', '%d'], ['next', '%d'], ['oldest', '%d'], 
+               ['base', '%d'], ['limit', '%d'], ['next', '%d'], 
                ['map_start', '%d'], ['map_entries', '%d'],
                ['len_start', '%d'], ['len_entries', '%d']]
 
