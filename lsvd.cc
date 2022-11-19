@@ -60,19 +60,19 @@ extern int make_cache(std::string name, uuid_t &uuid, int n_pages);
 
 bool __lsvd_dbg_no_gc = false;
 
+backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name) {
+
+    if (cfg->backend == BACKEND_FILE)
+	return make_file_backend(name);
+    if (cfg->backend == BACKEND_RADOS)
+	return make_rados_backend(io);
+    return NULL;
+}
+    
 int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     if (cfg.read() < 0)
 	return -1;
-    switch (cfg.backend) {
-    case BACKEND_FILE:
-	objstore = make_file_backend(name);
-	break;
-    case BACKEND_RADOS:
-	objstore = make_rados_backend(io);
-	break;
-    default:
-	return -1;
-    }
+    objstore = get_backend(&cfg, io, name);
 
     /* read superblock and initialize translation layer
      */
@@ -676,44 +676,28 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
     lsvd_config  cfg;
     if (cfg.read() < 0)
 	return -1;
-
-    backend *objstore;
-    switch (cfg.backend) {
-    case BACKEND_FILE:
-	objstore = make_file_backend(NULL);
-	break;
-    case BACKEND_RADOS:
-	objstore = make_rados_backend(io);
-	break;
-    default:
-	return -1;
-    }
-    
+    auto objstore = get_backend(&cfg, io, NULL);
     auto rv = translate_create_image(objstore, name, size);
     delete objstore;
     return rv;
 }
 
+/* TODO: translate.cc should implement rbd_remove, by reading the 
+ * last checkpoint and figuring out exactly which objects to remove
+ */
 extern "C" int rbd_remove(rados_ioctx_t io, const char *name) {
     lsvd_config  cfg;
     if (cfg.read() < 0)
 	return -1;
-
-    backend *objstore;
-    switch (cfg.backend) {
-    case BACKEND_FILE:
-	objstore = make_file_backend(NULL);
-	break;
-    case BACKEND_RADOS:
-	objstore = make_rados_backend(io);
-	break;
-    default:
-	return -1;
-    }
-    
+    auto objstore = get_backend(&cfg, io, NULL);
     int rv = objstore->delete_prefix(name);
     delete objstore;
     return rv;
+}
+
+extern "C" void rbd_uuid(rbd_image_t image, uuid_t *uuid) {
+    rbd_image *img = (rbd_image*)image;
+    memcpy(uuid, img->xlate->uuid, sizeof(uuid_t));
 }
 
 /* any following functions are stubs only
