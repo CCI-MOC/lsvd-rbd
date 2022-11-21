@@ -150,6 +150,7 @@ class translate_impl : public translate {
     void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
     void worker_thread(thread_pool<batch*> *p);
     void ckpt_thread(thread_pool<int> *p);
+    void verify_live(void);
     void flush_thread(thread_pool<int> *p);
 
     backend *objstore;
@@ -258,8 +259,8 @@ ssize_t translate_impl::init(const char *prefix_,
 
     /* read in the last checkpoint, then roll forward from there;
      */
+    int last_ckpt = -1;
     if (ckpts.size() > 0) {
-	int last_ckpt = -1;
 	for (auto c : ckpts) 
 	    checkpoints.push_back(c); // so we can delete them later
 
@@ -498,6 +499,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     int hdr_sectors = div_round_up(hdr_bytes, 512);
 
     std::unique_lock objlock(*map_lock);
+    //verify_live();
     obj_info oi = {.hdr = hdr_sectors, .data = (int)b->len/512,
 		   .live = (int)b->len/512, .type = LSVD_DATA};
     object_info[b->seq] = oi;
@@ -512,20 +514,23 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     for (auto e : b->entries) {
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
+	do_log("add: %d+%d -> %d.%d\n", e.lba, e.len, b->seq, sector_offset);
 	sector_offset += e.len;
     }
 
     for (auto d : deleted) {
 	auto [base, limit, ptr] = d.vals();
+	do_log("trimmed: %d+%d -> %d.%d\n", base, limit-base, ptr.obj, ptr.offset);
 	assert(object_info.find(ptr.obj) != object_info.end());
 	object_info[ptr.obj].live -= (limit - base);
 	assert(object_info[ptr.obj].live >= 0);
 	total_live_sectors -= (limit - base);
     }
+    //verify_live();
     objlock.unlock();
 
     total_sectors += b->len/512;
-    total_live_sectors += b->len/512;
+    total_live_sectors += b->len/512; // not quite right if overlaps...
     if (next_compln == -1)
 	next_compln = b->seq;
 
@@ -613,6 +618,22 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
 
 /* -------------- Checkpointing -------------- */
 
+void translate_impl::verify_live(void) {
+    // std::unique_lock lk(*map_lock); <- must be held
+    int n = seq.load();
+    std::vector<int> live(n, 0);
+    for (auto it = map->begin(); it != map->end(); it++) {
+	auto [base, limit, ptr] = it->vals();
+	live[ptr.obj] += (limit - base);
+    }
+    for (auto it = object_info.begin(); it != object_info.end(); it++) {
+	auto [obj, info] = *it;
+	if (info.type == LSVD_DATA)
+	    assert(info.live == live[obj]);
+    }
+}
+
+
 /* synchronously write a checkpoint
  * NOTE - this drops the lock passed to it.
  */
@@ -627,10 +648,11 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 	cv.wait(lk);
 
     /* - hold the translation layer lock (lk) until we get a copy 
-     *   of object_info
+     *   of object_info [no, wait until object map?]
      * - hold the map lock while we get a copy of the map.
      */
     std::unique_lock objlock(*map_lock);
+    //verify_live();
 
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
@@ -638,7 +660,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 		    .len = limit-base, .obj = (int32_t)ptr.obj,
 		    .offset = (int32_t)ptr.offset});
     }
-    objlock.unlock();
 
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
 
@@ -651,6 +672,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 			.data_sectors = (uint32_t)data,
 			.live_sectors = (uint32_t)live});
     }
+    objlock.unlock();
 
     /* add object for this checkpoint
      */
@@ -956,12 +978,21 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    obj_info oi = {.hdr = hdr_sectors, .data = gc_sectors,
 		   .live = gc_sectors, .type = LSVD_DATA};
 	    object_info[_seq] = oi;
-	    
+
+	    std::vector<extmap::lba2obj> deleted;
 	    for (auto e : obj_extents) {
 		extmap::obj_offset oo = {_seq, offset};
-		map->update(e.lba, e.lba+e.len, oo, NULL);
+		map->update(e.lba, e.lba+e.len, oo, &deleted);
 		offset += e.len;
 	    }
+	    for (auto d : deleted) {
+		auto [base, limit, ptr] = d.vals();
+		assert(object_info.find(ptr.obj) != object_info.end());
+		object_info[ptr.obj].live -= (limit - base);
+		assert(object_info[ptr.obj].live >= 0);
+		total_live_sectors -= (limit - base);
+	    }
+
 	    objlock2.unlock();
 	    lk2.unlock();
 
