@@ -26,6 +26,7 @@ std::mt19937_64 rng;
 
 struct cfg {
     const char *cache_dir;
+    const char *cache_size;
     const char *obj_prefix;
     const char *backend;
     int    run_len;
@@ -91,6 +92,15 @@ void get_random(char *buf, int lba, int sectors, int seq) {
 	p[0] = lba++;
 	p[1] = seq;
     }
+}
+
+extern "C" void rbd_uuid(rbd_image_t image, uuid_t *uuid);
+std::string get_cache_name(rbd_image_t img) {
+    uuid_t uu;
+    rbd_uuid(img, &uu);
+    char uuid_str[64];
+    uuid_unparse(uu, uuid_str);
+    return std::string(uuid_str) + ".cache";
 }
 
 void clean_cache(std::string cache_dir) {
@@ -173,7 +183,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     rados_ioctx_t io = 0;
     rbd_image_t img;
 
-    setenv("LSVD_CACHE_SIZE", "100M", 1);
+    setenv("LSVD_CACHE_SIZE", cfg->cache_size, 1);
     setenv("LSVD_BACKEND", cfg->backend, 1);
     setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
     
@@ -185,6 +195,8 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	started = true;
     }
 
+    std::vector<data_map> writes;
+    
     if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	printf("failed: rbd_open\n"), exit(1);
 
@@ -211,6 +223,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    get_random(ptr, lba, n, s);
 	    rbd_aio_write(img, 512L * lba, 512L * n, ptr, c);
 	    add_crc(lba, ptr, n*512L, s, cfg->verbose);
+	    writes.push_back({lba,n});
 	}
     }
     drain(q, 0);
@@ -258,12 +271,14 @@ static struct argp_option options[] = {
     {"existing", 'x', 0,      0, "don't delete existing cache"},    
     {"delay",    'D', 0,      0, "add random backend delays"},    
     {"rados",    'O', 0,      0, "use RADOS"},
+    {"cache-size",'Z', "N",    0, "cache size (K/M/G)"},
     {0},
 };
 
 struct cfg _cfg = {
     "/tmp",			// cache_dir
     "/tmp/bkt/obj",		// obj_prefix
+    "100m",                     // cache_size
     "file",                	// backend
     10000, 			// run_len
     16,				// window
@@ -337,6 +352,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	break;
     case 'O':
 	_cfg.backend = "rados";
+	break;
+    case 'Z':
+	_cfg.cache_size = arg;
 	break;
     case ARGP_KEY_END:
         break;
