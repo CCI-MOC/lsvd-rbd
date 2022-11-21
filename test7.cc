@@ -223,7 +223,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    get_random(ptr, lba, n, s);
 	    rbd_aio_write(img, 512L * lba, 512L * n, ptr, c);
 	    add_crc(lba, ptr, n*512L, s, cfg->verbose);
-	    writes.push_back({lba,n});
+	    writes.push_back({(uint64_t)lba,(uint64_t)n});
 	}
     }
     drain(q, 0);
