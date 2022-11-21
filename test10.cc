@@ -446,6 +446,7 @@ void run_test(struct cfg *cfg) {
 	    rbd_read(img, sector*512L, bufsize, buf);
 	    for (int j = 0; j < bufsize; j += 512) {
 		auto p = (const unsigned char*)buf + j;
+		assert(*(int*)(p+4) >= 0);
 		uint32_t crc = crc32(0, p, 512);
 		image_info[sector + j/512] = (triple){*(int*)p,
 						      *(int*)(p+4), crc};
