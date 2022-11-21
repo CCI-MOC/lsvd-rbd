@@ -88,7 +88,7 @@ if args.write and super.write_super < npages:
             b += 1
             continue
 
-        h_pp = [["magic", magic], ["type", fieldnames], ["seq", '%d'], ["len", '%d']]
+        h_pp = [["magic", magic], ["type", fieldnames], ["seq", '%d'], ["len", '%d'], ["prev", '%d']]
         print('\ndata: (%d)' % b)
         prettyprint(j, h_pp)
         print('extents    :', ' '.join(['%d+%d' % (_.lba,_.len) for _ in e]))
