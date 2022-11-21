@@ -343,9 +343,8 @@ ssize_t translate_impl::init(const char *prefix_,
 	    printf("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
     }
 
-    for (int i = 0; i < nthreads; i++) 
-	workers.pool.push(std::thread(&translate_impl::worker_thread,
-				      this, &workers));
+    workers.pool.push(std::thread(&translate_impl::worker_thread,
+				  this, &workers));
     misc_threads->pool.push(std::thread(&translate_impl::ckpt_thread,
 					this, misc_threads));
     if (timedflush)
@@ -622,6 +621,11 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
+    /* wait until all prior objects have been acked by backend
+     */
+    while (next_compln < ckpt_seq && !stopped)
+	cv.wait(lk);
+
     /* - hold the translation layer lock (lk) until we get a copy 
      *   of object_info
      * - hold the map lock while we get a copy of the map.
@@ -658,11 +662,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 				   .type = LSVD_CKPT};
     checkpoints.push_back(ckpt_seq);
     
-    /* wait until all prior objects have been acked by backend
-     */
-    while (next_compln < ckpt_seq && !stopped)
-	cv.wait(lk);
-
     /* put it all together in memory
      */
     auto buf = (char*)calloc(hdr_bytes, 1);
