@@ -229,11 +229,15 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
     wcache = (write_cache_impl*)wcache_;
     for (auto w : *work_)
 	work.push_back(w);
-    
+
+    /* if we pad, then the data record has prev=pad, and the pad 
+     * has prev=prev
+     */
     if (pad != 0) {
 	pad_hdr = (char*)aligned_alloc(512, 4096);
-	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1, 0);
-
+	wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad+1, prev);
+	prev = pad;
+	
 	/* if we pad before journal wraparound, zero out the remaining
 	 * pages to make crash recovery easier.
 	 */
@@ -270,7 +274,6 @@ wcache_write_req::wcache_write_req(std::vector<write_cache_work*> *work_,
     for (auto w : work) {
 	auto [iov, iovcnt] = w->iov->c_iov();
 	data_iovs->ingest(iov, iovcnt);
-	do_log("launch %d+%d -> %d\n", w->lba, w->iov->bytes()/512, plba+i);
 	i += w->iov->bytes() / 512;
     }
     reqs++;
@@ -282,7 +285,6 @@ wcache_write_req::~wcache_write_req() {
     if (pad_hdr) 
         free(pad_hdr);
     delete data_iovs;
-    //delete work;
 }
 
 /* called in order from notify_complete
@@ -296,7 +298,6 @@ void wcache_write_req::notify_in_order(std::unique_lock<std::mutex> &lk) {
     std::vector<extmap::lba2lba> garbage; 
     for (auto w : work) {
 	sector_t sectors = w->iov->bytes() / 512;
-	do_log("notify %d+%d -> %d\n", w->lba, sectors, _plba);
 	wcache->map.update(w->lba, w->lba + sectors, _plba, &garbage);
 	wcache->rmap.update(_plba, _plba+sectors, w->lba);
 	_plba += sectors;
@@ -662,8 +663,8 @@ int write_cache_impl::roll_log_forward() {
 	    break;
 	if (nvme_w->read(_hdrbuf, 4096, 4096L * prev) < 0)
 	    throw_fs_error("cache log roll-forward");
-	if (h->magic != LSVD_MAGIC || h->type != LSVD_J_DATA ||
-	    h->seq != sequence-1)
+	if (h->magic != LSVD_MAGIC || h->seq != sequence-1 ||
+	    (h->type != LSVD_J_DATA && h->type != LSVD_J_PAD))
 	    break;
 	sequence = h->seq;
 	start = prev;
