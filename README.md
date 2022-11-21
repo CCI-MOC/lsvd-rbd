@@ -84,22 +84,9 @@ snaps:          [tbd]
 
 The SSD cache is split into a read cache and a write cache, and is configured with `mkcache.py`. If you give it an existing file or partition it will calculate what I think are reasonable defaults.
 
-### Example
-
-```
-$ rm /mnt/nvme/lsvd/*
-$ dd if=/dev/zero bs=1024k count=100 of=/mnt/nvme/lsvd/SSD status=none
-$ python3 mkdisk.py --size 1g /mnt/nvme/lsvd/obj
-$ python3 parse.py /mnt/nvme/lsvd/obj | grep uuid
-$ python3 parse.py /mnt/nvme/lsvd/obj | grep UUID
-UUID:      43f844ba-a4a5-11ec-95e3-2dc9b17b86ce
-$ python3 mkcache.py --uuid 43f844ba-a4a5-11ec-95e3-2dc9b17b86ce /mnt/nvme/lsvd/SSD
-$ make liblsvd.so
-    ...
-$ LD_PRELOAD=$PWD/liblsvd.so qemu-img dd if=rbd://mnt/nvme/lsvd/SSD,/mnt/nvme/lsvd/obj bs=64k count=10k of=file:///tmp/z1
-$  ls -lh /tmp/z1
--rw-r--r-- 1 pjd pjd 640M Mar 15 21:19 /tmp/z1
-```
+**Cache sizing:** The write journal gets roughly 1/3 of the total cache size. We have two constraints on its size:
+1. Since the translation layer buffers data in RAM, the write cache needs to hold the currently buffered object (8MB by default) plus any outstanding writes to NVMe, which we limit to half the cache size - i.e. a min write cache size of 16MB, or a total cache size of about 48MB.
+1. Since outstanding writes are limited to 1/2 write cache size, the cache has to be double the largest write; QEMU has been observed to write 16MB in one operation, giving a min write cache size of 32MB, and a total size of about 100MB.
 
 ## Tests
 
