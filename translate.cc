@@ -321,21 +321,22 @@ ssize_t translate_impl::init(const char *prefix_,
 	    max_cache_seq = dh.cache_seq;
 	
 	int offset = 0, hdr_len = h.hdr_sectors;
+	std::vector<extmap::lba2obj> deleted;
 	for (auto m : entries) {
-	    std::vector<extmap::lba2obj> deleted;
 	    extmap::obj_offset oo = {seq, offset + hdr_len};
 	    map->update(m.lba, m.lba + m.len, oo, &deleted);
 	    offset += m.len;
-	    for (auto d : deleted) {
-		auto [base, limit, ptr] = d.vals();
-		object_info[ptr.obj].live -= (limit - base);
-		assert(object_info[ptr.obj].live >= 0);
-		total_live_sectors -= (limit - base);
-	    }
 	}
+	for (auto d : deleted) {
+	    auto [base, limit, ptr] = d.vals();
+	    object_info[ptr.obj].live -= (limit - base);
+	    assert(object_info[ptr.obj].live >= 0);
+	    total_live_sectors -= (limit - base);
+	}
+	verify_live();
     }
     next_compln = seq;
-
+    
     /* delete any potential "dangling" objects.
      */
     for (int i = 1; i < 32; i++) {
@@ -499,7 +500,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     int hdr_sectors = div_round_up(hdr_bytes, 512);
 
     std::unique_lock objlock(*map_lock);
-    //verify_live();
+    verify_live();
     obj_info oi = {.hdr = hdr_sectors, .data = (int)b->len/512,
 		   .live = (int)b->len/512, .type = LSVD_DATA};
     object_info[b->seq] = oi;
@@ -514,19 +515,17 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     for (auto e : b->entries) {
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
-	do_log("add: %d+%d -> %d.%d\n", e.lba, e.len, b->seq, sector_offset);
 	sector_offset += e.len;
     }
 
     for (auto d : deleted) {
 	auto [base, limit, ptr] = d.vals();
-	do_log("trimmed: %d+%d -> %d.%d\n", base, limit-base, ptr.obj, ptr.offset);
 	assert(object_info.find(ptr.obj) != object_info.end());
 	object_info[ptr.obj].live -= (limit - base);
 	assert(object_info[ptr.obj].live >= 0);
 	total_live_sectors -= (limit - base);
     }
-    //verify_live();
+    verify_live();
     objlock.unlock();
 
     total_sectors += b->len/512;
@@ -621,7 +620,7 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
 void translate_impl::verify_live(void) {
     // std::unique_lock lk(*map_lock); <- must be held
     int n = seq.load();
-    std::vector<int> live(n, 0);
+    std::vector<int> live(n*2, 0);
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
 	live[ptr.obj] += (limit - base);
@@ -652,7 +651,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      * - hold the map lock while we get a copy of the map.
      */
     std::unique_lock objlock(*map_lock);
-    //verify_live();
+    verify_live();
 
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
@@ -992,7 +991,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 		assert(object_info[ptr.obj].live >= 0);
 		total_live_sectors -= (limit - base);
 	    }
-
+	    verify_live();
 	    objlock2.unlock();
 	    lk2.unlock();
 
