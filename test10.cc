@@ -242,7 +242,7 @@ void lose_writes(struct cfg *cfg) {
     close(fd);
 }
 
-void print_status(struct cfg *cfg) {
+int print_status(struct cfg *cfg) {
     auto prefix = std::string(cfg->obj_prefix);
     auto stem = fs::path(prefix).filename();
     auto parent = fs::path(prefix).parent_path();
@@ -263,6 +263,7 @@ void print_status(struct cfg *cfg) {
     std::sort(files.begin(), files.end());
     auto end = files.size() - 1;
     printf("last object: %x %s\n", files[end].first, files[end].second.c_str());
+    int rv = files[end].first;
     auto min = std::max(0, (int)files.size() - 20);
     
     int n = files[min].first;
@@ -302,7 +303,32 @@ void print_status(struct cfg *cfg) {
     }
     printf("last write cache page: %d\n", highest);
     close(fd);
+    return rv;
 }
+
+char wcache_state_buf[4096];
+void save_wcache_state(struct cfg *cfg) {
+    auto cache = get_cache_filename(cfg);
+#if 0
+    fs::copy_file(cache, cache + ".bak");
+#else
+    int fd = open(cache.c_str(), O_RDONLY);
+    pread(fd, wcache_state_buf, 4096, 1*4096); // assume write super is block 1
+    auto super = (j_super*)wcache_state_buf;
+    assert(super->magic == LSVD_MAGIC && super->type == LSVD_J_W_SUPER);
+    close(fd);
+#endif
+}
+void restore_wcache_state(struct cfg *cfg) {
+    auto cache = get_cache_filename(cfg);
+#if 0
+    fs::rename(cache + ".bak", cache);
+#else
+    int fd = open(cache.c_str(), O_WRONLY, 0777);
+    pwrite(fd, wcache_state_buf, 4096, 1*4096); // assume write super is block 1
+    close(fd);
+#endif
+}    
 
 extern char *p_log, *logbuf;
 
@@ -319,7 +345,11 @@ struct op {
     std::vector<uint32_t> *crcs;
 };
 
+#include <sys/mman.h>
+
 void run_test(struct cfg *cfg) {
+    auto child_logbuf = (char*) mmap(NULL, 4000000, PROT_READ | PROT_WRITE, 
+				     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     rados_ioctx_t io = 0;
     rbd_image_t img;
     bool started = false;
@@ -365,6 +395,10 @@ void run_test(struct cfg *cfg) {
 
 	int pid = fork();
 	if (pid == 0) {
+	    extern char *logbuf, *p_log, *end_log;
+	    logbuf = p_log = child_logbuf;
+	    end_log = child_logbuf+4000000;
+	    
 	    if (cfg->sleep) {
 		printf("pid %d\n", getpid());
 		sleep(10);
@@ -420,7 +454,7 @@ void run_test(struct cfg *cfg) {
 
 	int status;
 	waitpid(pid, &status, 0);
-	print_status(cfg);
+	int last_obj = print_status(cfg);
     
 	if (cfg->lose_objs)
 	    obj_delete(cfg);
@@ -429,7 +463,9 @@ void run_test(struct cfg *cfg) {
 	else if (cfg->lose_writes)
 	    lose_writes(cfg);
 
-	usleep(100000);
+	if (!cfg->restart)
+	    save_wcache_state(cfg);
+	
 	if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	    printf("failed: rbd_open\n"), exit(1);
 
@@ -496,37 +532,19 @@ void run_test(struct cfg *cfg) {
 
 	rbd_close(img);
 
-	printf("testing again...\n");
-	rbd_open(io, cfg->obj_prefix, &img, NULL);
-	std::vector<triple> image_info2(cfg->image_sectors);
-    
-	for (int i = 0, sector = 0;
-	     sector < cfg->image_sectors; sector += bufsize/512) {
-	    memset(buf, 0, bufsize);
-	    rbd_read(img, sector*512L, bufsize, buf);
-	    for (int j = 0; j < bufsize; j += 512) {
-		auto p = (const unsigned char*)buf + j;
-		uint32_t crc = crc32(0, p, 512);
-		image_info2[sector + j/512] = (triple){*(int*)p,
-						      *(int*)(p+4), crc};
-		assert(*(int*)(p+4) <= (int)image_info.size()+1);
+	if (!cfg->restart) {
+	    restore_wcache_state(cfg);
+	    for (int i = 1; i < 64; i++) {
+		char name[128];
+		sprintf(name, "%s.%08x", cfg->obj_prefix, last_obj + i);
+		if (unlink(name) >= 0)
+		    printf("removed %s\n", name);
 	    }
-	    if (++i > cfg->image_sectors / (bufsize/512) / 10) {
-		printf("-"); fflush(stdout);
-		i = 0;
-	    }
+	    // works fine if I do this: (or don't delete objects above)
+	    // well, almost fine.
+	    //rbd_open(io, cfg->obj_prefix, &img, NULL);
+	    //rbd_close(img);
 	}
-	printf("\n");
-	int failed2 = 0;
-	for (int i = 0; i < cfg->image_sectors && failed < 100; i++)
-	    if (should_be_crcs[i].crc != image_info2[i].crc) {
-		printf("%d : %08x (seq %d) should be: %08x (%d)\n", i,
-		       image_info2[i].crc, image_info2[i].seq,
-		       should_be_crcs[i].crc, should_be_crcs[i].seq);
-		failed2++;
-	    }
-	assert(!failed2);
-	printf("ok\n");
 
 	free(buf);
 	__lsvd_dbg_be_delay = tmp;
