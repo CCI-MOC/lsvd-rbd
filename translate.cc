@@ -116,7 +116,6 @@ class translate_impl : public translate {
     super_hdr *super_sh = NULL;
     size_t     super_len;
 
-    thread_pool<batch*> workers;
     thread_pool<int>   *misc_threads; // so we can stop ckpt, gc first
 
     /* for triggering GC
@@ -148,8 +147,6 @@ class translate_impl : public translate {
     void do_gc(std::unique_lock<std::mutex> &lk, bool *running);
     void gc_thread(thread_pool<int> *p);
     void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
-    void worker_thread(thread_pool<batch*> *p);
-    void ckpt_thread(thread_pool<int> *p);
     void verify_live(void);
     void flush_thread(thread_pool<int> *p);
 
@@ -203,7 +200,7 @@ public:
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
 			       extmap::objmap *map_, std::shared_mutex *m_) :
-    done(128,false), workers(&m) {
+    done(128,false) {
     misc_threads = new thread_pool<int>(&m);
     objstore = _io;
     parser = new object_reader(objstore);
@@ -220,7 +217,7 @@ translate *make_translate(backend *_io, lsvd_config *cfg,
 translate_impl::~translate_impl() {
     stopped = true;
     cv.notify_all();
-    delete misc_threads;
+    delete misc_threads;	// TODO: move to shutdown(), call from rbd_close
     if (b)
 	delete b;
     delete parser;
@@ -345,10 +342,6 @@ ssize_t translate_impl::init(const char *prefix_,
 	    printf("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
     }
 
-    workers.pool.push(std::thread(&translate_impl::worker_thread,
-				  this, &workers));
-    misc_threads->pool.push(std::thread(&translate_impl::ckpt_thread,
-					this, misc_threads));
     if (timedflush)
 	misc_threads->pool.push(std::thread(&translate_impl::flush_thread,
 					    this, misc_threads));
@@ -420,8 +413,13 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
 
     if (b->len + len > b->max) {
 	b->seq = last_sent = seq++;
-	workers.put_locked(b);
+	process_batch(b, lk);
 	b = new batch(cfg->batch_size);
+	int _seq = 0;
+	if (!checkpoints.empty())
+	    _seq = checkpoints.back();
+	if (seq - _seq > cfg->ckpt_interval)
+	    write_checkpoint(seq++, lk);
     }
 
     if (b->cache_seq == 0)	// lowest sequence number
@@ -496,7 +494,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
      * - map - LBA to obj/offset map
      * - object_info, totals - adjust for new garbage
      */
-    size_t hdr_bytes = obj_hdr_len(b->entries.size(), checkpoints.size());
+    size_t hdr_bytes = obj_hdr_len(b->entries.size());
     int hdr_sectors = div_round_up(hdr_bytes, 512);
 
     std::unique_lock objlock(*map_lock);
@@ -552,21 +550,6 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     lk.lock();
 }
 
-/* worker: pull batches from queue and write them out
- */
-void translate_impl::worker_thread(thread_pool<batch*> *p) {
-    pthread_setname_np(pthread_self(), "worker_thread");
-
-    while (p->running) {
-	std::unique_lock lk(m);
-	batch *b;
-	if (!p->get_locked(lk, b)) 
-	    return;
-
-	process_batch(b, lk);
-    }
-}
-
 /* flushes any data buffered in current batch, and blocks until all 
  * outstanding writes are complete.
  * returns sequence number of last written object.
@@ -576,7 +559,7 @@ int translate_impl::flush() {
     
     if (b->len > 0) {
 	b->seq = last_sent = seq++;
-	workers.put_locked(b);
+	process_batch(b, lk);
 	b = new batch(cfg->batch_size);
     }
     auto _seq = last_sent;
@@ -605,6 +588,7 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
 	if (p->running && seq0 == seq.load() && b->len > 0) {
 	    if (std::chrono::system_clock::now() - t0 > timeout) {
 		lk.unlock();
+		do_log("timed flush %d\n", seq0);
 		flush();
 	    }
 	}
@@ -640,11 +624,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 				      std::unique_lock<std::mutex> &lk) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
-
-    /* wait until all prior objects have been acked by backend
-     */
-    while (next_compln < ckpt_seq && !stopped)
-	cv.wait(lk);
 
     /* - hold the translation layer lock (lk) until we get a copy 
      *   of object_info [no, wait until object map?]
@@ -683,6 +662,15 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 				   .type = LSVD_CKPT};
     checkpoints.push_back(ckpt_seq);
     
+    /* wait until all prior objects have been acked by backend, 
+     * then unlock
+     */
+    while (next_compln < ckpt_seq && !stopped)
+	cv.wait(lk);
+    lk.unlock();
+    if (stopped)
+	return;
+
     /* put it all together in memory
      */
     auto buf = (char*)calloc(hdr_bytes, 1);
@@ -713,10 +701,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 
     /* and write it
      */
-    lk.unlock();
-    if (stopped)
-	return;
-    
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, niovs);
     notify_complete(ckpt_seq);
@@ -762,29 +746,11 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     lk.lock();
 }
 
-void translate_impl::ckpt_thread(thread_pool<int> *p) {
-    const char *name = "ckpt_thread";
-    pthread_setname_np(pthread_self(), name);
-    auto one_second = std::chrono::seconds(1);
-    auto seq0 = seq.load();
-    const int ckpt_interval = 100;
-
-    while (p->running) {
-	std::unique_lock lk(m);
-	p->cv.wait_for(lk, one_second);
-	if (p->running && seq.load() - seq0 > ckpt_interval) {
-	    seq0 = seq.load();
-	    lk.unlock();
-	    checkpoint();
-	}
-    }
-}
-
 int translate_impl::checkpoint(void) {
     std::unique_lock lk(m);
     if (b->len > 0) {
 	b->seq = seq++;
-	workers.put_locked(b);
+	process_batch(b, lk);
 	b = new batch(cfg->batch_size);
     }
     int _seq = seq++;
@@ -1010,7 +976,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
 	    req->run(t_req);
-	    //do_log("gc write %s\n", name.c_str());
+	    do_log("gc write %s\n", name.c_str());
 	}
 	close(fd);
 	unlink(temp);
@@ -1026,12 +992,12 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	return;
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
-	//do_log("gc ckpt %d\n", ckpt_seq);
+	do_log("gc ckpt %d\n", ckpt_seq);
 	write_checkpoint(ckpt_seq, lk);
     
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(), it->first);
-	    //do_log("gc delete %s\n", name.c_str());
+	    do_log("gc delete %s\n", name.c_str());
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
