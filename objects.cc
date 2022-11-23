@@ -126,11 +126,10 @@ ssize_t object_reader::read_checkpoint(const char *name,
 /* How many bytes will we need for an object header if we 
  * have @n_entries extent entries and @n_ckpts checkpoints. 
  */
-size_t obj_hdr_len(int n_entries, int n_ckpts) {
+size_t obj_hdr_len(int n_entries) {
     return sizeof(obj_hdr) +
 	sizeof(obj_data_hdr) +
-	n_entries * sizeof(data_map) +
-	n_ckpts * sizeof(int);
+	n_entries * sizeof(data_map);
 }
 
 /* create header for a data object, returns size in bytes
