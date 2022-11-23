@@ -26,6 +26,7 @@ public:
     int         hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
     long        cache_size = 100*1024*1024; // in bytes
+    int         ckpt_interval = 500;        // objects 
     
     lsvd_config(){}
     ~lsvd_config(){ }
