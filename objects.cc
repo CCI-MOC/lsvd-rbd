@@ -15,10 +15,13 @@
 #include "backend.h"
 #include "objects.h"
 
+extern void do_log(const char *fmt, ...);
+
 char *object_reader::read_object_hdr(const char *name, bool fast) {
     obj_hdr *h = (obj_hdr*)malloc(4096);
     iovec iov = {(char*)h, 4096};
-    if (objstore->read_object(name, &iov, 1, 0) < 0)
+    int rv;
+    if ((rv = objstore->read_object(name, &iov, 1, 0)) < 0)
 	goto fail;
     if (fast)
 	return (char*)h;
@@ -103,11 +106,14 @@ ssize_t object_reader::read_checkpoint(const char *name,
 				       std::vector<deferred_delete> &deletes,
 				       std::vector<ckpt_mapentry> &dmap) {
     char *buf = read_object_hdr(name, false);
-    if (buf == NULL)
+    if (buf == NULL) {
+	do_log("buf == NULL\n");
 	return -1;
+    }
     auto h = (obj_hdr*)buf;
     auto ch = (obj_ckpt_hdr*)(h+1);
     if (h->type != LSVD_CKPT) {
+	do_log("%s: WRONG TYPE %d\n", name, h->type);
 	free(buf);
 	return -1;
     }

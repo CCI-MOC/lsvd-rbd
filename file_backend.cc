@@ -119,6 +119,7 @@ int file_backend::get_fd(const char* f) {
     return fd;
 }
 
+#include <zlib.h>
 /* trivial methods 
  */
 int file_backend::write_object(const char *name, iovec *iov, int iovcnt) {
@@ -127,7 +128,7 @@ int file_backend::write_object(const char *name, iovec *iov, int iovcnt) {
 	return -1;
     auto val = writev(fd, iov, iovcnt);
     close(fd);
-    return val < 0 ? -1 : 0;
+    return val < 0 ? -1 : val;
 }
 
 int file_backend::read_object(const char *name, iovec *iov, int iovcnt,
@@ -137,11 +138,9 @@ int file_backend::read_object(const char *name, iovec *iov, int iovcnt,
        return -1;
     if (fd < 0)
        return -1;
-    int val = lseek(fd, offset, SEEK_SET);
-    if (val >= 0)
-       val = readv(fd, iov, iovcnt);
+    auto val = preadv(fd, iov, iovcnt, offset);
     close(fd);
-    return val < 0 ? -1 : 0;
+    return val < 0 ? -1 : val;
 }
 
 int file_backend::delete_object(const char *name) {
