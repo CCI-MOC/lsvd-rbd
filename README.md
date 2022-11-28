@@ -10,6 +10,8 @@ The debug version uses files in a directory rather than an object store.
 As of 11/28, there seem to be two remaining bugs:
 - occasional read hang, observed 2x on test10 and 1x on QEMU
 - something to do with the read cache - occasionally returns data from the wrong object at the same offset (mod 128 sector block size) as the target sector. Reliably reproducible with test10
+- QEMU regression - abort in malloc/free in batch::~batch
+- QEMU regression - seems related to the hanging reads
 
 ## usage
 
