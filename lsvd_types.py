@@ -72,7 +72,8 @@ class data_map(LittleEndianStructure):
 sizeof_data_map = sizeof(data_map) # 8
 
 class ckpt_hdr(Structure):
-    _fields_ = [("ckpts_offset",        c_uint),
+    _fields_ = [("cache_seq",           c_ulong),
+                ("ckpts_offset",        c_uint),
                 ("ckpts_len",           c_uint),
                 ("objs_offset",         c_uint),
                 ("objs_len",            c_uint),
@@ -80,7 +81,7 @@ class ckpt_hdr(Structure):
                 ("deletes_len",         c_uint),
                 ("map_offset",          c_uint),
                 ("map_len",             c_uint)]
-sizeof_ckpt_hdr = sizeof(ckpt_hdr) # 32
+sizeof_ckpt_hdr = sizeof(ckpt_hdr) # 40
 
 class ckpt_obj(Structure):
     _fields_ = [("seq",                 c_uint),

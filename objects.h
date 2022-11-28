@@ -100,6 +100,7 @@ struct data_map {
 };
 
 struct obj_ckpt_hdr {
+    uint64_t cache_seq;         // from last data object
     uint32_t ckpts_offset;	// list includes self (TODO - not needed?)
     uint32_t ckpts_len;
     uint32_t objs_offset;	// ckpt_obj[]
@@ -149,7 +150,7 @@ public:
 			  std::vector<obj_cleaned> &cleaned,
 			  std::vector<data_map> &dmap);
 
-    ssize_t read_checkpoint(const char *name,
+    ssize_t read_checkpoint(const char *name, uint64_t &cache_seq,
 			    std::vector<uint32_t> &ckpts,
 			    std::vector<ckpt_obj> &objects, 
 			    std::vector<deferred_delete> &deletes,

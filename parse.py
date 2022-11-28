@@ -64,6 +64,8 @@ def read_ckpts(buf, base, bytes):
     ckpts = (c_int * n).from_buffer(buf[base:base+bytes])
     return [_ for _ in ckpts]
 
+import zlib
+print('crc:          %08x' % zlib.crc32(obj))
 h = lsvd.hdr.from_buffer(bytearray(obj[0:l1]))
 if h.type == lsvd.LSVD_SUPER:
     o3 = o2+lsvd.sizeof_super_hdr
@@ -156,6 +158,7 @@ elif h.type == lsvd.LSVD_CKPT:
     print('n_data:   ', h.data_sectors)
     print('crc:      ', '%08x' % h.crc)
     
+    print('cache_seq:', ch.cache_seq)
     print('ckpts:    ', ch.ckpts_offset, ':', ', '.join(fmt_ckpt(ckpts)))
     print('objs:     ', ch.objs_offset, ':', objs_txt)
     print('map:      ', ch.map_offset, ':', map_txt)

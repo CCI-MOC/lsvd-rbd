@@ -100,7 +100,7 @@ ssize_t object_reader::read_data_hdr(const char *name, obj_hdr &h,
 
 /* read and decode a checkpoint object identified by sequence number
  */
-ssize_t object_reader::read_checkpoint(const char *name,
+ssize_t object_reader::read_checkpoint(const char *name, uint64_t &cache_seq,
 				       std::vector<uint32_t> &ckpts,
 				       std::vector<ckpt_obj> &objects, 
 				       std::vector<deferred_delete> &deletes,
@@ -117,7 +117,7 @@ ssize_t object_reader::read_checkpoint(const char *name,
 	free(buf);
 	return -1;
     }
-
+    cache_seq = ch->cache_seq;
     decode_offset_len<uint32_t>(buf, ch->ckpts_offset, ch->ckpts_len, ckpts);
     decode_offset_len<ckpt_obj>(buf, ch->objs_offset, ch->objs_len, objects);
     decode_offset_len<deferred_delete>(buf, ch->deletes_offset,

@@ -54,8 +54,9 @@ class translate_impl : public translate {
     std::shared_mutex *map_lock; // locks the object map
     lsvd_config       *cfg;
 
-    std::atomic<int> seq;
-
+    std::atomic<int>   seq;
+    uint64_t           ckpt_cache_seq = 0; // from last data object
+    
     friend class translate_req;
     
     class batch {
@@ -277,7 +278,8 @@ ssize_t translate_impl::init(const char *prefix_,
 	while (n_ckpts > 0) {
 	    int c = ckpts[n_ckpts-1];
 	    objname name(prefix(), c);
-	    if (parser->read_checkpoint(name.c_str(), ckpts, objects,
+	    if (parser->read_checkpoint(name.c_str(), max_cache_seq,
+					ckpts, objects,
 					deletes, entries) >= 0) {
 		last_ckpt = c;
 		break;
@@ -443,8 +445,11 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
 	    write_checkpoint(seq++, lk);
     }
 
-    if (b->cache_seq == 0)	// lowest sequence number
+    if (b->cache_seq == 0) {	// lowest sequence number
 	b->cache_seq = cache_seq;
+	if (ckpt_cache_seq < cache_seq)
+	    ckpt_cache_seq = cache_seq;
+    }
     b->append(offset / 512, &siov);
 
     return len;
@@ -706,7 +711,8 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 
     uint32_t o1 = sizeof(obj_hdr)+sizeof(obj_ckpt_hdr), o2 = o1 + sizeof(ckpt_seq),
 	o3 = o2 + objs_bytes;
-    *ch = (obj_ckpt_hdr){.ckpts_offset = o1, .ckpts_len = sizeof(ckpt_seq),
+    *ch = (obj_ckpt_hdr){.cache_seq = ckpt_cache_seq,
+			 .ckpts_offset = o1, .ckpts_len = sizeof(ckpt_seq),
 			 .objs_offset = o2, .objs_len = o3-o2,
 			 .deletes_offset = 0, .deletes_len = 0,
 			 .map_offset = o3, .map_len = (uint32_t)map_bytes};
