@@ -240,6 +240,15 @@ ssize_t translate_impl::init(const char *prefix_,
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
+    do_log("read super crc %0x8\n", (uint32_t)crc32(0, (const unsigned char*)_buf, 4096));
+    
+    int c_last;
+    int n_ckpts = ckpts.size();
+    for (auto c : ckpts) {
+	do_log("got ckpt from super (total %d): %d\n", n_ckpts, c);
+	assert((int)c != c_last);
+	c_last = c;
+    }
     
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
@@ -258,23 +267,31 @@ ssize_t translate_impl::init(const char *prefix_,
      */
     int last_ckpt = -1;
     if (ckpts.size() > 0) {
-	for (auto c : ckpts) 
-	    checkpoints.push_back(c); // so we can delete them later
-
 	std::vector<ckpt_obj> objects;
 	std::vector<deferred_delete> deletes;
 	std::vector<ckpt_mapentry> entries;
 
-	for (int i = checkpoints.size() - 1; i >= 0; i--) {
-	    objname name(prefix(), checkpoints[i]);
+	/* hmm, we should never have checkpoints listed in the
+	 * super that aren't persisted on the backend, should we?
+	 */
+	while (n_ckpts > 0) {
+	    int c = ckpts[n_ckpts-1];
+	    objname name(prefix(), c);
 	    if (parser->read_checkpoint(name.c_str(), ckpts, objects,
 					deletes, entries) >= 0) {
-		last_ckpt = checkpoints[i];
+		last_ckpt = c;
 		break;
 	    }
+	    do_log("chkpt skip %d\n", c);
+	    n_ckpts--;
 	}
 	if (last_ckpt == -1)
 	    return -1;
+
+	for (int i = 0; i < n_ckpts; i++) {
+	    do_log("chkpt from super: %d\n", ckpts[i]);
+	    checkpoints.push_back(ckpts[i]); // so we can delete them later
+	}
 
 	for (auto o : objects) {
 	    object_info[o.seq] = (obj_info){.hdr = (int)o.hdr_sectors,
@@ -303,6 +320,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	if (parser->read_data_hdr(name.c_str(), h, dh, cleaned, entries) < 0)
 	    break;
 	if (h.type == LSVD_CKPT) {
+	    do_log("ckpt from roll-forward: %d\n", seq.load());
 	    checkpoints.push_back(seq);
 	    continue;
 	}
@@ -338,8 +356,10 @@ ssize_t translate_impl::init(const char *prefix_,
      */
     for (int i = 1; i < 32; i++) {
 	objname name(prefix(), i + seq);
-	if (objstore->delete_object(name.c_str()) == 0)
+	if (objstore->delete_object(name.c_str()) == 0) {
 	    printf("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
+	    do_log("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
+	}
     }
 
     if (timedflush)
@@ -410,7 +430,8 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     std::unique_lock lk(m);
     smartiov siov(iov, iovcnt);
     size_t len = siov.bytes();
-
+    //do_log("t %d+%d %d\n", offset/512, len/512, ((int*)iov->iov_base)[1]);
+    
     if (b->len + len > b->max) {
 	b->seq = last_sent = seq++;
 	process_batch(b, lk);
@@ -511,6 +532,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     std::vector<extmap::lba2obj> deleted;
 
     for (auto e : b->entries) {
+	//do_log("t2 %d %d+%d %d\n", b->seq, e.lba, e.len, ((int*)(b->buf + sector_offset*512))[1]);
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
 	sector_offset += e.len;
@@ -660,6 +682,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 			       objs_bytes, 512);
     object_info[ckpt_seq] = (obj_info){.hdr = sectors, .data = 0, .live = 0,
 				   .type = LSVD_CKPT};
+    do_log("adding checkpoint: %d\n", ckpt_seq);
     checkpoints.push_back(ckpt_seq);
     
     /* wait until all prior objects have been acked by backend, 
@@ -667,9 +690,9 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      */
     while (next_compln < ckpt_seq && !stopped)
 	cv.wait(lk);
-    lk.unlock();
     if (stopped)
 	return;
+    lk.unlock();
 
     /* put it all together in memory
      */
@@ -703,6 +726,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      */
     objname name(prefix(), ckpt_seq);
     objstore->write_object(name.c_str(), iov, niovs);
+    do_log("wrote ckpt %d\n", ckpt_seq);
     notify_complete(ckpt_seq);
     lk.lock();
     
@@ -729,18 +753,33 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     super_sh->ckpts_offset = offset;
     super_sh->ckpts_len = checkpoints.size() * sizeof(ckpt_seq);
     auto pc = (uint32_t*)(super_buf + offset);
-    for (auto c : checkpoints)
-	*pc++ = c;
-
-    lk.unlock();
+    for (size_t i = 0; i < checkpoints.size(); i++)
+	*pc++ = checkpoints[i];
 
     if (stopped)
 	return;
-    struct iovec iov2 = {super_buf, 4096};
-    objstore->write_object(super_name, &iov2, 1);
+    lk.unlock();
 
+    struct iovec iov2 = {super_buf, 4096};
+    {
+	char buf[128], *p = buf;
+	for (auto const &c : checkpoints)
+	    p += sprintf(p, " %d", c);
+	auto _pc = (uint32_t*)(super_buf + offset);
+	p += sprintf(p, " [");
+	for (size_t i = 0; i < checkpoints.size(); i++)
+	    p += sprintf(p, " %d", _pc[i]);
+	p += sprintf(p, "]");
+	do_log("writing super w/ ckpts:%s\ncrc %08x\n", buf,
+	       (uint32_t)crc32(0, (const unsigned char*)super_buf, 4096));
+    }
+    
+    objstore->write_object(super_name, &iov2, 1);
+    do_log("write done\n");
+    
     for (auto c : ckpts_to_delete) {
 	objname name(prefix(), c);
+	do_log("ckpt delete %s\n", name.c_str());
 	objstore->delete_object(name.c_str());
     }
     lk.lock();
@@ -995,12 +1034,14 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	do_log("gc ckpt %d\n", ckpt_seq);
 	write_checkpoint(ckpt_seq, lk);
     
+	lk.unlock();
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(), it->first);
 	    do_log("gc delete %s\n", name.c_str());
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
+	lk.lock();
     }
 }
 
