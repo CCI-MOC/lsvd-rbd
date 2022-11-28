@@ -828,7 +828,7 @@ void write_cache_impl::send_writes(void) {
 
 write_cache_work *write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
     std::unique_lock lk(m);
-    //printf("%d %p\n", __LINE__, &m); fflush(stdout);
+    //do_log("wc %d+%d %d\n", lba, iov->bytes()/512, ((int*)(iov->data()->iov_base))[1]);
     auto w = new write_cache_work(req, lba, iov);
     work.push_back(w);
     work_sectors += iov->bytes() / 512L;
