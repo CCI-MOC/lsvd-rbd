@@ -6,6 +6,11 @@ Uses two components: a local SSD partition (or file) and a remote backend store.
 
 The debug version uses files in a directory rather than an object store.
 
+## status
+As of 11/28, there seem to be two remaining bugs:
+- occasional read hang, observed 2x on test10 and 1x on QEMU
+- something to do with the read cache - occasionally returns data from the wrong object at the same offset (mod 128 sector block size) as the target sector. Reliably reproducible with test10
+
 ## usage
 
 Pick a RADOS pool, an image name, and a directory on an SSD-based file system (`rbd`, `img1`, and `/mnt/nvme/lsvd` in the example below).
