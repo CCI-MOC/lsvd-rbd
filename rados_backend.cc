@@ -30,7 +30,6 @@ class rados_backend : public backend {
     std::mutex m;
     char pool[128];
     int  pool_len = 0;
-    char *prefix = NULL;
     rados_t cluster;
     rados_ioctx_t io_ctx;
 
