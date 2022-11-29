@@ -15,6 +15,7 @@ LSVD_MAGIC = 0x4456534c
 # these match version 453d93 of objects.cc
 
 class hdr(Structure):
+    _pack_ = 1
     _fields_ = [("magic",               c_uint),
                 ("version",             c_uint),
                 ("vol_uuid",            c_ubyte*16),
@@ -26,6 +27,7 @@ class hdr(Structure):
 sizeof_hdr = sizeof(hdr) # 44
 
 class super_hdr(Structure):
+    _pack_ = 1
     _fields_ = [("vol_size",            c_ulong),
                 ("total_sectors",       c_ulong),
                 ("live_sectors",        c_ulong),
@@ -49,11 +51,13 @@ class clone(Structure):
 sizeof_clone = sizeof(clone) # 21
 
 class snap(Structure):
+    _pack_ = 1
     _fields_ = [("seq",                 c_uint),
                 ("name_len",            c_ubyte)]
 sizeof_snap = sizeof(snap) # 5
 
 class data_hdr(Structure):
+    _pack_ = 1
     _fields_ = [("cache_seq",           c_ulong),
                 ("objs_cleaned_offset", c_uint),
                 ("objs_cleaned_len",    c_uint),
@@ -62,16 +66,19 @@ class data_hdr(Structure):
 sizeof_data_hdr = sizeof(data_hdr) # 24
 
 class obj_cleaned(Structure):
+    _pack_ = 1
     _fields_ = [("seq",                 c_uint),
                 ("was_deleted",         c_uint)]
 sizeof_obj_cleaned = sizeof(obj_cleaned) # 8
 
 class data_map(LittleEndianStructure):
+    _pack_ = 1
     _fields_ = [("lba",                 c_ulong, 36),
                 ("len",                 c_ulong, 28)]
 sizeof_data_map = sizeof(data_map) # 8
 
 class ckpt_hdr(Structure):
+    _pack_ = 1
     _fields_ = [("cache_seq",           c_ulong),
                 ("ckpts_offset",        c_uint),
                 ("ckpts_len",           c_uint),
@@ -84,6 +91,7 @@ class ckpt_hdr(Structure):
 sizeof_ckpt_hdr = sizeof(ckpt_hdr) # 40
 
 class ckpt_obj(Structure):
+    _pack_ = 1
     _fields_ = [("seq",                 c_uint),
                 ("hdr_sectors",         c_uint),
                 ("data_sectors",        c_uint),
@@ -91,11 +99,13 @@ class ckpt_obj(Structure):
 sizeof_ckpt_obj = sizeof(ckpt_obj) # 16
 
 class deferred_delete(Structure):
+    _pack_ = 1
     _fields_ = [("seq",                 c_uint),
                 ("time",                c_uint)]
 sizeof_deferred_delete = sizeof(deferred_delete)
 
 class ckpt_mapentry(LittleEndianStructure):
+    _pack_ = 1
     _fields_ = [("lba",                 c_ulong, 36),
                 ("len",                 c_ulong, 28),
                 ("obj",                 c_uint),
@@ -103,11 +113,13 @@ class ckpt_mapentry(LittleEndianStructure):
 sizeof_ckpt_mapentry = sizeof(ckpt_mapentry) # 16
 
 class obj_offset(LittleEndianStructure):
+    _pack_ = 1
     _fields_ = [("obj", c_ulong, 36),
                 ("offset", c_ulong, 28)]
 sizeof_obj_offset = sizeof(obj_offset)
 
 class j_extent(LittleEndianStructure):
+    _pack_ = 1
     _fields_ = [("lba", c_ulong, 40),
                 ("len", c_ulong, 24)]
 sizeof_j_extent = sizeof(j_extent)
@@ -120,6 +132,7 @@ class j_map_extent(LittleEndianStructure):
 sizeof_j_map_extent = sizeof(j_map_extent)
 
 class j_length(Structure):
+    _pack_ = 1
     _fields_ = [("page", c_uint),
                 ("len", c_uint)]
 sizeof_j_length = sizeof(j_length)
@@ -132,6 +145,7 @@ LSVD_J_W_SUPER = 14
 LSVD_J_R_SUPER = 15
 
 class j_hdr(Structure):
+    _pack_ = 1
     _fields_ = [("magic",         c_uint),
                 ("type",          c_uint),
                 ("version",       c_uint),
@@ -144,6 +158,7 @@ class j_hdr(Structure):
 sizeof_j_hdr = sizeof(j_hdr)
 
 class j_write_super(Structure):
+    _pack_ = 1
     _fields_ = [("magic",       c_uint),
                 ("type",        c_uint),
                 ("version",     c_uint),
