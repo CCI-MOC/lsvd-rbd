@@ -181,17 +181,8 @@ class j_super(Structure):
                 ("version",      c_uint),
                 ("write_super",  c_uint),
                 ("read_super",   c_uint),
-                ("vol_uuid",     c_ubyte*16),
-                ("backend_type", c_uint)]
+                ("vol_uuid",     c_ubyte*16)]
 sizeof_j_super = sizeof(j_super)
-
-LSVD_BE_FILE  = 20
-LSVD_BE_S3    = 21
-LSVD_BE_RADOS = 22
-
-class j_be_file(Structure):
-    _fields_ = [("len", c_ushort),
-                ("prefix", c_char*24)]      # hack. max of 24 bytes
 
 class iovec(Structure):
     _fields_ = [('iov_base', c_void_p),
