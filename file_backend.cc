@@ -57,9 +57,6 @@ void verify_obj(iovec *iov, int iovcnt) {
 class file_backend : public backend {
     void worker(thread_pool<file_backend_req*> *p);
     std::mutex m;
-    std::map<std::string,int> fds;
-    std::vector<std::string> lru;
-    const size_t max_fds = 32;
     
 public:
     file_backend(const char *prefix);
@@ -80,44 +77,7 @@ public:
     request *make_read_req(const char *name, size_t offset,
                            char *buf, size_t len);
     thread_pool<file_backend_req*> workers;
-
-    int get_fd(const char* f);
 };
-
-/* try to prevent weird stuff happening when you open and close
- * lots of files on different threads.
- */
-int file_backend::get_fd(const char* f) {
-    std::unique_lock lk(m);
-    int fd = -1;
-    auto s = std::string(f);
-    if (fds.find(s) == fds.end()) {
-	if (lru.size() >= max_fds) {
-	    auto evictee = lru.front();
-	    auto it = fds.find(evictee);
-	    assert(it != fds.end());
-	    close(it->second);
-	    fds.erase(it);
-	    lru.erase(lru.begin());
-	}
-	assert((fd = open(f, O_RDONLY)) >= 0);
-	char buf[512];
-	assert(pread(fd, buf, sizeof(buf), 0) == sizeof(buf));
-	auto hdr = (obj_hdr*)buf;
-	uint32_t seq = strtol(f + strlen(f) - 8, NULL, 16);
-	assert(seq == hdr->seq);
-	lru.push_back(s);
-	fds[s] = fd;
-    }
-    else {
-	fd = fds[s];
-	auto it = std::find(lru.begin(), lru.end(), s);
-	lru.erase(it);
-	lru.push_back(s);
-    }
-
-    return fd;
-}
 
 #include <zlib.h>
 /* trivial methods 
@@ -228,17 +188,14 @@ public:
     void      notify(request *child);
     void      release() {};
 
-    static void rw_cb_fn(void *ptr) {
-	auto req = (file_backend_req*)ptr;
-	req->notify(NULL);
-    }
-
     void exec(void) {
 	auto [iov,niovs] = _iovs.c_iov();
 	if (op == OP_READ) {
-	    fd = be->get_fd(name);
+	    auto fd = open(name, O_RDONLY);
+	    assert(fd >= 0);
 	    auto rv = preadv(fd, iov, niovs, offset);
 	    assert(rv > 0);
+	    close(fd);
 	}
 	else {
 	    if ((fd = open(name,
@@ -264,8 +221,6 @@ file_backend::file_backend(const char *prefix) : workers(&m) {
 }
 
 file_backend::~file_backend() {
-    for (auto [s,fd] : fds)
-	close(fd);
 }
 
 void file_backend::worker(thread_pool<file_backend_req*> *p) {
