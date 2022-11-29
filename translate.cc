@@ -46,6 +46,31 @@ void fp_log(const char*, ...);
 
 /* ----------- Object translation layer -------------- */
 
+class batch {
+public:
+    std::vector<data_map> entries;
+    char  *buf = NULL;		// data goes here
+    size_t len = 0;		// current data size
+    size_t max;			// done when len hits here
+    int    seq = 0;		// sequence number for backend
+    uint64_t cache_seq = 0;
+
+    batch(size_t bytes){
+	buf = (char*)malloc(bytes);
+	max = bytes;
+    }
+    ~batch(){
+	free(buf);
+    }
+    void append(uint64_t lba, smartiov *iov) {
+	auto bytes = iov->bytes();
+	entries.push_back((data_map){lba, bytes/512});
+	char *ptr = buf + len;
+	iov->copy_out(ptr);
+	len += bytes;
+    }
+};
+
 class translate_impl : public translate {
     /* lock ordering: lock m before *map_lock
      */
@@ -58,31 +83,6 @@ class translate_impl : public translate {
     uint64_t           ckpt_cache_seq = 0; // from last data object
     
     friend class translate_req;
-    
-    class batch {
-    public:
-	char  *buf = NULL;	// data goes here
-	size_t len = 0;		// current data size
-	size_t max;		// done when len hits here
-	std::vector<data_map> entries;
-	int    seq = 0;		// sequence number for backend
-	uint64_t cache_seq = 0;
-	
-	batch(size_t bytes){
-	    buf = (char*)malloc(bytes);
-	    max = bytes;
-	}
-	~batch(){
-	    free(buf);
-	}
-	void append(uint64_t lba, smartiov *iov) {
-	    auto bytes = iov->bytes();
-	    entries.push_back((data_map){lba, bytes/512});
-	    char *ptr = buf + len;
-	    iov->copy_out(ptr);
-	    len += bytes;
-	}
-    };
     batch *b = NULL;
     
     /* info on all live objects - all sizes in sectors */
@@ -147,7 +147,7 @@ class translate_impl : public translate {
 
     void do_gc(std::unique_lock<std::mutex> &lk, bool *running);
     void gc_thread(thread_pool<int> *p);
-    void process_batch(batch *b, std::unique_lock<std::mutex> &lk);
+    void process_batch(batch *b);
     void verify_live(void);
     void flush_thread(thread_pool<int> *p);
 
@@ -219,7 +219,7 @@ translate_impl::~translate_impl() {
     stopped = true;
     cv.notify_all();
     delete misc_threads;	// TODO: move to shutdown(), call from rbd_close
-    if (b)
+    if (b) 
 	delete b;
     delete parser;
     if (super_buf)
@@ -436,8 +436,9 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     
     if (b->len + len > b->max) {
 	b->seq = last_sent = seq++;
-	process_batch(b, lk);
+	auto tmp = b;
 	b = new batch(cfg->batch_size);
+	process_batch(tmp);
 	int _seq = 0;
 	if (!checkpoints.empty())
 	    _seq = checkpoints.back();
@@ -485,7 +486,7 @@ class translate_req : public trivial_request {
     /* various things that we might need to free
      */
     std::vector<char*> to_free;
-    translate_impl::batch *b = NULL;
+    batch *b = NULL;
     
 public:
     translate_req(uint32_t seq_, translate_impl *tx_) {
@@ -506,7 +507,9 @@ public:
     }
 };
 
-void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
+void translate_impl::process_batch(batch *b) {
+    assert(!m.try_lock());
+
     /* TODO: coalesce writes: 
      *   bufmap m
      *   for e in entries
@@ -562,7 +565,6 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     make_data_hdr(hdr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
     iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
 		   {b->buf, b->len}};
-    lk.unlock();
 
     /* on completion, t_req calls notify_complete and frees stuff
      */
@@ -573,8 +575,6 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     objname name(prefix(), b->seq);
     auto req = objstore->make_write_req(name.c_str(), iov, 2);
     req->run(t_req);
-
-    lk.lock();
 }
 
 /* flushes any data buffered in current batch, and blocks until all 
@@ -586,8 +586,9 @@ int translate_impl::flush() {
     
     if (b->len > 0) {
 	b->seq = last_sent = seq++;
-	process_batch(b, lk);
+	auto tmp = b;
 	b = new batch(cfg->batch_size);
+	process_batch(tmp);
     }
     auto _seq = last_sent;
 
@@ -603,7 +604,7 @@ int translate_impl::flush() {
 void translate_impl::flush_thread(thread_pool<int> *p) {
     pthread_setname_np(pthread_self(), "flush_thread");
     auto wait_time = std::chrono::milliseconds(500);
-    auto timeout = std::chrono::seconds(2);
+    auto timeout = std::chrono::milliseconds(cfg->flush_msec);
     auto t0 = std::chrono::system_clock::now();
     auto seq0 = seq.load();
 
@@ -795,8 +796,9 @@ int translate_impl::checkpoint(void) {
     std::unique_lock lk(m);
     if (b->len > 0) {
 	b->seq = seq++;
-	process_batch(b, lk);
+	auto tmp = b;
 	b = new batch(cfg->batch_size);
+	process_batch(tmp);
     }
     int _seq = seq++;
     write_checkpoint(_seq, lk);
