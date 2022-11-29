@@ -569,7 +569,7 @@ void translate_impl::process_batch(batch *b, std::unique_lock<std::mutex> &lk) {
     auto t_req = new translate_req(b->seq, this);
     t_req->to_free.push_back(hdr);
     t_req->b = b;
-	
+
     objname name(prefix(), b->seq);
     auto req = objstore->make_write_req(name.c_str(), iov, 2);
     req->run(t_req);
@@ -723,9 +723,9 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     
     iovec iov[] = {{.iov_base = buf, .iov_len = hdr_bytes},
 		   {.iov_base = (char*)&ckpt_seq, .iov_len = sizeof(ckpt_seq)},
-		   {.iov_base = (char*)objects.data(), objs_bytes},
-		   {.iov_base = (char*)entries.data(), map_bytes},
-		   {.iov_base = tailbuf, tail}};
+		   {.iov_base = (char*)objects.data(), .iov_len = objs_bytes},
+		   {.iov_base = (char*)entries.data(), .iov_len = map_bytes},
+		   {.iov_base = tailbuf, .iov_len = tail}};
     int niovs = (tail == 0) ? 4 : 5;
 
     /* and write it
