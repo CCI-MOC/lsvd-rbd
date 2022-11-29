@@ -42,7 +42,7 @@ struct obj_hdr {
     uint32_t hdr_sectors;
     uint32_t data_sectors;	// hdr_sectors + data_sectors = size
     uint32_t crc;
-};
+} __attribute__((packed));
 
 // super_hdr :	super block style structure for the header structure, containing various metadata on the current
 //		header structure it describes including offsets, checkpoint statistics, and size
@@ -60,7 +60,7 @@ struct super_hdr {
     uint32_t clones_len;
     uint32_t snaps_offset;
     uint32_t snaps_len;
-};
+} __attribute__((packed));
 
 /* ckpts: list of active checkpoints: array of uint32_t */
 
@@ -85,19 +85,19 @@ struct obj_data_hdr {
     uint32_t objs_cleaned_len;
     uint32_t data_map_offset;
     uint32_t data_map_len;
-};
+} __attribute__((packed));
 
 struct obj_cleaned {
     uint32_t seq;
     uint32_t was_deleted;
-};
+} __attribute__((packed));
 
 // we can omit the offset in a data header
 //
 struct data_map {
     uint64_t lba : 36;
     uint64_t len : 28;
-};
+} __attribute__((packed));
 
 struct obj_ckpt_hdr {
     uint64_t cache_seq;         // from last data object
@@ -109,26 +109,26 @@ struct obj_ckpt_hdr {
     uint32_t deletes_len;
     uint32_t map_offset;        // ckpt_mapentry[]
     uint32_t map_len;
-};
+} __attribute__((packed));
 
 struct ckpt_obj {
     uint32_t seq;
     uint32_t hdr_sectors;
     uint32_t data_sectors;
     uint32_t live_sectors;
-};
+} __attribute__((packed));
 
 struct deferred_delete {
     uint32_t seq;		// object deleted
     uint32_t time;		// current write frontier when cleaned
-};
+} __attribute__((packed));
 
 struct ckpt_mapentry {
     int64_t lba : 36;
     int64_t len : 28;
     int32_t obj;
     int32_t offset;
-};
+} __attribute__((packed));
 
 class backend;
 

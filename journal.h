@@ -21,7 +21,7 @@ struct j_map_extent {
     uint64_t lba : 40;		// volume LBA (in sectors)
     uint64_t len : 24;		// length (sectors)
     uint64_t plba;		// on-SSD LBA
-};
+} __attribute__((packed));
 
 struct j_length {
     int32_t page;		// in pages
@@ -29,7 +29,7 @@ struct j_length {
     bool operator<(const j_length &other) const { // for sorting
         return page < other.page;
     }
-};
+} __attribute__((packed));
 
 enum {LSVD_J_DATA    = 10,
       LSVD_J_CKPT    = 11,
@@ -87,7 +87,7 @@ struct j_write_super {
     int32_t len_start;	// type: j_length
     int32_t len_blocks;
     int32_t len_entries;
-};
+} __attribute__((packed));
 
 /* probably in the third 4KB block, never gets overwritten (overwrite map in place)
  * uses a fixed map with 1 entry per 64KB block
@@ -112,7 +112,7 @@ struct j_read_super {
      */
     int32_t map_start;		// extmap::obj_offset
     int32_t map_blocks;
-};
+} __attribute__((packed));
 
       
 /* this goes in the first 4KB block in the cache partition, and never
@@ -129,46 +129,6 @@ struct j_super {
     uint32_t read_super;
 
     uuid_t   vol_uuid;
-    uint32_t backend_type;
-};
-
-/* backend follows superblock
- */
-enum {LSVD_BE_FILE  = 20,
-      LSVD_BE_S3    = 21,
-      LSVD_BE_RADOS = 22};
-
-struct j_be_file {
-    uint16_t len;
-    char    prefix[0];
-};
-
-struct offset_len {
-    uint16_t offset;
-    uint16_t len;
-};
-
-struct j_be_s3 {
-    uint16_t use_https;
-    struct offset_len access_key;
-    struct offset_len secret_key;
-    struct offset_len hostname;
-    struct offset_len bucket;
-    struct offset_len prefix;
-};
-
-/* based on C example at https://docs.ceph.com/en/latest/rados/api/librados-intro/
- */
-struct j_be_rados {
-    struct offset_len cluster_name;
-    struct offset_len user_name;
-    struct offset_len config_file;
-};
-
-
-/* TODO: 
- * - superblock
- * - move volume UUID to superblock??? maybe have it everywhere.
- */
+} __attribute__((packed));
 
 #endif

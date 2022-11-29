@@ -38,8 +38,7 @@ int make_cache(std::string name, uuid_t &uuid, int n_pages) {
 		     1,   // version
 		     1,   // write superblock offset
 		     2,   // read superblock offset
-		     {0}, // uuid
-		     LSVD_BE_RADOS}; // doesn't matter
+		     {0}};// uuid
     memcpy(sup->vol_uuid, uuid, sizeof(uuid_t));
     fwrite(buf, 4096, 1, fp);
 
