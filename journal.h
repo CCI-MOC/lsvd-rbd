@@ -44,13 +44,13 @@ struct j_hdr {
     uint32_t magic;
     uint32_t type;		// LSVD_J_DATA
     uint32_t version;		// 1
-    uint64_t seq;
     int32_t  len;		// in 4KB blocks, including header
+    uint64_t seq;
     uint32_t crc32;		// TODO: implement this
     int32_t  extent_offset;	// in bytes
     int32_t  extent_len;        // in bytes
-    int32_t  prev;              // TODO
-};
+    int32_t  prev;              // reverse link for recovery
+} __attribute__((packed));
 
 /* probably in the second 4KB block of the parition
  * this gets overwritten every time we re-write the map. We assume the 4KB write is

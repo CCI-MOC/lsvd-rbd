@@ -112,7 +112,7 @@ class write_cache_impl : public write_cache {
     std::vector<write_cache_work*> work;
     sector_t work_sectors;	// queued in work[]
     j_write_super *super;
-    page_t         previous_hdr;
+    page_t         previous_hdr = 0;
 
     /* these are used by wcache_write_req
      */
@@ -481,7 +481,7 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
     j_hdr *h = (j_hdr*)buf;
     // OH NO - am I using wcache->sequence or wcache->super->seq???
     *h = (j_hdr){.magic = LSVD_MAGIC, .type = type, .version = 1,
-		 .seq = sequence++, .len = blks, .crc32 = 0,
+		 .len = blks, .seq = sequence++, .crc32 = 0,
 		 .extent_offset = 0, .extent_len = 0, .prev = prev};
     return h;
 }
@@ -639,7 +639,7 @@ void write_cache_impl::read_map_entries() {
  *  sequence
  */
 int write_cache_impl::roll_log_forward() {
-    page_t start = super->base, prev;
+    page_t start = super->base, prev = 0;
     auto h = (j_hdr*)_hdrbuf;
     
     if (nvme_w->read(_hdrbuf, 4096, 4096L * start) < 0)
@@ -814,7 +814,7 @@ void write_cache_impl::send_writes(void) {
     }
     
     page_t pages = div_round_up(sectors, 8);
-    page_t pad, n_pad, prev;
+    page_t pad, n_pad, prev = 0;
     page_t page = allocate(pages+1, pad, n_pad, prev);
 
     auto req = new wcache_write_req(&work, pages, page,
