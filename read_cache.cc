@@ -398,30 +398,8 @@ void rcache_req::release() {
 	delete this;
 }
 
-#if 0
-const char *state_names[] = {
-    "RCACHE_NONE",
-    "RCACHE_LOCAL_BUFFER",	// 1
-    "RCACHE_SSD_READ",		// 2
-    "RCACHE_QUEUED",		// 3
-    "RCACHE_BLOCK_WRITE",	// 4
-    "RCACHE_BACKEND_WAIT",	// 5
-    "RCACHE_DIRECT_READ",	// 6
-    "RCACHE_DONE"		// 7
-};
-
-static int is_zero(char *buf, size_t len) {
-    for (int i = 0; i < len; i++)
-	if (buf[i] != 0)
-	    return false;
-    return true;
-}
-#endif
-
-
 void rcache_req::notify(request *child) {
     std::unique_lock lk(m);
-    
     bool notify_parent = false;
     enum req_type next_state = state;
 
@@ -457,13 +435,12 @@ void rcache_req::notify(request *child) {
 	lk.unlock();
 
 	notify_parent = true;
-	for (auto p : v) {
-	    p->notify(NULL);	// they're in state LINE_386
-	}
+	for (auto p : v) 
+	    p->notify(NULL);	// other requests waiting on read
 
 	sub_req = rci->ssd->make_write_request(_buf, rci->unit_sectors*512L,
 					       nvme_offset);
-	next_state = RCACHE_BLOCK_WRITE; // write_done closure
+	next_state = RCACHE_BLOCK_WRITE;
 	sub_req->run(this);
     }
     else if (state == RCACHE_BLOCK_WRITE) {
@@ -493,7 +470,6 @@ void rcache_req::notify(request *child) {
 
 void rcache_req::run(request *parent_) {
     parent = parent_;
-
     if (state == RCACHE_QUEUED) {
 	/* nothing */
     }
@@ -503,6 +479,8 @@ void rcache_req::run(request *parent_) {
 	    iovs.copy_in(rci->buffer[n] + blk_offset*512);
 	    parent->notify(this);
 	    state = RCACHE_DONE;
+	    if (released)
+		delete this;
 	}
 	else {
 	    rci->pending[n].push_back(this);
@@ -512,6 +490,8 @@ void rcache_req::run(request *parent_) {
     else if (state == RCACHE_LOCAL_BUFFER) {
 	parent->notify(this);
 	state = RCACHE_DONE;
+	if (released)
+	    delete this;
     }
     else if (state == RCACHE_SSD_READ ||
 	     state == RCACHE_BACKEND_WAIT ||
@@ -619,16 +599,19 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	    smartiov _iov = iov->slice(skip_len, skip_len + read_len);
 	    _iov.copy_in(buffer[n] + blk_offset*512L);
 	    r->state = RCACHE_LOCAL_BUFFER;
+	    //do_log("%ld+%ld buf[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	}
 	else if (written[n]) {
 	    in_use[n]++;
 	    smartiov _iov = iov->slice(skip_len, skip_len + read_len);
 	    r->sub_req = ssd->make_read_request(&_iov, 512L*start);
+	    //do_log("%ld+%ld ssd[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	    r->state = RCACHE_SSD_READ;
 	}
 	else {              // prior read is pending
 	    r->state = RCACHE_PENDING_QUEUE;
 	    r->iovs = iov->slice(skip_len, skip_len + read_len);
+	    //do_log("%ld+%ld pending[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	    r->blk_offset = blk_offset;
 	}
     }
@@ -657,6 +640,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	r->_buf = _buf;
 	r->state = RCACHE_BACKEND_WAIT;
 	r->iovs = iov->slice(skip_len, skip_len+read_len);
+	//do_log("%ld+%ld fetch[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	
 	objname name(be->prefix(), unit.obj);
 	r->sub_req = io->make_read_req(name.c_str(), 512L*blk_base,
@@ -673,6 +657,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	auto [_iov, _niov] = tmp.c_iov();
 	r->sub_req = io->make_read_req(name.c_str(), 512L*oo.offset,
 				       _iov, _niov);
+	//do_log("%ld+%ld direct[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	r->state = RCACHE_DIRECT_READ;
     }
     return std::make_tuple(skip_len, read_len, r);
