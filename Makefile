@@ -4,8 +4,8 @@ CC = g++
 # no-psabi - disable warnings for changes in aa64 ABI
 # no-tree-sra - tree-sra causes unit-test to segfault on x86-64, not on aa64
 # note that no-unswitch-loops also gets rid of the segfault
-CFLAGS = -ggdb3 -Wall -Wno-psabi $(OPT)
-CXXFLAGS = -std=c++17 -ggdb3 -Wall -Wno-psabi -fno-tree-sra $(OPT)
+CFLAGS = -ggdb3 -Wall $(OPT)
+CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT)
 SOFLAGS = -shared -fPIC
 
 OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
