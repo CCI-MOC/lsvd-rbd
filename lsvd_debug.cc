@@ -267,7 +267,7 @@ void do_log(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     ssize_t max = end_log - p_log - 1;
-    if (max > 0)
+    if (max > 256)
 	p_log += vsnprintf(p_log, max, fmt, args);
 }
 
@@ -374,7 +374,6 @@ extern "C" void rcache_read2(read_cache *rcache, char *buf,
 			    uint64_t offset, uint64_t len)
 {
     char *buf2 = (char*)aligned_alloc(512, len); // just assume it's not
-    std::mutex m;
     std::condition_variable cv;
 
     smartiov iovs(buf2, len);

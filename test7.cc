@@ -229,18 +229,18 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     drain(q, 0);
     printf("\n");
 
-    extern char *p_log;
-    if (p_log)
-	p_log += sprintf(p_log,"\n\nWRITE DONE\n\n");
+    extern char *p_log, *end_log;
+    if (p_log && p_log+16 < end_log)
+	p_log += snprintf(p_log, end_log-p_log, "\n\nWRITE DONE\n\n");
 			 
     if (cfg->reopen) {
 	rbd_close(img);
-	if (p_log)
-	    p_log += sprintf(p_log, "\nCLOSE done\n\n");
+	if (p_log && p_log+16 < end_log)
+	    p_log += snprintf(p_log, end_log-p_log, "\nCLOSE done\n\n");
 	if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	    printf("failed: rbd_open\n"), exit(1);
-	if (p_log)
-	    p_log += sprintf(p_log, "\nREOPEN done\n\n");	
+	if (p_log && p_log+16 < end_log)
+	    p_log += snprintf(p_log, end_log-p_log, "\nREOPEN done\n\n");	
     }
 
     auto tmp = __lsvd_dbg_be_delay;
@@ -259,8 +259,8 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     free(buf);
     rbd_close(img);
     __lsvd_dbg_be_delay = tmp;
-    if (p_log)
-	p_log += sprintf(p_log,"\n\nREAD DONE\n\n");
+    if (p_log && p_log+16 < end_log)
+	p_log += snprintf(p_log, end_log-p_log, "\n\nREAD DONE\n\n");
 }
 
 
@@ -396,4 +396,3 @@ int main(int argc, char **argv) {
 	    run_test(s, &_cfg);
     }
 }
-    
