@@ -1,3 +1,5 @@
+Notes for Friday code review:
+
 `fake_rbd.h` - this is the portion of the RADOS Block Device API that we support. Basic functions are:
 - create image, delete image
 - open image
@@ -6,14 +8,14 @@
    - aio or synchronous
    - buf/len or iovec
 
-`request.h` - I/O request structure that gets used through all the remaining stuff.
+`request.h` - I/O request structure that gets used through almost all the remaining stuff.
 - typically created by a layer-specific function, e.g. `backend->make_read_req(...)`
 - synchronous:
     `r = make_req();`
     `r->run(NULL);`
     `r->wait()`
 - async:
-    `r->run(request r2);`
+    `r->run(request r2);`  
     on completion `r2->notify()` is invoked.
 
 `lsvd.cc` - implements the RBD functions. The main data structures and types are:
@@ -33,7 +35,8 @@ Asynchronous reads are complicated, because sections of a single read can (a) hi
     - start through start+skip not found here
     - start+skip through start+skip+read was found
     - req is the async request for the section found (or null)
-It's kind of gross, but seems to work fine and lets us launch all our requests in parallel
+
+So you iterate through requested address range, taking the regions that get skipped by the write cache and passing them to the read cache, clearing any regions that get skipped by the read cache, and accumulating a list of requests that all have to complete before the user request is done. It's kind of gross, but seems to work pretty well.
 
 `objects.h`, `journal.h` - these are the data structures used in the backend objects and in the write/read cache. 
 
