@@ -243,13 +243,9 @@ ssize_t translate_impl::init(const char *prefix_,
 	return bytes;
     do_log("read super crc %0x8\n", (uint32_t)crc32(0, (const unsigned char*)_buf, 4096));
     
-    int c_last;
     int n_ckpts = ckpts.size();
-    for (auto c : ckpts) {
+    for (auto c : ckpts) 
 	do_log("got ckpt from super (total %d): %d\n", n_ckpts, c);
-	assert((int)c != c_last);
-	c_last = c;
-    }
     
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
