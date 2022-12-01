@@ -77,8 +77,8 @@ class read_cache_impl : public read_cache {
 	int64_t       user = 1000; // hack to get test4/test_2_fakemap to work
 	int64_t       backend = 0;
     } hit_stats;
-    size_t            outstanding_writes = 0; // NVMe writes to cache
-    size_t            maxbufs = 100;
+    int               outstanding_writes = 0; // NVMe writes to cache
+    int               maxbufs = 100;
     
     thread_pool<int> misc_threads; // eviction thread, for now
     bool             nothreads = false;	// for debug
@@ -95,7 +95,7 @@ class read_cache_impl : public read_cache {
     sized_vector<char*>              buffer;
     sized_vector<std::vector<request*>> pending;
     std::queue<int>    buf_loc;
-    
+
     /* possible CLOCK implementation - queue holds <block,ojb/offset> 
      * pairs so that we can evict blocks without having to remove them 
      * from the CLOCK queue
@@ -224,6 +224,7 @@ void read_cache_impl::evict(int n) {
 	while (flat_map[j].obj == 0 || in_use[j] > 0)
 	    j = uni(rng);
 	auto oo = flat_map[j];
+	do_log("evict: [%d] %d.%d\n", j, oo.obj, oo.offset*128);
 	flat_map[j] = (extmap::obj_offset){0, 0};
 	map.erase(oo);
 	free_blks.push_back(j);
@@ -260,10 +261,8 @@ void read_cache_impl::evict_thread(thread_pool<int> *p) {
 	    auto buf = (char*)aligned_alloc(512, bytes);
 	    memcpy(buf, flat_map, bytes);
 
-	    lk.unlock();
 	    if (ssd->write(buf, bytes, 4096L * super->map_start) < 0)
 		throw("write flatmap");
-	    lk.lock();
 
 	    free(buf);
 	    t0 = t;
@@ -309,7 +308,7 @@ void read_cache_impl::evict_thread(thread_pool<int> *p) {
 char *read_cache_impl::get_cacheline_buf(int n) {
     char *buf = NULL;
     int len = 65536;
-    if (buf_loc.size() < maxbufs) {
+    if (buf_loc.size() < (size_t)maxbufs) {
 	buf = (char*)aligned_alloc(512, len);
 	memset(buf, 0, len);
     }
@@ -370,18 +369,23 @@ class rcache_req : public request {
     request *sub_req = NULL;	// cache or backend request
 
     int      n = -1;		// cache block number
+    extmap::obj_offset unit;	// map key
+    
     sector_t blk_offset = -1;	// see async_readv comments
 
     smartiov iovs;
     
-    /* closure line 424 */
     off_t nvme_offset;
     off_t buf_offset;
     char *_buf = NULL;
+    char objname[128];
 
     std::mutex m;
     
 public:
+    extmap::obj_offset _oo;
+    sector_t sector;
+    
     rcache_req(read_cache_impl *rcache_) : rci(rcache_) {}
     ~rcache_req() {}
 
@@ -412,6 +416,7 @@ void rcache_req::notify(request *child) {
 	rci->in_use[n]--;
 	next_state = RCACHE_DONE;
 	notify_parent = true;
+	do_log("s %d %d %d.%d\n", n, sector, _oo.obj, _oo.offset);
     }
     /* completion of a pending prior read
      */
@@ -419,6 +424,7 @@ void rcache_req::notify(request *child) {
 	iovs.copy_in(rci->buffer[n] + blk_offset*512);
 	notify_parent = true;
 	next_state = RCACHE_DONE;
+	do_log("q %d %d %d.%d\n", n, sector, _oo.obj, _oo.offset);
     }
     /* cache block read completion
      */
@@ -434,6 +440,7 @@ void rcache_req::notify(request *child) {
 	rci->pending[n].erase(rci->pending[n].begin(), rci->pending[n].end());
 	lk.unlock();
 
+	do_log("x %d %d %d.%d %d\n", n, sector, _oo.obj, _oo.offset, buf_offset/512);
 	notify_parent = true;
 	for (auto p : v) 
 	    p->notify(NULL);	// other requests waiting on read
@@ -446,7 +453,11 @@ void rcache_req::notify(request *child) {
     else if (state == RCACHE_BLOCK_WRITE) {
 	std::unique_lock lk(rci->m);
 	rci->written[n] = true;
+	rci->flat_map[n] = unit;
+	rci->map_dirty = true;
 	rci->outstanding_writes--;
+	do_log("W %d %d %d.%d %d\n", n, sector, _oo.obj, _oo.offset, buf_offset/512);
+	assert(rci->outstanding_writes >= 0);
 	next_state = RCACHE_DONE;
     }
     else if (state == RCACHE_DIRECT_READ) {
@@ -533,6 +544,8 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	be->wait_object_ready(oo.obj);
 
     auto r = new rcache_req(this);
+    r->sector = base + skip_sectors; // debug
+    r->_oo = oo;
     
     /*
      * diagram to help explain stuff:
@@ -555,8 +568,8 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
      *           --------------------------->| blk_top_offset
      */
 
-    extmap::obj_offset unit = {oo.obj, oo.offset / unit_sectors};
-    sector_t blk_base = unit.offset * unit_sectors;
+    extmap::obj_offset unit = r->unit = {oo.obj, oo.offset / unit_sectors};
+    sector_t blk_base = r->unit.offset * unit_sectors;
     sector_t blk_offset = oo.offset % unit_sectors;
     sector_t blk_top_offset = std::min((int)(blk_offset+read_sectors),
 				       round_up(blk_offset+1,unit_sectors));
@@ -568,7 +581,11 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 
     size_t skip_len = 512L * skip_sectors;
     size_t read_len = 512L * read_sectors;
-    
+
+    /* Hold the read cache instance lock through the rest of the
+     * method. The code is complicated, but doesn't do any I/O. 
+     * TODO: see about dropping the lock for buffer copy???
+     */
     std::unique_lock lk2(m);
     bool in_cache = false;
     auto it2 = map.find(unit);
@@ -579,23 +596,37 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 
     /* protection against random reads - read-around when hit rate is too low
      */
+    const char *msg = "";	// debug
     bool use_cache = free_blks.size() > 0 &&
 	hit_stats.user * 3 > hit_stats.backend * 2;
     if (outstanding_writes > maxbufs - 10)
 	use_cache = false;
+    if (free_blks.size() < 5)
+	misc_threads.cv.notify_one();
     
-    if (in_cache) {		// lk2 held through this section
+    if (!use_cache) {
+	if (free_blks.size() == 0)
+	    msg = "nfree";
+	else if (outstanding_writes > maxbufs-10)
+	    msg = "nwrites";
+	else
+	    msg = "hits";
+    }
+    
+    if (in_cache) {
 	sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 	    start = blk_in_ssd + blk_offset,
 	    finish = start + (blk_top_offset - blk_offset);
 
+	assert(unit.obj == r->_oo.obj); // debug
+	assert(r->_oo.offset == blk_base+blk_offset); // debug
 	assert((finish - start) == read_sectors);
 
 	a_bit[n] = true;
 	hit_stats.user += read_sectors;
 
 	if (buffer[n] != NULL) {
-	    lk2.unlock();
+	    do_log("b %d %d %d.%d\n", n, r->sector, r->_oo.obj, r->_oo.offset);
 	    smartiov _iov = iov->slice(skip_len, skip_len + read_len);
 	    _iov.copy_in(buffer[n] + blk_offset*512L);
 	    r->state = RCACHE_LOCAL_BUFFER;
@@ -606,6 +637,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	    smartiov _iov = iov->slice(skip_len, skip_len + read_len);
 	    r->sub_req = ssd->make_read_request(&_iov, 512L*start);
 	    //do_log("%ld+%ld ssd[%d]\n", (offset+skip_len)/512, read_len/512, n);
+	    do_log("r %d %d %d.%d\n", n, r->sector, unit.obj, blk_base+blk_offset);
 	    r->state = RCACHE_SSD_READ;
 	}
 	else {              // prior read is pending
@@ -613,26 +645,34 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	    r->iovs = iov->slice(skip_len, skip_len + read_len);
 	    //do_log("%ld+%ld pending[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	    r->blk_offset = blk_offset;
+	    do_log("p %d %d %d.%d\n", n, r->sector, unit.obj, blk_base+blk_offset);
 	}
     }
     else if (use_cache) {
 	/* assign a location in cache before we start reading (and while we're
 	 * still holding the lock)
 	 */
-	map_dirty = true;
 	r->n = n = free_blks.back();
 	free_blks.pop_back();
 	written[n] = false;
+	assert(buffer[n] == NULL);
 	in_use[n]++;
-	map[unit] = n;
-	flat_map[n] = unit;
 	auto _buf = get_cacheline_buf(n);
+	memset(_buf, 0, 64*1024);
 
+	/* point the map to that location, so that further requests to the 
+	 * same cache block will get queued. 
+	 * (since buffer[n] == NULL and !written[n])
+	 */
+	map[unit] = n;
+
+	assert(unit.obj == r->_oo.obj); // debug
+	assert(r->_oo.offset == blk_base+blk_offset); // debug
+	
 	hit_stats.backend += unit_sectors;
 	//sector_t sectors = std::min((sector_t)(read_len/512),
 	//			    blk_top_offset - blk_offset);
 	hit_stats.user += read_sectors;
-	lk2.unlock();
 
 	r->nvme_offset = (super->base*8 + n*unit_sectors) * 512L;
 	r->buf_offset = blk_offset * 512L;
@@ -643,14 +683,15 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	//do_log("%ld+%ld fetch[%d]\n", (offset+skip_len)/512, read_len/512, n);
 	
 	objname name(be->prefix(), unit.obj);
-	r->sub_req = io->make_read_req(name.c_str(), 512L*blk_base,
+	strcpy(r->objname, name.c_str());
+	r->sub_req = io->make_read_req(r->objname, 512L*blk_base,
 				       _buf, 512L*unit_sectors);
+	do_log("f %d %d %d.%d\n", n, r->sector, unit.obj, blk_base+blk_offset);
 	outstanding_writes++;	// bound # of write bufs
     }
     else {
 	hit_stats.user += read_sectors;
 	hit_stats.backend += read_sectors;
-	lk2.unlock();
 
 	objname name(be->prefix(), oo.obj);
 	auto tmp = iov->slice(skip_len, skip_len + read_len);
@@ -658,6 +699,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	r->sub_req = io->make_read_req(name.c_str(), 512L*oo.offset,
 				       _iov, _niov);
 	//do_log("%ld+%ld direct[%d]\n", (offset+skip_len)/512, read_len/512, n);
+	do_log("d 0 %d %d.%d %s\n", r->sector, oo.obj, oo.offset, msg);
 	r->state = RCACHE_DIRECT_READ;
     }
     return std::make_tuple(skip_len, read_len, r);
