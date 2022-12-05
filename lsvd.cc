@@ -334,6 +334,7 @@ class rbd_aio_req : public request {
     int n_subs = 0;
 
     std::set<void*> wc_work;
+    std::set<request*> rc_work;
     
     void notify_parent(void) {
 	//assert(!m.try_lock());
@@ -402,6 +403,7 @@ class rbd_aio_req : public request {
 	    child->release();
 
 	std::unique_lock lk(m);
+	rc_work.erase(child);
         if (--n_req > 0)
 	    return;
 
@@ -433,6 +435,7 @@ class rbd_aio_req : public request {
                 img->wcache->async_readv(offset, &wcache_iov);
 	    if (req != NULL) {
 		requests.push_back(req);
+		rc_work.insert(req);
 	    }
             while (skip > 0) {
 		smartiov rcache_iov = aligned_iovs.slice(_offset, _offset+skip);
@@ -452,7 +455,7 @@ class rbd_aio_req : public request {
 	}
 
 	n_req += requests.size();
-	for (auto r : requests)
+	for (auto const & r : requests)
 	    r->run(this);
 	
 	std::unique_lock lk(m);
