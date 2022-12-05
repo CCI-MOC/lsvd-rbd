@@ -306,16 +306,14 @@ void read_cache_impl::evict_thread(thread_pool<int> *p) {
  */
 char *read_cache_impl::get_cacheline_buf(int n) {
     char *buf = NULL;
-    int len = 65536;
-    if (buf_loc.size() < (size_t)maxbufs) {
+    int len = super->unit_size * 512;
+    if (buf_loc.size() < (size_t)maxbufs) 
 	buf = (char*)aligned_alloc(512, len);
-	memset(buf, 0, len);
-    }
     else {
-	for (int i = 0; i < 10; i++) {
+	for (int i = 0; i < 20; i++) {
 	    int j = buf_loc.front();
 	    buf_loc.pop();
-	    if (buffer[j] != NULL) {
+	    if (buffer[j] != NULL && written[j]) {
 		buf = buffer[j];
 		buffer[j] = NULL;
 		in_use[j]--;
@@ -323,9 +321,11 @@ char *read_cache_impl::get_cacheline_buf(int n) {
 	    }
 	    buf_loc.push(j);
 	}
-	assert(buf != NULL);
+	if (buf == NULL)
+	    buf = (char*)aligned_alloc(512, len);
     }
     buf_loc.push(n);
+    memset(buf, 0, len);
     return buf;
 }
 
@@ -597,7 +597,6 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
 	    start = blk_in_ssd + blk_offset,
 	    finish = start + (blk_top_offset - blk_offset);
-
 	assert((finish - start) == read_sectors);
 
 	a_bit[n] = true;
