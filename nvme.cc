@@ -28,6 +28,8 @@
 
 #include "nvme.h"
 
+void do_log(const char*, ...);
+
 class nvme_impl;
 
 class nvme_request : public request {
@@ -35,7 +37,7 @@ public:
     e_iocb      eio;
     smartiov    _iovs;
     size_t      ofs;
-    int         t;
+    enum lsvd_op op;
     nvme_impl  *nvme_ptr;
     request    *parent;
 
@@ -45,14 +47,15 @@ public:
     std::condition_variable cv;
     
 public:
-    nvme_request(smartiov *iov, size_t offset, int type, nvme_impl* nvme_w);
-    nvme_request(char *buf, size_t len, size_t offset, int type,
+    nvme_request(smartiov *iov, size_t offset, enum lsvd_op type, nvme_impl* nvme_w);
+    nvme_request(char *buf, size_t len, size_t offset, enum lsvd_op type,
 		 nvme_impl* nvme_w);
     ~nvme_request();
 
     void wait();
     void run(request *parent);
-    void notify(request *child);
+    void notify(request *child) {}
+    void notify2(long res);
     void release();
 };
 
@@ -102,23 +105,23 @@ public:
 
     request* make_write_request(smartiov *iov, size_t offset) {
 	assert(offset != 0);
-	auto req = new nvme_request(iov, offset, WRITE_REQ, this);
+	auto req = new nvme_request(iov, offset, OP_WRITE, this);
 	return (request*) req;
     }
 
     request* make_write_request(char *buf, size_t len, size_t offset) {
 	assert(offset != 0);
-	auto req = new nvme_request(buf, len, offset, WRITE_REQ, this);
+	auto req = new nvme_request(buf, len, offset, OP_WRITE, this);
 	return (request*) req;
     }
     
     request* make_read_request(smartiov *iov, size_t offset) {
-	auto req = new nvme_request(iov, offset, READ_REQ, this);
+	auto req = new nvme_request(iov, offset, OP_READ, this);
 	return (request*) req;
     }
 
     request* make_read_request(char *buf, size_t len, size_t offset) {
-	auto req = new nvme_request(buf, len, offset, READ_REQ, this);
+	auto req = new nvme_request(buf, len, offset, OP_READ, this);
 	return (request*) req;
     }
 };
@@ -129,43 +132,45 @@ nvme *make_nvme(int fd, const char* name) {
 
 /* ------- nvme_request implementation -------- */
 
-void call_send_request_notify(void *parent)
+void call_send_request_notify(void *parent, long res)
 {
     nvme_request *r = (nvme_request*) parent;
-    r->notify(NULL);
+    r->notify2(res);
 }
 
 nvme_request::nvme_request(smartiov *iov, size_t offset,
-			   int type, nvme_impl* nvme_w) : _iovs(iov->data(),
-								iov->size()) {
+			   enum lsvd_op type, nvme_impl* nvme_w) {
+    _iovs.ingest(iov->data(), iov->size());
     ofs = offset;
-    t = type;
+    op = type;
     nvme_ptr = nvme_w;
 }
 
 nvme_request::nvme_request(char *buf, size_t len, size_t offset,
-			   int type, nvme_impl* nvme_w) {
+			   enum lsvd_op type, nvme_impl* nvme_w) {
     _iovs.push_back((iovec){buf, len});
     ofs = offset;
-    t = type;
+    op = type;
     nvme_ptr = nvme_w;
 }
 
 void nvme_request::run(request* parent_) {
     parent = parent_;
-    if (t == WRITE_REQ) 
+    if (op == OP_WRITE) {
 	e_io_prep_pwritev(&eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
 			  ofs, call_send_request_notify, this);
+    }
     else
 	e_io_prep_preadv(&eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
 			 ofs, call_send_request_notify, this);
     e_io_submit(nvme_ptr->ioctx, &eio);
 }
 
-void nvme_request::notify(request *child) {
+void nvme_request::notify2(long result) {
     if (parent)
 	parent->notify(this);
-
+    assert(result == _iovs.bytes());
+    
     std::unique_lock lk(m);
     complete = true;
     cv.notify_one();

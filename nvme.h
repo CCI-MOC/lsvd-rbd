@@ -28,11 +28,6 @@ public:
     virtual request* make_read_request(char *buf, size_t len, size_t offset) = 0;
 };
 
-enum {
-    WRITE_REQ = 1,
-    READ_REQ = 3
-};
-
 nvme *make_nvme(int fd, const char* name);
 
 #endif

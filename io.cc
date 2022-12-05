@@ -47,8 +47,9 @@ size_t getsize64(int fd)
 
 void e_iocb_cb(io_context_t ctx, iocb *io, long res, long res2)
 {
+    assert(res2 == 0);
     auto iocb = (e_iocb*)io;
-    iocb->cb(iocb->ptr);
+    iocb->cb(iocb->ptr, res);
 }
 
 int io_queue_wait(io_context_t ctx, struct timespec *timeout)
@@ -109,7 +110,7 @@ void e_iocb_runner(io_context_t ctx, bool *running, const char *name)
 }
 
 void e_io_prep_pwrite(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
-		      void (*cb)(void*), void *arg)
+		      void (*cb)(void*,long), void *arg)
 {
     io_prep_pwrite(&io->io, fd, buf, len, offset);
     io->cb = cb;
@@ -118,7 +119,7 @@ void e_io_prep_pwrite(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
 }
 
 void e_io_prep_pread(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
-		     void (*cb)(void*), void *arg)
+		     void (*cb)(void*,long), void *arg)
 {
     io_prep_pread(&io->io, fd, buf, len, offset);
     io->cb = cb;
@@ -127,7 +128,7 @@ void e_io_prep_pread(e_iocb *io, int fd, void *buf, size_t len, size_t offset,
 }
 
 void e_io_prep_pwritev(e_iocb *io, int fd, const struct iovec *iov, int iovcnt,
-		     size_t offset, void (*cb)(void*), void *arg)
+		       size_t offset, void (*cb)(void*,long), void *arg)
 {
     io_prep_pwritev(&io->io, fd, iov, iovcnt, offset);
     io->cb = cb;
@@ -136,7 +137,7 @@ void e_io_prep_pwritev(e_iocb *io, int fd, const struct iovec *iov, int iovcnt,
 }
 
 void e_io_prep_preadv(e_iocb *eio, int fd, const struct iovec *iov, int iovcnt,
-		    size_t offset, void (*cb)(void*), void *arg)
+		      size_t offset, void (*cb)(void*,long), void *arg)
 {
     io_prep_preadv(&eio->io, fd, iov, iovcnt, offset);
     eio->cb = cb;
