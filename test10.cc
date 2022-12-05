@@ -24,6 +24,7 @@ namespace fs = std::experimental::filesystem;
 #include "lsvd_types.h"
 #include "lsvd_debug.h"
 #include "objname.h"
+#include "extent.h"
 
 extern bool __lsvd_dbg_reverse;
 extern bool __lsvd_dbg_be_delay;
@@ -51,6 +52,7 @@ struct cfg {
     size_t lose_writes;
     bool   wipe_data;
     bool   sleep;
+    long   seed2;
 };
 
 
@@ -346,6 +348,91 @@ void restore_super(struct cfg *cfg) {
     }
 }
 
+void get_obj_files(std::string prefix, std::vector<std::string> &files) {
+    auto stem = fs::path(prefix).filename();
+    auto parent = fs::path(prefix).parent_path();
+    size_t stem_len = strlen(stem.c_str());
+
+    for (auto const& dir_entry : fs::directory_iterator{parent}) {
+        std::string entry{dir_entry.path().filename()};
+        if (strncmp(entry.c_str(), stem.c_str(), stem_len) == 0)
+            if (entry.size() == stem_len + 9)
+		files.push_back(entry);
+    }
+    std::sort(files.begin(), files.end());
+}
+
+void check_rcache(struct cfg *cfg) {
+    // crc32 -> <obj#,block>
+    std::map<uint32_t,std::pair<int,int>> crcmap;
+    std::map<std::pair<int,int>,uint32_t> objmap;
+    bool failed = false;
+    
+    auto cache = get_cache_filename(cfg);
+    int fd = open(cache.c_str(), O_RDONLY);
+    char buf1[4096];
+    pread(fd, buf1, 4096, 2*4096);
+    auto r_super = (j_read_super*)buf1;
+    size_t map_bytes = r_super->map_blocks * 4096;
+    auto _flat_map = malloc(map_bytes);
+    pread(fd, _flat_map, map_bytes, r_super->map_start * 4096);
+    auto flat_map = (extmap::obj_offset*)_flat_map;
+
+    std::set<int> objects;
+
+    for (int i = 0; i < r_super->units; i++) {
+	auto oo = flat_map[i];
+	if (objects.find(oo.obj) != objects.end())
+	    continue;
+	char name[128];
+	sprintf(name, "%s.%08x", cfg->obj_prefix, (uint32_t)oo.obj);
+	int fd = open(name, O_RDONLY);
+	if (fd == -1) {
+	    sprintf(name, "%s.%08x.bak", cfg->obj_prefix, (uint32_t)oo.obj);
+	    fd = open(name, O_RDONLY);
+	}
+	
+	char buf[64*1024];
+	for (int i = 0, rv = sizeof(buf); rv == sizeof(buf); i++) {
+	    memset(buf, 0, sizeof(buf));
+	    if ((rv = read(fd, buf, sizeof(buf))) <= 0)
+		break;
+	    uint32_t crc = crc32(0, (unsigned char*)buf, sizeof(buf));
+	    auto oop = std::make_pair((int)oo.obj, (int)i);
+	    crcmap[crc] = oop;
+	    objmap[oop] = crc;
+	}
+	objects.insert(oo.obj);
+	close(fd);
+    }
+
+    // note - all-zeros 64KB CRC = d7978eeb
+    for (int i = 0; i < r_super->units; i++) {
+	auto oo = flat_map[i];
+	if (oo.obj == 0)
+	    continue;
+	auto _oo = std::make_pair((int)oo.obj, (int)oo.offset);
+	assert(objmap.find(_oo) != objmap.end());
+	auto crc1 = objmap[_oo];
+	char buf[64*1024];
+	memset(buf, 0, sizeof(buf));
+	// 16 4KB pages in a 64KB block
+	pread(fd, buf, sizeof(buf), (r_super->base + i*16) * 4096L);
+	uint32_t crc2 = crc32(0, (unsigned char*)buf, 64*1024);
+	if (crc1 != crc2) {
+	    failed = true;
+	    printf("%d (%d.%d) failed: %08x (should be %08x)\n", i,
+		   (int)oo.obj, (int)oo.offset, crc2, crc1);
+	    if (crcmap.find(crc2) != crcmap.end()) {
+		auto [obj,offset] = crcmap[crc2];
+		printf("  %08x is for %d.%d\n", crc2, obj, offset);
+	    }
+	}
+    }
+
+    assert(!failed);
+}
+
 char wcache_state_buf[4096];
 int backup_n;
 void save_wcache_state(struct cfg *cfg) {
@@ -409,9 +496,13 @@ void run_test(struct cfg *cfg) {
     std::vector<std::tuple<int,int>> io_list;
 
     for (auto s : cfg->seeds) {
+#if 0
 	p_log = logbuf;
 	if (p_log)
 	    *p_log = 0;
+#endif
+	do_log("RESTART\n\n");
+
 	printf("seed: 0x%lx\n", s);
 	rng.seed(s);
 
@@ -446,7 +537,7 @@ void run_test(struct cfg *cfg) {
 	    logbuf = child_logbuf;
 	    p_log = (char*)memchr(logbuf, 0, buflen);
 	    end_log = child_logbuf+buflen;
-	    p_log += sprintf(p_log, "\n\nRESTART\n\n\n");
+	    do_log("\n\nRESTART\n\n\n");
 
 	    if (cfg->sleep) {
 		printf("pid %d\n", getpid());
@@ -484,9 +575,11 @@ void run_test(struct cfg *cfg) {
 	/* this relies on the random number stream being identical in 
 	 * the parent and child processes
 	 */
+	int n_writes = 0;
 	for (int i = 0; i < n_requests; i++) {
 	    if (uni(rng) < cfg->read_fraction)
 		continue;
+	    n_writes++;
 	    auto [lba, n] = io_list[start+i];
 	    auto ptr = (char*)malloc(n*512);
 	    auto s = ++seq;
@@ -505,7 +598,8 @@ void run_test(struct cfg *cfg) {
 	int status;
 	waitpid(pid, &status, 0);
 	int last_obj = print_status(cfg);
-    
+
+	
 	if (cfg->lose_objs)
 	    obj_delete(cfg);
 	if (cfg->wipe_cache)
@@ -518,11 +612,16 @@ void run_test(struct cfg *cfg) {
 	    save_super(cfg);
 	}
 	
+	//check_rcache(cfg);
+
 	extern bool __lsvd_dbg_no_gc;
 	__lsvd_dbg_no_gc = true;
 	if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
 	    printf("failed: rbd_open\n"), exit(1);
 
+	//check_rcache(cfg);
+	extern void do_log(const char*, ...);
+	do_log("cache checked\n");
 	auto tmp = __lsvd_dbg_be_delay;
 	__lsvd_dbg_be_delay = false;
 
@@ -536,6 +635,7 @@ void run_test(struct cfg *cfg) {
 	    rbd_read(img, sector*512L, bufsize, buf);
 	    for (int j = 0; j < bufsize; j += 512) {
 		auto p = (const unsigned char*)buf + j;
+		assert(*(int*)p == sector + j/512 || *(int*)p == 0);
 		assert(*(int*)(p+4) >= 0);
 		uint32_t crc = crc32(0, p, 512);
 		image_info[sector + j/512] = (triple){*(int*)p,
@@ -549,6 +649,9 @@ void run_test(struct cfg *cfg) {
 	}
 	printf("\n");
     
+	rbd_close(img);
+	//check_rcache(cfg);
+
 	int max_seq = 0;
 	for (int i = 0; i < cfg->image_sectors; i++)
 	    if (image_info[i].seq > max_seq) {
@@ -562,7 +665,7 @@ void run_test(struct cfg *cfg) {
 	    secs += op_crcs[i].len;
 	printf("lost %d writes (%.1f MB)\n",
 	       (int)op_crcs.size() - max_seq, secs / 2.0 / 1024);
-	assert(cfg->lose_writes || (n_requests - max_seq) < (int)cfg->window);
+	assert(cfg->lose_writes || (n_writes - max_seq) < (int)cfg->window);
     
 	for (int i = start2; i < max_seq; i++) {
 	    auto [lba,len,seq,crcs] = op_crcs[i];
@@ -582,10 +685,12 @@ void run_test(struct cfg *cfg) {
 		       should_be_crcs[i].crc, should_be_crcs[i].seq);
 		failed++;
 	    }
-	assert(!failed);
+	if (failed) {
+	    check_rcache(cfg);
+	    assert(false);
+	}
 	printf("ok\n");
 
-	rbd_close(img);
 	__lsvd_dbg_no_gc = false;
 	
 	if (!cfg->restart) {
@@ -630,6 +735,7 @@ static struct argp_option options[] = {
     {"cache-size",'Z', "N",    0, "cache size (K/M/G)"},
     {"no-wipe",  'n', 0,      0, "don't clear image between runs"},
     {"sleep",    'S', 0,      0, "child sleeps for debug attach"},
+    {"seed2",    '2', 0,      0, "seed-generating seed"},
     {0},
 };
 
@@ -650,7 +756,8 @@ struct cfg _cfg = {
     false,			// wipe_cache
     0,				// lose_writes
     true,			// wipe_data
-    false};			// sleep
+    false,			// sleep
+    0};				// seed2
 
 off_t parseint(char *s)
 {
@@ -726,6 +833,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'S':
 	_cfg.sleep = true;
 	break;
+    case '2':
+	_cfg.seed2 = strtoul(arg, NULL, 0);
+	break;
     case ARGP_KEY_END:
         break;
     }
@@ -738,10 +848,14 @@ int main(int argc, char **argv) {
     __lsvd_dbg_rename = true;
     
     if (_cfg.seeds.size() == 0) {
-	auto now = std::chrono::system_clock::now();
-	auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
-	auto value = now_ms.time_since_epoch();
-	long seed = value.count();
+	long seed = _cfg.seed2;
+	if (seed == 0) {
+	    auto now = std::chrono::system_clock::now();
+	    auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
+	    auto value = now_ms.time_since_epoch();
+	    seed = value.count();
+	    printf("seed2: 0x%lx\n", seed);
+	}
 
 	rng.seed(seed);
 	for (int i = 0; i < _cfg.n_runs; i++)
@@ -750,4 +864,3 @@ int main(int argc, char **argv) {
 
     run_test(&_cfg);
 }
-    
