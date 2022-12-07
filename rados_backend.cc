@@ -40,10 +40,11 @@ public:
     ~rados_backend();
 
     int write_object(const char *name, iovec *iov, int iovcnt);
+    int write_object(const char *name, char *buf, size_t len);
     int read_object(const char *name, iovec *iov, int iovcnt,
                     size_t offset);
+    int read_object(const char *name, char *buf, size_t len, size_t offset);
     int delete_object(const char *name);
-    int delete_prefix(const char *prefix);
     
     /* async I/O
      */
@@ -77,6 +78,7 @@ rados_backend::rados_backend() {
 rados_backend::~rados_backend() {
     if (pool_len > 0)
 	rados_ioctx_destroy(io_ctx);
+    rados_shutdown(cluster);
     /* TODO: do we close things down? */
 }
 
@@ -114,6 +116,11 @@ int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
     return r;
 }
 
+int rados_backend::write_object(const char *name, char *buf, size_t len) {
+    iovec iov = {buf, len};
+    return write_object(name, &iov, 1);
+}
+
 int rados_backend::read_object(const char *name, iovec *iov,
 				   int iovcnt, size_t offset) {
     auto oname = pool_init(name);
@@ -128,30 +135,22 @@ int rados_backend::read_object(const char *name, iovec *iov,
     return r;
 }
 
-int rados_backend::delete_object(const char *name) {
-    auto oname = pool_init(name);
-    return rados_remove(io_ctx, oname);
+
+int rados_backend::read_object(const char *name, char *buf, size_t len,
+			       size_t offset) {
+    iovec iov = {buf, len};
+    return read_object(name, &iov, 1, offset);
 }
 
-int rados_backend::delete_prefix(const char *name) {
+
+int rados_backend::delete_object(const char *name) {
     auto oname = pool_init(name);
-    std::vector<std::string> names;
-    
-    const char *key, *loc, *ns;
-    rados_list_ctx_t ls_ctx;
-
-    if (rados_nobjects_list_open(io_ctx, &ls_ctx) < 0)
-	return -1;
-    
-    while (rados_nobjects_list_next(ls_ctx, &key, &loc, &ns) >= 0)
-	if (strncmp(key, oname, strlen(oname)) == 0)
-	    names.push_back(std::string(key));
-    rados_nobjects_list_close(ls_ctx);
-    
-    for (auto key : names)
-	rados_remove(io_ctx, key.c_str());
-
-    return 0;
+    uint64_t size;
+    time_t time;
+    int rv = rados_stat(io_ctx, oname, &size, &time);
+    if (rv >= 0)
+	rv = rados_remove(io_ctx, oname);
+    return rv;
 }
 
 class rados_be_request : public request {

@@ -19,10 +19,12 @@ public:
     /* synchronous I/O methods, return 0 / -1 for success/error
      */
     virtual int write_object(const char *name, iovec *iov, int iovcnt) = 0;
+    virtual int write_object(const char *name, char *buf, size_t len) = 0;
     virtual int read_object(const char *name, iovec *iov, int iovcnt,
                             size_t offset) = 0;
+    virtual int read_object(const char *name, char *buf, size_t len,
+                            size_t offset) = 0;
     virtual int delete_object(const char *name) = 0;
-    virtual int delete_prefix(const char *prefix) = 0;
     
     /* async I/O
      */

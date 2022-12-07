@@ -65,9 +65,10 @@ public:
     /* see backend.h 
      */
     int write_object(const char *name, iovec *iov, int iovcnt);
+    int write_object(const char *name, char *buf, size_t len);
     int read_object(const char *name, iovec *iov, int iovcnt, size_t offset);
+    int read_object(const char *name, char *buf, size_t len, size_t offset);
     int delete_object(const char *name);
-    int delete_prefix(const char *prefix);
     
     /* async I/O
      */
@@ -91,6 +92,11 @@ int file_backend::write_object(const char *name, iovec *iov, int iovcnt) {
     return val < 0 ? -1 : val;
 }
 
+int file_backend::write_object(const char *name, char *buf, size_t len) {
+    iovec iov = {buf, len};
+    return write_object(name, &iov, 1);
+}
+
 int file_backend::read_object(const char *name, iovec *iov, int iovcnt,
 				  size_t offset) {
     int fd;
@@ -103,6 +109,12 @@ int file_backend::read_object(const char *name, iovec *iov, int iovcnt,
     return val < 0 ? -1 : val;
 }
 
+int file_backend::read_object(const char *name, char *buf, size_t len,
+			      size_t offset) {
+    iovec iov = {buf, len};
+    return read_object(name, &iov, 1, offset);
+}
+
 int file_backend::delete_object(const char *name) {
     int rv;
     if (__lsvd_dbg_rename) {
@@ -112,19 +124,6 @@ int file_backend::delete_object(const char *name) {
     else
 	rv = unlink(name);
     return rv < 0 ? -1 : 0;
-}
-
-int file_backend::delete_prefix(const char *prefix_) {
-    std::string prefix(prefix_);
-    auto dir = fs::path(prefix).parent_path();
-    std::string stem = fs::path(prefix).filename();
-
-    for (auto const& dir_entry : fs::directory_iterator{dir}) {
-	std::string entry{dir_entry.path().filename()};
-	if (strncmp(entry.c_str(), stem.c_str(), stem.size()) == 0)
-	    fs::remove(dir_entry.path());
-    }
-    return 0;
 }
 
 void trim_partial(const char *_prefix) {

@@ -354,10 +354,7 @@ ssize_t translate_impl::init(const char *prefix_,
      */
     for (int i = 1; i < 32; i++) {
 	objname name(prefix(), i + seq);
-	if (objstore->delete_object(name.c_str()) == 0) {
-	    printf("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
-	    do_log("deleted %s (next=%08x)\n", name.c_str(), (int)seq);
-	}
+	objstore->delete_object(name.c_str());
     }
 
     if (timedflush)
@@ -762,22 +759,8 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     if (stopped)
 	return;
     lk.unlock();
-
-    struct iovec iov2 = {super_buf, 4096};
-    {
-	char buf[128], *p = buf;
-	for (auto const &c : checkpoints)
-	    p += sprintf(p, " %d", c);
-	auto _pc = (uint32_t*)(super_buf + offset);
-	p += sprintf(p, " [");
-	for (size_t i = 0; i < checkpoints.size(); i++)
-	    p += sprintf(p, " %d", _pc[i]);
-	p += sprintf(p, "]");
-	do_log("writing super w/ ckpts:%s\ncrc %08x\n", buf,
-	       (uint32_t)crc32(0, (const unsigned char*)super_buf, 4096));
-    }
     
-    objstore->write_object(super_name, &iov2, 1);
+    objstore->write_object(super_name, super_buf, 4096);
     do_log("write done\n");
     
     for (auto c : ckpts_to_delete) {
@@ -882,8 +865,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 
 	for (auto [i,sectors] : objs_to_clean) {
 	    objname name(prefix(), i);
-	    iovec iov = {buf, (size_t)(sectors*512)};
-	    objstore->read_object(name.c_str(), &iov, 1, /*offset=*/ 0);
+	    objstore->read_object(name.c_str(), buf, sectors*512UL, 0);
 	    gc_sectors_read += sectors;
 	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
 	    file_map.update(_base, _limit, offset);
@@ -1147,7 +1129,7 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 
 int translate_create_image(backend *objstore, const char *name,
 			   uint64_t size) {
-    auto buf = (char*)aligned_alloc(512, 4096);
+    char buf[4096];
     memset(buf, 0, 4096);
 
     auto _hdr = (obj_hdr*) buf;
@@ -1170,10 +1152,69 @@ int translate_create_image(backend *objstore, const char *name,
 			  0, 0,	   // clone offset, len
 			  0, 0};   // snap offset, len
     
-    iovec iov = {buf, 4096};
-    auto rv = objstore->write_object(name, &iov, 1);
-    free(buf);
+    auto rv = objstore->write_object(name, buf, 4096);
     return rv;
+}
+
+int translate_remove_image(backend *objstore, const char *name) {
+
+    /* read the superblock to get the list of checkpoints
+     */
+    char buf[4096];
+    int rv = objstore->read_object(name, buf, sizeof(buf), 0);
+    if (rv < 0)
+	return rv;
+    auto hdr = (obj_hdr*) buf;
+    auto sh = (super_hdr*)(hdr+1);
+
+    if (hdr->magic != LSVD_MAGIC || hdr->type != LSVD_SUPER)
+	return -1;
+
+    int seq = 1;
+    std::vector<uint32_t> ckpts;
+    decode_offset_len<uint32_t>(buf, sh->ckpts_offset, sh->ckpts_len, ckpts);
+
+    /* read the most recent checkpoint and get its object map
+     */
+    if (ckpts.size() > 0) {
+	object_reader r(objstore);
+	seq = ckpts.back();
+	objname obj(name, seq);
+	auto ckpt_buf = r.read_object_hdr(obj.c_str(), false);
+	auto c_hdr = (obj_hdr*)ckpt_buf;
+	auto c_data = (obj_ckpt_hdr*)(c_hdr+1);
+	if (c_hdr->magic != LSVD_MAGIC || c_hdr->type != LSVD_CKPT)
+	    return -1;
+	std::vector<ckpt_obj> objects;
+	decode_offset_len<ckpt_obj>(ckpt_buf, c_data->objs_offset,
+				    c_data->objs_len, objects);
+
+	/* delete all the objects in the objmap
+	 */
+	for (auto const & o : objects) {
+	    objname obj(name, o.seq);
+	    objstore->delete_object(obj.c_str());
+	}
+	/* delete all the checkpoints
+	 */
+	for (auto const & c : ckpts) {
+	    objname obj(name, c);
+	    objstore->delete_object(obj.c_str());
+	}
+    }
+    /* delete any objects after the last checkpoint, up to the first run of
+     * 32 missing sequence numbers
+     */
+    for (int n = 0; n < 16; seq++, n++) {
+	objname obj(name, seq);
+	if (objstore->delete_object(obj.c_str()) >= 0)
+	    n = 0;
+    }
+
+    /* and delete the superblock
+     */
+    objstore->delete_object(name);
+    return 0;
 }
 
 void translate_impl::getmap(int base, int limit,

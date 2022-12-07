@@ -136,6 +136,8 @@ translate *image_2_xlate(rbd_image_t image) {
     return img->xlate;
 }
 
+rbd_image_t __lsvd_dbg_img;
+
 extern "C" int rbd_open(rados_ioctx_t io, const char *name,
 			rbd_image_t *image, const char *snap_name) {
     auto img = new rbd_image;
@@ -143,7 +145,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name,
 	delete img;
 	return -1;
     }
-    *image = (void*)img;
+    *image = __lsvd_dbg_img = (void*)img;
     return 0;
 }
 
@@ -407,12 +409,11 @@ class rbd_aio_req : public request {
         if (--n_req > 0)
 	    return;
 
-	//check_crc(_sector, aligned_iovs.data(), aligned_iovs.size(), "1");
-
 	if (aligned_buf)	// copy from aligned *after* read
 	    iovs.copy_in(aligned_buf);
 
 	auto x = (status |= REQ_COMPLETE);
+
 	if (x & REQ_LAUNCHED) {
 	    lk.unlock();
 	    notify_parent();
@@ -423,7 +424,6 @@ class rbd_aio_req : public request {
 
     void run_r() {
 	__reqs++;
-	
         /* we're not done until n_req == 0 && launched == true
          */
 	size_t _offset = 0, _end = aligned_iovs.bytes();
@@ -443,6 +443,7 @@ class rbd_aio_req : public request {
                     img->rcache->async_readv(offset, &rcache_iov);
 		if (req2) {
 		    requests.push_back(req2);
+		    rc_work.insert(req2);
 		}
 
 		aligned_iovs.zero(_offset, _offset+skip2);
@@ -693,7 +694,7 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name) {
     if (cfg.read() < 0)
 	return -1;
     auto objstore = get_backend(&cfg, io, NULL);
-    int rv = objstore->delete_prefix(name);
+    int rv = translate_remove_image(objstore, name);
     delete objstore;
     return rv;
 }

@@ -169,7 +169,7 @@ void nvme_request::run(request* parent_) {
 void nvme_request::notify2(long result) {
     if (parent)
 	parent->notify(this);
-    assert(result == _iovs.bytes());
+    assert((size_t)result == _iovs.bytes());
     
     std::unique_lock lk(m);
     complete = true;
