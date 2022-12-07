@@ -188,7 +188,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
     
     if (!started || cfg->restart) {
-	clean_cache(cfg->cache_dir);
+	//clean_cache(cfg->cache_dir);
 	rbd_remove(io, cfg->obj_prefix);
 	rbd_create(io, cfg->obj_prefix, cfg->image_sectors, NULL);
 	sector_crc.clear();
@@ -197,8 +197,8 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 
     std::vector<data_map> writes;
     
-    if (rbd_open(io, cfg->obj_prefix, &img, NULL) < 0)
-	printf("failed: rbd_open\n"), exit(1);
+    int rv = rbd_open(io, cfg->obj_prefix, &img, NULL);
+    assert(rv >= 0);
 
     std::queue<std::pair<rbd_completion_t,char*>> q;
     std::uniform_real_distribution<> uni(0.0,1.0);
