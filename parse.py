@@ -86,10 +86,19 @@ if h.type == lsvd.LSVD_SUPER:
     print('live_sectors:  ', sh.live_sectors)
     print('ckpts_offset:  ', sh.ckpts_offset)
     print('ckpts_len:     ', sh.ckpts_len)
-    if sh.ckpts_offset > sh.ckpts_len:
+    if sh.ckpts_len > 0:
         ckpts = read_ckpts(bytearray(obj), sh.ckpts_offset, sh.ckpts_len)
         print('ckpts:         ', ','.join(map(lambda x: '%08x' % x, ckpts)))
-    print('clones:        ', '[tbd]')
+    if sh.clones_len > 0:
+        o1 = sh.clones_offset
+        o2 = o1+lsvd.sizeof_clone
+        c = lsvd.clone.from_buffer(bytearray(obj[o1:o2]))
+        uu = uuid.UUID(bytes=bytes(c.vol_uuid))
+        name = obj[o2:o2+c.name_len]
+        print('clone base:    ', str(name,'utf-8'))
+        print(' seq limit:    ', c.sequence)
+        print('      uuid:    ', str(uu))
+
     print('snaps:         ', '[tbd]')
     
 elif h.type == lsvd.LSVD_DATA:
