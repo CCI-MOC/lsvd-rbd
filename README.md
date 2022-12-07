@@ -13,38 +13,54 @@ As of 11/28, there seem to be two remaining bugs:
 - [FIXED] QEMU regression - abort in malloc/free in batch::~batch
 - QEMU regression - seems related to the hanging reads
 
-## usage
+## usage - QEMU
 
 Pick a RADOS pool, an image name, and a directory on an SSD-based file system (`rbd`, `img1`, and `/mnt/nvme/lsvd` in the example below).
 
-1. create a disk - this creates a 4KB RADOS object named `img1` with the volume metadata:
+1. create a disk. This creates a "superblock" - a 4KB RADOS object named `img1`, in this case, holding volume metadata:
 
-    `sudo python3 mkdisk.py --rados --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 --size 10g rbd/img1`
+    `sudo python3 mkdisk.py --rados --size 10g rbd/img1`
 
-2. initialize the cache, using the same UUID. 
+2. Set your configuration. The config variables are (sort of) described in `config.h`; you can either (a) set them in `lsvd.conf` or (b) pass them as environment variables. 
 
-    `sudo python3 mkcache.py --size 400M --uuid 7cf1fca0-a182-11ec-8abf-37d9345adf43 /mnt/nvme/lsvd/img1.cache`
-
-Note that the cache needs to be at least this big because the write cache is only 1/2 of it, and if it's too small (a) really large writes can deadlock it, and (b) it might not be able to hold all the outstanding writes to the backend, risking data loss if you crash and restart.
-
-3. start KVM using the virtual disk. (note - you can use the file `lsvd.conf` instead of environment variables - see config.h / config.cc for details. Keywords are the same as field names.
-
-    `sudo env LSVD_CACHE_DIR=/mnt/nvme/lsvd LD_PRELOAD=$PWD/liblsvd.so qemu-system-x86_64 -m 1024 -cdrom whatever.iso -blockdev '{"driver":"rbd","pool":"rbd","image":"rbd/img1","server":[{"host":"10.1.0.4","port":"6789"}],"node-name":"libvirt-2-storage","auto-read-only":true,"discard":"unmap"}' -device virtio-blk,drive=libvirt-2-storage -k en-us -machine accel=kvm -smp 2 -m 1024`
-
-Notes:
-- cache gets divided 1/2 read cache, 1/2 write cache
-- LSVD looks in `$LSVD_CACHE_DIR` (or `cache_dir` from `lsvd.conf`) for (a) `<img>.cache`, then `<uuid>.cache`. If it doesn't find either it creates a cache with default parameters, but that's currently broken.
-- you can omit the UUID, but then you'll want to have LSVD create the cache file so that it matches the remote image. In that case you'll need to set LSVD_CACHE_SIZE=400m or you'll deadlock eventually.
-- also you'll want to set XAUTHORITY=$HOME/.Xauthority
+3. start KVM using the virtual disk. Here we're starting a 2 VCP instance with 1G of RAM, a CD drive running off an ISO image, SSH on localhost:5555, and our virtual drive:
+```
+sudo env LSVD_CACHE_DIR=/mnt/nvme/lsvd LSVD_CACHE_SIZE=1000m \
+	LD_PRELOAD=$PWD/liblsvd.so XAUTHORITY=$HOME/.Xauthority\
+    qemu-system-x86_64 -m 1024 -cdrom whatever.iso \
+    -blockdev '{"driver":"rbd","pool":"rbd","image":"rbd/img1","server":[{"host":"10.1.0.4","port":"6789"}],"node-name":"libvirt-2-storage","auto-read-only":true,"discard":"unmap"}' -device virtio-blk,drive=libvirt-2-storage \
+    -device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::5555-:22 \
+    -k en-us -machine accel=kvm -smp 2 -m 1024
+```
 
 Unit tests included here:
 - test1.py through test5.py - really simple functional tests
 - test6.py - replays a trace from the Ubuntu 14 install
 - test7.cc - random writes and reads followed by readback, with CRC verification
 - test8.cc - random writes from multiple threads, CRC verification
-- test9.cc - similar, but crash and restart
+- test10.cc - similar, but crash and restart
 
-Writes are done with a size distribution vaguely based on the test6 QEMU trace - mostly small, with a few up to 16MB.
+If you want to compare it with a VM running off an image file on your local SSD:
+```
+qemu-img create -f qcow2 /mnt/nvme/qcow/img1.img 20G
+sudo env XAUTHORITY=$HOME/.Xauthority \
+    qemu-system-x86_64 -m 1024 -cdrom whatever.iso \
+    -drive file=/mnt/nvme/qcow/img1.img,media=disk,if=virtio \
+	-device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::5555-:22 \
+	-k en-us -machine accel=kvm -smp 2 -m 1024
+```
+
+### Notes on erasure-coded pools
+
+Because of its read cache, LSVD makes lots of 64KB random reads to the backend. I believe (but haven't fully verified) that it's more efficient if this matches the stripe size of your erasure code - e.g.
+```
+sudo ceph osd erasure-code-profile set ec83b k=8 m=3 plugin=isa \
+    technique=cauchy crush-failure-domain=osd crush-root=default~ssd \
+    stripe-unit=64k
+sudo ceph osd pool create ec83b_pool erasure ec83b
+```
+
+(yeah, crush-failure-domain=osd is sketchy, but I only have 4 OSD servers in my test cluster...)
 
 ## Overview
 
