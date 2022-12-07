@@ -321,8 +321,10 @@ char *read_cache_impl::get_cacheline_buf(int n) {
 	    }
 	    buf_loc.push(j);
 	}
-	if (buf == NULL)
+	if (buf == NULL) {
+	    do_log("rcache bufs: %d\n", (int)buf_loc.size()+1);
 	    buf = (char*)aligned_alloc(512, len);
+	}
     }
     buf_loc.push(n);
     memset(buf, 0, len);
@@ -427,16 +429,15 @@ void rcache_req::notify(request *child) {
 
 	std::unique_lock lk(rci->m);
 	rci->buffer[n] = _buf;
-	std::vector<request*>
-	    v(std::make_move_iterator(rci->pending[n].begin()),
-	      std::make_move_iterator(rci->pending[n].end()));
-	     
-	rci->pending[n].erase(rci->pending[n].begin(), rci->pending[n].end());
 	lk.unlock();
 
+	/* once buffer[n] is set, pending[n] will not be modified
+	 * by any other requests and we can safely access and clear it
+	 */
 	notify_parent = true;
-	for (auto p : v) 
+	for (auto const & p : rci->pending[n]) 
 	    p->notify(NULL);	// other requests waiting on read
+	rci->pending[n].clear();
 
 	sub_req = rci->ssd->make_write_request(_buf, rci->unit_sectors*512L,
 					       nvme_offset);
