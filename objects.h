@@ -31,8 +31,10 @@ enum obj_type {
     LSVD_CKPT = 3
 };
 
-// hdr :	header structure used to contain data for separate objects in translation and write cache layers
-//		of the LSVD system
+/* hdr - standard header for all backend objects
+ * total length is hdr_sectors + data_sectors, in 512-byte units
+ * name is <prefix> for superblock, (<prefix>.%08x % seq) otherwise
+ */
 struct obj_hdr {
     uint32_t magic;
     uint32_t version;		// 1
@@ -40,20 +42,23 @@ struct obj_hdr {
     uint32_t type;
     uint32_t seq;		// same as in name
     uint32_t hdr_sectors;
-    uint32_t data_sectors;	// hdr_sectors + data_sectors = size
-    uint32_t crc;
+    uint32_t data_sectors;
+    uint32_t crc;               // of header only
 } __attribute__((packed));
 
-// super_hdr :	super block style structure for the header structure, containing various metadata on the current
-//		header structure it describes including offsets, checkpoint statistics, and size
-/* variable-length fields are identified by offset/length pairs, where both
- * the offset and length are in units of bytes.
+/*  super_hdr - "superblock object", describing the entire volume
+ *
+ * variable-length fields are identified by offset/length pairs; 
+ * offset, length are both in units of bytes.
+ *
+ * ckpts : array of checkpoint sequence numbers (uint32). We keep the
+ *         last 3, but we only need 1 unless we go to incremental ckpts
+ * clones : zero or one struct clone_info, followed by a name and a zero
+ *         byte to terminate the string. (chase the chain to find all)
+ * snaps : TBD
  */
 struct super_hdr {
     uint64_t vol_size;
-    uint64_t total_sectors;
-    uint64_t live_sectors;
-    uint32_t next_obj;    	// next sequence number
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
     uint32_t clones_offset;	// array of struct clone
@@ -64,10 +69,12 @@ struct super_hdr {
 
 /* ckpts: list of active checkpoints: array of uint32_t */
 
-/* variable-length structure */
+/* variable-length structure
+ * objects @last_seq and earlier are in volume @name or its predecessors
+ */
 struct clone_info {
-    uuid_t   vol_uuid;
-    uint32_t sequence;
+    uuid_t   vol_uuid;          // of volume @name
+    uint32_t last_seq;          // of linked volume
     uint8_t  name_len;
     char     name[0];
 } __attribute__((packed));
@@ -78,7 +85,11 @@ struct snap_info {
     char     name[0];
 } __attribute__((packed));
 
-
+/* sub-header for a data object
+ *  cache_seq: lowest write cache sequence number (see source code)
+ *  objs_cleaned: TBD
+ *  data_map_offset/len: lba/len pairs for data in body of object.
+ */
 struct obj_data_hdr {
     uint64_t cache_seq;
     uint32_t objs_cleaned_offset;
@@ -95,10 +106,20 @@ struct obj_cleaned {
 // we can omit the offset in a data header
 //
 struct data_map {
-    uint64_t lba : 36;
-    uint64_t len : 28;
+    uint64_t lba : 36;          // 512-byte sectors
+    uint64_t len : 28;          // 512-byte sectors
 } __attribute__((packed));
 
+/* sub-header for a checkpoint object
+ *  TODO: get rid of ckpts_offset/len
+ *  objs_offset/len: list of live objects. For clones, does not include
+ *                   objects in clone base
+ *  deletes_offset/len: TBD
+ *  map_offset/len: LBA-to-object map at time checkpoint was written
+ *
+ * TODO: incremental checkpointing, taking advantage of dirty-bit
+ * feature in extent.h
+ */
 struct obj_ckpt_hdr {
     uint64_t cache_seq;         // from last data object
     uint32_t ckpts_offset;	// list includes self (TODO - not needed?)
@@ -129,6 +150,8 @@ struct ckpt_mapentry {
     int32_t obj;
     int32_t offset;
 } __attribute__((packed));
+
+/* ------ helper functions -------- */
 
 class backend;
 

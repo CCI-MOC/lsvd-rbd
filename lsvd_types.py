@@ -29,9 +29,6 @@ sizeof_hdr = sizeof(hdr) # 44
 class super_hdr(Structure):
     _pack_ = 1
     _fields_ = [("vol_size",            c_ulong),
-                ("total_sectors",       c_ulong),
-                ("live_sectors",        c_ulong),
-                ("next_obj",            c_uint),
                 ("ckpts_offset",        c_uint),
                 ("ckpts_len",           c_uint),
                 ("clones_offset",       c_uint),
@@ -42,13 +39,13 @@ sizeof_super_hdr = sizeof(super_hdr) # 56
 
 # ckpts is array of uint32
 
-class clone(Structure):
+class clone_info(Structure):
     _pack_ = 1
     _fields_ = [("vol_uuid",            c_ubyte*16),
-                ("sequence",            c_uint),
+                ("last_seq",            c_uint),
                 ("name_len",            c_ubyte)]   # 21 bytes
-        # followed by 'name_len' bytes of name, use string_at
-sizeof_clone = sizeof(clone) # 21
+        # followed by 'name_len' bytes of name
+sizeof_clone_info = sizeof(clone_info) # 21
 
 class snap(Structure):
     _pack_ = 1

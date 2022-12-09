@@ -28,6 +28,20 @@ else:
     obj = f.read(None)
     f.close()
 
+def read_obj(name):
+    if args.rados:
+        pool,oid = name.split('/')
+        if not cluster.pool_exists(pool):
+            raise RuntimeError('Pool not found: ' + pool)
+        ioctx = cluster.open_ioctx(pool)
+        obj = ioctx.read(oid)
+        ioctx.close()
+    else:
+        f = open(name, 'rb')
+        obj = f.read(None)
+        f.close()
+    return obj
+
 o2 = l1 = lsvd.sizeof_hdr
 
 def fmt_ckpt(ckpts):
@@ -66,6 +80,27 @@ def read_ckpts(buf, base, bytes):
 
 import zlib
 print('crc:          %08x' % zlib.crc32(obj))
+
+def print_clone(c, name, indent):
+    uu = uuid.UUID(bytes=bytes(c.vol_uuid))
+    print(indent + 'clone base:    ', str(name,'utf-8'))
+    print(indent + '  last seq:    ', c.last_seq)
+    print(indent + '      uuid:    ', str(uu))
+
+    _name = str(name,'utf-8')
+    obj = read_obj(_name)
+    o2 = lsvd.sizeof_hdr
+    o3 = o2+lsvd.sizeof_super_hdr
+    sh = lsvd.super_hdr.from_buffer(bytearray(obj[o2:o3]))
+
+    if sh.clones_len > 0:
+        o1 = sh.clones_offset
+        o2 = o1+lsvd.sizeof_clone
+        c = lsvd.clone_info.from_buffer(bytearray(obj[o1:o2]))
+        name = obj[o2:o2+c.name_len]
+        print_clone(c, name, '  ')
+
+    
 h = lsvd.hdr.from_buffer(bytearray(obj[0:l1]))
 if h.type == lsvd.LSVD_SUPER:
     o3 = o2+lsvd.sizeof_super_hdr
@@ -82,8 +117,6 @@ if h.type == lsvd.LSVD_SUPER:
     print('crc:      ', '%08x' % h.crc)
 
     print('vol_size:      ', sh.vol_size)
-    print('total_sectors: ', sh.total_sectors)
-    print('live_sectors:  ', sh.live_sectors)
     print('ckpts_offset:  ', sh.ckpts_offset)
     print('ckpts_len:     ', sh.ckpts_len)
     if sh.ckpts_len > 0:
@@ -91,13 +124,10 @@ if h.type == lsvd.LSVD_SUPER:
         print('ckpts:         ', ','.join(map(lambda x: '%08x' % x, ckpts)))
     if sh.clones_len > 0:
         o1 = sh.clones_offset
-        o2 = o1+lsvd.sizeof_clone
-        c = lsvd.clone.from_buffer(bytearray(obj[o1:o2]))
-        uu = uuid.UUID(bytes=bytes(c.vol_uuid))
+        o2 = o1+sizeof(lsvd.clone_info)
+        c = lsvd.clone_info.from_buffer(bytearray(obj[o1:o2]))
         name = obj[o2:o2+c.name_len]
-        print('clone base:    ', str(name,'utf-8'))
-        print(' seq limit:    ', c.sequence)
-        print('      uuid:    ', str(uu))
+        print_clone(c, name, '')
 
     print('snaps:         ', '[tbd]')
     
