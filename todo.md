@@ -1,5 +1,37 @@
 # punch list
 
+`lsvd.cc`:
+- implement `rbd_aio_discard`
+- implement `rbd_aio_flush`
+- `rbd_aio_req` - merge with lsvd_completion 
+- `rbd_remove` - find and remove cache file
+
+`read_cache.cc`:
+- implement CLOCK replacement
+- lots of notes that documentation needs to be added
+- **code cleanup** - stop using saved superblock for runtime variables 
+
+`translate.cc`:
+- coalesce writes
+- improved GC
+
+`write_cache.cc`:
+- **batching** - account for write size (not just number of writes) in batching
+- **code cleanup** - stop using saved superblock for runtime variables 
+
+**unused fields in superblock** - `total_sectors`, `live_sectors`, `next_object` - either use these or delete them.
+
+**putting data into read cache** - do this from translate when it's  writing a batch. Data will get written twice, but there won't be a read operation. Make the write cache a fixed size, dependent on backend write window and batch size, and read cache takes all the rest of the space
+
+**improved GC** - interface to get data from read cache, also decide whether to do partial or full read of an object.
+
+**clone volumes**
+- create script for clone. note that we
+
+**snapshots**
+
+# all old stuff below here
+
 [DONE]**GET FIO WORKING**
 - read seems to have regressed totally
 - write seems to hang on completion when compiled with -O3
@@ -28,7 +60,7 @@ note that we still don't handle malformed cache files
 
 ## other stuff
 
-[SEE "Remaining crash recovery optimizations"] **write cache sequence number** - need to record this in the backend so that we can implement write cache roll forward properly.
+[DONE] **write cache sequence number** - need to record this in the backend so that we can implement write cache roll forward properly.
 
 [DONE] **read blocking** - need to block interfering reads during GC. (note - this can be done just by blocking access to any objects which haven't finished being written out, and this works for misses in the write cache, too)
 
@@ -62,7 +94,7 @@ any other parameters that should go in the config file?
 
 requests in general:
 - `request->run` - should this return success/error?
-- is there any use for `req->wait` method?
+- [YES] is there any use for `req->wait` method?
 
 `rados_backend.cc`:
 - should `rados_backend` take an ioctx rather than using pool in the prefix?

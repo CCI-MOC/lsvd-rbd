@@ -36,7 +36,7 @@ public:
     virtual bool check_object_ready(int obj) = 0; /* GC stalls */
     virtual void wait_object_ready(int obj) = 0;
     
-    virtual const char *prefix() = 0; /* for read cache */
+    virtual const char *prefix(int seq) = 0; /* for read cache */
 
     virtual void wait_for_gc(void) = 0; /* do this before shutdown */
     virtual void start_gc(void) = 0;
