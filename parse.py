@@ -21,7 +21,9 @@ if args.rados:
     if not cluster.pool_exists(pool):
         raise RuntimeError('Pool not found: ' + pool)
     ioctx = cluster.open_ioctx(pool)
-    obj = ioctx.read(oid)
+    obj = ioctx.read(oid, 4096, 0)
+    h = lsvd.hdr.from_buffer(bytearray(obj[0:sizeof(lsvd.hdr)]))
+    obj = ioctx.read(oid, 512*h.hdr_sectors, 0)
     ioctx.close()
 else:
     f = open(args.object, 'rb')
