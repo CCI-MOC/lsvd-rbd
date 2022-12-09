@@ -107,11 +107,15 @@ class translate_impl : public translate {
     
     /* various constant state
      */
-    char      single_prefix[128];
+    struct clone {
+	char prefix[128];
+	int  limit;
+    };
+    std::vector<clone> clone_list;
+    char               super_name[128];
 
     /* superblock has two sections: [obj_hdr] [super_hdr]
      */
-    char      *super_name;
     char      *super_buf = NULL;
     obj_hdr   *super_h = NULL;
     super_hdr *super_sh = NULL;
@@ -186,7 +190,7 @@ public:
     void wait_object_ready(int obj);
     void start_gc(void);
     
-    const char *prefix() { return single_prefix; }
+    const char *prefix(int seq);
     
     /* debug functions
      */
@@ -198,6 +202,15 @@ public:
     int batch_seq(void) { return seq; }
     void set_completion(int next);
 };
+
+const char *translate_impl::prefix(int seq) {
+    if (clone_list.size() == 0 || seq >= clone_list.front().limit)
+	return super_name;
+    for (auto const & c : clone_list)
+	if (seq < c.limit)
+	    return c.prefix;
+    assert(false);
+}
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
 			       extmap::objmap *map_, std::shared_mutex *m_) :
@@ -234,8 +247,7 @@ ssize_t translate_impl::init(const char *prefix_,
 
     /* note prefix = superblock name
      */
-    strcpy(single_prefix, prefix_);
-    super_name = single_prefix;
+    strcpy(super_name, prefix_);
 
     auto [_buf, bytes] = parser->read_super(super_name, ckpts, clones,
 					    snaps, uuid);
@@ -255,11 +267,39 @@ ssize_t translate_impl::init(const char *prefix_,
     memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
 
     b = new batch(cfg->batch_size);
-
-    /* actually we're going to forget about next_obj
+    seq = 1;			// empty volume case
+    
+    /* is this a clone?
      */
-    seq = next_compln = super_sh->next_obj;
+    if (super_sh->clones_len > 0) {
+	char buf[4096];
+	auto ci = (clone_info*)(_buf + super_sh->clones_offset);
+	auto obj_name = (char*)(ci+1);
+	while (true) {
+	    if (objstore->read_object(obj_name, buf, sizeof(buf), 0) < 0)
+		return -1;
+	    auto _h = (obj_hdr*)buf;
+	    auto _sh = (super_hdr*)(_h+1);
+	    if (_h->magic != LSVD_MAGIC || _h->type != LSVD_SUPER) {
+		printf("clone: bad magic\n");
+		return -1;
+	    }
+	    if (memcmp(_h->vol_uuid, ci->vol_uuid, sizeof(uuid_t)) != 0) {
+		printf("clone: bad UUID\n");
+		return -1;
+	    }
+	    clone c;
+	    strcpy(c.prefix, obj_name);
+	    c.limit = ci->last_seq;
+	    clone_list.push_back(c);
 
+	    if (_sh->clones_len == 0)
+		break;
+	    ci = (clone_info*)(buf + _sh->clones_offset);
+	    obj_name = (char*)(ci + 1);
+	}
+    }
+    
     /* read in the last checkpoint, then roll forward from there;
      */
     int last_ckpt = -1;
@@ -273,7 +313,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	 */
 	while (n_ckpts > 0) {
 	    int c = ckpts[n_ckpts-1];
-	    objname name(prefix(), c);
+	    objname name(prefix(c), c);
 	    if (parser->read_checkpoint(name.c_str(), max_cache_seq,
 					ckpts, objects,
 					deletes, entries) >= 0) {
@@ -314,7 +354,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	std::vector<data_map>    entries;
 	obj_hdr h; obj_data_hdr dh;
 
-	objname name(prefix(), seq);
+	objname name(prefix(seq), seq);
 	if (parser->read_data_hdr(name.c_str(), h, dh, cleaned, entries) < 0)
 	    break;
 	if (h.type == LSVD_CKPT) {
@@ -353,7 +393,7 @@ ssize_t translate_impl::init(const char *prefix_,
     /* delete any potential "dangling" objects.
      */
     for (int i = 1; i < 32; i++) {
-	objname name(prefix(), i + seq);
+	objname name(prefix(i+seq), i + seq);
 	objstore->delete_object(name.c_str());
     }
 
@@ -565,7 +605,7 @@ void translate_impl::process_batch(batch *b) {
     t_req->to_free.push_back(hdr);
     t_req->b = b;
 
-    objname name(prefix(), b->seq);
+    objname name(prefix(b->seq), b->seq);
     auto req = objstore->make_write_req(name.c_str(), iov, 2);
     req->run(t_req);
 }
@@ -724,7 +764,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
 
     /* and write it
      */
-    objname name(prefix(), ckpt_seq);
+    objname name(prefix(ckpt_seq), ckpt_seq);
     objstore->write_object(name.c_str(), iov, niovs);
     do_log("wrote ckpt %d\n", ckpt_seq);
     notify_complete(ckpt_seq);
@@ -764,7 +804,7 @@ void translate_impl::write_checkpoint(int ckpt_seq,
     do_log("write done\n");
     
     for (auto c : ckpts_to_delete) {
-	objname name(prefix(), c);
+	objname name(prefix(c), c);
 	do_log("ckpt delete %s\n", name.c_str());
 	objstore->delete_object(name.c_str());
     }
@@ -864,7 +904,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	char *buf = (char*)malloc(20*1024*1024);
 
 	for (auto [i,sectors] : objs_to_clean) {
-	    objname name(prefix(), i);
+	    objname name(prefix(i), i);
 	    objstore->read_object(name.c_str(), buf, sectors*512UL, 0);
 	    gc_sectors_read += sectors;
 	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
@@ -997,7 +1037,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    if (stopped)
 		return;
 	    
-	    objname name(prefix(), _seq);
+	    objname name(prefix(_seq), _seq);
 	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
 	    req->run(t_req);
@@ -1022,7 +1062,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
     
 	lk.unlock();
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
-	    objname name(prefix(), it->first);
+	    objname name(prefix(it->first), it->first);
 	    do_log("gc delete %s\n", name.c_str());
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
@@ -1112,7 +1152,7 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt) {
 	if (obj == -1)
 	    slice.zero();
 	else {
-	    objname name(prefix(), obj);
+	    objname name(prefix(obj), obj);
 	    auto [iov,iovcnt] = slice.c_iov();
 	    objstore->read_object(name.c_str(), iov, iovcnt, _offset);
 	}
@@ -1145,9 +1185,6 @@ int translate_create_image(backend *objstore, const char *name,
     auto _super = (super_hdr*)(_hdr + 1);
     uint64_t sectors = size / 512;
     *_super = (super_hdr){sectors, // vol_size
-			  0,	   // total data sectors
-			  0,	   // live sectors
-			  1,	   // next object
 			  0, 0,	   // checkpoint offset, len
 			  0, 0,	   // clone offset, len
 			  0, 0};   // snap offset, len

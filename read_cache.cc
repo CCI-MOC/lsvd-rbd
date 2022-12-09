@@ -650,7 +650,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	r->state = RCACHE_BACKEND_WAIT;
 	r->iovs = iov->slice(skip_len, skip_len+read_len);
 	
-	objname name(be->prefix(), unit.obj);
+	objname name(be->prefix(unit.obj), unit.obj);
 	strcpy(r->objname, name.c_str());
 	r->sub_req = io->make_read_req(r->objname, 512L*blk_base,
 				       _buf, 512L*unit_sectors);
@@ -660,7 +660,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	hit_stats.user += read_sectors;
 	hit_stats.backend += read_sectors;
 
-	objname name(be->prefix(), oo.obj);
+	objname name(be->prefix(oo.obj), oo.obj);
 	auto tmp = iov->slice(skip_len, skip_len + read_len);
 	auto [_iov, _niov] = tmp.c_iov();
 	r->sub_req = io->make_read_req(name.c_str(), 512L*oo.offset,

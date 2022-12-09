@@ -60,8 +60,6 @@ struct rbd_image {
     event_socket ev;
     std::queue<rbd_completion_t> completions;
 
-    std::set<request*> rd_reqs; // debug
-
     rbd_image() {}
     ~rbd_image() {}
 
