@@ -109,7 +109,8 @@ class translate_impl : public translate {
      */
     struct clone {
 	char prefix[128];
-	int  limit;
+	int  last_seq;
+	int  first_seq = 0;
     };
     std::vector<clone> clone_list;
     char               super_name[128];
@@ -204,10 +205,10 @@ public:
 };
 
 const char *translate_impl::prefix(int seq) {
-    if (clone_list.size() == 0 || seq >= clone_list.front().limit)
+    if (clone_list.size() == 0 || seq > clone_list.front().last_seq)
 	return super_name;
     for (auto const & c : clone_list)
-	if (seq < c.limit)
+	if (seq >= c.first_seq)
 	    return c.prefix;
     assert(false);
 }
@@ -290,7 +291,9 @@ ssize_t translate_impl::init(const char *prefix_,
 	    }
 	    clone c;
 	    strcpy(c.prefix, obj_name);
-	    c.limit = ci->last_seq;
+	    c.last_seq = ci->last_seq;
+	    if (clone_list.size() > 0)
+		clone_list.back().first_seq = ci->last_seq + 1;
 	    clone_list.push_back(c);
 
 	    if (_sh->clones_len == 0)
@@ -573,7 +576,6 @@ void translate_impl::process_batch(batch *b) {
     std::vector<extmap::lba2obj> deleted;
 
     for (auto e : b->entries) {
-	//do_log("t2 %d %d+%d %d\n", b->seq, e.lba, e.len, ((int*)(b->buf + sector_offset*512))[1]);
 	extmap::obj_offset oo = {b->seq, sector_offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
 	sector_offset += e.len;
@@ -581,7 +583,8 @@ void translate_impl::process_batch(batch *b) {
 
     for (auto d : deleted) {
 	auto [base, limit, ptr] = d.vals();
-	assert(object_info.find(ptr.obj) != object_info.end());
+	if (object_info.find(ptr.obj) == object_info.end())
+	    continue;		// skip clone base
 	object_info[ptr.obj].live -= (limit - base);
 	assert(object_info[ptr.obj].live >= 0);
 	total_live_sectors -= (limit - base);
@@ -1017,7 +1020,8 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    }
 	    for (auto d : deleted) {
 		auto [base, limit, ptr] = d.vals();
-		assert(object_info.find(ptr.obj) != object_info.end());
+		if (object_info.find(ptr.obj) == object_info.end())
+		    continue;	// skip clone base
 		object_info[ptr.obj].live -= (limit - base);
 		assert(object_info[ptr.obj].live >= 0);
 		total_live_sectors -= (limit - base);
@@ -1041,7 +1045,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	    auto [iov,iovcnt] = iovs.c_iov();
 	    auto req = objstore->make_write_req(name.c_str(), iov, iovcnt);
 	    req->run(t_req);
-	    do_log("gc write %s\n", name.c_str());
 	}
 	close(fd);
 	unlink(temp);
@@ -1057,13 +1060,11 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 	return;
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
-	do_log("gc ckpt %d\n", ckpt_seq);
 	write_checkpoint(ckpt_seq, lk);
     
 	lk.unlock();
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(it->first), it->first);
-	    do_log("gc delete %s\n", name.c_str());
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
