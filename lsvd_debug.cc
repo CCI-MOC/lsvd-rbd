@@ -612,35 +612,6 @@ void list_crc(sector_t sector, int n) {
 	printf("%ld %08x\n", sector+i, sector_crc[sector+i]);
 }
 
-void printaddr(sector_t sector, rbd_image *img) {
-    sector_t base = sector, limit = base+8;
-    char buf[1024], *p = buf;
-    auto [wm,wmap] = img->wcache->getmap2();
-    {
-	std::unique_lock lk(*wm);
-	p += sprintf(p, " w %ld: [", sector);
-	for (auto it = wmap->lookup(base);
-	     it != wmap->end() && it->base() < limit; it++) {
-	    auto [_b,_l,_p] = it->vals(base, limit+512);
-	    p += sprintf(p, " %ld+%ld->%ld", _b, _l-_b, _p);
-	}
-	p += sprintf(p, " ]");
-	do_log("%s\n", buf);
-    }
-    {
-	p = buf;
-	std::shared_lock lk(img->map_lock);
-	p += sprintf(p, " r %ld: [", sector);
-	for (auto it = img->map.lookup(base);
-	     it != img->map.end() && it->base() < limit; it++) {
-	    auto [_b,_l,oo] = it->vals();
-	    p += sprintf(p, " %ld+%ld->%ld.%d", _b, _l-_b, oo.obj, (int)oo.offset);
-	}
-	p += sprintf(p, " ]");
-	do_log("%s\n", buf);
-    }
-}
-
 size_t iovsum(const iovec *iov, int iovcnt) {
     int sum = 0;
     for (int i = 0; i < iovcnt; i++)
