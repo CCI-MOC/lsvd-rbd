@@ -43,7 +43,6 @@ public:
     virtual void get_super(j_write_super *s) = 0; /* copies superblock */
     virtual page_t get_oldest(page_t blk, std::vector<j_extent> &extents) = 0;
     virtual void do_write_checkpoint(void) = 0;
-    virtual std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) = 0;
 };
 
 extern write_cache *make_write_cache(uint32_t blkno, int fd,

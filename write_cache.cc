@@ -156,10 +156,6 @@ public:
      */
     page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
     void do_write_checkpoint(void);
-
-    std::pair<std::mutex*,extmap::cachemap2*> getmap2(void) {
-	return std::make_pair(&m, &map);
-    }
 };
 
 void print_pages(write_cache_impl *w, const char *file) {
