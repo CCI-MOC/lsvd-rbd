@@ -225,9 +225,9 @@ namespace extmap {
 
     // an extent map with entries of type T, which map from T_in to T_out
     //
-    template <class T, class T_in, class T_out>
+    template <class T, class T_in, class T_out, int load = 256>
     struct extmap {
-	static const int _load = 256;
+	static const int _load = load;
 
     public:
 	typedef std::vector<T>      extent_vector;
