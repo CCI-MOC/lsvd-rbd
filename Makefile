@@ -4,8 +4,9 @@ CC = g++
 # no-psabi - disable warnings for changes in aa64 ABI
 # no-tree-sra - tree-sra causes unit-test to segfault on x86-64, not on aa64
 # note that no-unswitch-loops also gets rid of the segfault
+# -fno-omit-frame-pointer is so perf gets good stack traces
 CFLAGS = -ggdb3 -Wall $(OPT)
-CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT)
+CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT) -fno-omit-frame-pointer
 SOFLAGS = -shared -fPIC
 
 OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
@@ -19,6 +20,9 @@ liblsvd.so:  $(OBJS)
 %.o: %.d
 
 # CRC_OBJS = crc32.o crc32_simd.o
+
+imgtool: imgtool.o $(OBJS)
+	$(CXX) -o $@ imgtool.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
 
 test-1: test-1.o $(OBJS)
 	$(CXX) -o $@ test-1.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
