@@ -60,6 +60,8 @@ struct rbd_image {
     event_socket ev;
     std::queue<rbd_completion_t> completions;
 
+    int          refcount = 0;
+
     rbd_image() {}
     ~rbd_image() {}
 
