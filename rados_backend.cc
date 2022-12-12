@@ -49,6 +49,8 @@ public:
     /* async I/O
      */
     request *make_write_req(const char *name, iovec *iov, int iovcnt);
+    request *make_write_req(const char *name, char *buf, size_t len);
+
     request *make_read_req(const char *name, size_t offset,
                            iovec *iov, int iovcnt);
     request *make_read_req(const char *name, size_t offset,
@@ -156,6 +158,8 @@ int rados_backend::delete_object(const char *name) {
 class rados_be_request : public request {
     smartiov       _iovs;
     char          *buf = NULL;
+    char          *client_buf = NULL;
+    size_t         client_len = 0;
     request       *parent = NULL;
     char           oid[64];
     //char          *oid = NULL;
@@ -172,6 +176,17 @@ public:
 	offset = offset_;
 	io_ctx = io_ctx_;
 	strcpy(oid, obj_name);
+	op = op_;
+    }
+
+    rados_be_request(enum lsvd_op op_, char *obj_name,
+		     char *buf, size_t len, size_t offset_,
+		     rados_ioctx_t io_ctx_) {
+	offset = offset_;
+	io_ctx = io_ctx_;
+	strcpy(oid, obj_name);
+	client_buf = buf;
+	client_len = len;
 	op = op_;
     }
     ~rados_be_request() {}
@@ -195,20 +210,29 @@ public:
 	parent = parent_;
 	assert(op == OP_READ || op == OP_WRITE);
 	
+	rados_aio_create_completion(this, rados_be_notify, NULL, &c);
+
 	/* damn C interface doesn't handle iovecs
 	 */
-	char *_buf = (char*)_iovs.data()->iov_base;
-	if (_iovs.size() > 1) {
-	    _buf = buf = (char*)malloc(_iovs.bytes());
-	    if (op == OP_WRITE)
-		_iovs.copy_out(buf);
-	}
+	if (client_buf == NULL) {
+	    char *_buf = (char*)_iovs.data()->iov_base;
+	    if (_iovs.size() > 1) {
+		_buf = buf = (char*)malloc(_iovs.bytes());
+		if (op == OP_WRITE)
+		    _iovs.copy_out(buf);
+	    }
 
-	rados_aio_create_completion(this, rados_be_notify, NULL, &c);
-	if (op == OP_READ)
-	    rados_aio_read(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
-	else
-	    rados_aio_write_full(io_ctx, oid, c, _buf, _iovs.bytes());
+	    if (op == OP_READ)
+		rados_aio_read(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
+	    else
+		rados_aio_write_full(io_ctx, oid, c, _buf, _iovs.bytes());
+	}
+	else {
+	    if (op == OP_READ)
+		rados_aio_read(io_ctx, oid, c, client_buf, client_len, offset);
+	    else
+		rados_aio_write_full(io_ctx, oid, c, client_buf, client_len);
+	}
     }
 
     void release() {}
@@ -220,6 +244,12 @@ request *rados_backend::make_write_req(const char *name, iovec *iov,
     auto oid = pool_init(name);
     assert(*((int*)iov[0].iov_base) == LSVD_MAGIC);
     return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx);
+}
+
+request *rados_backend::make_write_req(const char *name, char *buf, size_t len) {
+    auto oid = pool_init(name);
+    assert(*((int*)buf) == LSVD_MAGIC);
+    return new rados_be_request(OP_WRITE, oid, buf, len, 0, io_ctx);
 }
 
 request *rados_backend::make_read_req(const char *name, size_t offset,

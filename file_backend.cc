@@ -73,6 +73,7 @@ public:
     /* async I/O
      */
     request *make_write_req(const char *name, iovec *iov, int iovcnt);
+    request *make_write_req(const char *name, char *buf, size_t len);
     request *make_read_req(const char *name, size_t offset,
                            iovec *iov, int iovcnt);
     request *make_read_req(const char *name, size_t offset,
@@ -180,6 +181,16 @@ public:
 	be = be_;
 	strcpy(name, name_);
     }
+    file_backend_req(enum lsvd_op op_, const char *name_,
+		     char *buf, size_t len, size_t offset_,
+		     file_backend *be_) {
+	op = op_;
+	offset = offset_;
+	be = be_;
+	strcpy(name, name_);
+	iovec iov = {buf, len};
+	_iovs.push_back(iov);
+    }
     ~file_backend_req() {}
 
     void      wait() {}		   // TODO: ?????
@@ -256,6 +267,12 @@ request *file_backend::make_write_req(const char*name, iovec *iov, int niov) {
     verify_obj(iov, niov);
     return new file_backend_req(OP_WRITE, name, iov, niov, 0, this);
 }
+request *file_backend::make_write_req(const char *name, char *buf, size_t len) {
+    assert(access(name, F_OK) != 0);
+    return new file_backend_req(OP_WRITE, name, buf, len, 0, this);
+}
+    
+
 
 request *file_backend::make_read_req(const char *name, size_t offset,
 				     iovec *iov, int iovcnt) {
