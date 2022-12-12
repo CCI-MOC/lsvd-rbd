@@ -81,6 +81,7 @@ int lsvd_config::read() {
 	    F_CONFIG_INT(words[0], words[1], hard_sync);
 	    F_CONFIG_INT(words[0], words[1], ckpt_interval);
 	    F_CONFIG_INT(words[0], words[1], flush_msec);
+	    F_CONFIG_INT(words[0], words[1], gc_threshold);
 	}
 	fp.close();
 	break;
@@ -97,6 +98,7 @@ int lsvd_config::read() {
     ENV_CONFIG_INT(hard_sync);
     ENV_CONFIG_INT(ckpt_interval);
     ENV_CONFIG_INT(flush_msec);
+    ENV_CONFIG_INT(gc_threshold);
 
     return 0;			// success
 }
