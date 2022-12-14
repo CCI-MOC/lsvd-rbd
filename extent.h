@@ -190,7 +190,8 @@ namespace extmap {
 
 	// can't use a bitfield directly in make_tuple - need +0
 	std::tuple<T_in, T_in, T_out> vals(void) {
-	    return std::make_tuple(s.base+0, s.base+s.len, s.ptr);
+            auto _ptr = s.ptr;
+	    return std::make_tuple(s.base+0, s.base+s.len, _ptr);
 	}
 
 	std::tuple<T_in, T_in, T_out> vals(T_in _base, T_in _limit) {
