@@ -57,5 +57,6 @@ extern translate *make_translate(backend *_io, lsvd_config *cfg,
 extern int translate_create_image(backend *objstore, const char *name,
                                   uint64_t size);
 extern int translate_remove_image(backend *objstore, const char *name);
+extern int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu);
 
 #endif
