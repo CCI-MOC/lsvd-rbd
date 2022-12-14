@@ -163,12 +163,15 @@ int rbd_image::image_close(void) {
     return 0;
 }
 
+extern void save_log_time(void); // debug
+extern void log_time(uint64_t loc, uint64_t value);
 extern "C" int rbd_close(rbd_image_t image)
 {
     //do_log("rbd_close\n");
     rbd_image *img = (rbd_image*)image;
     img->image_close();
     delete img;
+    save_log_time();		// debug
     return 0;
 }
 
@@ -370,7 +373,11 @@ class rbd_aio_req : public request {
 
 	//add_crc(_sector, aligned_iovs.data(), aligned_iovs.size());
 
+	//log_time(6,offset/512);
 	img->wcache->get_room(sectors);
+	//log_time(7,offset/512);
+	img->xlate->wait_for_room();
+	log_time(30,offset/512);
 
 	/* split large requests into 2MB (default) chunks
 	 */
@@ -600,6 +607,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     lsvd_completion *p = (lsvd_completion *)c;
     p->img = img;
 
+    //log_time(1, offset/512);
     p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
 			     (char*)buf, len);
     p->req->run(NULL);
@@ -686,15 +694,23 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
     return rv;
 }
 
-/* TODO: translate.cc should implement rbd_remove, by reading the 
- * last checkpoint and figuring out exactly which objects to remove
+/* remove all objects and cache file.
+ * this only removes objects pointed to by the last checkpoint, plus
+ * a small range of following ones - there may be dangling objects after
+ * removing a deeply corrupted image
  */
 extern "C" int rbd_remove(rados_ioctx_t io, const char *name) {
     lsvd_config  cfg;
-    if (cfg.read() < 0)
-	return -1;
+    auto rv = cfg.read();
+    if (rv < 0)
+	return rv;
     auto objstore = get_backend(&cfg, io, NULL);
-    int rv = translate_remove_image(objstore, name);
+    uuid_t uu;
+    if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
+	return rv;
+    auto cache_file = cfg.cache_filename(uu, name);
+    unlink(cache_file.c_str());
+    rv = translate_remove_image(objstore, name);
     delete objstore;
     return rv;
 }
