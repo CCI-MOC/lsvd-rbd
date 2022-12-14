@@ -49,6 +49,7 @@ void fp_log(const char*, ...);
 class batch {
 public:
     std::vector<data_map> entries;
+    char  *_buf = NULL;		// allocation start
     char  *buf = NULL;		// data goes here
     size_t len = 0;		// current data size
     size_t max;			// done when len hits here
@@ -56,11 +57,13 @@ public:
     uint64_t cache_seq = 0;
 
     batch(size_t bytes){
-	buf = (char*)malloc(bytes);
+	int room = 16*1024*sizeof(data_map) + 512;
+	_buf = (char*)malloc(bytes + room);
+	buf = _buf + room;
 	max = bytes;
     }
     ~batch(){
-	free(buf);
+	free(_buf);
     }
     void append(uint64_t lba, smartiov *iov) {
 	auto bytes = iov->bytes();
@@ -153,7 +156,6 @@ class translate_impl : public translate {
     void do_gc(std::unique_lock<std::mutex> &lk, bool *running);
     void gc_thread(thread_pool<int> *p);
     void process_batch(batch *b);
-    void verify_live(void);
     void flush_thread(thread_pool<int> *p);
 
     backend *objstore;
@@ -389,9 +391,9 @@ ssize_t translate_impl::init(const char *prefix_,
 	    assert(object_info[ptr.obj].live >= 0);
 	    total_live_sectors -= (limit - base);
 	}
-	verify_live();
     }
     next_compln = seq;
+    last_sent = next_compln - 1;
     
     /* delete any potential "dangling" objects.
      */
@@ -543,6 +545,7 @@ public:
     }
 };
 
+extern void log_time(uint64_t loc, uint64_t val); // debug
 void translate_impl::process_batch(batch *b) {
     assert(!m.try_lock());
 
@@ -561,9 +564,10 @@ void translate_impl::process_batch(batch *b) {
      */
     size_t hdr_bytes = obj_hdr_len(b->entries.size());
     int hdr_sectors = div_round_up(hdr_bytes, 512);
+    char *hdr_ptr = b->buf - hdr_sectors*512;
 
+    //log_time(10, b->entries.front().lba);
     std::unique_lock objlock(*map_lock);
-    verify_live();
     obj_info oi = {.hdr = hdr_sectors, .data = (int)b->len/512,
 		   .live = (int)b->len/512, .type = LSVD_DATA};
     object_info[b->seq] = oi;
@@ -589,27 +593,26 @@ void translate_impl::process_batch(batch *b) {
 	assert(object_info[ptr.obj].live >= 0);
 	total_live_sectors -= (limit - base);
     }
-    verify_live();
     objlock.unlock();
-
+    // for 4K random, mean time from 10 to 11 is about 2000 uS (1uS per IO)
+    // then 40 uS until it's sent over the wire
+    //log_time(11, b->entries.back().lba); 
+    
     total_sectors += b->len/512;
     total_live_sectors += b->len/512; // not quite right if overlaps...
     if (next_compln == -1)
 	next_compln = b->seq;
 
-    char *hdr = (char*)calloc(hdr_sectors*512, 1);
-    make_data_hdr(hdr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
-    iovec iov[] = {{hdr, (size_t)(hdr_sectors*512)},
-		   {b->buf, b->len}};
+    make_data_hdr(hdr_ptr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
+    size_t total_len = hdr_sectors*512 + b->len;
 
-    /* on completion, t_req calls notify_complete and frees stuff
+    /* on completion, t_req calls notify_complete
      */
     auto t_req = new translate_req(b->seq, this);
-    t_req->to_free.push_back(hdr);
     t_req->b = b;
-
+    
     objname name(prefix(b->seq), b->seq);
-    auto req = objstore->make_write_req(name.c_str(), iov, 2);
+    auto req = objstore->make_write_req(name.c_str(), hdr_ptr, total_len);
     req->run(t_req);
 }
 
@@ -665,22 +668,6 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
 
 /* -------------- Checkpointing -------------- */
 
-void translate_impl::verify_live(void) {
-    // std::unique_lock lk(*map_lock); <- must be held
-    int n = seq.load();
-    std::vector<int> live(n*2, 0);
-    for (auto it = map->begin(); it != map->end(); it++) {
-	auto [base, limit, ptr] = it->vals();
-	live[ptr.obj] += (limit - base);
-    }
-    for (auto it = object_info.begin(); it != object_info.end(); it++) {
-	auto [obj, info] = *it;
-	if (info.type == LSVD_DATA)
-	    assert(info.live == live[obj]);
-    }
-}
-
-
 /* synchronously write a checkpoint
  * NOTE - this drops the lock passed to it.
  */
@@ -694,7 +681,6 @@ void translate_impl::write_checkpoint(int ckpt_seq,
      * - hold the map lock while we get a copy of the map.
      */
     std::unique_lock objlock(*map_lock);
-    verify_live();
 
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
@@ -855,7 +841,7 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 
     /* gather list of objects needing cleaning, return if none
      */
-    const double threshold = 0.50;
+    const double threshold = cfg->gc_threshold / 100.0;
     std::vector<std::pair<int,int>> objs_to_clean;
     for (auto [u, o, n] : utilization) {
 	if (u > threshold)
@@ -1026,7 +1012,6 @@ void translate_impl::do_gc(std::unique_lock<std::mutex> &lk,
 		assert(object_info[ptr.obj].live >= 0);
 		total_live_sectors -= (limit - base);
 	    }
-	    verify_live();
 	    objlock2.unlock();
 	    lk2.unlock();
 
@@ -1192,6 +1177,16 @@ int translate_create_image(backend *objstore, const char *name,
     
     auto rv = objstore->write_object(name, buf, 4096);
     return rv;
+}
+
+int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu) {
+    char buf[4096];
+    int rv = objstore->read_object(name, buf, sizeof(buf), 0);
+    if (rv < 0)
+	return rv;
+    auto hdr = (obj_hdr*)buf;
+    memcpy(uu, hdr->vol_uuid, sizeof(uuid_t));
+    return 0;
 }
 
 int translate_remove_image(backend *objstore, const char *name) {
