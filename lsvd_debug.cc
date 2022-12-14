@@ -570,7 +570,34 @@ extern "C" void get_rbd_uuid(rbd_image_t image, uuid_t *uuid) {
     auto img = (rbd_image *)image;
     memcpy(uuid, img->xlate->uuid, sizeof(*uuid));
 }
-    
+
+struct timelog {
+    uint64_t loc : 8;
+    uint64_t val : 48;
+    uint64_t time;
+};
+
+struct timelog *tl;
+std::atomic<int> tl_index;
+int tl_max = 10000000;
+
+#include <x86intrin.h>
+void log_time(uint64_t loc, uint64_t value) {
+    if (tl == NULL)
+	tl = (struct timelog*)malloc(tl_max * sizeof(struct timelog));
+    auto t = __rdtsc();
+    auto i = tl_index++;
+    if (i < tl_max) 
+	tl[i] = {loc, value, t};
+}
+
+void save_log_time(void) {
+    FILE *fp = fopen("/tmp/timelog", "wb");
+    size_t bytes = tl_index * sizeof(struct timelog);
+    fwrite(tl, bytes, 1, fp);
+    fclose(fp);
+}
+
 /* random run-time debugging stuff, not used at the moment...
  */
 #if 1
