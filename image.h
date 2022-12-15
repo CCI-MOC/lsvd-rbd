@@ -68,7 +68,7 @@ struct rbd_image {
     int image_open(rados_ioctx_t io, const char *name);
     int image_close(void);
     int poll_io_events(rbd_completion_t *comps, int numcomp);
-    void notify(void);
+    void notify(rbd_completion_t c);
 };
 
 #endif

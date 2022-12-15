@@ -111,10 +111,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
     return 0;
 }
 
-void rbd_image::notify(void) {
+void rbd_image::notify(rbd_completion_t c) {
     std::unique_lock lk(m);
     if (ev.is_valid()) {
-	completions.push(this);
+	completions.push(c);
 	ev.notify();
     }
 }
@@ -155,7 +155,7 @@ int rbd_image::image_close(void) {
     wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
-    xlate->wait_for_gc();
+    xlate->stop_gc();
     xlate->checkpoint();
     delete xlate;
     delete objstore;
@@ -179,6 +179,7 @@ extern "C" int rbd_close(rbd_image_t image)
  */
 struct lsvd_completion {
 public:
+    int magic = LSVD_MAGIC;
     rbd_image *img;
     rbd_callback_t cb;
     void *arg;
@@ -200,7 +201,7 @@ public:
 	retval = val;
 	if (cb)
 	    cb((rbd_completion_t)this, arg);
-	img->notify();
+	img->notify((rbd_completion_t)this);
 
 	std::unique_lock lk(m);
 	int x = (done_released += 1);
@@ -222,7 +223,9 @@ int rbd_image::poll_io_events(rbd_completion_t *comps, int numcomp) {
     std::unique_lock lk(m);
     int i;
     for (i = 0; i < numcomp && !completions.empty(); i++) {
-	comps[i] = completions.front();
+	auto p = (lsvd_completion *)completions.front();
+	assert(p->magic == LSVD_MAGIC);
+	comps[i] = p;
 	completions.pop();
     }
     return i;
@@ -254,6 +257,7 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
 extern "C" void rbd_aio_release(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     p->release();
 }
 
@@ -262,6 +266,7 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 {
     //do_log("rbd_aio_discard\n");
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     p->img = (rbd_image*)image;
 
     /* TODO: implement
@@ -275,6 +280,7 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
     //do_log("'f', 0, 0, []\n");
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     auto img = p->img = (rbd_image*)image;
 
     if (img->cfg.hard_sync)
@@ -296,12 +302,14 @@ extern "C" int rbd_flush(rbd_image_t image)
 extern "C" void *rbd_aio_get_arg(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     return p->arg;
 }
 
 extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     return p->retval;
 }
 
@@ -377,7 +385,7 @@ class rbd_aio_req : public request {
 	img->wcache->get_room(sectors);
 	//log_time(7,offset/512);
 	img->xlate->wait_for_room();
-	log_time(30,offset/512);
+	//log_time(30,offset/512);
 
 	/* split large requests into 2MB (default) chunks
 	 */
@@ -483,6 +491,7 @@ class rbd_aio_req : public request {
 	op = op_;		// OP_READ or OP_WRITE
 	img = img_;
 	p = p_;
+	assert(p->magic == LSVD_MAGIC);
 	offset = offset_;	// byte offset into volume
 	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
@@ -564,6 +573,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
     //do_log("rbd_aio_read\n");
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
+    assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
     p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, buf, len);
@@ -579,6 +589,7 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 {
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
+    assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
     p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, iov, iovcnt);
@@ -591,6 +602,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 {
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
     p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
@@ -605,6 +617,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     //do_log("rbd_aio_write\n");
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
     //log_time(1, offset/512);
@@ -641,6 +654,7 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
+    assert(p->magic == LSVD_MAGIC);
     p->done_released += 20;
     std::unique_lock lk(p->m);
     while ((p->done_released.load() & 1) == 0)
