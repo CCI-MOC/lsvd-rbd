@@ -38,7 +38,7 @@ public:
     
     virtual const char *prefix(int seq) = 0; /* for read cache */
 
-    virtual void wait_for_gc(void) = 0; /* do this before shutdown */
+    virtual void stop_gc(void) = 0; /* do this before shutdown */
     virtual void start_gc(void) = 0;
     
     /* debug functions
