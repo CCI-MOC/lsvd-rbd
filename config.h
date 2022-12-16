@@ -28,7 +28,7 @@ public:
     long        cache_size = 100*1024*1024; // in bytes
     int         ckpt_interval = 500;        // objects 
     int         flush_msec = 2000;          // flush timeout
-    int         gc_threshold = 30;          // GC threshold, percent
+    int         gc_threshold = 60;          // GC threshold, percent
 
     lsvd_config(){}
     ~lsvd_config(){ }
