@@ -165,6 +165,10 @@ size_t make_data_hdr(char *hdr, size_t bytes, uint64_t cache_seq,
     auto dm = (data_map*)(dh+1);
     for (auto e : *entries)
 	*dm++ = e;
+
+    auto pad = hdr + hdr_bytes;	// make valgrind happy
+    memset(pad, 0, hdr_sectors*512 - hdr_bytes);
+    
     auto ptr = (const unsigned char *)hdr;
     h->crc = (uint32_t)crc32(0, ptr, hdr_sectors*512);
 
