@@ -819,6 +819,14 @@ int translate_impl::checkpoint(void) {
 
 /* -------------- Garbage collection ---------------- */
 
+struct _extent {
+    int64_t base;
+    int64_t limit;
+    extmap::obj_offset ptr;
+};
+
+std::vector<_extent> *__dbg_extents;
+
 /* Needs a lot of work. Note that all reads/writes are synchronous
  * for now...
  */
@@ -873,7 +881,6 @@ void translate_impl::do_gc(bool *running) {
 	utilization.insert(std::make_tuple(rho, p.first, sectors));
 	assert(sectors <= 20*1024*1024/512);
     }
-    obj_r_lock.unlock();
     
     /* gather list of objects needing cleaning, return if none
      */
@@ -898,10 +905,9 @@ void translate_impl::do_gc(bool *running) {
 	bitmap[it->first] = true;
 
     extmap::objmap live_extents;
-    obj_r_lock.lock();
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
-	if (bitmap[ptr.obj])
+	if (ptr.obj <= max_obj && bitmap[ptr.obj])
 	    live_extents.update(base, limit, ptr);
     }
     obj_r_lock.unlock();
@@ -941,11 +947,6 @@ void translate_impl::do_gc(bool *running) {
 	}
 	free(buf);
 
-	struct _extent {
-	    int64_t base;
-	    int64_t limit;
-	    extmap::obj_offset ptr;
-	};
 	std::vector<_extent> all_extents;
 	for (auto it = live_extents.begin(); it != live_extents.end(); it++) {
 	    auto [base, limit, ptr] = it->vals();
@@ -968,6 +969,7 @@ void translate_impl::do_gc(bool *running) {
 	    std::vector<_extent> extents(std::make_move_iterator(all_extents.begin()),
 					 std::make_move_iterator(it));
 	    all_extents.erase(all_extents.begin(), it);
+	    __dbg_extents = &extents; // debug
 	    
 	    /* figure out what we need to read from the file, create
 	     * the header etc., then drop the lock and actually read it.
