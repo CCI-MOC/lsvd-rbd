@@ -491,7 +491,8 @@ class rbd_aio_req : public request {
 	op = op_;		// OP_READ or OP_WRITE
 	img = img_;
 	p = p_;
-	assert(p->magic == LSVD_MAGIC);
+	if (p != NULL)
+	    assert(p->magic == LSVD_MAGIC);
 	offset = offset_;	// byte offset into volume
 	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
