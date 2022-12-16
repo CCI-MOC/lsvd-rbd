@@ -45,6 +45,7 @@ public:
                     size_t offset);
     int read_object(const char *name, char *buf, size_t len, size_t offset);
     int delete_object(const char *name);
+    request *delete_object_req(const char *name);
     
     /* async I/O
      */
@@ -87,12 +88,12 @@ rados_backend::~rados_backend() {
 /* if pool hasn't been initialized yet, initialize the ioctx
  * only supports one pool, exception if you try to access another one
  * name format: <pool>/<object_prefix>
- * HACK: returns pointer to object name
+ * HACK: returns pointer to object name, i.e. suffix after "<pool>/"
  */
-char* rados_backend::pool_init(const char *pool_) {
+char* rados_backend::pool_init(const char *name) {
     if (pool_len == 0) {
 	char *dst = pool;
-	const char *src = pool_;
+	const char *src = name;
 	while (*src && *src != '/')
 	    *dst++ = *src++;
 	*dst = 0;
@@ -101,8 +102,8 @@ char* rados_backend::pool_init(const char *pool_) {
 	if (r < 0)
 	    throw("rados pool open");
     }
-    assert(!memcmp(pool, pool_, pool_len));
-    return (char*)pool_ + pool_len + 1;
+    assert(!memcmp(pool, name, pool_len));
+    return (char*)name + pool_len + 1;
 }
 
 int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
@@ -119,8 +120,9 @@ int rados_backend::write_object(const char *name, iovec *iov, int iovcnt) {
 }
 
 int rados_backend::write_object(const char *name, char *buf, size_t len) {
-    iovec iov = {buf, len};
-    return write_object(name, &iov, 1);
+    auto oname = pool_init(name);
+    assert(*((int*)buf) == LSVD_MAGIC);
+    return rados_write_full(io_ctx, oname, buf, len);
 }
 
 int rados_backend::read_object(const char *name, iovec *iov,
@@ -155,6 +157,36 @@ int rados_backend::delete_object(const char *name) {
     return rv;
 }
 
+/* wait-only request, used for deleting images
+ */
+class r_delete_req : public request {
+    char oid[64];
+    rados_ioctx_t io_ctx;
+    rados_completion_t c;
+public:
+    r_delete_req(const char *oid_, rados_ioctx_t io) {
+	strcpy(oid, oid_);
+	io_ctx = io;
+    }
+    ~r_delete_req() {}
+    void wait() {
+	rados_aio_wait_for_complete(c);
+	rados_aio_release(c);
+	delete this;
+    }
+    void run(request *parent) {
+	rados_aio_create_completion2(this, NULL, &c);
+	rados_aio_remove(io_ctx, oid, c);
+    }
+    void notify(request *child) { }
+    void release() { }
+};
+
+request *rados_backend::delete_object_req(const char *name) {
+    auto oid = pool_init(name);
+    return (request*)new r_delete_req(oid, io_ctx);
+}
+
 class rados_be_request : public request {
     smartiov       _iovs;
     char          *buf = NULL;
@@ -166,28 +198,31 @@ class rados_be_request : public request {
     size_t         offset = 0;
     rados_ioctx_t  io_ctx;
     rados_completion_t c;
+    std::mutex     *m;
 
 public:
     enum lsvd_op   op;
 
     rados_be_request(enum lsvd_op op_, char *obj_name,
 		     iovec *iov, int niov, size_t offset_,
-		     rados_ioctx_t io_ctx_) : _iovs(iov, niov) {
+		     rados_ioctx_t io_ctx_, std::mutex *m_) : _iovs(iov, niov) {
 	offset = offset_;
 	io_ctx = io_ctx_;
 	strcpy(oid, obj_name);
 	op = op_;
+	m = m_;
     }
 
     rados_be_request(enum lsvd_op op_, char *obj_name,
 		     char *buf, size_t len, size_t offset_,
-		     rados_ioctx_t io_ctx_) {
+		     rados_ioctx_t io_ctx_, std::mutex *m_) {
 	offset = offset_;
 	io_ctx = io_ctx_;
 	strcpy(oid, obj_name);
 	client_buf = buf;
 	client_len = len;
 	op = op_;
+	m = m_;
     }
     ~rados_be_request() {}
 
@@ -203,6 +238,8 @@ public:
 
     static void rados_be_notify(rados_completion_t c, void *ptr) {
 	auto req = (rados_be_request*)ptr;
+	int rv = rados_aio_get_return_value(c);
+	assert(rv >= 0);
 	req->notify(NULL);
     }
     
@@ -210,7 +247,7 @@ public:
 	parent = parent_;
 	assert(op == OP_READ || op == OP_WRITE);
 	
-	rados_aio_create_completion(this, rados_be_notify, NULL, &c);
+	rados_aio_create_completion2(this, rados_be_notify, &c);
 
 	/* damn C interface doesn't handle iovecs
 	 */
@@ -243,24 +280,24 @@ request *rados_backend::make_write_req(const char *name, iovec *iov,
 				       int iovcnt) {
     auto oid = pool_init(name);
     assert(*((int*)iov[0].iov_base) == LSVD_MAGIC);
-    return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx);
+    return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx, &m);
 }
 
 request *rados_backend::make_write_req(const char *name, char *buf, size_t len) {
     auto oid = pool_init(name);
     assert(*((int*)buf) == LSVD_MAGIC);
-    return new rados_be_request(OP_WRITE, oid, buf, len, 0, io_ctx);
+    return new rados_be_request(OP_WRITE, oid, buf, len, 0, io_ctx, &m);
 }
 
 request *rados_backend::make_read_req(const char *name, size_t offset,
 				      iovec *iov, int iovcnt) {
     auto oid = pool_init(name);
-    return new rados_be_request(OP_READ, oid, iov, iovcnt, offset, io_ctx);
+    return new rados_be_request(OP_READ, oid, iov, iovcnt, offset, io_ctx, &m);
 }
 
 request *rados_backend::make_read_req(const char *name, size_t offset,
 				      char *buf, size_t len) {
     iovec iov = {buf, len};
     auto oid = pool_init(name);
-    return new rados_be_request(OP_READ, oid, &iov, 1, offset, io_ctx);
+    return new rados_be_request(OP_READ, oid, &iov, 1, offset, io_ctx, &m);
 }

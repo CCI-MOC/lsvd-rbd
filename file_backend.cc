@@ -69,6 +69,7 @@ public:
     int read_object(const char *name, iovec *iov, int iovcnt, size_t offset);
     int read_object(const char *name, char *buf, size_t len, size_t offset);
     int delete_object(const char *name);
+    request *delete_object_req(const char *name);
     
     /* async I/O
      */
@@ -125,6 +126,24 @@ int file_backend::delete_object(const char *name) {
     else
 	rv = unlink(name);
     return rv < 0 ? -1 : 0;
+}
+
+/* this only gets used for deleting images
+ * the async nature is obviously fraudulent
+ */
+class f_delete_req : public request {
+    int rv;
+public:
+    f_delete_req(const char *name) { rv = unlink(name); }
+    ~f_delete_req() {}
+    void wait() { delete this; }
+    void run(request *parent) {}
+    void notify(request *child) {}
+    void release() { }
+};
+
+request *file_backend::delete_object_req(const char *name) {
+    return (request*)new f_delete_req(name);
 }
 
 void trim_partial(const char *_prefix) {
