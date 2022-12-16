@@ -25,6 +25,7 @@ public:
     virtual int read_object(const char *name, char *buf, size_t len,
                             size_t offset) = 0;
     virtual int delete_object(const char *name) = 0;
+    virtual request *delete_object_req(const char *name) = 0;
     
     /* async I/O
      */
