@@ -583,6 +583,7 @@ int tl_max = 10000000;
 
 #include <x86intrin.h>
 void log_time(uint64_t loc, uint64_t value) {
+    return;
     if (tl == NULL)
 	tl = (struct timelog*)malloc(tl_max * sizeof(struct timelog));
     auto t = __rdtsc();
@@ -592,6 +593,7 @@ void log_time(uint64_t loc, uint64_t value) {
 }
 
 void save_log_time(void) {
+    return;
     FILE *fp = fopen("/tmp/timelog", "wb");
     size_t bytes = tl_index * sizeof(struct timelog);
     fwrite(tl, bytes, 1, fp);
