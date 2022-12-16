@@ -122,7 +122,7 @@ struct data_map {
  */
 struct obj_ckpt_hdr {
     uint64_t cache_seq;         // from last data object
-    uint32_t ckpts_offset;	// list includes self (TODO - not needed?)
+    uint32_t ckpts_offset;	// TODO: remove this
     uint32_t ckpts_len;
     uint32_t objs_offset;	// ckpt_obj[]
     uint32_t objs_len;
