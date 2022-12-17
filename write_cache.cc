@@ -43,6 +43,13 @@ extern void log_time(uint64_t loc, uint64_t val); // debug
 
 /* ------------- Write cache structure ------------- */
 
+extern std::mutex *__dbg_wcache_m; // debug
+extern int __dbg_write1;
+extern std::atomic<int> __dbg_wq_1;
+extern std::atomic<int> __dbg_wq_2;
+extern std::atomic<int> __dbg_wq_3;
+extern std::atomic<int> __dbg_wq_4;
+
 class wcache_write_req;
 class write_cache_impl : public write_cache {
     size_t         dev_max;
@@ -159,18 +166,6 @@ public:
     page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
     void do_write_checkpoint(void);
 };
-
-void print_pages(write_cache_impl *w, const char *file) {
-    FILE *fp = fopen(file, "w");
-    fprintf(fp, "before:\n");
-    for (auto l : w->before)
-	fprintf(fp, " %d+%d\n", l.page, l.len);
-    fprintf(fp, "after:\n");
-    for (auto l : w->after)
-	fprintf(fp, " %d+%d\n", l.page, l.len);
-    fclose(fp);
-}
-
 
 
 /* ------------- batched write request ------------- */
@@ -293,24 +288,17 @@ void wcache_write_req::notify_in_order(void) {
 
     /* update the write cache forward and reverse maps
      */
-    log_time(20, plba);
     std::unique_lock lk(wcache->m);
     std::vector<extmap::lba2lba> garbage; 
     for (auto w : work) {
+	extern int __dbg_write2;	// debug
+	__dbg_write2++;			// debug
 	sector_t sectors = w->iov->bytes() / 512;
 	wcache->map.update(w->lba, w->lba + sectors, _plba, &garbage);
 	_plba += sectors;
+	__dbg_wq_4--;
     }
-
-    /* if there are enough pending writes, send them
-     */
-    wcache->outstanding_writes--;
-    if (wcache->work.size() >= wcache->write_batch ||
-	wcache->work_sectors >= wcache->cfg->wcache_chunk / 512)
-	wcache->send_writes(lk); // unlocks
-    else
-	lk.unlock();
-    log_time(21, plba);
+    lk.unlock();
     
     /* send data to backend, invoke callbacks, then clean up
      */
@@ -324,15 +312,32 @@ void wcache_write_req::notify_in_order(void) {
 	delete w;
     }
     
+    /* if there are enough pending writes, send them
+     */
+    lk.lock();
+    wcache->outstanding_writes--;
+    if (wcache->work.size() >= wcache->write_batch ||
+	wcache->work_sectors >= wcache->cfg->wcache_chunk / 512)
+	wcache->send_writes(lk); // unlocks
+    else
+	lk.unlock();
+
     /* we don't implement release or wait - just delete ourselves.
      */
     delete this;
 }
 
+extern int __dbg_wc_tid;
+extern int get_tid(void);
+
 void wcache_write_req::notify(request *child) {
+    if (__dbg_wc_tid == 0)
+	__dbg_wc_tid = get_tid();
     child->release();
     if(--reqs > 0)
 	return;
+    __dbg_wq_3 -= work.size();
+    __dbg_wq_4 += work.size();
     wcache->notify_complete(seq);
 }
 
@@ -347,15 +352,15 @@ void wcache_write_req::run(request *parent /* unused */) {
 /* stall write requests using window of max_write_blocks, which should
  * be <= 0.5 * write cache size.
  */
+extern int __dbg_w_room;
 void write_cache_impl::get_room(sector_t sectors) {
+    __dbg_w_room = 1;
     int pages = sectors / 8;
-    log_time(8, total_write_pages);
     std::unique_lock lk(m2);
-    log_time(9, total_write_pages);
     while (total_write_pages + pages > max_write_pages)
 	write_cv.wait(lk);
     total_write_pages += pages;
-    log_time(10, total_write_pages);
+    __dbg_w_room = 0;
 }
 
 void write_cache_impl::release_room(sector_t sectors) {
@@ -479,9 +484,7 @@ again:
 }
 
 void write_cache_impl::notify_complete(uint64_t seq) {
-    log_time(5, seq);
     std::unique_lock lk(m);
-    log_time(6, seq);
     write_record r = {seq, NULL, 0, false};
     auto it = outstanding.find(r);
     assert(it != outstanding.end() && it->seq == seq);
@@ -494,7 +497,6 @@ void write_cache_impl::notify_complete(uint64_t seq) {
 	it = outstanding.erase(it);
     }
     lk.unlock();
-    log_time(7, seq);
     
     for (auto r : reqs)
 	r->notify_in_order();
@@ -785,6 +787,8 @@ int write_cache_impl::roll_log_forward() {
 
 write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 				    lsvd_config *cfg_) {
+    __dbg_wcache_m = &m;	// debug
+    
     super_blkno = blkno;
     dev_max = getsize64(fd);
     be = _be;
@@ -844,27 +848,29 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
 	last = w->lba;		// debug
     }
 
-    log_time(3, last);
     page_t pages = div_round_up(sectors, 8);
     page_t pad, n_pad, prev = 0;
     page_t page = allocate(pages+1, pad, n_pad, prev);
 
+    int n = work.size();
+    __dbg_wq_1 -= n;
+    __dbg_wq_2 += n;
     auto req = new wcache_write_req(&work, pages, page,
 				    n_pad-1, pad, prev, this);
     work.clear();
     work_sectors = 0;
     outstanding_writes++;
 
-    log_time(4, last);
     lk.unlock();
+    __dbg_wq_2 -= n;
+    __dbg_wq_3 += n;
     req->run(NULL);
 }
 
 write_cache_work *write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
-    log_time(1, lba);
+    __dbg_write1++;
+    __dbg_wq_1++;
     std::unique_lock lk(m);
-    log_time(2, lba);
-    //do_log("wc %d+%d %d\n", lba, iov->bytes()/512, ((int*)(iov->data()->iov_base))[1]);
     auto w = new write_cache_work(req, lba, iov);
     work.push_back(w);
     work_sectors += iov->bytes() / 512L;
