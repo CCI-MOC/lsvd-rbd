@@ -107,10 +107,10 @@ class translate_impl : public translate {
     int       last_sent = 0;	// most recent data object
     std::atomic<int> outstanding_writes = 0; // wait_for_room
     
-    std::vector<bool> done;
+    std::set<int> pending_writes;
     std::condition_variable cv;
     bool stopped = false;	// stop GC from writing
-    
+
     /* various constant state
      */
     struct clone {
@@ -169,17 +169,25 @@ class translate_impl : public translate {
 
     /* all objects seq<next_compln have been completed
      */
-    void notify_complete(int _seq) {
-	std::unique_lock lk(m);	// lots of contention
-	auto moved = false;
-	done[_seq % 128] = true;
-	while (done[next_compln % 128]) {
-	    done[next_compln % 128] = false;
-	    next_compln++;
-	    moved = true;
+    void seq_record(int _seq) {
+	std::unique_lock lk(m);
+	if (_seq > last_sent) {
+	    last_sent = _seq;
+	    do_log("last_sent2 : %d\n", last_sent);
 	}
-	if (moved) 
-	    cv.notify_all();
+	pending_writes.insert(_seq);
+    }
+
+    void seq_complete(int _seq) {
+	std::unique_lock lk(m);
+	pending_writes.erase(_seq);
+	auto it = pending_writes.begin();
+	if (it == pending_writes.end())
+	    next_compln = last_sent+1;
+	else
+	    next_compln = *it;
+	do_log("next_compln = %d\n", next_compln);
+	cv.notify_all();
     }
 
 public:
@@ -223,8 +231,7 @@ const char *translate_impl::prefix(int seq) {
 }
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
-			       extmap::objmap *map_,
-			       std::shared_mutex *m_) : done(128,false) {
+			       extmap::objmap *map_, std::shared_mutex *m_) {
     misc_threads = new thread_pool<int>(&m);
     workers = new thread_pool<batch*>(&m);
     objstore = _io;
@@ -263,9 +270,10 @@ ssize_t translate_impl::init(const char *prefix_,
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
-    do_log("read super crc %0x8\n", (uint32_t)crc32(0, (const unsigned char*)_buf, 4096));
     
     int n_ckpts = ckpts.size();
+    do_log("read super crc %0x8 ckpts %d\n", (uint32_t)crc32(0, (const unsigned char*)_buf, 4096));
+
     for (auto c : ckpts) 
 	do_log("got ckpt from super (total %d): %d\n", n_ckpts, c);
     
@@ -326,6 +334,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	while (n_ckpts > 0) {
 	    int c = ckpts[n_ckpts-1];
 	    objname name(prefix(c), c);
+	    do_log("reading ckpt %s\n", name.c_str());
 	    if (parser->read_checkpoint(name.c_str(), max_cache_seq,
 					ckpts, objects,
 					deletes, entries) >= 0) {
@@ -374,6 +383,7 @@ ssize_t translate_impl::init(const char *prefix_,
 	    continue;
 	}
 
+	do_log("roll %d\n", seq.load());
 	assert(h.type == LSVD_DATA);
 	object_info[seq] = (obj_info){.hdr = (int)h.hdr_sectors,
 				      .data = (int)h.data_sectors,
@@ -399,7 +409,8 @@ ssize_t translate_impl::init(const char *prefix_,
     }
     next_compln = seq;
     last_sent = next_compln - 1;
-    
+    do_log("set next_compln %d\n", next_compln);
+
     /* delete any potential "dangling" objects.
      */
     for (int i = 1; i < 32; i++) {
@@ -470,6 +481,7 @@ batch *translate_impl::check_batch_room(size_t len) {
     batch *full = NULL;
     if ((b->len + len > b->max) || (len == 0 && b->len > 0)) {
 	b->seq = last_sent = seq++;
+	do_log("last_sent = %d\n", last_sent);
 	full = b;
 	b = new batch(cfg->batch_size);
     }
@@ -552,20 +564,18 @@ public:
     void notify(request *child) {
 	if (child)
 	    child->release();
-	tx->notify_complete(seq);
+	tx->seq_complete(seq);
 	for (auto ptr : to_free)
 	    free(ptr);
 	if (b) 
 	    delete b;
 
-	std::unique_lock lk(m);
+	std::unique_lock lk(tx->m);
 	if (--tx->outstanding_writes < tx->cfg->xlate_window)
-	    cv.notify_all();
+	    tx->cv.notify_all();
 
-	if (!waiting) {
-	    lk.unlock();
+	if (!waiting) 
 	    delete this;
-	}
 	else {
 	    done = true;
 	    cv.notify_one();
@@ -613,6 +623,9 @@ void translate_impl::process_batch(batch *b) {
     int hdr_sectors = div_round_up(hdr_bytes, 512);
     char *hdr_ptr = b->buf - hdr_sectors*512;
 
+    // deadlock risk - locks m, can't call with map_lock held
+    seq_record(b->seq);
+
     std::unique_lock obj_w_lock(*map_lock);
     obj_info oi = {.hdr = hdr_sectors, .data = (int)b->len/512,
 		   .live = (int)b->len/512};
@@ -655,7 +668,7 @@ void translate_impl::process_batch(batch *b) {
     make_data_hdr(hdr_ptr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
     size_t total_len = hdr_sectors*512 + b->len;
 
-    /* on completion, t_req calls notify_complete
+    /* on completion, t_req calls seq_complete
      */
     auto t_req = new translate_req(b->seq, this, false);
     t_req->b = b;
@@ -720,6 +733,8 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
 void translate_impl::write_checkpoint(int ckpt_seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
+
+    seq_record(ckpt_seq);
 
     /* - map lock protects both object_info and map
      * - damned if I know why I need lk(m) to keep test10 from failing,
@@ -786,7 +801,7 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
      */
     objname name(prefix(ckpt_seq), ckpt_seq);
     objstore->write_object(name.c_str(), buf, sectors*512);
-    notify_complete(ckpt_seq);
+    seq_complete(ckpt_seq);	// no locks held
     free(buf);
 
     /* Now re-write the superblock with the new list of checkpoints
@@ -977,7 +992,7 @@ void translate_impl::do_gc(bool *running) {
 	
 	/* outstanding writes
 	 */
-	std::queue<request*> requests;
+	std::queue<translate_req*> requests;
 	
 	while (all_extents.size() > 0) {
 	    sector_t sectors = 0, max = 16 * 1024; // 8MB
@@ -1052,7 +1067,8 @@ void translate_impl::do_gc(bool *running) {
 	    int32_t _seq = seq++;
 	    obj_r_lock.unlock();
 	    lk.unlock();
-	    
+
+	    seq_record(_seq);
 	    gc_sectors_written += data_sectors; // only written in this thread
 	    int hdr_size = div_round_up(sizeof(obj_hdr) + sizeof(obj_data_hdr) +
 					obj_extents.size()*sizeof(data_map), 512);
@@ -1062,7 +1078,6 @@ void translate_impl::do_gc(bool *running) {
 	    assert(hdr_size == hdr_sectors);
 	    sector_t offset = hdr_sectors;
 
-	    
 	    int gc_sectors = byte_offset / 512;
 	    obj_info oi = {.hdr = hdr_sectors, .data = gc_sectors,
 			   .live = gc_sectors};
@@ -1109,12 +1124,14 @@ void translate_impl::do_gc(bool *running) {
 	    requests.push(t_req);
 	    
 	    while (requests.size() > 8) {
-		requests.front()->wait();
+		auto t = requests.front();
+		t->wait();
 		requests.pop();
 	    }
 	}
 	while (requests.size() > 0) {
-	    requests.front()->wait();
+	    auto t = requests.front();
+	    t->wait();
 	    requests.pop();
 	}
 	close(fd);
