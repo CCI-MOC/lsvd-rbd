@@ -62,6 +62,9 @@ struct rbd_image {
 
     int          refcount = 0;
 
+    std::thread  dbg;
+    bool         done = false;
+
     rbd_image() {}
     ~rbd_image() {}
 

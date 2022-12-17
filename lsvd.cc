@@ -69,7 +69,11 @@ backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name) {
     return NULL;
 }
     
+extern void debug_thread(rbd_image *img); // debug
+
 int rbd_image::image_open(rados_ioctx_t io, const char *name) {
+    dbg = std::thread(debug_thread, this); // debug
+    
     if (cfg.read() < 0)
 	return -1;
     objstore = get_backend(&cfg, io, name);
@@ -150,6 +154,9 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name,
 }
 
 int rbd_image::image_close(void) {
+    done = true;		// debug
+    dbg.join();			// debug
+    
     rcache->write_map();
     delete rcache;
     wcache->flush();
@@ -177,6 +184,7 @@ extern "C" int rbd_close(rbd_image_t image)
 
 /* RBD-level completion structure
  */
+extern std::atomic<int> __dbg_in_lsvd;
 struct lsvd_completion {
 public:
     int magic = LSVD_MAGIC;
@@ -199,8 +207,10 @@ public:
      */
     void complete(int val) {
 	retval = val;
+	__dbg_in_lsvd--;
 	if (cb)
 	    cb((rbd_completion_t)this, arg);
+	__dbg_in_lsvd++;
 	img->notify((rbd_completion_t)this);
 
 	std::unique_lock lk(m);
@@ -235,7 +245,10 @@ extern "C" int rbd_poll_io_events(rbd_image_t image,
 				  rbd_completion_t *comps, int numcomp)
 {
     rbd_image *img = (rbd_image*)image;
-    return img->poll_io_events(comps, numcomp);
+    __dbg_in_lsvd++;
+    int rv = img->poll_io_events(comps, numcomp);
+    __dbg_in_lsvd--;
+    return rv;
 }
 
 extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
@@ -598,9 +611,15 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
     return 0;
 }
 
+extern int __dbg_fio_tid;
+extern int get_tid(void);
+
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 			      int iovcnt, uint64_t offset, rbd_completion_t c)
 {
+    if (__dbg_fio_tid == 0)
+	__dbg_fio_tid = get_tid();
+    __dbg_in_lsvd++;
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -609,13 +628,19 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
 			     iov, iovcnt);
     p->req->run(NULL);
+    __dbg_in_lsvd--;
     return 0;
 }
 
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 			     const char *buf, rbd_completion_t c)
 {
-    //do_log("rbd_aio_write\n");
+    if (__dbg_fio_tid == 0) {
+	pthread_setname_np(pthread_self(), "writer"); // debug
+	__dbg_fio_tid = get_tid();
+    }
+    __dbg_in_lsvd++;
+
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -625,6 +650,8 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT,
 			     (char*)buf, len);
     p->req->run(NULL);
+    __dbg_in_lsvd--;
+
     return 0;
 }
 
