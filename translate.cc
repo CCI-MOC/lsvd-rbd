@@ -949,23 +949,23 @@ void translate_impl::do_gc(bool *running) {
 	/* read all objects in completely. Someday we can check to see whether
 	 * (a) data is already in cache, or (b) sparse reading would be quicker
 	 */
-	std::map<int,int> obj_location; // in sectors
-	std::map<int,int> obj_sectors;
-	
-	sector_t file_offset = 0;
+	extmap::cachemap file_map;
+	sector_t offset = 0;
 	char *buf = (char*)malloc(20*1024*1024);
 
 	for (auto [i,sectors] : objs_to_clean) {
 	    objname name(prefix(i), i);
 	    objstore->read_object(name.c_str(), buf, sectors*512UL, 0);
 	    gc_sectors_read += sectors;
-	    obj_location[i] = file_offset;
-	    obj_sectors[i] = sectors;
+	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
+	    file_map.update(_base, _limit, offset);
 	    if (write(fd, buf, sectors*512) < 0)
 		throw("no space");
-	    file_offset += sectors;
+	    offset += sectors;
 	}
 	free(buf);
+
+	auto file_offset = offset;
 
 	std::vector<_extent> all_extents;
 	for (auto it = live_extents.begin(); it != live_extents.end(); it++) {
@@ -1006,6 +1006,7 @@ void translate_impl::do_gc(bool *running) {
 
 	    /* the extents may have been fragmented in the meantime...
 	     */
+	    sector_t _debug_sector = 0;
 	    obj_r_lock.lock();
 	    for (auto const & [base, limit, ptr] : extents) {
 		for (auto it2 = map->lookup(base);
@@ -1020,20 +1021,25 @@ void translate_impl::do_gc(bool *running) {
 		     */
 		    if (obj_base.obj != ptr.obj)
 			continue;
-
-		    assert(obj_location.find(ptr.obj) != obj_location.end());
-		    assert(obj_sectors.find(ptr.obj) != obj_sectors.end());
-		    /* _sectors is the length of the live chunk, starting at
-		     * file_sector in the GC file.
-		     */
 		    sector_t _sectors = _limit - _base;
-		    sector_t file_sector = obj_location[ptr.obj] + ptr.offset;
-		    assert(ptr.offset + _sectors <= obj_sectors[ptr.obj]);
-		    assert(file_sector + _sectors <= file_offset);
-		    
+		    auto obj_limit =
+			extmap::obj_offset{obj_base.obj,
+					   obj_base.offset+_sectors};
+
+		    /* file_sector is where that piece starts in 
+		     * the GC file...
+		     */
+		    auto it3 = file_map.lookup(obj_base);
+		    auto [file_base,file_limit,file_sector] =
+			it3->vals(obj_base, obj_limit);
+		    (void)file_limit; // suppress warning
+		    (void)file_base;  // suppress warning
+		    assert(file_sector != _debug_sector);
+		    _debug_sector = file_sector;
 		    size_t bytes = _sectors*512;
 		    to_read.push_back(std::make_tuple(file_sector,
 						      buf+byte_offset, bytes));
+
 		    obj_extents.push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
 
 		    data_sectors += _sectors;
@@ -1306,10 +1312,22 @@ int translate_remove_image(backend *objstore, const char *name) {
 
 	/* delete all the objects in the objmap
 	 */
+	std::queue<request*> deletes;
 	for (auto const & o : objects) {
 	    objname obj(name, o.seq);
-	    objstore->delete_object(obj.c_str());
+	    auto r = objstore->delete_object_req(obj.c_str());
+	    r->run(NULL);
+	    deletes.push(r);
+	    while (deletes.size() > 8) {
+		deletes.front()->wait();
+		deletes.pop();
+	    }
 	}
+	while (deletes.size() > 0) {
+	    deletes.front()->wait();
+	    deletes.pop();
+	}
+	
 	/* delete all the checkpoints
 	 */
 	for (auto const & c : ckpts) {
