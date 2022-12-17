@@ -498,13 +498,10 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     return len;
 }
 
-extern int __dbg_t_room;
 void translate_impl::wait_for_room(void) {
-    __dbg_t_room = 1;
     std::unique_lock lk(m);
     while (outstanding_writes > cfg->xlate_window)
 	cv.wait(lk);
-    __dbg_t_room = 0;
 }
 
 /* GC (like normal write) updates the map before it writes an object,
@@ -521,9 +518,6 @@ void translate_impl::wait_object_ready(int obj) {
     while (obj >= next_compln)
 	cv.wait(lk);
 }
-
-extern int __dbg_write3, __dbg_write4;	// debug
-extern std::mutex *__dbg_xlate_m;
 
 class translate_req : public request {
     uint32_t seq;
@@ -545,7 +539,6 @@ public:
 	seq = seq_;
 	tx = tx_;
 	waiting = waiting_;
-	__dbg_xlate_m = &m;	// debug
     }
     ~translate_req(){}
 
@@ -557,8 +550,6 @@ public:
     }
 
     void notify(request *child) {
-	__dbg_write4++;
-	
 	if (child)
 	    child->release();
 	tx->notify_complete(seq);
@@ -603,7 +594,6 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
     }
 }
 
-extern void log_time(uint64_t loc, uint64_t val); // debug
 void translate_impl::process_batch(batch *b) {
 
     /* TODO: coalesce writes: 
@@ -672,7 +662,6 @@ void translate_impl::process_batch(batch *b) {
 
     objname name(prefix(b->seq), b->seq);
     auto req = objstore->make_write_req(name.c_str(), hdr_ptr, total_len);
-    __dbg_write3++;
     outstanding_writes++;
     req->run(t_req);
 }
@@ -818,10 +807,9 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
      */
     super_sh->ckpts_offset = offset;
     super_sh->ckpts_len = checkpoints.size() * sizeof(ckpt_seq);
-    int last_ckpt = 0;		// debug
     auto pc = (uint32_t*)(super_buf + offset);
     for (size_t i = 0; i < checkpoints.size(); i++)
-	*pc++ = last_ckpt = checkpoints[i];
+	*pc++ = checkpoints[i];
 	
     if (stopped)
 	return;
@@ -861,22 +849,12 @@ struct _extent {
     extmap::obj_offset ptr;
 };
 
-std::vector<_extent> *__dbg_extents;
-extern const char *__dbg_gc_state;	// debug
-extern int __dbg_gc_reads;
-extern int __dbg_gc_writes;
-extern int __dbg_gc_deletes;
-extern int __dbg_gc_n;
-
-/* Needs a lot of work. Note that all reads/writes are synchronous
- * for now...
+/* [describe GC algorithm here]
  */
 void translate_impl::do_gc(bool *running) {
     gc_cycles++;
-    __dbg_gc_n++;
     int max_obj = seq.load();
 
-    __dbg_gc_state = "obj0";
     std::shared_lock obj_r_lock(*map_lock);
     std::vector<int> dead_objects;
     for (auto const &p : object_info)  {
@@ -892,7 +870,6 @@ void translate_impl::do_gc(bool *running) {
     for (auto const &o : dead_objects) {
 	objname name(prefix(o), o);
 	auto r = objstore->delete_object_req(name.c_str());
-	__dbg_gc_deletes++;
 	r->run(NULL);
 	deletes.push(r);
 	while (deletes.size() > 8) {
@@ -913,7 +890,6 @@ void translate_impl::do_gc(bool *running) {
     /* create list of object info in increasing order of 
      * utilization, i.e. (live data) / (total size)
      */
-    __dbg_gc_state = "list";	// debug
     obj_r_lock.lock();
     int calculated_total = 0;
     std::set<std::tuple<double,int,int>> utilization;
@@ -963,7 +939,6 @@ void translate_impl::do_gc(bool *running) {
     /* this is really gross. We really should check to see if data is
      * in the read cache, and put retrieved data there...
      */
-    __dbg_gc_state = "read";
     if (live_extents.size() > 0) {
 	/* temporary file, delete on close. 
 	 */
@@ -982,7 +957,6 @@ void translate_impl::do_gc(bool *running) {
 
 	for (auto [i,sectors] : objs_to_clean) {
 	    objname name(prefix(i), i);
-	    __dbg_gc_reads++;
 	    objstore->read_object(name.c_str(), buf, sectors*512UL, 0);
 	    gc_sectors_read += sectors;
 	    obj_location[i] = file_offset;
@@ -1005,7 +979,6 @@ void translate_impl::do_gc(bool *running) {
 	
 	while (all_extents.size() > 0) {
 	    sector_t sectors = 0, max = 16 * 1024; // 8MB
-	    __dbg_gc_state = "  e1";		   // debug
 	    
 	    auto it = all_extents.begin();
 	    while (it != all_extents.end() && sectors < max) {
@@ -1016,7 +989,6 @@ void translate_impl::do_gc(bool *running) {
 	    std::vector<_extent> extents(std::make_move_iterator(all_extents.begin()),
 					 std::make_move_iterator(it));
 	    all_extents.erase(all_extents.begin(), it);
-	    __dbg_extents = &extents; // debug
 	    
 	    /* figure out what we need to read from the file, create
 	     * the header etc., then drop the lock and actually read it.
@@ -1035,7 +1007,6 @@ void translate_impl::do_gc(bool *running) {
 	    /* the extents may have been fragmented in the meantime...
 	     */
 	    obj_r_lock.lock();
-	    __dbg_gc_state = "  e2";		   // debug
 	    for (auto const & [base, limit, ptr] : extents) {
 		for (auto it2 = map->lookup(base);
 		     it2->base() < limit && it2 != map->end(); it2++) {
@@ -1087,7 +1058,6 @@ void translate_impl::do_gc(bool *running) {
 			   .live = gc_sectors};
 
 	    obj_w_lock.lock();
-	    __dbg_gc_state = "  e3";		   // debug
 	    object_info[_seq] = oi;
 	    std::vector<extmap::lba2obj> deleted;
 	    for (auto const &e : obj_extents) {
@@ -1108,12 +1078,8 @@ void translate_impl::do_gc(bool *running) {
 
 	    /* Now we actually read from the file
 	     */
-	    __dbg_gc_state = "  e4";		   // debug
-	    sector_t last_sector = 0;
 	    for (auto const & tpl : to_read) {
 		auto [file_sector, ptr, bytes] = tpl;
-		assert(file_sector != last_sector); // debug
-		last_sector = file_sector;	    // debug
 		assert(file_sector < file_offset);  // total file size
 		auto err = pread(fd, ptr, bytes, file_sector*512);
 		assert(err == (ssize_t)bytes);
@@ -1125,9 +1091,7 @@ void translate_impl::do_gc(bool *running) {
 	    if (stopped)
 		return;
 	    
-	    __dbg_gc_state = "  e5";		   // debug
 	    objname name(prefix(_seq), _seq);
-	    __dbg_gc_writes++;
 	    auto req = objstore->make_write_req(name.c_str(), hdr,
 						(hdr_sectors+data_sectors)*512);
 	    outstanding_writes++;
@@ -1147,7 +1111,6 @@ void translate_impl::do_gc(bool *running) {
 	unlink(temp);
     }
 
-    __dbg_gc_state = "  e6";		   // debug
     obj_w_lock.lock();
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	total_sectors -= object_info[it->first].data;
@@ -1159,19 +1122,16 @@ void translate_impl::do_gc(bool *running) {
      */
     if (stopped)
 	return;
-    __dbg_gc_state = "  e7";		   // debug
     if (objs_to_clean.size()) {
 	int ckpt_seq = seq++;
 	write_checkpoint(ckpt_seq);
     
-	__dbg_gc_state = "  e8";		   // debug
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(it->first), it->first);
 	    objstore->delete_object(name.c_str());
 	    gc_deleted++;		// single-threaded, no lock needed
 	}
     }
-    __dbg_gc_state = "   -";
 }
 
 void translate_impl::stop_gc(void) {
@@ -1181,13 +1141,9 @@ void translate_impl::stop_gc(void) {
 	gc_cv.wait(lk);
 }
 
-extern int __dbg_gc_tid;
-extern int get_tid(void);
-
 void translate_impl::gc_thread(thread_pool<int> *p) {
-    __dbg_gc_tid = get_tid();
     auto interval = std::chrono::milliseconds(100);
-    sector_t trigger = 128 * 1024 * 2; // 128 MB
+    //sector_t trigger = 128 * 1024 * 2; // 128 MB
     const char *name = "gc_thread";
     pthread_setname_np(pthread_self(), name);
 	

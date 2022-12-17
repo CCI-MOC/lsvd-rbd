@@ -673,6 +673,7 @@ extern "C" void map_lookup(extmap::objmap *map, sector_t sector, int len) {
 
 #endif
 
+#ifdef PERF_DEBUGGER
 #include <fcntl.h>
 void getcpu(int pid, int tid, int &u, int &s) {
     if (tid == 0) 
@@ -802,3 +803,4 @@ void debug_thread(rbd_image *img) {
 	}
     }
 }
+#endif // PERF_DEBUGGER
