@@ -722,8 +722,11 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     std::vector<ckpt_obj> objects;
 
     /* - map lock protects both object_info and map
+     * - damned if I know why I need lk(m) to keep test10 from failing,
+     *   but I do.
      */
-    std::shared_lock obj_r_lock(*map_lock);
+    std::unique_lock lk(m);
+    std::unique_lock obj_w_lock(*map_lock);
 
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
@@ -742,11 +745,10 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
 		    .data_sectors = (uint32_t)data,
 		    .live_sectors = (uint32_t)live});
     }
-    obj_r_lock.unlock();
+    obj_w_lock.unlock();
 
     /* wait until all prior objects have been acked by backend, 
      */
-    std::unique_lock lk(m);
     while (next_compln < ckpt_seq && !stopped)
 	cv.wait(lk);
     if (stopped)
@@ -1007,6 +1009,7 @@ void translate_impl::do_gc(bool *running) {
 	    /* the extents may have been fragmented in the meantime...
 	     */
 	    sector_t _debug_sector = 0;
+	    std::unique_lock lk(m); // not sure exactly why test10 needs this...
 	    obj_r_lock.lock();
 	    for (auto const & [base, limit, ptr] : extents) {
 		for (auto it2 = map->lookup(base);
@@ -1048,6 +1051,7 @@ void translate_impl::do_gc(bool *running) {
 	    }
 	    int32_t _seq = seq++;
 	    obj_r_lock.unlock();
+	    lk.unlock();
 	    
 	    gc_sectors_written += data_sectors; // only written in this thread
 	    int hdr_size = div_round_up(sizeof(obj_hdr) + sizeof(obj_data_hdr) +
