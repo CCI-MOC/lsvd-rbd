@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <uuid/uuid.h>
+#include <unistd.h>
 
 #include <string>
 
@@ -20,16 +21,12 @@
 
 /* translated from mkcache.py version 2a8d3060
  */
-int make_cache(std::string name, uuid_t &uuid, int n_pages) {
+int make_cache(int fd, uuid_t &uuid, int n_pages) {
     page_t r_units = 0.66 * n_pages / 16;
     page_t r_pages = r_units * 16;
     page_t r_meta = div_round_up(r_units * sizeof(extmap::obj_offset), 4096);
     page_t w_pages = n_pages - r_pages - r_meta - 3;
     
-    FILE *fp = fopen(name.c_str(), "wb");
-    if (fp == NULL)
-	return -1;
-
     char buf[4096];
     memset(buf, 0, sizeof(buf));
     auto sup = (j_super*)buf;
@@ -40,7 +37,7 @@ int make_cache(std::string name, uuid_t &uuid, int n_pages) {
 		     2,   // read superblock offset
 		     {0}};// uuid
     memcpy(sup->vol_uuid, uuid, sizeof(uuid_t));
-    fwrite(buf, 4096, 1, fp);
+    write(fd, buf, 4096);
 
     page_t _map = div_round_up(w_pages, 256);
     page_t _len = div_round_up(w_pages, 512);
@@ -61,7 +58,7 @@ int make_cache(std::string name, uuid_t &uuid, int n_pages) {
 			       3+w_meta,	   // next
 			       0,0,0,	   // map_start/blocks/entries
 			       0,0,0};	   // len_start/blocks/entries
-    fwrite(buf, 4096, 1, fp);
+    write(fd, buf, 4096);
 
     page_t r_base = 3 + w_pages + w_meta;
 
@@ -75,12 +72,11 @@ int make_cache(std::string name, uuid_t &uuid, int n_pages) {
 			      r_units,		     // units
 			      r_base,		     // map_start
 			      r_meta};		     // map_blocks
-    fwrite(buf, 4096, 1, fp);
+    write(fd, buf, 4096);
 
     memset(buf, 0, 4096);
     for (int i = 3; i < 3 + w_pages + w_meta + r_pages + r_meta; i++)
-	fwrite(buf, 4096, 1, fp);
-    fclose(fp);
+	write(fd, buf, 4096);
 
     return 0;
 }
