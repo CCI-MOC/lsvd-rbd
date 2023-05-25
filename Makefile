@@ -11,7 +11,7 @@ SOFLAGS = -shared -fPIC
 
 OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 	nvme.o write_cache.o file_backend.o \
-	rados_backend.o lsvd_debug.o lsvd.o
+	rados_backend.o lsvd_debug.o liblsvd.o
 CFILES = $(OBJS:.o=.cc)
 
 liblsvd.so:  $(OBJS)
