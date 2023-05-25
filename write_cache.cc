@@ -143,20 +143,6 @@ public:
     virtual std::tuple<size_t,size_t,request*> 
         async_readv(size_t offset, smartiov *iov);
 
-    /* debug functions */
-
-    /* getmap callback(ptr, base, limit, phys_lba)
-     */
-    void getmap(int base, int limit, int (*cb)(void*,int,int,int), void *ptr);
-
-    void reset(void);
-    void get_super(j_write_super *s); /* copies superblock */
-
-    /*  @blk - header to read
-     *  @extents - data to move. empty if J_PAD or J_CKPT
-     *  return value - first page of next record
-     */
-    page_t get_oldest(page_t blk, std::vector<j_extent> &extents);
     void do_write_checkpoint(void);
 };
 
@@ -584,7 +570,8 @@ void write_cache_impl::write_checkpoint(void) {
 
     super_copy->clean = true;
 
-    assert(4096UL*blockno + 4096UL*ckpt_pages <= dev_max);
+    if (!(4096UL*blockno + 4096UL*ckpt_pages <= dev_max))
+	throw("some-sort-of-error");
     iovec iov[] = {{e_buf, map_pages*4096UL},
 		   {l_buf, len_pages*4096UL}};
 
@@ -790,10 +777,9 @@ write_cache_impl::write_cache_impl( uint32_t blkno, int fd, translate *_be,
 	sequence = super->seq;
 	read_map_entries();	// length, too
     }
-    else {
-	auto rv = roll_log_forward();
-	assert(rv == 0);
-    }
+    else if (roll_log_forward() < 0)
+	throw("write log roll-forward failed");
+
     super->clean = false;
     if (nvme_w->write(buf, 4096, 4096L*super_blkno) < 4096)
 	throw_fs_error("wcache");
@@ -917,53 +903,6 @@ write_cache_impl::async_readv(size_t offset, smartiov *iov) {
     return std::make_tuple(skip_len, read_len, rreq);
 }
 
-// debugging
-void write_cache_impl::getmap(int base, int limit, int (*cb)(void*, int, int, int),
-			 void *ptr) {
-    for (auto it = map.lookup(base); it != map.end() && it->base() < limit; it++) {
-	auto [_base, _limit, plba] = it->vals(base, limit);
-	if (!cb(ptr, (int)_base, (int)_limit, (int)plba))
-	    break;
-    }
-}
-
-void write_cache_impl::reset(void) {
-    map.reset();
-}
-
-void write_cache_impl::get_super(j_write_super *s) {
-    *s = *super;
-}
-
-/* debug:
- * cache eviction - get info from oldest entry in cache. [should be private]
- *  @blk - header to read
- *  @extents - data to move. empty if J_PAD or J_CKPT
- *  return value - first page of next record
- */
-
-page_t write_cache_impl::get_oldest(page_t blk, std::vector<j_extent> &extents) {
-    char *buf = (char*)aligned_alloc(512, 4096);
-    j_hdr *h = (j_hdr*)buf;
-
-    if (nvme_w->read(buf, 4096, blk*4096) < 0)
-	throw_fs_error("wcache");
-    if (h->magic != LSVD_MAGIC) {
-	printf("bad block: %d\n", blk);
-    }
-    assert(h->magic == LSVD_MAGIC && h->version == 1);
-
-    auto next_blk = blk + h->len;
-    if (next_blk >= super->limit)
-	next_blk = super->base;
-    if (h->type == LSVD_J_DATA)
-	decode_offset_len<j_extent>(buf, h->extent_offset, h->extent_len, extents);
-
-    free(buf);
-    return next_blk;
-}
-    
 void write_cache_impl::do_write_checkpoint(void) {
     write_checkpoint();
 }
-

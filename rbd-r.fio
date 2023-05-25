@@ -1,14 +1,15 @@
 [global]
 ioengine=rbd
 clientname=admin
-pool=rbd
-rbdname=rbd/obj_B
+pool=ec83b_pool
+rbdname=ec83b_poolx/fio-target 
 #rw=randwrite
 rw=randread
+#rw=read
 bs=4k
-runtime=15
+runtime=100
 time_based
+busy_poll=0
 
 [rbd_iodepth32]
-iodepth=16
-size=5g
+iodepth=128

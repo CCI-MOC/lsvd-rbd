@@ -195,13 +195,15 @@ public:
 		   extmap::objmap *map, std::shared_mutex *m);
     ~translate_impl();
 
-    ssize_t init(const char *name, int nthreads, bool timedflush);
+    ssize_t init(const char *name, bool timedflush);
     void shutdown(void);
 
     int flush(void);            /* write out current batch */
     int checkpoint(void);       /* flush, then write checkpoint */
 
     ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov, int iovcnt);
+    ssize_t trim(size_t offset, size_t len);
+    
     void wait_for_room(void);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
     bool check_object_ready(int obj);
@@ -210,15 +212,6 @@ public:
     
     const char *prefix(int seq);
     
-    /* debug functions
-     */
-    void getmap(int base, int limit,
-                int (*cb)(void *ptr,int,int,int,int), void *ptr);
-    int mapsize(void) { return map->size(); }
-    void reset(void) { map->reset(); }
-    int frontier(void) { return b->len / 512; }
-    int batch_seq(void) { return seq; }
-    void set_completion(int next);
 };
 
 const char *translate_impl::prefix(int seq) {
@@ -256,8 +249,7 @@ translate_impl::~translate_impl() {
 	free(super_buf);
 }
 
-ssize_t translate_impl::init(const char *prefix_,
-			     int nthreads, bool timedflush) {
+ssize_t translate_impl::init(const char *prefix_, bool timedflush) {
     std::vector<uint32_t>    ckpts;
     std::vector<clone_info*> clones;
     std::vector<snap_info*>  snaps;
@@ -510,6 +502,39 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     return len;
 }
 
+/* TRIM is not guaranteed durable, because:
+ * 1. it doesn't remove data in the write cache
+ * 2. it doesn't remove data in the write pipeline
+ * 3. it's not logged, so the map update isn't persistent until the 
+ *    next checkpoint
+ *
+ * to implement durable discard we would need to:
+ * - flush write cache map entries
+ * - insert the discard, in order, into a batch
+ * - persist it in the object data header
+ * possible solution: reserve a tombstone bit in struct data_map
+ * TODO: do we need durable discard?
+ */
+ssize_t translate_impl::trim(size_t offset, size_t len) {
+    std::unique_lock lk(m);
+    std::unique_lock obj_w_lock(*map_lock);
+
+    // trim the map
+    std::vector<extmap::lba2obj> deleted;
+    map->trim(offset/512, (offset+len)/512, &deleted);
+
+    // and then update the GC accounting
+    for (auto d : deleted) {
+	auto [base, limit, ptr] = d.vals();
+	if (object_info.find(ptr.obj) == object_info.end())
+	    continue;		// skip clone base
+	object_info[ptr.obj].live -= (limit - base);
+	assert(object_info[ptr.obj].live >= 0);
+	total_live_sectors -= (limit - base);
+    }
+    return 0;
+}
+
 void translate_impl::wait_for_room(void) {
     std::unique_lock lk(m);
     while (outstanding_writes > cfg->xlate_window)
@@ -558,6 +583,7 @@ public:
 	std::unique_lock lk(m);
 	while (!done)
 	    cv.wait(lk);
+	lk.unlock();
 	delete this;		// always call wait
     }
 
@@ -577,6 +603,7 @@ public:
 	if (!waiting) 
 	    delete this;
 	else {
+	    std::unique_lock lk(m);
 	    done = true;
 	    cv.notify_one();
 	}
@@ -1371,22 +1398,3 @@ int translate_remove_image(backend *objstore, const char *name) {
     return 0;
 }
 
-void translate_impl::getmap(int base, int limit,
-		       int (*cb)(void *ptr,int,int,int,int), void *ptr) {
-    for (auto it = map->lookup(base); it != map->end() && it->base() < limit; it++) {
-	auto [_base, _limit, oo] = it->vals(base, limit);
-	if (!cb(ptr, (int)_base, (int)_limit, (int)oo.obj, (int)oo.offset))
-	    break;
-    }
-}
-
-void translate_impl::set_completion(int next)
-{
-    if (next > next_compln)
-	next_compln= next;
-}
-
-int batch_seq(translate *xlate_) {
-    auto xlate = (translate_impl*)xlate_;
-    return xlate->batch_seq();
-}

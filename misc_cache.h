@@ -82,8 +82,8 @@ public:
 
 /* nice error messages
  */
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
+#include <filesystem>
+namespace fs = std::filesystem;
 static inline void throw_fs_error(std::string msg) {
     throw fs::filesystem_error(msg, std::error_code(errno,
                                                     std::system_category()));

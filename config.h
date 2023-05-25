@@ -21,11 +21,10 @@ public:
     int         wcache_batch = 8;           // requests
     int         wcache_chunk = 2*1024*1024; // bytes
     std::string cache_dir = "/tmp";
-    int         xlate_threads = 2;
     int         xlate_window = 8;
     int         hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
-    long        cache_size = 100*1024*1024; // in bytes
+    long        cache_size = 500*1024*1024; // in bytes
     int         ckpt_interval = 500;        // objects 
     int         flush_msec = 2000;          // flush timeout
     int         gc_threshold = 60;          // GC threshold, percent

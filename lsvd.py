@@ -4,7 +4,7 @@ from lsvd_types import *
 
 dir = os.getcwd()
 dir = '/home/pjd/lsvd-rbd'
-lsvd_lib = CDLL(dir + "/liblsvd.so")
+lsvd_lib = CDLL("liblsvd.so")
 assert lsvd_lib
 
 
@@ -201,16 +201,6 @@ class read_cache:
     def evict(self, n):
         lsvd_lib.rcache_evict(self.rcache, c_int(n))
 
-# start and stop the libaio completion thread
-
-def io_start():
-    pass
-    #lsvd_lib.e_io_start()
-
-def io_stop():
-    pass
-    #lsvd_lib.e_io_stop()
-
 def logbuf():
     buf = (c_char * 4096)()
     nbytes = lsvd_lib.get_logbuf(buf, c_int(4096))
@@ -241,88 +231,5 @@ def rbd_write(img, off, data):
 def rbd_flush(img):
     lsvd_lib.rbd_flush(img)
 
-lsvd_lib.aligned_alloc.argtypes = [c_size_t,c_size_t]
-lsvd_lib.aligned_alloc.restype = c_void_p
-lsvd_lib.free.argtypes = [c_void_p]
-lsvd_lib.memcpy.argtypes = [c_void_p,c_void_p,c_size_t]
 
-def rbd_writev(img, off, data, sizes):
-    if type(data) != bytes:
-        data = bytes(data, 'utf-8')
-    _off = 0
-    split_data = []
-    for s in sizes:
-        buf = (c_char * (s*512))()
-        buf.value = data[_off:_off+s*512]
-        split_data.append(buf)
-        _off += s*512
-    niovs = len(sizes)
-    iovs = (iovec * niovs)()
-    for i,b in zip(range(niovs), split_data):
-        ptr = lsvd_lib.aligned_alloc(c_size_t(512), c_size_t(len(b)))
-        lsvd_lib.memcpy(ptr, addressof(b), c_size_t(len(b)))
-        iovs[i].iov_base = addressof(b)
-        iovs[i].iov_len = len(b)
-    lsvd_lib.do_rbd_aio_writev(img, iovs, c_int(niovs), c_ulong(off))
-    #for i in range(niovs):
-    #    lsvd_lib.free(iovs[i].iov_base)
-        
-def rbd_readv(img, off, sizes):
-    bufs = [(c_char * (s*512))() for s in sizes]
-    niovs = len(sizes)
-    iovs = (iovec * niovs)()
-    for i,b in zip(range(niovs), bufs):
-        ptr = lsvd_lib.aligned_alloc(c_size_t(512), c_size_t(len(b)))
-        iovs[i].iov_base = ptr
-        iovs[i].iov_len = len(b)
-    lsvd_lib.do_rbd_aio_readv(img, iovs, c_int(niovs), c_ulong(off))
-    for i,b in zip(range(niovs), bufs):
-        lsvd_lib.memcpy(addressof(b), iovs[i].iov_base, iovs[i].iov_len)
-        #lsvd_lib.free(iovs[i].iov_base)
-    return b''.join([_[:] for _ in bufs])
 
-lsvd_lib.launch_rbd_aio_writev.argtypes = [c_void_p, c_ulong, c_void_p,
-                                               POINTER(c_size_t), c_int]
-lsvd_lib.launch_rbd_aio_writev.restype = c_void_p
-lsvd_lib.wait_rbd_aio_writev.argtypes = [c_void_p]
-lsvd_lib.launch_rbd_aio_readv.argtypes = [c_void_p, c_ulong, c_void_p,
-                                               POINTER(c_size_t), c_int]
-lsvd_lib.launch_rbd_aio_readv.restype = c_void_p
-lsvd_lib.wait_rbd_aio_readv.argtypes = [c_void_p]
-
-def rbd_launch_readv(img, off, sizes):
-    nbytes = 512 * sum(sizes)
-    buf = (c_char * nbytes)()
-    szs = (c_size_t * len(sizes))()
-    for i in range(len(sizes)):
-        szs[i] = sizes[i]
-    tmp = lsvd_lib.launch_rbd_aio_readv(img, c_ulong(off), buf,
-                                            szs, c_int(len(sizes)))
-    return [tmp,buf]
-
-def rbd_wait_readv(req):
-    tmp,buf = req
-    lsvd_lib.wait_rbd_aio_readv(tmp)
-    return buf[:]
-    
-def rbd_launch_writev(img, off, data, sizes):
-    nbytes = 512 * sum(sizes)
-    assert nbytes == len(data)
-    szs = (c_size_t * len(sizes))()
-    for i in range(len(sizes)):
-        szs[i] = sizes[i]
-    return lsvd_lib.launch_rbd_aio_writev(img, c_ulong(off), data,
-                                              szs, c_int(len(sizes)))
-
-def rbd_wait_writev(req):
-    lsvd_lib.wait_rbd_aio_writev(req)
-
-def noop():
-    print("noop")
-    lsvd_lib.noop()
-
-def rbd_getmap(img, base, limit):
-    n_tuples = 128
-    tuples = (tuple * n_tuples)()
-    n = lsvd_lib.rbd_getmap(c_long(base), c_long(limit), img, c_int(n_tuples), byref(tuples))
-    return list(map(lambda x: [x.base, x.limit, x.obj, x.offset], tuples[0:n]))

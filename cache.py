@@ -2,7 +2,7 @@
 
 import sys
 import os
-import lsvd
+import lsvd_types as lsvd
 import test3 as t3
 import uuid
 import blkdev

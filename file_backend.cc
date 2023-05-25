@@ -151,7 +151,8 @@ void trim_partial(const char *_prefix) {
     auto stem = fs::path(prefix).filename();
     auto parent = fs::path(prefix).parent_path();
     size_t stem_len = strlen(stem.c_str());
-
+    int rv;
+    
     for (auto const& dir_entry : fs::directory_iterator{parent}) {
 	std::string entry{dir_entry.path().filename()};
 	if (strncmp(entry.c_str(), stem.c_str(), stem_len) == 0 &&
@@ -160,8 +161,11 @@ void trim_partial(const char *_prefix) {
 	    auto h = (obj_hdr *)buf;
 	    int fd = open(dir_entry.path().c_str(), O_RDONLY);
 	    struct stat sb;
-	    assert(fstat(fd, &sb) >= 0);
-	    int rv = read(fd, buf, sizeof(buf));
+	    if (fstat(fd, &sb) < 0) {
+		close(fd);
+		continue;
+	    }
+	    rv = read(fd, buf, sizeof(buf));
 	    if (rv < 512 || h->magic != LSVD_MAGIC ||
 		(h->hdr_sectors + h->data_sectors)*512 != sb.st_size) {
 		printf("deleting partial object: %s (%d vs %d)\n",
@@ -190,6 +194,7 @@ class file_backend_req : public request {
     request        *parent = NULL;
     file_backend   *be;
     int             fd = -1;
+    int             retval;
     
 public:
     file_backend_req(enum lsvd_op op_, const char *name_,
@@ -220,19 +225,20 @@ public:
     void exec(void) {
 	auto [iov,niovs] = _iovs.c_iov();
 	if (op == OP_READ) {
-	    auto fd = open(name, O_RDONLY);
-	    assert(fd >= 0);
-	    auto rv = preadv(fd, iov, niovs, offset);
-	    assert(rv > 0);
-	    close(fd);
+	    if ((fd = open(name, O_RDONLY)) < 0)
+		retval = fd;
+	    else {
+		retval = preadv(fd, iov, niovs, offset);
+		close(fd);
+	    }
 	}
 	else {
-	    if ((fd = open(name,
-			   O_RDWR | O_CREAT | O_TRUNC, 0777)) < 0)
-		throw("file object error");
-	    if (pwritev(fd, iov, niovs, offset) < 0)
-		throw("file object error");
-	    close(fd);
+	    if ((fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0777)) < 0)
+		retval = fd;
+	    else {
+		retval = pwritev(fd, iov, niovs, offset);
+		close(fd);
+	    }
 	}
 	notify(NULL);
     }

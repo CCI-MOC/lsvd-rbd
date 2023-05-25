@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import lsvd
+import lsvd_types as lsvd
 import sys
 import os
 import argparse

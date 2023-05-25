@@ -6,15 +6,18 @@
 ioengine=rbd
 clientname=admin
 pool=rbd
-rbdname=rbd/obj_B
+rbdname=ec83b_pool/fio-target
+busy_poll=0
+
 rw=randwrite
 #rw=randread
 bs=4k
-runtime=30
+runtime=100
 time_based
 direct=1
 #threads=4
 
 [rbd_iodepth32]
-iodepth=64
+iodepth=128
+group_reporting
 

@@ -121,18 +121,6 @@ public:
     std::tuple<size_t,size_t,request*> async_readv(size_t offset,
 						   smartiov *iov);
 
-    /* debugging. 
-     */
-
-    /* get superblock, flattened map, vector of free blocks, extent map
-     * only returns ones where ptr!=NULL
-     */
-    void get_info(j_read_super **p_super, extmap::obj_offset **p_flat, 
-		  std::vector<int> **p_free_blks,
-                  std::map<extmap::obj_offset,int> **p_map);
-
-    void do_add(extmap::obj_offset unit, char *buf); /* TODO: document */
-    void do_evict(int n);       /* TODO: document */
     void write_map(void);
 };
 
@@ -164,11 +152,7 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, bool nt,
 	throw("read cache superblock");
     super = (j_read_super*)buf;
 
-    //assert(super->unit_size == 128); // 64KB, in sectors
-    unit_sectors = super->unit_size; // todo: fixme
-
-    int oos_per_pg = 4096 / sizeof(extmap::obj_offset);
-    assert(div_round_up(super->units, oos_per_pg) == super->map_blocks);
+    unit_sectors = super->unit_size;
 
     in_use.init(super->units);
     written.init(super->units);
@@ -596,9 +580,7 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     
     if (in_cache) {
 	sector_t blk_in_ssd = super->base*8 + n*unit_sectors,
-	    start = blk_in_ssd + blk_offset,
-	    finish = start + (blk_top_offset - blk_offset);
-	assert((finish - start) == read_sectors);
+	    start = blk_in_ssd + blk_offset;
 
 	a_bit[n] = true;
 	hit_stats.user += read_sectors;
@@ -672,44 +654,6 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 
 void read_cache_impl::write_map(void) {
     if (ssd->write(flat_map, 4096 * super->map_blocks,
-		   4096L * super->map_start) < 0)
-	throw("write flatmap");
+                   4096L * super->map_start) < 0)
+        throw("write flatmap");
 }
-
-/* --------- Debug methods ----------- */
-
-void read_cache_impl::get_info(j_read_super **p_super,
-			       extmap::obj_offset **p_flat, 
-			       std::vector<int> **p_free_blks,
-			       std::map<extmap::obj_offset,int> **p_map) {
-    if (p_super != NULL)
-	*p_super = super;
-    if (p_flat != NULL)
-	*p_flat = flat_map;
-    if (p_free_blks != NULL)
-	*p_free_blks = &free_blks;
-    if (p_map != NULL)
-	*p_map = &map;
-}
-
-void read_cache_impl::do_add(extmap::obj_offset unit, char *buf) {
-    std::unique_lock lk(m);
-    char *_buf = (char*)aligned_alloc(512, 65536);
-    memcpy(_buf, buf, 65536);
-    int n = free_blks.back();
-    free_blks.pop_back();
-    written[n] = true;
-    map[unit] = n;
-    flat_map[n] = unit;
-    off_t nvme_offset = (super->base*8 + n*unit_sectors)*512L;
-    if (ssd->write(_buf, unit_sectors*512L, nvme_offset) < 0)
-       throw("write data");
-    write_map();
-    free(_buf);
-}
-
-void read_cache_impl::do_evict(int n) {
-    std::unique_lock lk(m);
-    evict(n);
-}
-

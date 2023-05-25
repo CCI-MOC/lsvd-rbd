@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 import os
-import lsvd
+import lsvd_types as lsvd
 import sys
 import uuid
 from ctypes import *

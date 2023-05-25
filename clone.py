@@ -121,7 +121,7 @@ def mk_clone(old, new, uu):
     
 if __name__ == '__main__':
     _rnd_uuid = str(uuid.uuid4())
-    parser = argparse.ArgumentParser(description='create LSVD disk')
+    parser = argparse.ArgumentParser(description='create clone of LSVD disk image')
     parser.add_argument('--uuid', help='volume UUID', default=_rnd_uuid)
     parser.add_argument('--rados', help='use RADOS backend', action='store_true');
     parser.add_argument('base', help='base image')
