@@ -8,6 +8,7 @@
  *              LGPL-2.1-or-later
  */
 
+#include <cstdio>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -93,7 +94,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	close(fd);
     }
 
-    fd = open(cache.c_str(), O_RDWR | O_DIRECT);
+    fd = open(cache.c_str(), O_RDWR);
     if (fd < 0)
 	return -1;
 
@@ -110,8 +111,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 			     xlate, &map, &map_lock, objstore);
     free(js);
 
-    if (!__lsvd_dbg_no_gc)
-	xlate->start_gc();
+    // if (!__lsvd_dbg_no_gc)
+	// xlate->start_gc();
 
     return 0;
 }
@@ -265,6 +266,7 @@ extern "C" void rbd_aio_release(rbd_completion_t c)
 
 extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
 {
+    fp_log("rbd_discard\n");
     auto img = (rbd_image*)image;
     img->xlate->trim(ofs, len);
     return 0;
@@ -273,6 +275,7 @@ extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
 extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 			       uint64_t len, rbd_completion_t c)
 {
+    fp_log("rbd_aio_discard\n");
     auto p = (lsvd_completion *)c;
     auto img = p->img = (rbd_image*)image;
     img->xlate->trim(off, len);
@@ -297,7 +300,7 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 
 extern "C" int rbd_flush(rbd_image_t image)
 {
-    //do_log("rbd_flush\n");
+    fp_log("rbd_flush\n");
     auto img = (rbd_image*)image;
     if (img->cfg.hard_sync)
 	img->xlate->flush();
@@ -355,8 +358,13 @@ class rbd_aio_req : public request {
 
     void notify_parent(void) {
 	//assert(!m.try_lock());
-        if (p != NULL)
+        if (p != NULL) {
+            if (op == OP_READ) {
             p->complete(sectors*512L);
+            } else {
+                p->complete(0);
+            }
+        }
 	if (status & REQ_WAIT)
 	    cv.notify_all();
     }
@@ -570,6 +578,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
 			    size_t len, char *buf, rbd_completion_t c)
 {
     //do_log("rbd_aio_read\n");
+    fp_log("rbd_aio_read: offset = %lu, len = %u\n", offset, len);
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
     assert(p->magic == LSVD_MAGIC);
@@ -584,6 +593,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 			     int iovcnt, uint64_t offset, rbd_completion_t c)
 {
+    fp_log("rbd_aio_readv: offset = %lu, iov_base = %p, iov_len = %u, iovcnt = %d\n", offset, iov->iov_base, iov->iov_len, iovcnt);
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
     assert(p->magic == LSVD_MAGIC);
@@ -597,6 +607,7 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov,
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 			      int iovcnt, uint64_t offset, rbd_completion_t c)
 {
+    fp_log("rbd_aio_writev: offset = %lu, iov_base = %p, iov_len = %u, iovcnt = %d\n", offset, iov->iov_base, iov->iov_len, iovcnt);
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -611,6 +622,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 			     const char *buf, rbd_completion_t c)
 {
+    fp_log("rbd_aio_write: offset = %lu, len = %u\n", offset, len);
     rbd_image *img = (rbd_image*)image;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -628,6 +640,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     //do_log("rbd_read %d\n", (int)(off / 512));
+    fp_log("rbd_read: offset = %lu, len = %u\n", off, len);
     rbd_image *img = (rbd_image*)image;
     auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
 
@@ -638,6 +651,7 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char *buf)
 {
+    fp_log("rbd_write: offset = %lu, len = %u\n", off, len);
     //do_log("rbd_write\n");
     rbd_image *img = (rbd_image*)image;
     auto req = new rbd_aio_req(OP_WRITE, img, NULL, off, REQ_WAIT,
@@ -649,6 +663,7 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char
 
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
+    fp_log("rbd_aio_wait_for_complete\n");
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
     p->done_released += 20;
@@ -669,17 +684,20 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
     //do_log("rbd_stat\n");
+    fp_log("rbd_stat\n");
     rbd_image *img = (rbd_image*)image;
     memset(info, 0, sizeof(*info));
     info->size = img->size;
-    info->obj_size = 2*1024*1024; // 2^21 bytes
-    info->order = 21;		  // 2^21 bytes
+    info->obj_size = 1<<22; // 2^21 bytes
+    info->order = 22;		  // 2^21 bytes
+    info->num_objs = img->size / info->obj_size;
     return 0;
 }
 
 extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
 {
     //do_log("rbd_get_size\n");
+    fp_log("rbd_get_size\n");
     rbd_image *img = (rbd_image*)image;
     *size = img->size;
     return 0;
@@ -735,6 +753,7 @@ extern "C" int rbd_aio_writesame(rbd_image_t image, uint64_t off,
 				 const char *buf, size_t data_len,
 				 rbd_completion_t c, int op_flags)
 {
+    fp_log("rbd_aio_writesame\n");
     int n = div_round_up(len, data_len);
     iovec iov[n];
     int niovs = 0;
@@ -751,6 +770,7 @@ extern "C" int rbd_aio_write_zeroes(rbd_image_t image, uint64_t off,
                                       size_t len, rbd_completion_t c,
                                       int zero_flags, int op_flags)
 {
+    fp_log("rbd_aio_write_zeroes\n");
     return rbd_aio_writesame(image, off, len, zeropage, 4096, c, op_flags);
 }
 
@@ -758,6 +778,7 @@ extern "C" int rbd_aio_write_zeroes(rbd_image_t image, uint64_t off,
  */
 extern "C" int rbd_invalidate_cache(rbd_image_t image)
 {
+    fp_log("rbd_invalidate_cache\n");
     return 0;
 }
 
@@ -765,27 +786,33 @@ extern "C" int rbd_invalidate_cache(rbd_image_t image)
  */
 extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
 {
+    fp_log("rbd_resize\n");
     return -1;
 }
 
 extern "C" int rbd_snap_create(rbd_image_t image, const char *snapname)
 {
+    fp_log("rbd_snap_create\n");
     return -1;
 }
 extern "C" int rbd_snap_list(rbd_image_t image, rbd_snap_info_t *snaps,
                                int *max_snaps)
 {
+    fp_log("rbd_snap_list\n");
     return -1;
 }
 extern "C" void rbd_snap_list_end(rbd_snap_info_t *snaps)
 {
+    fp_log("rbd_snap_list_end\n");
 }
 extern "C" int rbd_snap_remove(rbd_image_t image, const char *snapname)
 {
+    fp_log("rbd_snap_remove\n");
     return -1;
 }
 extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
 {
+    fp_log("rbd_snap_rollback\n");
     return -1;
 }
 
@@ -796,6 +823,7 @@ extern "C" int rbd_diff_iterate2(rbd_image_t image, const char *fromsnapname,
 				 int (*cb)(uint64_t, size_t, int, void *),
 				 void *arg)
 {
+    fp_log("rbd_diff_iterate2\n");
     return *(int*)0;
 }
 
@@ -804,6 +832,7 @@ extern "C" int rbd_encryption_format(rbd_image_t image,
 				     rbd_encryption_options_t opts,
 				     size_t opts_size)
 {
+    fp_log("rbd_encryption_format\n");
     return *(int*)0;
 }
 
@@ -812,16 +841,19 @@ extern "C" int rbd_encryption_load(rbd_image_t image,
 				   rbd_encryption_options_t opts,
 				   size_t opts_size)
 {
+    fp_log("rbd_encryption_load\n");
     return *(int*)0;
 }
 
 extern "C" int rbd_get_features(rbd_image_t image, uint64_t *features)
 {
+    fp_log("rbd_get_features\n");
     return *(int*)0;
 }
 
 extern "C" int rbd_get_flags(rbd_image_t image, uint64_t *flags)
 {
+    fp_log("rbd_get_flags\n");
     return *(int*)0;
 }
 
@@ -830,34 +862,40 @@ static int _tmp;
 
 extern "C" void rbd_image_spec_cleanup(rbd_image_spec_t *image)
 {
+    fp_log("rbd_image_spec_cleanup\n");
     ASSERT_FAIL();
 }
 
 extern "C" void rbd_linked_image_spec_cleanup(rbd_linked_image_spec_t *image)
 {
+    fp_log("rbd_linked_image_spec_cleanup\n");
     ASSERT_FAIL();
 }
 
 extern "C" int rbd_mirror_image_enable(rbd_image_t image)
 {
+    fp_log("rbd_mirror_image_enable\n");
     return *(int*)0;
 }
 
 extern "C" int rbd_mirror_image_enable2(rbd_image_t image,
                                           rbd_mirror_image_mode_t mode)
 {
+    fp_log("rbd_mirror_image_enable2\n");
     return *(int*)0;
 }
 
 extern "C" void rbd_mirror_image_get_info_cleanup(
     rbd_mirror_image_info_t *mirror_image_info)
 {
+    fp_log("rbd_mirror_image_get_info_cleanup\n");
     ASSERT_FAIL();
 }
 
 extern "C" void rbd_mirror_image_global_status_cleanup(
     rbd_mirror_image_global_status_t *mirror_image_global_status)
 {
+    fp_log("rbd_mirror_image_global_status_cleanup\n");
     ASSERT_FAIL();
 }
 
@@ -866,6 +904,7 @@ extern "C" int rbd_mirror_peer_site_add(
     rbd_mirror_peer_direction_t direction, const char *site_name,
     const char *client_name)
 {
+    fp_log("rbd_mirror_peer_site_add\n");
     return *(int*)0;
 }
 
@@ -873,12 +912,14 @@ extern "C" int rbd_mirror_peer_site_get_attributes(
     rados_ioctx_t p, const char *uuid, char *keys, size_t *max_key_len,
     char *values, size_t *max_value_len, size_t *key_value_count)
 {
+    fp_log("rbd_mirror_peer_site_get_attributes\n");
     return *(int*)0;
 }
 
 extern "C" int rbd_mirror_peer_site_remove(
     rados_ioctx_t io_ctx, const char *uuid)
 {
+    fp_log("rbd_mirror_peer_site_remove\n");
     return *(int*)0;
 }
 
@@ -886,28 +927,33 @@ extern "C" int rbd_mirror_peer_site_set_attributes(
     rados_ioctx_t p, const char *uuid, const char *keys, const char *values,
     size_t key_value_count)
 {
+    fp_log("rbd_mirror_peer_site_set_attributes\n");
     return *(int*)0;
 }
 
 extern "C" int rbd_mirror_peer_site_set_name(
     rados_ioctx_t io_ctx, const char *uuid, const char *site_name)
 {
+    fp_log("rbd_mirror_peer_site_set_name\n");
     return *(int*)0;
 }
 
 extern "C" int rbd_mirror_peer_site_set_client_name(
     rados_ioctx_t io_ctx, const char *uuid, const char *client_name)
 {
+    fp_log("rbd_mirror_peer_site_set_client_name\n");
     return *(int*)0;
 }
 
 extern "C" void rbd_pool_stats_create(rbd_pool_stats_t *stats)
 {
+    fp_log("rbd_pool_stats_create\n");
     ASSERT_FAIL();
 }
 
 extern "C" void rbd_pool_stats_destroy(rbd_pool_stats_t stats)
 {
+    fp_log("rbd_pool_stats_destroy\n");
     ASSERT_FAIL();
 }
 
@@ -915,11 +961,13 @@ extern "C" int rbd_pool_stats_option_add_uint64(rbd_pool_stats_t stats,
 						int stat_option,
 						uint64_t* stat_val)
 {
+    fp_log("rbd_pool_stats_option_add_uint64\n");
     return *(int*)0;
 }
 
 extern "C" void rbd_trash_get_cleanup(rbd_trash_image_info_t *info)
 {
+    fp_log("rbd_trash_get_cleanup\n");
     ASSERT_FAIL();
 }
 

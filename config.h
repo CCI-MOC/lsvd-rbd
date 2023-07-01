@@ -12,6 +12,8 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
+#include <string>
+
 enum cfg_backend { BACKEND_FILE = 1, BACKEND_RADOS = 2 };
 
 class lsvd_config {

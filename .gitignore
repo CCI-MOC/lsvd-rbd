@@ -45,3 +45,7 @@
 *.app
 
 *.pyc
+.cache
+compile_commands.json
+
+imgtool

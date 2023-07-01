@@ -10,6 +10,8 @@
 #ifndef __OBJNAME_H__
 #define __OBJNAME_H__
 
+#include <cstdio>
+
 class objname {
     char buf[128];
 public:
