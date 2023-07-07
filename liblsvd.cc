@@ -360,7 +360,7 @@ class rbd_aio_req : public request {
 	//assert(!m.try_lock());
         if (p != NULL) {
             if (op == OP_READ) {
-            p->complete(sectors*512L);
+                p->complete(sectors*512L);
             } else {
                 p->complete(0);
             }

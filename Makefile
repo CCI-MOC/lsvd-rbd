@@ -14,6 +14,15 @@ OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 	rados_backend.o lsvd_debug.o liblsvd.o
 CFILES = $(OBJS:.o=.cc)
 
+debug: CXXFLAGS += -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
+debug: CXXFLAGS += -Wall -Wextra -Wconversion -Wdouble-promotion -Wno-sign-conversion
+release: CXXFLAGS += -O3
+
+debug: liblsvd.so
+release: liblsvd.so
+
+all: release imgtool
+
 liblsvd.so:  $(OBJS)
 	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
 
@@ -59,7 +68,7 @@ bdus: bdus.o $(OBJS)
 	$(CXX) $(OBJS) bdus.o -o bdus $(CFLAGS) $(CXXFLAGS) -lbdus -lpthread -lstdc++fs -lrados -laio -luuid
 
 clean:
-	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d test7 test8
+	rm -f liblsvd.so bdus mkdisk $(OBJS) *.o *.d test7 test8 imgtool
 
 unit-test: unit-test.cc extent.h
 	$(CXX) $(OPT) $(CXXFLAGS) -o unit-test unit-test.cc -lstdc++fs
