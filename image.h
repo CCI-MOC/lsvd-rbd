@@ -49,7 +49,9 @@ struct rbd_image {
 
     std::shared_mutex map_lock;
     extmap::objmap    map;
-
+    extmap::bufmap    bufmap;
+    std::map<int,char*> buffers;
+    
     backend     *objstore;
     translate   *xlate;
     write_cache *wcache;

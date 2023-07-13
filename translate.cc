@@ -47,9 +47,17 @@ extern void log_time(uint64_t loc, uint64_t val); // debug
 
 /* ----------- Object translation layer -------------- */
 
+struct batch_entry {
+    char    *ptr;
+    sector_t lba;
+    sector_t len;
+};
+
 class batch {
 public:
-    std::vector<data_map> entries;
+    //std::vector<data_map> entries;
+    std::vector<batch_entry> entries;
+
     char  *_buf = NULL;		// allocation start
     char  *buf = NULL;		// data goes here
     size_t len = 0;		// current data size
@@ -66,12 +74,12 @@ public:
     ~batch(){
 	free(_buf);
     }
-    void append(uint64_t lba, smartiov *iov) {
+    char *append(uint64_t lba, smartiov *iov) {
 	auto bytes = iov->bytes();
-	entries.push_back((data_map){lba, bytes/512});
 	char *ptr = buf + len;
 	iov->copy_out(ptr);
 	len += bytes;
+	return ptr;
     }
 };
 
@@ -80,6 +88,7 @@ class translate_impl : public translate {
      */
     std::mutex         m;	// for things in this instance
     extmap::objmap    *map;	// shared object map
+    extmap::bufmap    *bufmap;	// shared object map
     std::shared_mutex *map_lock; // locks the object map
     lsvd_config       *cfg;
 
@@ -192,7 +201,8 @@ class translate_impl : public translate {
 
 public:
     translate_impl(backend *_io, lsvd_config *cfg_,
-		   extmap::objmap *map, std::shared_mutex *m);
+		   extmap::objmap *map, extmap::bufmap *bufmap,
+		   std::shared_mutex *m);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
@@ -224,19 +234,23 @@ const char *translate_impl::prefix(int seq) {
 }
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
-			       extmap::objmap *map_, std::shared_mutex *m_) {
+			       extmap::objmap *map_,
+			       extmap::bufmap *bufmap_,
+			       std::shared_mutex *m_) {
     misc_threads = new thread_pool<int>(&m);
     workers = new thread_pool<batch*>(&m);
     objstore = _io;
     parser = new object_reader(objstore);
     map = map_;
+    bufmap = bufmap_;
     map_lock = m_;
     cfg = cfg_;
 }
 
 translate *make_translate(backend *_io, lsvd_config *cfg,
-			  extmap::objmap *map, std::shared_mutex *m) {
-    return (translate*) new translate_impl(_io, cfg, map, m);
+			  extmap::objmap *map, extmap::bufmap *bufmap,
+			  std::shared_mutex *m) {
+    return (translate*) new translate_impl(_io, cfg, map, bufmap, m);
 }
 
 translate_impl::~translate_impl() {
@@ -480,6 +494,7 @@ batch *translate_impl::check_batch_room(size_t len) {
     return full;
 }
 
+bool print_it_out = false;
 /* NOTE: offset is in bytes
  */
 ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
@@ -489,13 +504,38 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
 
     std::unique_lock lk(m);
     auto old_batch = check_batch_room(len);
+    if (old_batch != NULL) {
+	/* regenerate b->entries from bufmap so we get write
+	 * coalescing
+	 */
+	old_batch->entries.clear();
+	for (auto it = bufmap->begin(); it != bufmap->end(); it++) {
+	    auto [base, limit, ptr] = it->vals();
+	    sector_t sectors = limit-base;
+	    if (print_it_out)
+		printf("- %ld,%ld = %ld\n", base, sectors, (ptr.buf - old_batch->buf)/512);
+	    old_batch->entries.push_back((batch_entry){
+		    ptr.buf, base, sectors});
+	}
+	bufmap->reset();
+    }
+    
     if (b->cache_seq == 0) {	// lowest sequence number
 	b->cache_seq = cache_seq;
 	if (ckpt_cache_seq < cache_seq)
 	    ckpt_cache_seq = cache_seq;
     }
 
-    b->append(offset / 512, &siov);
+    /* save "naive" extent and pointer into b->entries, as well as
+     * into bufmap. 
+     */
+    auto ptr = b->append(offset / 512, &siov);
+    bufmap->update(offset / 512, (offset+len) / 512, ptr);
+    b->entries.push_back((batch_entry){ptr, (sector_t)offset/512, (sector_t)len/512});
+    
+    if (print_it_out)
+	printf(". %ld,%ld %ld\n", offset/512, len/512, (ptr - b->buf)/512);
+
     if (old_batch != NULL)
 	workers->put_locked(old_batch);
 
@@ -633,14 +673,6 @@ void translate_impl::worker_thread(thread_pool<batch*> *p) {
 
 void translate_impl::process_batch(batch *b) {
 
-    /* TODO: coalesce writes: 
-     *   bufmap m
-     *   for e in entries
-     *      m.insert(lba, len, ptr)
-     *   for e in m:
-     *      (lba, iovec) -> output
-     */
-
     /* make the following updates:
      * - object_info - hdrlen, total/live data sectors
      * - map - LBA to obj/offset map
@@ -648,7 +680,6 @@ void translate_impl::process_batch(batch *b) {
      */
     size_t hdr_bytes = obj_hdr_len(b->entries.size());
     int hdr_sectors = div_round_up(hdr_bytes, 512);
-    char *hdr_ptr = b->buf - hdr_sectors*512;
 
     // deadlock risk - locks m, can't call with map_lock held
     seq_record(b->seq);
@@ -691,14 +722,30 @@ void translate_impl::process_batch(batch *b) {
     if (next_compln == -1)
 	next_compln = b->seq;
     lk.unlock();
-    
-    make_data_hdr(hdr_ptr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
-    size_t total_len = hdr_sectors*512 + b->len;
 
+    std::vector<data_map> _entries;
+    sector_t data_sectors = 0;
+    for (auto e : b->entries) {
+	_entries.push_back((data_map){(uint64_t)e.lba, (uint64_t)e.len});
+	data_sectors += e.len;
+    }
+    sector_t total_sectors = hdr_sectors + data_sectors;
+    size_t total_len = total_sectors*512;
+    char *hdr_ptr = (char*)malloc(total_len);
+    
+    make_data_hdr(hdr_ptr, b->len, b->cache_seq, &_entries, b->seq, &uuid);
+    auto ptr = hdr_ptr + hdr_sectors*512;
+    for (auto e : b->entries) {
+	size_t bytes = e.len*512;
+	memcpy(ptr, e.ptr, bytes);
+	ptr += bytes;
+    }
+    
     /* on completion, t_req calls seq_complete
      */
     auto t_req = new translate_req(b->seq, this, false);
     t_req->b = b;
+    t_req->to_free.push_back(hdr_ptr);
 
     objname name(prefix(b->seq), b->seq);
     auto req = objstore->make_write_req(name.c_str(), hdr_ptr, total_len);
@@ -761,6 +808,7 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
+    //printf("***CHECKPOINT***\n");
     seq_record(ckpt_seq);
 
     /* - map lock protects both object_info and map

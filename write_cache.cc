@@ -153,7 +153,6 @@ class wcache_write_req : public request {
     std::atomic<int> reqs = 0;
 
     sector_t      plba;
-    uint64_t      seq;
     
     std::vector<write_cache_work*> work;
     request      *r_data = NULL;
@@ -167,6 +166,8 @@ class wcache_write_req : public request {
     write_cache_impl *wcache = NULL;
     
 public:
+    uint64_t      seq;
+
     wcache_write_req(std::vector<write_cache_work*> *w, page_t n_pages,
 		     page_t page, page_t n_pad, page_t pad, page_t prev,
 		     write_cache *wcache);
@@ -276,13 +277,8 @@ void wcache_write_req::notify_in_order(void) {
     }
     lk.unlock();
     
-    /* send data to backend, invoke callbacks, then clean up
+    /* invoke callbacks, then clean up
      */
-    for (auto w : work) {
-	auto [iov, iovcnt] = w->iov->c_iov();
-	wcache->be->writev(seq, w->lba*512, iov, iovcnt);
-    }
-
     for (auto w : work) {
 	w->req->notify((request*)w);
 	delete w;
@@ -818,6 +814,11 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
 
     auto req = new wcache_write_req(&work, pages, page,
 				    n_pad-1, pad, prev, this);
+    for (auto w : work) {
+	auto [iov, iovcnt] = w->iov->c_iov();
+	be->writev(req->seq, w->lba*512, iov, iovcnt);
+    }
+    
     work.clear();
     work_sectors = 0;
     outstanding_writes++;

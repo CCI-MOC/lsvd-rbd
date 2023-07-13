@@ -44,7 +44,8 @@ public:
 };
 
 extern translate *make_translate(backend *_io, lsvd_config *cfg,
-                                 extmap::objmap *map, std::shared_mutex *m);
+				 extmap::objmap *map, extmap::bufmap *bufmap,
+				 std::shared_mutex *m);
 
 extern int translate_create_image(backend *objstore, const char *name,
                                   uint64_t size);

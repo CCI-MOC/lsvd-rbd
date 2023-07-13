@@ -77,7 +77,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 
     /* read superblock and initialize translation layer
      */
-    xlate = make_translate(objstore, &cfg, &map, &map_lock);
+    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock);
     size = xlate->init(name, true);
 
     /* figure out cache file name, create it if necessary
