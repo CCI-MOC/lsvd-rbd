@@ -148,7 +148,14 @@ void check_crc(sector_t sector, const char *_buf, size_t bytes) {
 	}
 	else {
 	    unsigned crc1 = 0, crc2 = 0;
-	    assert((crc1 = sector_crc[sector]) == (crc2 = crc32(0, ptr, 512)));
+	    //assert((crc1 = sector_crc[sector]) == (crc2 = crc32(0, ptr, 512)));
+	    crc1 = sector_crc[sector];
+	    crc2 = crc32(0, ptr, 512);
+	    if (crc1 != crc2) {
+		printf("%ld : %x != %x\n", sector, crc1, crc2);
+		fprintf(stdout, "FAIL: %ld : %x != %x\n", sector, crc1, crc2);
+		exit(1);
+	    }
 	}
 	sector++;
     }
@@ -243,6 +250,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
 	    p_log += snprintf(p_log, end_log-p_log, "\nREOPEN done\n\n");	
     }
 
+    fflush(stdout);
     auto tmp = __lsvd_dbg_be_delay;
     __lsvd_dbg_be_delay = false;
     auto buf = (char*)aligned_alloc(512, 64*1024);
