@@ -355,8 +355,12 @@ class rbd_aio_req : public request {
 
     void notify_parent(void) {
 	//assert(!m.try_lock());
-        if (p != NULL)
-            p->complete(sectors*512L);
+        if (p != NULL) {
+	    if (op == OP_READ)
+		p->complete(sectors*512L);
+	    else
+		p->complete(0);
+	}
 	if (status & REQ_WAIT)
 	    cv.notify_all();
     }

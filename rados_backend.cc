@@ -239,7 +239,6 @@ public:
     static void rados_be_notify(rados_completion_t c, void *ptr) {
 	auto req = (rados_be_request*)ptr;
 	int rv = rados_aio_get_return_value(c);
-	assert(rv >= 0);
 	req->notify(NULL);
     }
     
