@@ -21,6 +21,7 @@ extern bool __lsvd_dbg_reverse;
 extern bool __lsvd_dbg_be_delay;
 extern bool __lsvd_dbg_be_delay_ms;
 extern bool __lsvd_dbg_be_threads;
+extern bool __lsvd_dbg_rename;
 
 std::mt19937_64 rng;
 
@@ -239,7 +240,7 @@ void run_test(unsigned long seed, struct cfg *cfg) {
     extern char *p_log, *end_log;
     if (p_log && p_log+16 < end_log)
 	p_log += snprintf(p_log, end_log-p_log, "\n\nWRITE DONE\n\n");
-			 
+
     if (cfg->reopen) {
 	rbd_close(img);
 	if (p_log && p_log+16 < end_log)
@@ -382,6 +383,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 static struct argp argp = { options, parse_opt, NULL, args_doc};
 
 int main(int argc, char **argv) {
+    __lsvd_dbg_rename = true;
     argp_parse (&argp, argc, argv, 0, 0, 0);
 
     if (_cfg.seeds.size() > 0) {
@@ -400,7 +402,10 @@ int main(int argc, char **argv) {
 	std::vector<unsigned long> seeds;
 	for (int i = 0; i < _cfg.n_runs; i++)
 	    seeds.push_back(rng());
-	for (auto s : seeds)
+	for (auto s : seeds) {
+	    if (getenv("PRE_TEST"))
+		system(getenv("PRE_TEST"));
 	    run_test(s, &_cfg);
+	}
     }
 }

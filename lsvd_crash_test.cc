@@ -621,6 +621,9 @@ void run_test(struct cfg *cfg) {
 	}
 	
 	//check_rcache(cfg);
+	if (getenv("AFTER_CRASH"))
+	    system(getenv("AFTER_CRASH"));
+	
 
 	extern bool __lsvd_dbg_no_gc;
 	__lsvd_dbg_no_gc = true;
@@ -657,9 +660,6 @@ void run_test(struct cfg *cfg) {
 	}
 	printf("\n");
     
-	rbd_close(img);
-	//check_rcache(cfg);
-
 	int max_seq = 0;
 	for (int i = 0; i < cfg->image_sectors; i++)
 	    if (image_info[i].seq > max_seq) {
@@ -698,6 +698,9 @@ void run_test(struct cfg *cfg) {
 	    assert(false);
 	}
 	printf("ok\n");
+
+	rbd_close(img);
+	//check_rcache(cfg);
 
 	__lsvd_dbg_no_gc = false;
 	
@@ -743,7 +746,7 @@ static struct argp_option options[] = {
     {"cache-size",'Z', "N",    0, "cache size (K/M/G)"},
     {"no-wipe",  'n', 0,      0, "don't clear image between runs"},
     {"sleep",    'S', 0,      0, "child sleeps for debug attach"},
-    {"seed2",    '2', 0,      0, "seed-generating seed"},
+    {"seed2",    '2', "SEED", 0, "seed-generating seed"},
     {0},
 };
 
