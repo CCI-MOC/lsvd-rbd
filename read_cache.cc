@@ -514,12 +514,6 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     if (read_sectors == 0)
 	return std::make_tuple(skip_sectors*512L, 0, (request*)NULL);
     
-    /* handle the small probability that it's for an object
-     * currently being GC'ed
-     */
-    if (!be->check_object_ready(oo.obj))
-	be->wait_object_ready(oo.obj);
-
     auto r = new rcache_req(this);
     
     /*
