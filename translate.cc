@@ -554,7 +554,6 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     /* save extent and pointer into bufmap. 
      */
     auto ptr = current->append(base, &siov);
-    printf("update1: %ld .. %ld -> %p\n", base, limit, ptr);
     bufmap->update(base, limit, ptr);
 
     return 0;
@@ -615,7 +614,7 @@ void translate_req::notify(request *child) {
 	for (auto const & e : entries) {
 	    auto limit = e.lba+e.len;
 	    for (auto it2 = tx->bufmap->lookup(e.lba);
-		 it2->base() < limit && it2 != tx->bufmap->end(); it2++) {
+		 it2 != tx->bufmap->end() && it2->base() < limit; it2++) {
 		auto [_base, _limit, ptr] = it2->vals(e.lba, limit);
 		if (ptr.buf >= local_buf_base && ptr.buf < local_buf_limit)
 		    extents.push_back(std::pair(_base, _limit));
@@ -627,8 +626,8 @@ void translate_req::notify(request *child) {
 	/* wake up anyone waiting for TX window room
 	 */
 	std::unique_lock lk(tx->m);
-	//if (--tx->outstanding_writes < tx->cfg->xlate_window)
-	tx->cv.notify_all();
+	if (--tx->outstanding_writes < tx->cfg->xlate_window)
+	    tx->cv.notify_all();
     }
 
     if (batch_buf != NULL)	// allocated in constructor
@@ -747,7 +746,7 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
     for (auto const & [base, len, obj, offset] : req->entries) {
 	auto limit = base+len;
 	for (auto it2 = map->lookup(base);
-	     it2->base() < limit && it2 != map->end(); it2++) {
+	     it2 != map->end() && it2->base() < limit; it2++) {
 	     /* [_base,_limit] is a piece of the extent
 	      * obj_base is where that piece starts in the object
 	      */
@@ -781,7 +780,6 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
 	offset += e.len;
 	bufmap->update(e.lba, e.lba+e.len, data_ptr);
-	printf("update2: %ld .. %ld -> %p\n", e.lba, e.lba+e.len, data_ptr);
 	data_ptr += e.len*512;
     }
     obj_w_lock.unlock();
@@ -1141,7 +1139,6 @@ void translate_impl::do_gc(bool *running) {
 
 	    std::unique_lock lk(m);
 	    requests.push(req);
-	    outstanding_writes++;
 	    workers->put_locked(req);
 	    lk.unlock();
 	    
@@ -1384,6 +1381,7 @@ int translate_remove_image(backend *objstore, const char *name) {
 	    objname obj(name, c);
 	    objstore->delete_object(obj.c_str());
 	}
+	free(ckpt_buf);
     }
     /* delete any objects after the last checkpoint, up to the first run of
      * 32 missing sequence numbers
