@@ -105,10 +105,10 @@ namespace extmap {
     // these are the actual structures stored in the map
     //
     struct _lba2buf {
-	uint64_t    a    : 1;
-	uint64_t    d    : 1;
-	uint64_t    base : 38;
-	uint64_t    len  : 24;
+	int64_t    a    : 1;
+	int64_t    d    : 1;
+	int64_t    base : 38;
+	int64_t    len  : 24;
 	sector_ptr ptr;
     };
 	
