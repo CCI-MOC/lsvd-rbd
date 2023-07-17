@@ -105,10 +105,10 @@ namespace extmap {
     // these are the actual structures stored in the map
     //
     struct _lba2buf {
-	int64_t    a    : 1;
-	int64_t    d    : 1;
-	int64_t    base : 38;
-	int64_t    len  : 24;
+        uint64_t   a    : 1;
+	uint64_t   d    : 1;
+	uint64_t   base : 38;
+	uint64_t   len  : 24;
 	sector_ptr ptr;
     };
 	
@@ -196,7 +196,8 @@ namespace extmap {
 
 	std::tuple<T_in, T_in, T_out> vals(T_in _base, T_in _limit) {
 	    auto _ptr = s.ptr;
-	    if (s.base < _base)
+	    T_in s_base = s.base;
+	    if (s_base < _base)
 		_ptr += (_base - s.base);
 	    else
 		_base = s.base;
