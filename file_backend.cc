@@ -226,7 +226,7 @@ public:
 	auto [iov,niovs] = _iovs.c_iov();
 	if (op == OP_READ) {
 	    if ((fd = open(name, O_RDONLY)) < 0)
-		retval = fd;
+		retval = -errno;
 	    else {
 		retval = preadv(fd, iov, niovs, offset);
 		close(fd);
