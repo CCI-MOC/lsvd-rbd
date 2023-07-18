@@ -121,6 +121,8 @@ class translate_req : public request {
     /* used for removing from map */
     char *local_buf_base = NULL;
     char *local_buf_limit = NULL;
+
+    int           _seq;
     
 public:
     char *append(int64_t lba, smartiov *iov) {
@@ -223,6 +225,7 @@ class translate_impl : public translate {
     super_hdr *super_sh = NULL;
     size_t     super_len;
 
+    std::set<int> objs_written;	// HACK - for wait_object_ready
 
     thread_pool<translate_req*> *workers;
     thread_pool<int>    *misc_threads; // so we can stop ckpt, gc first
@@ -276,6 +279,7 @@ public:
     
     void wait_for_room(void);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
+    bool wait_object_ready(int obj);
     void start_gc(void);
     
     const char *prefix(int seq);
@@ -334,12 +338,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush) {
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
-    
     int n_ckpts = ckpts.size();
-    do_log("read super crc %0x8 ckpts %d\n", (uint32_t)crc32(0, (const unsigned char*)_buf, 4096));
-
-    for (auto c : ckpts) 
-	do_log("got ckpt from super (total %d): %d\n", n_ckpts, c);
     
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
@@ -522,7 +521,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 
     *dh = (obj_data_hdr){.cache_seq = 0,
 			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
-			 .data_map_offset = o1, .data_map_len = l1};
+			 .data_map_offset = o1, .data_map_len = l1,
+			 .is_gc = 1};
 
     data_map *dm = (data_map*)(dh+1);
     for (int i = 0; i < n_extents; i++)
@@ -554,6 +554,7 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     /* save extent and pointer into bufmap. 
      */
     auto ptr = current->append(base, &siov);
+    std::unique_lock obj_w_lock(*map_lock);
     bufmap->update(base, limit, ptr);
 
     return 0;
@@ -598,6 +599,12 @@ void translate_impl::wait_for_room(void) {
 	cv.wait(lk);
 }
 
+bool translate_impl::wait_object_ready(int obj) {
+    std::unique_lock lk(m);
+    while (objs_written.find(obj) == objs_written.end())
+	cv.wait(lk);
+}
+
 /* NOTE - currently not called for REQ_CKPT, which
  * uses sync write
  */
@@ -606,6 +613,16 @@ void translate_req::notify(request *child) {
 	child->release();
 
     if (op == REQ_PUT || op == REQ_GC) {
+	/* wake up anyone waiting for TX window room
+	 * -> lock tx->m before tx->map_lock
+	 * also wakes up wait_object_ready
+	 */
+	std::unique_lock lk(tx->m);
+	//if (--tx->outstanding_writes < tx->cfg->xlate_window)
+	tx->outstanding_writes--;
+	tx->objs_written.insert(_seq);
+	tx->cv.notify_all();
+
 	/* remove extents from tx->bufmap, but only if they still
 	 * point to this buffer
 	 */
@@ -622,12 +639,6 @@ void translate_req::notify(request *child) {
 	}
 	for (auto [base, limit] : extents)
 	    tx->bufmap->trim(base, limit);
-	
-	/* wake up anyone waiting for TX window room
-	 */
-	std::unique_lock lk(tx->m);
-	if (--tx->outstanding_writes < tx->cfg->xlate_window)
-	    tx->cv.notify_all();
     }
 
     if (batch_buf != NULL)	// allocated in constructor
@@ -726,17 +737,19 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req) {
  * previous seq#s and before all following ones.
  */
 void translate_impl::write_gc(int _seq, translate_req *req) {
+    req->_seq = _seq;
+    
     int data_sectors = 0;
     for (const auto &e : req->entries)
 	data_sectors += e.len;
 
-    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
-	req->entries.size() * sizeof(data_map);
-    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    int max_hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+	(cfg->batch_size / 2048) * sizeof(data_map);
+    int max_hdr_sectors = div_round_up(max_hdr_bytes, 512);
 
-    auto buf = req->gc_buf = (char*)malloc((hdr_sectors+data_sectors)*512);
-    memset(buf, 0, hdr_sectors*512);
-    auto data_ptr = buf + hdr_sectors*512;
+    auto buf = req->gc_buf = (char*)malloc((max_hdr_sectors+data_sectors)*512);
+    memset(buf, 0, max_hdr_sectors*512);
+    auto data_ptr = buf + max_hdr_sectors*512;
     auto data_ptr0 = data_ptr;
     auto in_ptr = req->local_buf_base = req->gc_data;
     std::vector<data_map> obj_extents;
@@ -769,7 +782,10 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
     req->local_buf_limit = in_ptr;
     data_sectors = (data_ptr - data_ptr0) / 512;
 
-
+    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+	obj_extents.size() * sizeof(data_map);
+    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    
     sector_t offset = hdr_sectors;
     data_ptr = data_ptr0;
     std::vector<extmap::lba2obj> deleted;
@@ -794,13 +810,19 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
     }
     
     gc_sectors_written += data_sectors; // only written in this thread
-    auto hdr = buf;
+    auto hdr = data_ptr0 - hdr_sectors*512;
     make_gc_hdr(hdr, _seq, data_sectors,
 		obj_extents.data(), obj_extents.size());
 
+    auto h = (obj_hdr*)hdr;
+    assert(h->hdr_sectors == hdr_sectors);
+    
     obj_info oi = {.hdr = hdr_sectors, .data = data_sectors,
 		   .live = data_sectors};
     object_info[_seq] = oi;
+
+    auto _p = (uint64_t *)(hdr + 512*hdr_sectors);
+    assert(*_p != 0);
     
     objname name(prefix(_seq), _seq);
     auto req2 = objstore->make_write_req(name.c_str(), hdr,
@@ -812,6 +834,8 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
 
 void translate_impl::process_batch(int _seq, translate_req *req)
 {
+    req->_seq = _seq;
+    
     int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
 	req->entries.size() * sizeof(data_map);
     int hdr_sectors = div_round_up(hdr_bytes, 512);
@@ -1030,6 +1054,7 @@ void translate_impl::do_gc(bool *running) {
 	utilization.insert(std::make_tuple(rho, p.first, sectors));
 	assert(sectors <= 20*1024*1024/512); // WTF??
     }
+    obj_r_lock.unlock();
     
     /* gather list of objects needing cleaning, return if none
      */
@@ -1059,6 +1084,7 @@ void translate_impl::do_gc(bool *running) {
 	max_obj_sectors = std::max(_sectors, max_obj_sectors);
     }
     
+    obj_r_lock.lock();
     extmap::objmap live_extents;
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();

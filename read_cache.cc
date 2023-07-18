@@ -305,10 +305,8 @@ char *read_cache_impl::get_cacheline_buf(int n) {
 	    }
 	    buf_loc.push(j);
 	}
-	if (buf == NULL) {
-	    do_log("rcache bufs: %d\n", (int)buf_loc.size()+1);
+	if (buf == NULL) 
 	    buf = (char*)aligned_alloc(512, len);
-	}
     }
     buf_loc.push(n);
     memset(buf, 0, len);
@@ -366,7 +364,7 @@ class rcache_req : public request {
     char objname[128];
 
     std::mutex m;
-    
+
 public:
     rcache_req(read_cache_impl *rcache_) : rci(rcache_) {}
     ~rcache_req() {}
@@ -514,6 +512,11 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
     if (read_sectors == 0)
 	return std::make_tuple(skip_sectors*512L, 0, (request*)NULL);
     
+    /* handle the small probability that it's for an object
+     * currently being GC'ed
+     */
+    be->wait_object_ready(oo.obj);
+
     auto r = new rcache_req(this);
     
     /*
