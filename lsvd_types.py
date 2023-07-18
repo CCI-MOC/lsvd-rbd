@@ -59,8 +59,9 @@ class data_hdr(Structure):
                 ("objs_cleaned_offset", c_uint),
                 ("objs_cleaned_len",    c_uint),
                 ("map_offset",          c_uint),
-                ("map_len",             c_uint)]
-sizeof_data_hdr = sizeof(data_hdr) # 24
+                ("map_len",             c_uint),
+                ("is_gc",               c_uint)]
+sizeof_data_hdr = sizeof(data_hdr) # 28
 
 class obj_cleaned(Structure):
     _pack_ = 1

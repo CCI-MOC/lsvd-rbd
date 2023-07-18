@@ -146,7 +146,7 @@ elif h.type == lsvd.LSVD_DATA:
     print('name:     ', args.object)
     print('magic:    ', 'OK' if h.magic == lsvd.LSVD_MAGIC else '**BAD**')
     print('version:  ', h.version)
-    print('type:     ', 'DATA')
+    print('type:     ', 'DATA', '(gc)' if dh.is_gc else '')
     print('seq:      ', h.seq)
     print('n_hdr:    ', h.hdr_sectors)
     print('n_data:   ', h.data_sectors)

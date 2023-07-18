@@ -96,6 +96,7 @@ struct obj_data_hdr {
     uint32_t objs_cleaned_len;
     uint32_t data_map_offset;
     uint32_t data_map_len;
+    uint32_t is_gc;
 } __attribute__((packed));
 
 struct obj_cleaned {
