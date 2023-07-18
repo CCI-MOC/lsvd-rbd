@@ -40,6 +40,7 @@ struct cfg {
     bool   restart;
     bool   verbose;
     bool   existing;
+    bool   deterministic;
 };
 
 
@@ -290,7 +291,8 @@ static struct argp_option options[] = {
     {"existing", 'x', 0,      0, "don't delete existing cache"},    
     {"delay",    'D', 0,      0, "add random backend delays"},    
     {"rados",    'O', 0,      0, "use RADOS"},
-    {"cache-size",'Z', "N",    0, "cache size (K/M/G)"},
+    {"cache-size",'Z', "N",   0, "cache size (K/M/G)"},
+    {"deterministic",'Q', 0,  0, "no backend non-determinism"},
     {0},
 };
 
@@ -308,7 +310,8 @@ struct cfg _cfg = {
     false,			// reopen
     true,			// restart
     false,			// verbose
-    false};			// existing
+    false,			// existing
+    false};			// deterministic
 
 off_t parseint(char *s)
 {
@@ -375,6 +378,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'Z':
 	_cfg.cache_size = arg;
 	break;
+    case 'Q':
+        _cfg.deterministic = true;
+	break;
     case ARGP_KEY_END:
         break;
     }
@@ -386,6 +392,11 @@ int main(int argc, char **argv) {
     __lsvd_dbg_rename = true;
     argp_parse (&argp, argc, argv, 0, 0, 0);
 
+    if (_cfg.deterministic) {
+        __lsvd_dbg_be_threads = 1;
+        __lsvd_dbg_be_delay = false;
+    }
+    
     if (_cfg.seeds.size() > 0) {
 	for (int i = 0; i < _cfg.n_runs; i++)
 	    for (auto s : _cfg.seeds)
