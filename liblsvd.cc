@@ -349,10 +349,6 @@ class rbd_aio_req : public request {
     std::mutex        m;
     std::condition_variable cv;
 
-
-    std::set<void*> wc_work;
-    std::set<request*> rc_work;
-
     void notify_parent(void) {
 	//assert(!m.try_lock());
         if (p != NULL) {
@@ -367,7 +363,6 @@ class rbd_aio_req : public request {
 
     void notify_w(request *req) {
 	std::unique_lock lk(m);
-	wc_work.erase((void*)req);
 	auto z = --n_req;
 	if (z > 0)
 	    return;
@@ -404,7 +399,6 @@ class rbd_aio_req : public request {
 	    smartiov *_iov = new smartiov(tmp.data(), tmp.size());
 	    to_free.push_back(_iov);
 	    auto wcw = img->wcache->writev(this, offset/512, _iov);
-	    wc_work.insert((void*)wcw);
 	    offset += _sectors*512L;
 	}
 
@@ -422,7 +416,6 @@ class rbd_aio_req : public request {
 	    child->release();
 
 	std::unique_lock lk(m);
-	rc_work.erase(child);
         if (--n_req > 0)
 	    return;
 
@@ -441,37 +434,10 @@ class rbd_aio_req : public request {
 
     void run_r() {
 	__reqs++;
-        /* we're not done until n_req == 0 && launched == true
-         */
-	size_t _offset = 0, _end = aligned_iovs.bytes();
 	std::vector<request*> requests;
+
+	img->rcache->handle_read(img, offset, &aligned_iovs, requests);
 	
-        while (_offset < _end) {
-	    smartiov wcache_iov = aligned_iovs.slice(_offset,_end);
-            auto [skip,wait,req] =
-                img->wcache->async_readv(offset, &wcache_iov);
-	    if (req != NULL) {
-		requests.push_back(req);
-		rc_work.insert(req);
-	    }
-            while (skip > 0) {
-		smartiov rcache_iov = aligned_iovs.slice(_offset, _offset+skip);
-                auto [skip2, wait2, req2] =
-                    img->rcache->async_readv(offset, &rcache_iov);
-		if (req2) {
-		    requests.push_back(req2);
-		    rc_work.insert(req2);
-		}
-
-		aligned_iovs.zero(_offset, _offset+skip2);
-                skip -= (skip2 + wait2);
-                _offset += (skip2 + wait2);
-                offset += (skip2 + wait2);
-            }
-            _offset += wait;
-            offset += wait;
-	}
-
 	n_req += requests.size();
 	for (auto const & r : requests)
 	    r->run(this);

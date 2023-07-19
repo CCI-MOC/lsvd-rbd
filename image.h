@@ -43,6 +43,11 @@ public:
     }
 };
 
+class read_cache;
+class write_cache;
+class backend;
+class translate;
+
 struct rbd_image {
     lsvd_config  cfg;
     ssize_t      size;          // bytes

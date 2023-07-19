@@ -21,7 +21,6 @@
 #include <atomic>
 #include <cassert>
 
-
 #include <queue>
 #include <map>
 #include <stack>
@@ -45,6 +44,7 @@
 
 #include "read_cache.h"
 #include "objname.h"
+#include "write_cache.h"
 
 extern void do_log(const char *, ...);
 
@@ -120,6 +120,9 @@ public:
     
     std::tuple<size_t,size_t,request*> async_readv(size_t offset,
 						   smartiov *iov);
+
+    void handle_read(rbd_image *img, size_t offset, smartiov *iovs,
+		     std::vector<request*> &requests);
 
     void write_map(void);
 };
@@ -647,6 +650,34 @@ read_cache_impl::async_readv(size_t offset, smartiov *iov) {
 	r->state = RCACHE_DIRECT_READ;
     }
     return std::make_tuple(skip_len, read_len, r);
+}
+
+void read_cache_impl::handle_read(rbd_image *img,
+				  size_t offset, smartiov *iovs,
+				  std::vector<request*> &requests) {
+    size_t _offset = 0, _end = iovs->bytes();
+
+    while (_offset < _end) {
+	smartiov wcache_iov = iovs->slice(_offset,_end);
+	auto [skip,wait,req] =
+	    img->wcache->async_readv(offset, &wcache_iov);
+	if (req != NULL) 
+	    requests.push_back(req);
+	while (skip > 0) {
+	    smartiov rcache_iov = iovs->slice(_offset, _offset+skip);
+	    auto [skip2, wait2, req2] =
+		async_readv(offset, &rcache_iov);
+	    if (req2) 
+		requests.push_back(req2);
+
+	    iovs->zero(_offset, _offset+skip2);
+	    skip -= (skip2 + wait2);
+	    _offset += (skip2 + wait2);
+	    offset += (skip2 + wait2);
+	}
+	_offset += wait;
+	offset += wait;
+    }
 }
 
 void read_cache_impl::write_map(void) {
