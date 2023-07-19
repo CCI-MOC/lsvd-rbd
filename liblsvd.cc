@@ -106,8 +106,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(js->write_super, fd, xlate, &cfg);
-    rcache = make_read_cache(js->read_super, fd, false,
-			     xlate, &map, &map_lock, objstore);
+    rcache = make_read_cache(js->read_super, fd, 
+			     xlate, &map, &bufmap, &map_lock, objstore);
     free(js);
 
     if (!__lsvd_dbg_no_gc)

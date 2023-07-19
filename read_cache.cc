@@ -159,7 +159,7 @@ class read_cache_impl : public read_cache {
     char *get_cacheline_buf(int n);
 
 public:
-    read_cache_impl(uint32_t blkno, int _fd, bool nt,
+    read_cache_impl(uint32_t blkno, int _fd, 
 		    translate *_be, extmap::objmap *map,
 		    extmap::bufmap *bufmap,
 		    std::shared_mutex *m, backend *_io);
@@ -177,15 +177,15 @@ public:
 
 /* factory function so we can hide implementation
  */
-read_cache *make_read_cache(uint32_t blkno, int _fd, bool nt, translate *_be,
+read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
 			    extmap::objmap *map, extmap::bufmap *bufmap,
 			    std::shared_mutex *m, backend *_io) {
-    return new read_cache_impl(blkno, _fd, nt, _be, map, bufmap, m, _io);
+    return new read_cache_impl(blkno, _fd, _be, map, bufmap, m, _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
-read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, bool nt,
+read_cache_impl::read_cache_impl(uint32_t blkno, int fd_,
 				 translate *be_, extmap::objmap *omap,
 				 extmap::bufmap *bmap,
 				 std::shared_mutex *maplock,
@@ -265,7 +265,7 @@ void read_cache_impl::evict(int n) {
 void read_cache_impl::evict_thread(thread_pool<int> *p) {
     auto wait_time = std::chrono::milliseconds(500);
     auto t0 = std::chrono::system_clock::now();
-    auto timeout = std::chrono::seconds(2);
+    auto timeout = std::chrono::seconds(20);
 
     std::unique_lock<std::mutex> lk(m);
 

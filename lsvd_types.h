@@ -55,6 +55,10 @@ static inline int round_up(int n, int m) {
     return m * div_round_up(n, m);
 }
 
+static inline int round_down(int n, int m) {
+    return m * (n / m);
+}
+
 static inline bool aligned(const void *ptr, int a) {
     return 0 == ((long)ptr & (a-1));
 }
