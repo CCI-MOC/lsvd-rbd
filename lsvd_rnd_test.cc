@@ -388,6 +388,16 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 }
 static struct argp argp = { options, parse_opt, NULL, args_doc};
 
+void do_run_cmd(void) {
+    if (getenv("PRE_TEST")) {
+	char *cmd = getenv("PRE_TEST");
+	printf("running: %s\n", cmd);
+	auto val = system(cmd);
+	if (val < 0)
+	    printf("val %d errno %d\n", val, errno);
+    }
+}    
+
 int main(int argc, char **argv) {
     __lsvd_dbg_rename = true;
     argp_parse (&argp, argc, argv, 0, 0, 0);
@@ -399,8 +409,10 @@ int main(int argc, char **argv) {
     
     if (_cfg.seeds.size() > 0) {
 	for (int i = 0; i < _cfg.n_runs; i++)
-	    for (auto s : _cfg.seeds)
+	    for (auto s : _cfg.seeds) {
+		do_run_cmd();
 		run_test(s, &_cfg);
+	    }
     }
     else {
 	auto now = std::chrono::system_clock::now();
@@ -414,8 +426,7 @@ int main(int argc, char **argv) {
 	for (int i = 0; i < _cfg.n_runs; i++)
 	    seeds.push_back(rng());
 	for (auto s : seeds) {
-	    if (getenv("PRE_TEST"))
-		system(getenv("PRE_TEST"));
+	    do_run_cmd();
 	    run_test(s, &_cfg);
 	}
     }
