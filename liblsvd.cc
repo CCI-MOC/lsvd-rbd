@@ -111,8 +111,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 			     xlate, &map, &map_lock, objstore);
     free(js);
 
-    // if (!__lsvd_dbg_no_gc)
-	// xlate->start_gc();
+    if (!__lsvd_dbg_no_gc)
+	xlate->start_gc();
 
     return 0;
 }
