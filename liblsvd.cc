@@ -283,7 +283,6 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 
 extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
-    //do_log("'f', 0, 0, []\n");
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
     auto img = p->img = (rbd_image*)image;
@@ -297,7 +296,6 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 
 extern "C" int rbd_flush(rbd_image_t image)
 {
-    //do_log("rbd_flush\n");
     auto img = (rbd_image*)image;
     if (img->cfg.hard_sync)
 	img->xlate->flush();
@@ -438,7 +436,7 @@ class rbd_aio_req : public request {
 
 	img->rcache->handle_read(img, offset, &aligned_iovs, requests);
 	
-	n_req += requests.size();
+	n_req = requests.size();
 	for (auto const & r : requests)
 	    r->run(this);
 	
@@ -465,13 +463,7 @@ class rbd_aio_req : public request {
 	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
 	sectors = iovs.bytes() / 512L;
-#if 0
-	if (op == OP_WRITE) {
-	    do_log("%s %ld\n", op == OP_READ ? "R" : "W", sectors);
-	    if (iovs.size() > 10)
-		do_log(" big\n");
-	}
-#endif
+
 	if (iovs.aligned(512))
 	    aligned_iovs = iovs;
 	else {
@@ -539,7 +531,6 @@ public:
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset,
 			    size_t len, char *buf, rbd_completion_t c)
 {
-    //do_log("rbd_aio_read\n");
     rbd_image *img = (rbd_image*)image;
     auto p = (lsvd_completion*)c;
     assert(p->magic == LSVD_MAGIC);
@@ -597,7 +588,6 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
-    //do_log("rbd_read %d\n", (int)(off / 512));
     rbd_image *img = (rbd_image*)image;
     auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
 
@@ -608,7 +598,6 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len, const char *buf)
 {
-    //do_log("rbd_write\n");
     rbd_image *img = (rbd_image*)image;
     auto req = new rbd_aio_req(OP_WRITE, img, NULL, off, REQ_WAIT,
 			       (char*)buf, len);
@@ -638,7 +627,6 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
  */
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosize)
 {
-    //do_log("rbd_stat\n");
     rbd_image *img = (rbd_image*)image;
     memset(info, 0, sizeof(*info));
     info->size = img->size;
@@ -649,7 +637,6 @@ extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info, size_t infosi
 
 extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
 {
-    //do_log("rbd_get_size\n");
     rbd_image *img = (rbd_image*)image;
     *size = img->size;
     return 0;

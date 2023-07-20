@@ -29,6 +29,8 @@
 #include <random>
 #include <algorithm>		// std::min
 
+#include <zlib.h>		// DEBUG
+
 #include "lsvd_types.h"
 #include "backend.h"
 
@@ -168,7 +170,9 @@ public:
 		     std::vector<request*> &requests);
 
     sector_t nvme_sector(int blk) {
-	return (8 * super->base) + (blk * block_sectors);
+	auto val = (8 * super->base) + (blk * block_sectors);
+	do_log("nv %d %d\n", blk, (int)val);
+	return val;
     }
     
     void write_map(void);
@@ -375,10 +379,10 @@ class pending_read_request : public rcache_generic_request {
     read_cache_impl *r;
     sector_t sector_in_blk;
     smartiov iovs;
-
     request *parent;
     
 public:
+    sector_t base, limit;
     pending_read_request(read_cache_impl *r_,
 			 sector_t sector_in_blk_,
 			 smartiov &slice) : iovs(slice) {
@@ -393,7 +397,13 @@ public:
     }
     
     void copy_in(char *buf) {
+	auto p1 = (int*)buf;
+	auto p2 = (int*)(buf + sector_in_blk * 512L);
+	do_log("8 %ld %ld %ld %d,%d %d,%d\n",
+	       base, limit, sector_in_blk,
+	       p2[0], p2[1], p1[0], p1[1]);
 	iovs.copy_in(buf + sector_in_blk * 512L);
+	do_log("d %p\n", this);
 	parent->notify(this);
 	finish();
     }
@@ -430,6 +440,7 @@ public:
 	    child->release();
 	std::unique_lock lk(r->m);
 	r->in_use[blk]--;
+	do_log("c %p\n", this);
 	parent->notify(this);
 	finish();
     }
@@ -466,6 +477,7 @@ public:
     void notify(request *child) {
 	if (child)
 	    child->release();
+	do_log("b %p\n", this);
 	parent->notify(this);
 	finish();
     }
@@ -484,11 +496,11 @@ class cache_fill_req : public rcache_generic_request {
     request *obj_req;
     
     char *buf;
-    iovec buf_iov;
     
     enum {FETCH_PENDING = 1,
 	  WRITE_PENDING} state;
-    
+
+    uint32_t crc1;		// DEBUG
 public:
     cache_fill_req(read_cache_impl *r_, int blk_,
 		   sector_t sector_in_blk_, extmap::obj_offset obj_loc_,
@@ -498,13 +510,13 @@ public:
 	sector_in_blk = sector_in_blk_;
 	oo = obj_loc_;
 	nvme_sector = nvme_sector_;
-	buf = (char*)calloc(r->block_sectors * 512, 1);
-
+	buf = (char*)aligned_alloc(512, r->block_sectors * 512);
+	memset(buf, 'A', 64*1024);
+	
 	objname name(r->be->prefix(oo.obj), oo.obj);
-	buf_iov = (iovec){.iov_base = buf,
-			  .iov_len = (size_t)r->block_sectors * 512};
 	obj_req = r->io->make_read_req(name.c_str(), 512L*oo.offset,
-				       &buf_iov, 1);
+				       buf, r->block_sectors * 512);
+	do_log("f %s %d\n", name.c_str()+23, 512*oo.offset);
     }
     
     ~cache_fill_req() {
@@ -520,27 +532,39 @@ public:
     void notify(request *child) {
 	if (child)
 	    child->release();
-	
+	auto p = (int*)buf;
+	do_log("nfy %d (%ld) %s %d,%d\n", blk, nvme_sector,
+	       state == FETCH_PENDING ?
+	       "FETCH" : (state == WRITE_PENDING ? "WRITE" : "???"),
+	       p[0], p[1]);
 	if (state == FETCH_PENDING) {
-	    /* complete any higher-layer requests waiting on this
-	     */
-	    std::unique_lock lk(r->m);
-	    for (auto const &req : r->pending[blk])
-		req->copy_in(buf);
-	    r->pending[blk].clear();
-	    lk.unlock();
+	    // /* complete any higher-layer requests waiting on this
+	    //  */
+	    // std::unique_lock lk(r->m);
+	    // for (auto const &req : r->pending[blk])
+	    // 	req->copy_in(buf);
+	    // r->pending[blk].clear();
+	    // lk.unlock();
 	    
-	    iovs.copy_in(buf + sector_in_blk * 512L);
-	    parent->notify(this);
+	    //iovs.copy_in(buf + sector_in_blk * 512L);
+	    //parent->notify(this);
 
 	    /* and write it to cache
 	     */
-	    nvme_req = r->ssd->make_write_request(&iovs, nvme_sector * 512L);
+	    size_t len = r->block_sectors * 512;
+	    crc1 = (uint32_t)crc32(0, (unsigned char*)buf, len);
+	    nvme_req = r->ssd->make_write_request(buf, len, nvme_sector * 512L);
 	    state = WRITE_PENDING;
 	    nvme_req->run(this);
 	}
 	else if (state == WRITE_PENDING) {
+	    size_t len = r->block_sectors * 512;
+	    auto crc2 = (uint32_t)crc32(0, (unsigned char*)buf, len);
+	    assert(crc1 == crc2);
 	    std::unique_lock lk(r->m);
+	    iovs.copy_in(buf + sector_in_blk * 512L);
+	    do_log("a %p\n", this);
+	    parent->notify(this);
 	    for (auto req : r->pending[blk])
 		req->copy_in(buf);
 	    r->pending[blk].clear();
@@ -565,7 +589,9 @@ void read_cache_impl::handle_read(rbd_image *img,
 
     std::shared_lock lk(*obj_lock);
     
-    auto it1 = buf_map->lookup(base);
+    auto it1 = buf_map->end();
+    if (buf_map->size() > 0)
+	it1 = buf_map->lookup(base);
     auto it2 = obj_map->lookup(base);
     size_t _offset = 0;
 
@@ -593,6 +619,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 	 */
 	auto base3 = std::min(base1, base2);
 	if (base3 > base) {
+	    do_log("1 %ld %ld\n", base, base3);
 	    sector_t sectors = base3 - base;
 	    iovs->zero(_offset, _offset + sectors*512L);
 	    base = base3;
@@ -607,6 +634,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
 	    slice.copy_in(bufptr.buf);
 	    hit_stats.serve(sectors);
+	    do_log("2 %ld %ld\n", base, limit1);
 	    
 	    base = limit1;
 	    _offset += sectors*512;
@@ -639,8 +667,10 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    sector_t sectors = (offset_limit - objptr.offset);
 	    sector_t sector_in_blk = objptr.offset % block_sectors;
 	    limit2 = base + sectors;
+	    
 	    int i = map[key];
 	    in_use[i]++;
+	    do_log("3 %ld %ld ([%d] %ld)\n", base, limit2, i, sector_in_blk);
 
 	    hit_stats.serve(sectors);
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
@@ -648,14 +678,18 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    if (fetching[i]) {
 		auto req = new pending_read_request(this, sector_in_blk,
 						    slice);
+		req->base = base;
+		req->limit = limit2;
 		pending[i].push_back(req);
 		requests.push_back(req);
+		do_log("4 [%d] %p\n", i, req);
 	    }
 	    else {
-		auto nvme_location = nvme_sector(i);
+		auto nvme_location = nvme_sector(i) + sector_in_blk;
 		auto req = new cache_hit_request(this, i,
 						 nvme_location, slice);
 		requests.push_back(req);
+		do_log("5 [%d] %p\n", i, req);
 	    }
 	    _offset += (limit2 - base)*512;
 	    base = limit2;
@@ -683,7 +717,8 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
 	    auto req = new direct_read_req(this, objptr, slice);
 	    requests.push_back(req);
-
+	    do_log("6 %ld %ld\n", base, limit2);
+	    
 	    hit_stats.serve(sectors);
 	    hit_stats.fetch(sectors);
 
@@ -722,6 +757,8 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto req = new cache_fill_req(this, i, sector_in_blk, key,
 					  nvme_base, slice);
 	    requests.push_back(req);
+	    do_log("7 %ld %ld [%d] %p\n", base, limit2, i, req);
+	    
 
 	    hit_stats.serve(sectors);
 	    hit_stats.fetch(block_sectors);
