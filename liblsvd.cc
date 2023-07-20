@@ -414,6 +414,7 @@ class rbd_aio_req : public request {
 	    child->release();
 
 	std::unique_lock lk(m);
+	//do_log("rr done %d %p\n", n_req.load(), child);
         if (--n_req > 0)
 	    return;
 
@@ -437,8 +438,11 @@ class rbd_aio_req : public request {
 	img->rcache->handle_read(img, offset, &aligned_iovs, requests);
 	
 	n_req = requests.size();
-	for (auto const & r : requests)
+	//do_log("rbd_read %ld:\n", offset/512);
+	for (auto const & r : requests) {
+	    //do_log(" %p\n", r);
 	    r->run(this);
+	}
 	
 	std::unique_lock lk(m);
 	if (requests.size() == 0)

@@ -290,9 +290,8 @@ void wcache_write_req::notify_in_order(void) {
     wcache->outstanding_writes--;
     if (wcache->work.size() >= wcache->write_batch ||
 	wcache->work_sectors >= wcache->cfg->wcache_chunk / 512)
-	wcache->send_writes(lk); // unlocks
-    else
-	lk.unlock();
+	wcache->send_writes(lk); // doesn't unlock anymore
+    lk.unlock();
 
     /* we don't implement release or wait - just delete ourselves.
      */
@@ -489,13 +488,14 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
 void write_cache_impl::flush_thread(thread_pool<int> *p) {
     pthread_setname_np(pthread_self(), "wcache_flush");
     auto period = std::chrono::milliseconds(50);
+
+    std::unique_lock lk(m);
     while (p->running) {
-	std::unique_lock lk(m);
 	p->cv.wait_for(lk, period);
 	if (!p->running)
 	    return;
 	if (outstanding_writes == 0 && work.size() > 0)
-	    send_writes(lk);	// unlocks
+	    send_writes(lk);	// doesn't unlock anymore
     }
 }
 
@@ -825,6 +825,7 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
 
     lk.unlock();
     req->run(NULL);
+    lk.lock();
 }
 
 write_cache_work *write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {

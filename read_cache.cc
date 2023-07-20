@@ -102,9 +102,8 @@ class read_cache_impl : public read_cache {
     int block_sectors;
 
     j_read_super       *super;
-    extmap::obj_offset *flat_map;
 
-    std::vector<extmap::obj_offset>    rmap;
+    extmap::obj_offset  *rmap;
     std::map<extmap::obj_offset,int>   map;
     bool              map_dirty = false;
 
@@ -171,7 +170,6 @@ public:
 
     sector_t nvme_sector(int blk) {
 	auto val = (8 * super->base) + (blk * block_sectors);
-	do_log("nv %d %d\n", blk, (int)val);
 	return val;
     }
     
@@ -214,16 +212,19 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_,
     written.insert(written.end(), super->units, false);
     fetching.insert(fetching.end(), super->units, false);
     pending.init(super->units);
-    rmap.insert(rmap.end(), super->units, (extmap::obj_offset){0,0});
+    int rmap_bytes = round_up(super->units * sizeof(extmap::obj_offset),
+			      4096);
+    rmap = (extmap::obj_offset*)aligned_alloc(512, rmap_bytes);
+    memset((char*)rmap, 0, rmap_bytes);
 
-    flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
-    if (ssd->read((char*)flat_map, super->map_blocks*4096,
-		  super->map_start*4096L) < 0)
+    auto val = ssd->read((char*)rmap, super->map_blocks*4096,
+			 super->map_start*4096L);
+    if (val < 0)
 	throw("read flatmap");
 
     for (int i = 0; i < super->units; i++) {
-	if (flat_map[i].obj != 0) {
-	    map[flat_map[i]] = i;
+	if (rmap[i].obj != 0) {
+	    map[rmap[i]] = i;
 	    written[i] = true;
 	}
 	else 
@@ -239,8 +240,6 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_,
 read_cache_impl::~read_cache_impl() {
     misc_threads.stop();	// before we free anything threads might touch
     delete ssd;
-	
-    free((void*)flat_map);
     free((void*)super);
 }
 
@@ -258,10 +257,10 @@ void read_cache_impl::evict(int n) {
     std::uniform_int_distribution<int> uni(0,super->units - 1);
     for (int i = 0; i < n; i++) {
 	int j = uni(rng);
-	while (flat_map[j].obj == 0 || in_use[j] > 0)
+	while (rmap[j].obj == 0 || in_use[j] > 0)
 	    j = uni(rng);
-	auto oo = flat_map[j];
-	flat_map[j] = (extmap::obj_offset){0, 0};
+	auto oo = rmap[j];
+	rmap[j] = (extmap::obj_offset){0, 0};
 	map.erase(oo);
 	free_blocks.push(j);
     }
@@ -295,7 +294,7 @@ void read_cache_impl::evict_thread(thread_pool<int> *p) {
 	if (n > 0 || (t - t0) > timeout) {
 	    size_t bytes = 4096 * super->map_blocks;
 	    auto buf = (char*)aligned_alloc(512, bytes);
-	    memcpy(buf, flat_map, bytes);
+	    memcpy(buf, (char*)rmap, bytes);
 
 	    if (ssd->write(buf, bytes, 4096L * super->map_start) < 0)
 		throw("write flatmap");
@@ -397,13 +396,7 @@ public:
     }
     
     void copy_in(char *buf) {
-	auto p1 = (int*)buf;
-	auto p2 = (int*)(buf + sector_in_blk * 512L);
-	do_log("8 %ld %ld %ld %d,%d %d,%d\n",
-	       base, limit, sector_in_blk,
-	       p2[0], p2[1], p1[0], p1[1]);
 	iovs.copy_in(buf + sector_in_blk * 512L);
-	do_log("d %p\n", this);
 	parent->notify(this);
 	finish();
     }
@@ -440,7 +433,6 @@ public:
 	    child->release();
 	std::unique_lock lk(r->m);
 	r->in_use[blk]--;
-	do_log("c %p\n", this);
 	parent->notify(this);
 	finish();
     }
@@ -477,7 +469,6 @@ public:
     void notify(request *child) {
 	if (child)
 	    child->release();
-	do_log("b %p\n", this);
 	parent->notify(this);
 	finish();
     }
@@ -516,7 +507,6 @@ public:
 	objname name(r->be->prefix(oo.obj), oo.obj);
 	obj_req = r->io->make_read_req(name.c_str(), 512L*oo.offset,
 				       buf, r->block_sectors * 512);
-	do_log("f %s %d\n", name.c_str()+23, 512*oo.offset);
     }
     
     ~cache_fill_req() {
@@ -532,11 +522,6 @@ public:
     void notify(request *child) {
 	if (child)
 	    child->release();
-	auto p = (int*)buf;
-	do_log("nfy %d (%ld) %s %d,%d\n", blk, nvme_sector,
-	       state == FETCH_PENDING ?
-	       "FETCH" : (state == WRITE_PENDING ? "WRITE" : "???"),
-	       p[0], p[1]);
 	if (state == FETCH_PENDING) {
 	    // /* complete any higher-layer requests waiting on this
 	    //  */
@@ -563,7 +548,6 @@ public:
 	    assert(crc1 == crc2);
 	    std::unique_lock lk(r->m);
 	    iovs.copy_in(buf + sector_in_blk * 512L);
-	    do_log("a %p\n", this);
 	    parent->notify(this);
 	    for (auto req : r->pending[blk])
 		req->copy_in(buf);
@@ -624,7 +608,6 @@ void read_cache_impl::handle_read(rbd_image *img,
 	 */
 	auto base3 = std::min(base1, base2);
 	if (base3 > base) {
-	    do_log("1 %ld %ld\n", base, base3);
 	    sector_t sectors = base3 - base;
 	    iovs->zero(_offset, _offset + sectors*512L);
 	    base = base3;
@@ -639,7 +622,6 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
 	    slice.copy_in(bufptr.buf);
 	    hit_stats.serve(sectors);
-	    do_log("2 %ld %ld\n", base, limit1);
 	    
 	    base = limit1;
 	    _offset += sectors*512;
@@ -657,6 +639,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 
 	assert(base2 == base);
 	assert(it2 != obj_map->end());
+	limit2 = std::min(limit2, base1);
 	sector_t sectors = limit2 - base;
 
 	/* objects are cached in aligned blocks of size <block_sectors>
@@ -675,7 +658,6 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    
 	    int i = map[key];
 	    in_use[i]++;
-	    do_log("3 %ld %ld ([%d] %ld)\n", base, limit2, i, sector_in_blk);
 
 	    hit_stats.serve(sectors);
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
@@ -687,14 +669,12 @@ void read_cache_impl::handle_read(rbd_image *img,
 		req->limit = limit2;
 		pending[i].push_back(req);
 		requests.push_back(req);
-		do_log("4 [%d] %p\n", i, req);
 	    }
 	    else {
 		auto nvme_location = nvme_sector(i) + sector_in_blk;
 		auto req = new cache_hit_request(this, i,
 						 nvme_location, slice);
 		requests.push_back(req);
-		do_log("5 [%d] %p\n", i, req);
 	    }
 	    _offset += (limit2 - base)*512;
 	    base = limit2;
@@ -722,7 +702,6 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
 	    auto req = new direct_read_req(this, objptr, slice);
 	    requests.push_back(req);
-	    do_log("6 %ld %ld\n", base, limit2);
 	    
 	    hit_stats.serve(sectors);
 	    hit_stats.fetch(sectors);
@@ -762,9 +741,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto req = new cache_fill_req(this, i, sector_in_blk, key,
 					  nvme_base, slice);
 	    requests.push_back(req);
-	    do_log("7 %ld %ld [%d] %p\n", base, limit2, i, req);
 	    
-
 	    hit_stats.serve(sectors);
 	    hit_stats.fetch(block_sectors);
 	    pending_fills++;
@@ -778,7 +755,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 }
 
 void read_cache_impl::write_map(void) {
-    if (ssd->write(flat_map, 4096 * super->map_blocks,
+    if (ssd->write((char*)rmap, 4096 * super->map_blocks,
                    4096L * super->map_start) < 0)
         throw("write flatmap");
 }

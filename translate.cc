@@ -556,7 +556,10 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
     std::unique_lock obj_w_lock(*map_lock);
     assert(ptr >= current->local_buf_base &&
 	   ptr + (limit-base)*512 <= current->local_buf_limit);
+    assert(ptr != NULL);
     bufmap->update(base, limit, ptr);
+    //for (auto it = bufmap->begin(); it != bufmap->end(); it++)
+    //    assert(it->ptr().buf != NULL);
 
     return 0;
 }
@@ -738,6 +741,8 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req) {
  * this guarantees that the contents reflect the map state after all
  * previous seq#s and before all following ones.
  */
+int __count_update;
+int __last_size;
 void translate_impl::write_gc(int _seq, translate_req *req) {
     req->_seq = _seq;
     
@@ -800,7 +805,16 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
 	extmap::obj_offset oo = {_seq, offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
 	offset += e.len;
+	assert(data_ptr != NULL);
+	__last_size = bufmap->size();
+	if (__last_size == 1)
+	    do_log("1 1 1\n");
 	bufmap->update(e.lba, e.lba+e.len, data_ptr);
+
+	//__count_update++;
+	//for (auto it = bufmap->begin(); it != bufmap->end(); it++)
+	//    assert(it->ptr().buf != NULL);
+
 	dbg_ptrs.push_back(std::make_pair(data_ptr, data_ptr+512*e.len));
 	data_ptr += e.len*512;
 	req->entries.push_back((ckpt_mapentry){
@@ -986,8 +1000,8 @@ void translate_impl::flush_thread(thread_pool<int> *p) {
     auto t0 = std::chrono::system_clock::now();
     auto seq0 = seq.load();
 
+    std::unique_lock lk(*p->m);
     while (p->running) {
-	std::unique_lock lk(*p->m);
 	p->cv.wait_for(lk, wait_time);
 	if (!p->running)
 	    break;
