@@ -54,14 +54,13 @@ extern void do_log(const char *, ...);
 class window_ctr {
     int i = 0;			// current epoch
     int epoch;			// number of sectors per epoch
-    int n;			// current # sectors
-    int served[4] = {0};
-    int fetched[4] = {0};
+    int n = 1000;		// current # sectors
+    int served[4] = {1000,0,0,0};
+    int fetched[4] = {0,0,0,0};
 
 public:
     window_ctr(int epoch_) {
 	epoch = epoch_;
-	served[0] = 1000;
     }
     ~window_ctr() {}
     
@@ -136,7 +135,7 @@ class read_cache_impl : public read_cache {
 
     window_ctr        hit_stats;
 
-    int               pending_fills;
+    int               pending_fills = 0;
     int               fill_window = 12;
     
     thread_pool<int> misc_threads; // eviction thread, for now
@@ -209,7 +208,9 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_,
 
     in_use.insert(in_use.end(), super->units, 0);
     written.insert(written.end(), super->units, false);
+    fetching.insert(fetching.end(), super->units, false);
     pending.init(super->units);
+    rmap.insert(rmap.end(), super->units, (extmap::obj_offset){0,0});
 
     flat_map = (extmap::obj_offset*)aligned_alloc(512, super->map_blocks*4096);
     if (ssd->read((char*)flat_map, super->map_blocks*4096,
@@ -472,7 +473,7 @@ public:
 
 class cache_fill_req : public rcache_generic_request {
     read_cache_impl *r;
-    int      blk;
+    int      blk = 10000000;
     sector_t sector_in_blk;	// specific request
     extmap::obj_offset oo;	// block location in object
     sector_t nvme_sector;
@@ -489,10 +490,11 @@ class cache_fill_req : public rcache_generic_request {
 	  WRITE_PENDING} state;
     
 public:
-    cache_fill_req(read_cache_impl *r_, int blk,
+    cache_fill_req(read_cache_impl *r_, int blk_,
 		   sector_t sector_in_blk_, extmap::obj_offset obj_loc_,
 		   sector_t nvme_sector_, smartiov &slice) : iovs(slice) {
 	r = r_;
+	blk = blk_;
 	sector_in_blk = sector_in_blk_;
 	oo = obj_loc_;
 	nvme_sector = nvme_sector_;
@@ -561,6 +563,8 @@ void read_cache_impl::handle_read(rbd_image *img,
     sector_t base = offset / 512;
     sector_t limit = base + iovs->bytes() / 512;
 
+    std::shared_lock lk(*obj_lock);
+    
     auto it1 = buf_map->lookup(base);
     auto it2 = obj_map->lookup(base);
     size_t _offset = 0;
@@ -633,7 +637,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 	 */
 	if (map.find(key) != map.end()) {
 	    sector_t sectors = (offset_limit - objptr.offset);
-	    sector_t sector_in_blk = base - key.offset;
+	    sector_t sector_in_blk = objptr.offset % block_sectors;
 	    limit2 = base + sectors;
 	    int i = map[key];
 	    in_use[i]++;
@@ -668,8 +672,8 @@ void read_cache_impl::handle_read(rbd_image *img,
 	 * TODO: don't let hits get too high
 	 */
 	auto [served, fetched] = hit_stats.vals();
-	bool use_cache = free_blocks.size() > 0 &&
-	    served * 3 > fetched * 2 && pending_fills < fill_window;
+	bool use_cache = (free_blocks.size() > 0) &&
+	    ((served * 3) > (fetched * 2)) && (pending_fills < fill_window);
 
 	/* if we bypass the cache, send the entire read to the backend
 	 * without worrying about cache block alignment
@@ -704,7 +708,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    sector_t sectors = offset_limit - objptr.offset;
 	    limit2 = base + sectors;
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
-	    sector_t sector_in_blk = base - key.offset;
+	    sector_t sector_in_blk = objptr.offset % block_sectors;
 
 	    /* parameters to the request:
 	     * - lba range of this request
