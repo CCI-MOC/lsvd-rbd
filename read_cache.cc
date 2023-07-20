@@ -608,12 +608,17 @@ void read_cache_impl::handle_read(rbd_image *img,
      *
      */
     while (base < limit) {
-	auto [base1,limit1,bufptr] = it1->vals(base, limit);
-	if (it1 == buf_map->end())
-	    base1 = limit1 = limit;
-	auto [base2,limit2,objptr] = it2->vals(base, limit);
-	if (it2 == obj_map->end())
-	    base2 = limit2 = limit;
+	/* ugly hack because end()->vals() crashes
+	 */
+	sector_t base1 = limit, limit1 = limit;
+	extmap::sector_ptr bufptr = {NULL};
+	if (it1 != buf_map->end())
+	    std::tie(base1,limit1,bufptr) = it1->vals(base, limit);
+	
+	sector_t base2 = limit, limit2 = limit;
+	extmap::obj_offset objptr = {0, 0};
+	if (it2 != obj_map->end())
+	    std::tie(base2, limit2, objptr) = it2->vals(base, limit);
 
 	/* [base..base3] is unmapped - zero it out
 	 */
