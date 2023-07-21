@@ -846,7 +846,7 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
 void translate_impl::process_batch(int _seq, translate_req *req)
 {
     req->_seq = _seq;
-    
+
     int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
 	req->entries.size() * sizeof(data_map);
     int hdr_sectors = div_round_up(hdr_bytes, 512);
@@ -1052,6 +1052,11 @@ void translate_impl::do_gc(bool *running) {
 	object_info.erase(o);
     obj_w_lock.unlock();
     
+    std::unique_lock lk(m);
+    int last_ckpt = (checkpoints.size() > 0) ?
+	checkpoints.back() : seq.load();
+    lk.unlock();
+
     /* create list of object info in increasing order of 
      * utilization, i.e. (live data) / (total size)
      */
@@ -1059,6 +1064,8 @@ void translate_impl::do_gc(bool *running) {
     int calculated_total = 0;
     std::set<std::tuple<double,int,int>> utilization;
     for (auto p : object_info)  {
+	if (p.first > last_ckpt)
+	    continue;
 	auto [hdrlen, datalen, live] = p.second;
 	double rho = 1.0 * live / datalen;
 	sector_t sectors = hdrlen + datalen;
@@ -1067,7 +1074,7 @@ void translate_impl::do_gc(bool *running) {
 	assert(sectors <= 20*1024*1024/512); // WTF??
     }
     obj_r_lock.unlock();
-    
+
     /* gather list of objects needing cleaning, return if none
      */
     const double threshold = cfg->gc_threshold / 100.0;
