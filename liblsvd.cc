@@ -347,6 +347,8 @@ class rbd_aio_req : public request {
     std::mutex        m;
     std::condition_variable cv;
 
+    std::vector<request*> requests;
+    
     void notify_parent(void) {
 	//assert(!m.try_lock());
         if (p != NULL) {
@@ -433,7 +435,7 @@ class rbd_aio_req : public request {
 
     void run_r() {
 	__reqs++;
-	std::vector<request*> requests;
+	//std::vector<request*> requests;
 
 	img->rcache->handle_read(img, offset, &aligned_iovs, requests);
 	
