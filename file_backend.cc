@@ -61,6 +61,7 @@ class file_backend : public backend {
 public:
     file_backend(const char *prefix);
     ~file_backend();
+    void stop(void) {}
 
     /* see backend.h 
      */
@@ -216,7 +217,7 @@ public:
 	_iovs.push_back(iov);
     }
     ~file_backend_req() {}
-
+    
     void      wait() {}		   // TODO: ?????
     void      run(request *parent);
     void      notify(request *child);

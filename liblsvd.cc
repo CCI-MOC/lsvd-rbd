@@ -162,6 +162,7 @@ int rbd_image::image_close(void) {
     delete wcache;
     xlate->stop_gc();
     xlate->checkpoint();
+    objstore->stop();
     delete xlate;
     delete objstore;
     close(fd);
@@ -663,6 +664,7 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
 	return -1;
     auto objstore = get_backend(&cfg, io, NULL);
     auto rv = translate_create_image(objstore, name, size);
+    objstore->stop();
     delete objstore;
     return rv;
 }
@@ -684,6 +686,7 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name) {
     auto cache_file = cfg.cache_filename(uu, name);
     unlink(cache_file.c_str());
     rv = translate_remove_image(objstore, name);
+    objstore->stop();
     delete objstore;
     return rv;
 }

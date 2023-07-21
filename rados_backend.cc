@@ -38,6 +38,7 @@ class rados_backend : public backend {
 public:
     rados_backend();
     ~rados_backend();
+    void stop(void);
 
     int write_object(const char *name, iovec *iov, int iovcnt);
     int write_object(const char *name, char *buf, size_t len);
@@ -78,12 +79,13 @@ rados_backend::rados_backend() {
 	throw("rados connect");
 }
 
-rados_backend::~rados_backend() {
+void rados_backend::stop(void) {
     if (pool_len > 0)
 	rados_ioctx_destroy(io_ctx);
     rados_shutdown(cluster);
-    /* TODO: do we close things down? */
 }
+
+rados_backend::~rados_backend() {}
 
 /* if pool hasn't been initialized yet, initialize the ioctx
  * only supports one pool, exception if you try to access another one
