@@ -379,26 +379,46 @@ class pending_read_request : public rcache_generic_request {
     sector_t sector_in_blk;
     smartiov iovs;
     request *parent;
+    sector_t blk;
+    bool     was_run = false;
+    bool     done = false;
+    std::mutex m;
     
 public:
     sector_t base, limit;
     pending_read_request(read_cache_impl *r_,
-			 sector_t sector_in_blk_,
+			 sector_t blk_, sector_t sector_in_blk_,
 			 smartiov &slice) : iovs(slice) {
+	blk = blk_;
 	sector_in_blk = sector_in_blk_;
     }
     
     ~pending_read_request() {}
     void notify(request *r) {}
-    
+
+    /* weird race condition - we might actually get completed before
+     * the parent has called run()
+     */
     void run(request *parent_) {
+	std::unique_lock lk(m);
 	parent = parent_;
+	was_run = true;
+	if (done) {
+	    lk.unlock();
+	    parent->notify(this);
+	    finish();
+	}
     }
     
     void copy_in(char *buf) {
 	iovs.copy_in(buf + sector_in_blk * 512L);
-	parent->notify(this);
-	finish();
+	std::unique_lock lk(m);
+	done = true;
+	if (was_run) {
+	    lk.unlock();
+	    parent->notify(this);
+	    finish();
+	}
     }
 };
 
@@ -573,7 +593,8 @@ void read_cache_impl::handle_read(rbd_image *img,
     sector_t base = offset / 512;
     sector_t limit = base + iovs->bytes() / 512;
 
-    std::shared_lock lk(*obj_lock);
+    std::unique_lock lk(m);
+    std::shared_lock lk2(*obj_lock);
     
     auto it1 = buf_map->end();
     if (buf_map->size() > 0)
@@ -665,8 +686,8 @@ void read_cache_impl::handle_read(rbd_image *img,
 	    auto slice = iovs->slice(_offset, _offset + sectors*512L);
 
 	    if (fetching[i]) {
-		auto req = new pending_read_request(this, sector_in_blk,
-						    slice);
+		auto req = new pending_read_request(this, i,
+						    sector_in_blk, slice);
 		req->base = base;
 		req->limit = limit2;
 		pending[i].push_back(req);
