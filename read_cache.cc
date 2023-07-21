@@ -454,6 +454,7 @@ class direct_read_req : public rcache_generic_request {
 public:
     direct_read_req(read_cache_impl *r, extmap::obj_offset oo,
 		    smartiov &slice) : iovs(slice) {
+	r->be->wait_object_ready(oo.obj);
 	objname name(r->be->prefix(oo.obj), oo.obj);
 	auto [iov,iovcnt] = iovs.c_iov();
 	obj_req = r->io->make_read_req(name.c_str(), 512L*oo.offset,
@@ -504,6 +505,7 @@ public:
 	buf = (char*)aligned_alloc(512, r->block_sectors * 512);
 	memset(buf, 'A', 64*1024);
 	
+	r->be->wait_object_ready(oo.obj);
 	objname name(r->be->prefix(oo.obj), oo.obj);
 	obj_req = r->io->make_read_req(name.c_str(), 512L*oo.offset,
 				       buf, r->block_sectors * 512);
@@ -631,7 +633,7 @@ void read_cache_impl::handle_read(rbd_image *img,
 	     *  it2:    |----|    |----|
 	     *                           |------|   < but not this
 	     */
-	    while (it2 != obj_map->end() && it2->limit() < limit1)
+	    while (it2 != obj_map->end() && it2->limit() <= limit1)
 		it2++;
 	    it1++;
 	    continue;

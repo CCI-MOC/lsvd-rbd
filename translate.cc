@@ -626,7 +626,8 @@ void translate_req::notify(request *child) {
 	std::unique_lock lk(tx->m);
 	//if (--tx->outstanding_writes < tx->cfg->xlate_window)
 	tx->outstanding_writes--;
-	tx->active_gc_objs.erase(_seq);
+	if (op == REQ_GC)
+	    tx->active_gc_objs.erase(_seq);
 	tx->cv.notify_all();
     }
 

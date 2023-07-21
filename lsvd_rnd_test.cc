@@ -187,7 +187,9 @@ bool started = false;
 void run_test(unsigned long seed, struct cfg *cfg) {
     printf("seed: 0x%lx\n", seed);
     rng.seed(seed);
-
+    extern char *p_log, *logbuf;
+    p_log = logbuf;		// DEBUG
+    
     init_random();
     rados_ioctx_t io = 0;
     rbd_image_t img;
