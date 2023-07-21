@@ -224,7 +224,7 @@ class translate_impl : public translate {
     super_hdr *super_sh = NULL;
     size_t     super_len;
 
-    std::set<int> objs_written;	// HACK - for wait_object_ready
+    std::set<int> active_gc_objs; // for wait_object_ready
 
     thread_pool<translate_req*> *workers;
     thread_pool<int>    *misc_threads; // so we can stop ckpt, gc first
@@ -603,9 +603,11 @@ void translate_impl::wait_for_room(void) {
 	cv.wait(lk);
 }
 
+/* TODO: change to track outstanding objects, remove on notify
+ */
 void translate_impl::wait_object_ready(int obj) {
     std::unique_lock lk(m);
-    while (objs_written.find(obj) == objs_written.end())
+    while (active_gc_objs.find(obj) != active_gc_objs.end())
 	cv.wait(lk);
 }
 
@@ -624,9 +626,11 @@ void translate_req::notify(request *child) {
 	std::unique_lock lk(tx->m);
 	//if (--tx->outstanding_writes < tx->cfg->xlate_window)
 	tx->outstanding_writes--;
-	tx->objs_written.insert(_seq);
+	tx->active_gc_objs.erase(_seq);
 	tx->cv.notify_all();
+    }
 
+    if (op == REQ_PUT) {
 	/* remove extents from tx->bufmap, but only if they still
 	 * point to this buffer
 	 */
@@ -741,8 +745,6 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req) {
  * this guarantees that the contents reflect the map state after all
  * previous seq#s and before all following ones.
  */
-int __count_update;
-int __last_size;
 void translate_impl::write_gc(int _seq, translate_req *req) {
     req->_seq = _seq;
     
@@ -799,34 +801,16 @@ void translate_impl::write_gc(int _seq, translate_req *req) {
     std::vector<extmap::lba2obj> deleted;
     req->entries.clear();	// replace with actual extents written
 
-    std::vector<std::pair<char*,char*>> dbg_ptrs;
     std::unique_lock obj_w_lock(*map_lock); // protect the readers
     for (auto const &e : obj_extents) {
 	extmap::obj_offset oo = {_seq, offset};
 	map->update(e.lba, e.lba+e.len, oo, &deleted);
 	offset += e.len;
-	assert(data_ptr != NULL);
-	__last_size = bufmap->size();
-	if (__last_size == 1)
-	    do_log("1 1 1\n");
-	bufmap->update(e.lba, e.lba+e.len, data_ptr);
-
-	//__count_update++;
-	//for (auto it = bufmap->begin(); it != bufmap->end(); it++)
-	//    assert(it->ptr().buf != NULL);
-
-	dbg_ptrs.push_back(std::make_pair(data_ptr, data_ptr+512*e.len));
-	data_ptr += e.len*512;
 	req->entries.push_back((ckpt_mapentry){
 		(int64_t)e.lba, (int64_t)e.len, 0, 0});
     }
     obj_w_lock.unlock();
 
-    for (auto [p1,p2] : dbg_ptrs) {
-	assert(p1 >= req->local_buf_base && p1 < req->local_buf_limit);
-	assert(p2 > req->local_buf_base && p2 <= req->local_buf_limit);
-    }
-    
     for (auto &d : deleted) {
 	auto [base, limit, ptr] = d.vals();
 	if (object_info.find(ptr.obj) == object_info.end())
@@ -948,6 +932,7 @@ void translate_impl::worker_thread(thread_pool<translate_req*> *p) {
 	}
 	else if (req->op == REQ_GC) {
 	    auto _seq = seq++;
+	    active_gc_objs.insert(_seq);
 	    lk.unlock();
 	    write_gc(_seq, req);
 	}
