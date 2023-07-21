@@ -30,10 +30,6 @@ public:
     virtual ~write_cache() {}
 
     virtual write_cache_work* writev(request *req, sector_t lba, smartiov *iov) = 0;
-    virtual std::tuple<size_t,size_t,request*>
-        async_read(size_t offset, char* buf, size_t len) = 0;
-    virtual std::tuple<size_t,size_t,request*>
-        async_readv(size_t offset, smartiov *iovs) = 0;
 
     virtual void do_write_checkpoint(void) = 0;
 };

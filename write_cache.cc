@@ -138,10 +138,6 @@ public:
     ~write_cache_impl();
 
     write_cache_work *writev(request *req, sector_t lba, smartiov *iov);
-    virtual std::tuple<size_t,size_t,request*> 
-        async_read(size_t offset, char *buf, size_t bytes);
-    virtual std::tuple<size_t,size_t,request*> 
-        async_readv(size_t offset, smartiov *iov);
 
     void do_write_checkpoint(void);
 };
@@ -840,69 +836,6 @@ write_cache_work *write_cache_impl::writev(request *req, sector_t lba, smartiov 
 	work_sectors >= cfg->wcache_chunk / 512)
 	send_writes(lk);
     return w;
-}
-
-/* arguments:
- *  lba to start at
- *  iov corresponding to lba (iov.bytes() = length to read)
- * returns (number of bytes skipped), (number of bytes read_started)
- */
-std::tuple<size_t,size_t,request*>
-write_cache_impl::async_read(size_t offset, char *buf, size_t bytes) {
-    sector_t base = offset/512, limit = base + bytes/512;
-    size_t skip_len = 0, read_len = 0;
-    request *rreq = NULL;
-    
-    std::unique_lock<std::mutex> lk(m);
-    off_t nvme_offset = 0;
-
-    auto it = map.lookup(base);
-    if (it == map.end() || it->base() >= limit)
-	skip_len = bytes;
-    else {
-	auto [_base, _limit, plba] = it->vals(base, limit);
-	if (_base > base) {
-	    skip_len = 512 * (_base - base);
-	    buf += skip_len;
-	}
-	read_len = 512 * (_limit - _base);
-	nvme_offset = 512L * plba;
-    }
-    lk.unlock();
-
-    if (read_len) 
-	rreq = nvme_w->make_read_request(buf, read_len, nvme_offset);
-
-    return std::make_tuple(skip_len, read_len, rreq);
-}
-
-std::tuple<size_t,size_t,request*>
-write_cache_impl::async_readv(size_t offset, smartiov *iov) {
-    auto bytes = iov->bytes();
-    sector_t base = offset/512, limit = base + bytes/512;
-    size_t skip_len = 0, read_len = 0;
-    request *rreq = NULL;
-    
-    std::unique_lock<std::mutex> lk(m);
-    off_t nvme_offset = 0;
-
-    auto it = map.lookup(base);
-    if (it == map.end() || it->base() >= limit)
-	skip_len = bytes;
-    else {
-	auto [_base, _limit, plba] = it->vals(base, limit);
-	if (_base > base) 
-	    skip_len = 512 * (_base - base);
-	read_len = 512 * (_limit - _base);
-	nvme_offset = 512L * plba;
-    }
-
-    if (read_len) {
-	smartiov _iovs = iov->slice(skip_len, skip_len+read_len);
-	rreq = nvme_w->make_read_request(&_iovs, nvme_offset);
-    }
-
-    return std::make_tuple(skip_len, read_len, rreq);
 }
 
 void write_cache_impl::do_write_checkpoint(void) {
