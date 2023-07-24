@@ -19,30 +19,34 @@ dir = os.path.dirname(img)
 
 _vals = None
 
+
 def inv(i, k, m):
     global _vals
     if not _vals:
         _vals = [None] * m
         for i in range(m):
-            _vals[(i*k)%m] = i
+            _vals[(i*k) % m] = i
     return _vals[i]
+
 
 def rbd_startup():
     mkdisk.cleanup_files(img)
-    sectors = 10*1024*2 # 10MB
+    sectors = 10*1024*2  # 10MB
     mkdisk.mkdisk(img, sectors)
     mkcache.cleanup(nvme)
     mkcache.mkcache(nvme)
     return lsvd.rbd_open(img)
 
+
 def rbd_finish(_img):
     lsvd.rbd_close(_img)
+
 
 class tests(unittest.TestCase):
 
     def test_0_null(self):
         pass
-    
+
     def test_1_wcache_holes(self):
         _img = rbd_startup()
         lsvd.img_write(_img, 0, b'A'*20*1024)
@@ -51,9 +55,10 @@ class tests(unittest.TestCase):
         lsvd.wcache_img_write(_img, 3*4096, b'C'*4096)
         d = lsvd.rbd_read(_img, 0, 20*1024)
 
-        self.assertEqual(d, b'A'*4096 + b'B'*4096 + b'A'*4096 + b'C'*4096 + b'A'*4096)
+        self.assertEqual(d, b'A'*4096 + b'B'*4096 + b'A' *
+                         4096 + b'C'*4096 + b'A'*4096)
         rbd_finish(_img)
-        
+
     def test_2_write(self):
         _img = rbd_startup()
         data = b'A' * 4096
@@ -74,7 +79,7 @@ class tests(unittest.TestCase):
             data = bytes(chr(c + i), 'utf-8') * 4096
             d2 = lsvd.rbd_read(_img, i*4096, 4096)
             self.assertEqual(d2, data)
-        
+
         rbd_finish(_img)
 
     # write cache is 125 pages = 1000 sectors
@@ -82,8 +87,8 @@ class tests(unittest.TestCase):
     # volume is 10MiB = 20480 sectors = 2650 4KB pages
 
     def test_4_rand_write(self):
-        #s = [bytes(chr(65+i),'utf-8') for i in range(26)]
-        #pgs = [_*4096 for _ in s]
+        # s = [bytes(chr(65+i),'utf-8') for i in range(26)]
+        # pgs = [_*4096 for _ in s]
         _img = rbd_startup()
         # 59 is enough to force write cache eviction
         N = 200
@@ -108,15 +113,15 @@ class tests(unittest.TestCase):
             d = lsvd.rbd_read(_img, i*4096, 4096)
             if d0 != d:
                 passed = False
-                print('FAILED:', i, d[0:10]+b'...'+d[-5:], '!=', d0[0:10]+b'...'+d0[-5:])
+                print('FAILED:', i, d[0:10]+b'...' +
+                      d[-5:], '!=', d0[0:10]+b'...'+d0[-5:])
         self.assertTrue(passed)
 
         rbd_finish(_img)
 
-        
+
 if __name__ == '__main__':
     lsvd.io_start()
     unittest.main(exit=False)
     lsvd.io_stop()
     time.sleep(0.1)
-

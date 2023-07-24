@@ -4,9 +4,9 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <experimental/filesystem>
+#include <filesystem>
 #include <random>
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 #include <atomic>
 #include <iostream>
 #include <map>
@@ -21,6 +21,7 @@ extern bool __lsvd_dbg_reverse;
 extern bool __lsvd_dbg_be_delay;
 extern bool __lsvd_dbg_be_delay_ms;
 extern bool __lsvd_dbg_be_threads;
+extern bool __lsvd_dbg_rename;
 
 std::mt19937_64 rng;
 
@@ -39,6 +40,7 @@ struct cfg {
     bool restart;
     bool verbose;
     bool existing;
+    bool deterministic;
 };
 
 /* empirical fit to the pattern of writes in the ubuntu install,
@@ -155,7 +157,15 @@ void check_crc(sector_t sector, const char *_buf, size_t bytes)
             assert(memcmp(ptr, _zbuf, 512) == 0);
         } else {
             unsigned crc1 = 0, crc2 = 0;
-            assert((crc1 = sector_crc[sector]) == (crc2 = crc32(0, ptr, 512)));
+            // assert((crc1 = sector_crc[sector]) == (crc2 = crc32(0, ptr,
+            // 512)));
+            crc1 = sector_crc[sector];
+            crc2 = crc32(0, ptr, 512);
+            if (crc1 != crc2) {
+                printf("%ld : %x != %x\n", sector, crc1, crc2);
+                fprintf(stdout, "FAIL: %ld : %x != %x\n", sector, crc1, crc2);
+                exit(1);
+            }
         }
         sector++;
     }
@@ -183,6 +193,8 @@ void run_test(unsigned long seed, struct cfg *cfg)
 {
     printf("seed: 0x%lx\n", seed);
     rng.seed(seed);
+    extern char *p_log, *logbuf;
+    p_log = logbuf; // DEBUG
 
     init_random();
     rados_ioctx_t io = 0;
@@ -247,6 +259,7 @@ void run_test(unsigned long seed, struct cfg *cfg)
             p_log += snprintf(p_log, end_log - p_log, "\nREOPEN done\n\n");
     }
 
+    fflush(stdout);
     auto tmp = __lsvd_dbg_be_delay;
     __lsvd_dbg_be_delay = false;
     auto buf = (char *)aligned_alloc(512, 64 * 1024);
@@ -286,6 +299,7 @@ static struct argp_option options[] = {
     {"delay", 'D', 0, 0, "add random backend delays"},
     {"rados", 'O', 0, 0, "use RADOS"},
     {"cache-size", 'Z', "N", 0, "cache size (K/M/G)"},
+    {"deterministic", 'Q', 0, 0, "no backend non-determinism"},
     {0},
 };
 
@@ -302,7 +316,8 @@ struct cfg _cfg = {"/tmp",          // cache_dir
                    false,           // reopen
                    true,            // restart
                    false,           // verbose
-                   false};          // existing
+                   false,           // existing
+                   false};          // deterministic
 
 off_t parseint(char *s)
 {
@@ -369,6 +384,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'Z':
         _cfg.cache_size = arg;
         break;
+    case 'Q':
+        _cfg.deterministic = true;
+        break;
     case ARGP_KEY_END:
         break;
     }
@@ -376,14 +394,33 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 }
 static struct argp argp = {options, parse_opt, NULL, args_doc};
 
+void do_run_cmd(void)
+{
+    if (getenv("PRE_TEST")) {
+        char *cmd = getenv("PRE_TEST");
+        printf("running: %s\n", cmd);
+        auto val = system(cmd);
+        if (val < 0)
+            printf("val %d errno %d\n", val, errno);
+    }
+}
+
 int main(int argc, char **argv)
 {
+    __lsvd_dbg_rename = true;
     argp_parse(&argp, argc, argv, 0, 0, 0);
+
+    if (_cfg.deterministic) {
+        __lsvd_dbg_be_threads = 1;
+        __lsvd_dbg_be_delay = false;
+    }
 
     if (_cfg.seeds.size() > 0) {
         for (int i = 0; i < _cfg.n_runs; i++)
-            for (auto s : _cfg.seeds)
+            for (auto s : _cfg.seeds) {
+                do_run_cmd();
                 run_test(s, &_cfg);
+            }
     } else {
         auto now = std::chrono::system_clock::now();
         auto now_ms =
@@ -396,7 +433,9 @@ int main(int argc, char **argv)
         std::vector<unsigned long> seeds;
         for (int i = 0; i < _cfg.n_runs; i++)
             seeds.push_back(rng());
-        for (auto s : seeds)
+        for (auto s : seeds) {
+            do_run_cmd();
             run_test(s, &_cfg);
+        }
     }
 }

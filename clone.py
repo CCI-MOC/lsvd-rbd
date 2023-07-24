@@ -10,10 +10,11 @@ try:
     import rados
 except:
     pass
-    
+
+
 def read_obj(name):
     if args.rados:
-        pool,oid = name.split('/')
+        pool, oid = name.split('/')
         if not cluster.pool_exists(pool):
             raise RuntimeError('Pool not found: ' + pool)
         ioctx = cluster.open_ioctx(pool)
@@ -28,22 +29,25 @@ def read_obj(name):
         fp.close()
     return obj
 
+
 def write_obj(name, data):
     if args.rados:
-        pool,oid = name.split('/')
+        pool, oid = name.split('/')
         if not cluster.pool_exists(pool):
             raise RuntimeError('Pool not found: ' + pool)
         ioctx = cluster.open_ioctx(pool)
         ioctx.write(oid, bytes(data))
         ioctx.close()
     else:
-        fd = os.open(name, os.O_WRONLY|os.O_TRUNC|os.O_CREAT)
+        fd = os.open(name, os.O_WRONLY | os.O_TRUNC | os.O_CREAT)
         os.write(fd, bytes(data))
         os.close(fd)
 
-# we assume that the base volume is completely shut down, so the 
+# we assume that the base volume is completely shut down, so the
 # highest-numbered object is the last checkpoint
 #
+
+
 def mk_clone(old, new, uu):
     obj = read_obj(old)
     o2 = lsvd.sizeof_hdr
@@ -69,9 +73,9 @@ def mk_clone(old, new, uu):
     ckpt_map = ckpt_obj[m_begin:m_end]
 
     c_ckpt_num = ctypes.c_int(seq+1)
-    
+
     hdr_bytes = (ctypes.sizeof(c_h) + ctypes.sizeof(c_ch) +
-                     ctypes.sizeof(c_ckpt_num) + len(ckpt_map))
+                 ctypes.sizeof(c_ckpt_num) + len(ckpt_map))
     hdr_sectors = (hdr_bytes + 511) // 512
 
     c_ch.cache_seq = 0
@@ -85,7 +89,7 @@ def mk_clone(old, new, uu):
 
     c_ch.map_offset = o
     c_ch.map_len = len(ckpt_map)
-    
+
     c_h.seq = seq+1
     c_h.vol_uuid[:] = uu
     c_h.hdr_sectors = hdr_sectors
@@ -93,37 +97,40 @@ def mk_clone(old, new, uu):
 
     new_ckpt_name = "%s.%08x" % (new, seq+1)
     write_obj(new_ckpt_name, c_newobj)
-    
+
     # and create a superblock object
     h2 = lsvd.hdr(magic=lsvd.LSVD_MAGIC, version=1, type=lsvd.LSVD_SUPER,
-                      hdr_sectors=8, data_sectors=0)
+                  hdr_sectors=8, data_sectors=0)
     h2.vol_uuid[:] = uu
 
     # TODO: need to create a single checkpoint, copying the map from the
     # most recent checkpoint in the base, but omitting the object map.
 
-    b_old = bytes(old,'utf-8')
+    b_old = bytes(old, 'utf-8')
     c = lsvd.clone_info(last_num=seq, name_len=len(b_old))
     c.vol_uuid[:] = h.vol_uuid[:]
     sizeof_clone = lsvd.sizeof_clone_info + len(b_old) + 1
     offset_ckpt = lsvd.sizeof_hdr+lsvd.sizeof_super_hdr
     offset_clone = offset_ckpt + ctypes.sizeof(c_ckpt_num)
-    
+
     sh2 = lsvd.super_hdr(vol_size=sh.vol_size, ckpts_offset=offset_ckpt,
-                             ckpts_len=ctypes.sizeof(c_ckpt_num), 
-                             clones_offset=offset_clone,
-                             clones_len=sizeof_clone)
+                         ckpts_len=ctypes.sizeof(c_ckpt_num),
+                         clones_offset=offset_clone,
+                         clones_len=sizeof_clone)
 
     data = bytearray() + h2 + sh2 + c_ckpt_num + c + b_old
     data += b'\0' * (4096-len(data))
 
     write_obj(new, data)
-    
+
+
 if __name__ == '__main__':
     _rnd_uuid = str(uuid.uuid4())
-    parser = argparse.ArgumentParser(description='create clone of LSVD disk image')
+    parser = argparse.ArgumentParser(
+        description='create clone of LSVD disk image')
     parser.add_argument('--uuid', help='volume UUID', default=_rnd_uuid)
-    parser.add_argument('--rados', help='use RADOS backend', action='store_true');
+    parser.add_argument('--rados', help='use RADOS backend',
+                        action='store_true')
     parser.add_argument('base', help='base image')
     parser.add_argument('image', help='new (clone) image')
     args = parser.parse_args()
