@@ -15,7 +15,7 @@ OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 CFILES = $(OBJS:.o=.cc)
 
 debug: CXXFLAGS += -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
-debug: CXXFLAGS += -Wall -Wextra -Wconversion -Wdouble-promotion -Wno-sign-conversion
+# debug: CXXFLAGS += -Wall -Wextra -Wconversion -Wdouble-promotion -Wno-sign-conversion
 release: CXXFLAGS += -O3
 
 debug: liblsvd.so
