@@ -43,13 +43,20 @@ public:
     }
 };
 
+class read_cache;
+class write_cache;
+class backend;
+class translate;
+
 struct rbd_image {
     lsvd_config  cfg;
     ssize_t      size;          // bytes
 
     std::shared_mutex map_lock;
     extmap::objmap    map;
-
+    extmap::bufmap    bufmap;
+    std::map<int,char*> buffers;
+    
     backend     *objstore;
     translate   *xlate;
     write_cache *wcache;

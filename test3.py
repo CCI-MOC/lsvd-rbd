@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import os
 import lsvd_types as lsvd
 import ctypes
 import mkdisk

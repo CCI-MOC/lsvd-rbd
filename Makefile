@@ -33,6 +33,12 @@ liblsvd.so:  $(OBJS)
 imgtool: imgtool.o $(OBJS)
 	$(CXX) -o $@ imgtool.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
 
+lsvd_rnd_test: lsvd_rnd_test.o $(OBJS)
+	$(CXX) -o $@ lsvd_rnd_test.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
+
+lsvd_crash_test: lsvd_crash_test.o $(OBJS)
+	$(CXX) -o $@ lsvd_crash_test.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
+
 test-1: test-1.o $(OBJS)
 	$(CXX) -o $@ test-1.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
 test-2: test-2.o $(OBJS)

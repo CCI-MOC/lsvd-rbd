@@ -138,10 +138,6 @@ public:
     ~write_cache_impl();
 
     write_cache_work *writev(request *req, sector_t lba, smartiov *iov);
-    virtual std::tuple<size_t,size_t,request*> 
-        async_read(size_t offset, char *buf, size_t bytes);
-    virtual std::tuple<size_t,size_t,request*> 
-        async_readv(size_t offset, smartiov *iov);
 
     void do_write_checkpoint(void);
 };
@@ -153,7 +149,6 @@ class wcache_write_req : public request {
     std::atomic<int> reqs = 0;
 
     sector_t      plba;
-    uint64_t      seq;
     
     std::vector<write_cache_work*> work;
     request      *r_data = NULL;
@@ -167,6 +162,8 @@ class wcache_write_req : public request {
     write_cache_impl *wcache = NULL;
     
 public:
+    uint64_t      seq;
+
     wcache_write_req(std::vector<write_cache_work*> *w, page_t n_pages,
 		     page_t page, page_t n_pad, page_t pad, page_t prev,
 		     write_cache *wcache);
@@ -276,13 +273,8 @@ void wcache_write_req::notify_in_order(void) {
     }
     lk.unlock();
     
-    /* send data to backend, invoke callbacks, then clean up
+    /* invoke callbacks, then clean up
      */
-    for (auto w : work) {
-	auto [iov, iovcnt] = w->iov->c_iov();
-	wcache->be->writev(seq, w->lba*512, iov, iovcnt);
-    }
-
     for (auto w : work) {
 	w->req->notify((request*)w);
 	delete w;
@@ -294,9 +286,8 @@ void wcache_write_req::notify_in_order(void) {
     wcache->outstanding_writes--;
     if (wcache->work.size() >= wcache->write_batch ||
 	wcache->work_sectors >= wcache->cfg->wcache_chunk / 512)
-	wcache->send_writes(lk); // unlocks
-    else
-	lk.unlock();
+	wcache->send_writes(lk); // doesn't unlock anymore
+    lk.unlock();
 
     /* we don't implement release or wait - just delete ourselves.
      */
@@ -493,13 +484,14 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
 void write_cache_impl::flush_thread(thread_pool<int> *p) {
     pthread_setname_np(pthread_self(), "wcache_flush");
     auto period = std::chrono::milliseconds(50);
+
+    std::unique_lock lk(m);
     while (p->running) {
-	std::unique_lock lk(m);
 	p->cv.wait_for(lk, period);
 	if (!p->running)
 	    return;
 	if (outstanding_writes == 0 && work.size() > 0)
-	    send_writes(lk);	// unlocks
+	    send_writes(lk);	// doesn't unlock anymore
     }
 }
 
@@ -818,12 +810,18 @@ void write_cache_impl::send_writes(std::unique_lock<std::mutex> &lk) {
 
     auto req = new wcache_write_req(&work, pages, page,
 				    n_pad-1, pad, prev, this);
+    for (auto w : work) {
+	auto [iov, iovcnt] = w->iov->c_iov();
+	be->writev(req->seq, w->lba*512, iov, iovcnt);
+    }
+    
     work.clear();
     work_sectors = 0;
     outstanding_writes++;
 
     lk.unlock();
     req->run(NULL);
+    lk.lock();
 }
 
 write_cache_work *write_cache_impl::writev(request *req, sector_t lba, smartiov *iov) {
@@ -838,69 +836,6 @@ write_cache_work *write_cache_impl::writev(request *req, sector_t lba, smartiov 
 	work_sectors >= cfg->wcache_chunk / 512)
 	send_writes(lk);
     return w;
-}
-
-/* arguments:
- *  lba to start at
- *  iov corresponding to lba (iov.bytes() = length to read)
- * returns (number of bytes skipped), (number of bytes read_started)
- */
-std::tuple<size_t,size_t,request*>
-write_cache_impl::async_read(size_t offset, char *buf, size_t bytes) {
-    sector_t base = offset/512, limit = base + bytes/512;
-    size_t skip_len = 0, read_len = 0;
-    request *rreq = NULL;
-    
-    std::unique_lock<std::mutex> lk(m);
-    off_t nvme_offset = 0;
-
-    auto it = map.lookup(base);
-    if (it == map.end() || it->base() >= limit)
-	skip_len = bytes;
-    else {
-	auto [_base, _limit, plba] = it->vals(base, limit);
-	if (_base > base) {
-	    skip_len = 512 * (_base - base);
-	    buf += skip_len;
-	}
-	read_len = 512 * (_limit - _base);
-	nvme_offset = 512L * plba;
-    }
-    lk.unlock();
-
-    if (read_len) 
-	rreq = nvme_w->make_read_request(buf, read_len, nvme_offset);
-
-    return std::make_tuple(skip_len, read_len, rreq);
-}
-
-std::tuple<size_t,size_t,request*>
-write_cache_impl::async_readv(size_t offset, smartiov *iov) {
-    auto bytes = iov->bytes();
-    sector_t base = offset/512, limit = base + bytes/512;
-    size_t skip_len = 0, read_len = 0;
-    request *rreq = NULL;
-    
-    std::unique_lock<std::mutex> lk(m);
-    off_t nvme_offset = 0;
-
-    auto it = map.lookup(base);
-    if (it == map.end() || it->base() >= limit)
-	skip_len = bytes;
-    else {
-	auto [_base, _limit, plba] = it->vals(base, limit);
-	if (_base > base) 
-	    skip_len = 512 * (_base - base);
-	read_len = 512 * (_limit - _base);
-	nvme_offset = 512L * plba;
-    }
-
-    if (read_len) {
-	smartiov _iovs = iov->slice(skip_len, skip_len+read_len);
-	rreq = nvme_w->make_read_request(&_iovs, nvme_offset);
-    }
-
-    return std::make_tuple(skip_len, read_len, rreq);
 }
 
 void write_cache_impl::do_write_checkpoint(void) {

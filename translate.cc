@@ -23,9 +23,7 @@
 
 #include <stack>
 #include <map>
-
 #include <algorithm>
-
 #include <thread>
 
 #include "extent.h"
@@ -45,41 +43,144 @@ void do_log(const char*, ...);
 void fp_log(const char*, ...);
 extern void log_time(uint64_t loc, uint64_t val); // debug
 
+/*
+ * Architecture:
+ *
+ * all operations go through a single queue, handled by a single worker
+ * thread. All sequence numbers are assigned by this thread, so operations
+ * are totally ordered.
+ *
+ * - writes are aggregated into batches and submitted to the queue. 
+ *   objmap entries are updated before sending backend PUT request
+ *
+ * - checkpoint request: write the current map.
+ *
+ * - flush: block until all outstanding writes have completed
+ *
+ * - GC: the GC thread creates "tentative" GC writes, including all data
+ *   to be written, and submits to the queue. 
+ *   Request processing (a) revalidates all data in the request, 
+ *   (b) updates the map, and (c) sends PUT request.
+ * 
+ * in-memory map: the above steps leave the following windows where data 
+ * is not available for reading:
+ *
+ * 1. between (a1) appending to the current batch and (a2) assigning a 
+ *    sequence number - there's no "name" for the location of the data
+ * 2. between (a2) assigning a sequence number and (a3) completion of
+ *    PUT request - data may not be available for GET requests
+ * 3. like 2, but for GC - after (b1) updating the map until (b2) the
+ *    new PUT request is durable on the backend
+ *
+ * During each of these periods the data is guaranteed to be sitting in an
+ * in-memory buffer. We keep a map from LBA to in-memory pointers, updating
+ * it at points a1 and b1 and removing entries at a3 and b2 (i.e. write
+ * request completion), being careful of overwrites in the interim.
+ */
+
 /* ----------- Object translation layer -------------- */
 
-class batch {
-public:
-    std::vector<data_map> entries;
-    char  *_buf = NULL;		// allocation start
-    char  *buf = NULL;		// data goes here
-    size_t len = 0;		// current data size
-    size_t max;			// done when len hits here
-    int    seq = 0;		// sequence number for backend
-    uint64_t cache_seq = 0;
+enum work_type {
+    REQ_PUT = 1,
+    REQ_FLUSH = 2,
+    REQ_CKPT = 3,
+    REQ_GC = 4
+};
 
-    batch(size_t bytes){
-	int room = 16*1024*sizeof(data_map) + 512;
-	_buf = (char*)malloc(bytes + room);
-	buf = _buf + room;
-	max = bytes;
-    }
-    ~batch(){
-	free(_buf);
-    }
-    void append(uint64_t lba, smartiov *iov) {
-	auto bytes = iov->bytes();
-	entries.push_back((data_map){lba, bytes/512});
-	char *ptr = buf + len;
+class translate_impl;
+
+/* TODO: local_buf_base/limit are set in constructor for PUT, 
+ * translate_impl::write_gc for GC. this should be uniform...
+ */
+
+class translate_req : public request {
+    work_type       op;
+    translate_impl *tx;
+    std::mutex      m;
+    std::condition_variable cv;
+    bool            done = false;
+    
+    friend class translate_impl;
+
+    /* REQ_PUT */
+    char    *batch_buf = NULL;	// actual allocation
+    char    *data_ptr;		// batch_buf+room
+    /* entries */
+    
+    size_t   len = 0;		// in bytes
+    size_t   max = 0;
+
+    /* REQ_GC */
+    char  *gc_buf = NULL;	// object to write out
+    char  *gc_data = NULL;	// passed in by GC thread
+
+    /* lba/len/obj/offset (ignore obj/offset for REQ_PUT) */
+    std::vector<ckpt_mapentry> entries;
+
+    /* used for removing from map */
+    char *local_buf_base = NULL;
+    char *local_buf_limit = NULL;
+
+    int           _seq;
+    
+public:
+    char *append(int64_t lba, smartiov *iov) {
+	assert(op == REQ_PUT);
+	int64_t bytes = iov->bytes();
+	entries.push_back((ckpt_mapentry){lba, bytes/512, 0, 0});
+	char *ptr = data_ptr + len;
 	iov->copy_out(ptr);
 	len += bytes;
+	return ptr;
     }
+
+    bool room(size_t bytes) {
+	assert(op == REQ_PUT);
+	return len+bytes <= max;
+    }
+    
+    ~translate_req(){}
+
+    /* NOTE - this assumes the only significant header entry is the map
+     */
+    translate_req(work_type op_, size_t bytes, translate_impl *tx_) {
+	assert (op_ == REQ_PUT);
+	op = op_;
+	tx = tx_;
+	int max_hdr_bytes = 1024 + (bytes / 2048) * sizeof(data_map);
+	batch_buf = (char*)malloc(bytes + max_hdr_bytes);
+	data_ptr = batch_buf + max_hdr_bytes;
+	max = bytes;
+
+	local_buf_base = data_ptr;
+	local_buf_limit = data_ptr + bytes;
+    }
+    
+    translate_req(work_type op_, translate_impl *tx_) {
+	op = op_;
+	tx = tx_;
+    }
+    
+    void wait(void) {
+	std::unique_lock lk(m);
+	while (!done)
+	    cv.wait(lk);
+	lk.unlock();
+	delete this;		// always call wait
+    }
+
+    void notify(request *child);
+    void run(request *parent) {} // unused
+    void release(void) {}	// unused
 };
+
 
 class translate_impl : public translate {
     /* lock ordering: lock m before *map_lock
      */
     std::mutex         m;	// for things in this instance
     extmap::objmap    *map;	// shared object map
+    extmap::bufmap    *bufmap;	// shared object map
     std::shared_mutex *map_lock; // locks the object map
     lsvd_config       *cfg;
 
@@ -87,7 +188,7 @@ class translate_impl : public translate {
     uint64_t           ckpt_cache_seq = 0; // from last data object
     
     friend class translate_req;
-    batch *b = NULL;
+    translate_req     *current = NULL;
     
     /* info on live data objects - all sizes in sectors 
      * checkpoints are tracked in @checkpoints, and in the superblock
@@ -101,13 +202,8 @@ class translate_impl : public translate {
 
     std::vector<uint32_t> checkpoints;
     
-    /* tracking completions for flush()
-     */
-    int       next_compln = 1;
-    int       last_sent = 0;	// most recent data object
-    std::atomic<int> outstanding_writes = 0; // wait_for_room
+    std::atomic<int> outstanding_writes = 0;
     
-    std::set<int> pending_writes;
     std::condition_variable cv;
     bool stopped = false;	// stop GC from writing
 
@@ -128,8 +224,9 @@ class translate_impl : public translate {
     super_hdr *super_sh = NULL;
     size_t     super_len;
 
+    std::set<int> active_gc_objs; // for wait_object_ready
 
-    thread_pool<batch*> *workers;
+    thread_pool<translate_req*> *workers;
     thread_pool<int>    *misc_threads; // so we can stop ckpt, gc first
 
     /* for triggering GC
@@ -149,14 +246,11 @@ class translate_impl : public translate {
     
     object_reader *parser;
     
-    /* maybe use insertion sorted vector?
-     *  https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
-     */
-
-    void write_checkpoint(int seq);
-    batch *check_batch_room(size_t len);
-    void process_batch(batch *b);
-    void worker_thread(thread_pool<batch*> *p);
+    void write_checkpoint(int seq, translate_req *req);
+    void process_batch(int seq, translate_req *req);
+    void write_gc(int _seq, translate_req *req);
+    
+    void worker_thread(thread_pool<translate_req*> *p);
     
     sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
 			 data_map *extents, int n_extents);
@@ -167,46 +261,23 @@ class translate_impl : public translate {
 
     backend *objstore;
 
-    /* all objects seq<next_compln have been completed
-     */
-    void seq_record(int _seq) {
-	std::unique_lock lk(m);
-	if (_seq > last_sent) {
-	    last_sent = _seq;
-	    do_log("last_sent2 : %d\n", last_sent);
-	}
-	pending_writes.insert(_seq);
-    }
-
-    void seq_complete(int _seq) {
-	std::unique_lock lk(m);
-	pending_writes.erase(_seq);
-	auto it = pending_writes.begin();
-	if (it == pending_writes.end())
-	    next_compln = last_sent+1;
-	else
-	    next_compln = *it;
-	do_log("next_compln = %d\n", next_compln);
-	cv.notify_all();
-    }
-
 public:
     translate_impl(backend *_io, lsvd_config *cfg_,
-		   extmap::objmap *map, std::shared_mutex *m);
+		   extmap::objmap *map, extmap::bufmap *bufmap,
+		   std::shared_mutex *m);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
     void shutdown(void);
 
-    int flush(void);            /* write out current batch */
-    int checkpoint(void);       /* flush, then write checkpoint */
+    void flush(void);            /* write out current batch */
+    void checkpoint(void);       /* flush, then write checkpoint */
 
     ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov, int iovcnt);
     ssize_t trim(size_t offset, size_t len);
     
     void wait_for_room(void);
     ssize_t readv(size_t offset, iovec *iov, int iovcnt);
-    bool check_object_ready(int obj);
     void wait_object_ready(int obj);
     void start_gc(void);
     
@@ -224,26 +295,30 @@ const char *translate_impl::prefix(int seq) {
 }
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
-			       extmap::objmap *map_, std::shared_mutex *m_) {
+			       extmap::objmap *map_,
+			       extmap::bufmap *bufmap_,
+			       std::shared_mutex *m_) {
     misc_threads = new thread_pool<int>(&m);
-    workers = new thread_pool<batch*>(&m);
+    workers = new thread_pool<translate_req*>(&m);
     objstore = _io;
     parser = new object_reader(objstore);
     map = map_;
+    bufmap = bufmap_;
     map_lock = m_;
     cfg = cfg_;
 }
 
 translate *make_translate(backend *_io, lsvd_config *cfg,
-			  extmap::objmap *map, std::shared_mutex *m) {
-    return (translate*) new translate_impl(_io, cfg, map, m);
+			  extmap::objmap *map, extmap::bufmap *bufmap,
+			  std::shared_mutex *m) {
+    return (translate*) new translate_impl(_io, cfg, map, bufmap, m);
 }
 
 translate_impl::~translate_impl() {
     stopped = true;
     cv.notify_all();
-    if (b) 
-	delete b;
+    if (current) 
+	delete current;
     delete parser;
     if (super_buf)
 	free(super_buf);
@@ -262,12 +337,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush) {
 					    snaps, uuid);
     if (bytes < 0)
 	return bytes;
-    
     int n_ckpts = ckpts.size();
-    do_log("read super crc %0x8 ckpts %d\n", (uint32_t)crc32(0, (const unsigned char*)_buf, 4096));
-
-    for (auto c : ckpts) 
-	do_log("got ckpt from super (total %d): %d\n", n_ckpts, c);
     
     super_buf = _buf;
     super_h = (obj_hdr*)super_buf;
@@ -276,7 +346,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush) {
 
     memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
 
-    b = new batch(cfg->batch_size);
+    current = new translate_req(REQ_PUT, cfg->batch_size, this);
     seq = 1;			// empty volume case
     
     /* is this a clone?
@@ -356,7 +426,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush) {
 			    (extmap::obj_offset){.obj = m.obj,
 				    .offset = m.offset});
 	}
-	seq = next_compln = last_ckpt + 1;
+	seq = last_ckpt + 1;
     }
 
     /* roll forward
@@ -399,9 +469,6 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush) {
 	    total_live_sectors -= (limit - base);
 	}
     }
-    next_compln = seq;
-    last_sent = next_compln - 1;
-    do_log("set next_compln %d\n", next_compln);
 
     /* delete any potential "dangling" objects.
      */
@@ -453,7 +520,8 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 
     *dh = (obj_data_hdr){.cache_seq = 0,
 			 .objs_cleaned_offset = 0, .objs_cleaned_len = 0,
-			 .data_map_offset = o1, .data_map_len = l1};
+			 .data_map_offset = o1, .data_map_len = l1,
+			 .is_gc = 1};
 
     data_map *dm = (data_map*)(dh+1);
     for (int i = 0; i < n_extents; i++)
@@ -468,38 +536,32 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
 
 /* ----------- data transfer logic -------------*/
 
-// call with len=0 to force a new batch
-batch *translate_impl::check_batch_room(size_t len) {
-    batch *full = NULL;
-    if ((b->len + len > b->max) || (len == 0 && b->len > 0)) {
-	b->seq = last_sent = seq++;
-	do_log("last_sent = %d\n", last_sent);
-	full = b;
-	b = new batch(cfg->batch_size);
-    }
-    return full;
-}
-
 /* NOTE: offset is in bytes
  */
 ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset,
 			       iovec *iov, int iovcnt) {
     smartiov siov(iov, iovcnt);
-    size_t len = siov.bytes();
+    size_t bytes = siov.bytes();
+    sector_t base = offset / 512, limit = (offset + bytes) / 512;
 
     std::unique_lock lk(m);
-    auto old_batch = check_batch_room(len);
-    if (b->cache_seq == 0) {	// lowest sequence number
-	b->cache_seq = cache_seq;
-	if (ckpt_cache_seq < cache_seq)
-	    ckpt_cache_seq = cache_seq;
+    if (!current->room(bytes)) {
+	workers->put_locked(current);
+	current = new translate_req(REQ_PUT, cfg->batch_size, this);
     }
+    
+    /* save extent and pointer into bufmap. 
+     */
+    auto ptr = current->append(base, &siov);
+    std::unique_lock obj_w_lock(*map_lock);
+    assert(ptr >= current->local_buf_base &&
+	   ptr + (limit-base)*512 <= current->local_buf_limit);
+    assert(ptr != NULL);
+    bufmap->update(base, limit, ptr);
+    //for (auto it = bufmap->begin(); it != bufmap->end(); it++)
+    //    assert(it->ptr().buf != NULL);
 
-    b->append(offset / 512, &siov);
-    if (old_batch != NULL)
-	workers->put_locked(old_batch);
-
-    return len;
+    return 0;
 }
 
 /* TRIM is not guaranteed durable, because:
@@ -541,234 +603,80 @@ void translate_impl::wait_for_room(void) {
 	cv.wait(lk);
 }
 
-/* GC (like normal write) updates the map before it writes an object,
- * but we can't assume the data is in cache, so we might get writes
- * for objects that haven't committed yet.
- * since this almost never blocks, do an unlocked check before the
- * locked one.
+/* TODO: change to track outstanding objects, remove on notify
  */
-bool translate_impl::check_object_ready(int obj) {
-    return obj < (int)next_compln;
-}
 void translate_impl::wait_object_ready(int obj) {
     std::unique_lock lk(m);
-    while (obj >= next_compln)
+    while (active_gc_objs.find(obj) != active_gc_objs.end())
 	cv.wait(lk);
 }
 
-class translate_req : public request {
-    uint32_t seq;
-    translate_impl *tx;
-    std::mutex      m;
-    bool            waiting;
-    bool            done = false;
-    std::condition_variable cv;
-    
-    friend class translate_impl;
-    
-    /* various things that we might need to free
-     */
-    std::vector<char*> to_free;
-    batch *b = NULL;
-    
-public:
-    translate_req(uint32_t seq_, translate_impl *tx_, bool waiting_) {
-	seq = seq_;
-	tx = tx_;
-	waiting = waiting_;
-    }
-    ~translate_req(){}
+/* NOTE - currently not called for REQ_CKPT, which
+ * uses sync write
+ */
+void translate_req::notify(request *child) {
+    if (child)
+	child->release();
 
-    void wait(void) {
-	std::unique_lock lk(m);
-	while (!done)
-	    cv.wait(lk);
-	lk.unlock();
-	delete this;		// always call wait
-    }
-
-    void notify(request *child) {
-	if (child)
-	    child->release();
-	tx->seq_complete(seq);
-	for (auto ptr : to_free)
-	    free(ptr);
-	if (b) 
-	    delete b;
-
+    if (op == REQ_PUT || op == REQ_GC) {
+	/* wake up anyone waiting for TX window room
+	 * -> lock tx->m before tx->map_lock
+	 * also wakes up wait_object_ready
+	 */
 	std::unique_lock lk(tx->m);
-	if (--tx->outstanding_writes < tx->cfg->xlate_window)
-	    tx->cv.notify_all();
+	//if (--tx->outstanding_writes < tx->cfg->xlate_window)
+	tx->outstanding_writes--;
+	if (op == REQ_GC)
+	    tx->active_gc_objs.erase(_seq);
+	tx->cv.notify_all();
+    }
 
-	if (!waiting) 
-	    delete this;
-	else {
-	    std::unique_lock lk(m);
-	    done = true;
-	    cv.notify_one();
+    if (op == REQ_PUT) {
+	/* remove extents from tx->bufmap, but only if they still
+	 * point to this buffer
+	 */
+	std::unique_lock obj_w_lock(*tx->map_lock);
+	std::vector<std::pair<sector_t,sector_t>> extents;
+	for (auto const & e : entries) {
+	    auto limit = e.lba+e.len;
+	    for (auto it2 = tx->bufmap->lookup(e.lba);
+		 it2 != tx->bufmap->end() && it2->base() < limit; it2++) {
+		auto [_base, _limit, ptr] = it2->vals(e.lba, limit);
+		if (ptr.buf >= local_buf_base && ptr.buf < local_buf_limit)
+		    extents.push_back(std::pair(_base, _limit));
+	    }
+	}
+	for (auto [base, limit] : extents) {
+	    tx->bufmap->trim(base, limit);
 	}
     }
 
-    void run(request *parent) {} // unused
-    void release(void) {}	// unused
-};
-
-void translate_impl::worker_thread(thread_pool<batch*> *p) {
-    pthread_setname_np(pthread_self(), "batch_writer");
-    while (p->running) {
+    if (batch_buf != NULL)	// allocated in constructor
+	free(batch_buf);
+    if (gc_buf != NULL)		// allocated in write_gc
+	free(gc_buf);
+    if (gc_data != NULL)	// allocated in gc threqad
+	free(gc_data);
+	
+    if (op == REQ_GC) {
 	std::unique_lock lk(m);
-	batch *b;
-	if (!p->get_locked(lk, b)) 
-           return;
-
-	int _seq = checkpoints.size() ? checkpoints.back() : 0;
-	lk.unlock();
-
-	process_batch(b);
-
-	if (p->running && b->seq - _seq > cfg->ckpt_interval && !gc_running)
-	    write_checkpoint(seq++);
+	done = true;
+	cv.notify_one();
     }
+    else 
+	delete this;
 }
 
-void translate_impl::process_batch(batch *b) {
-
-    /* TODO: coalesce writes: 
-     *   bufmap m
-     *   for e in entries
-     *      m.insert(lba, len, ptr)
-     *   for e in m:
-     *      (lba, iovec) -> output
-     */
-
-    /* make the following updates:
-     * - object_info - hdrlen, total/live data sectors
-     * - map - LBA to obj/offset map
-     * - object_info, totals - adjust for new garbage
-     */
-    size_t hdr_bytes = obj_hdr_len(b->entries.size());
-    int hdr_sectors = div_round_up(hdr_bytes, 512);
-    char *hdr_ptr = b->buf - hdr_sectors*512;
-
-    // deadlock risk - locks m, can't call with map_lock held
-    seq_record(b->seq);
-
-    std::unique_lock obj_w_lock(*map_lock);
-    obj_info oi = {.hdr = hdr_sectors, .data = (int)b->len/512,
-		   .live = (int)b->len/512};
-    object_info[b->seq] = oi;
-
-    /* note that we update the map before the object is written,
-     * and count on the write cache preventing any reads until
-     * it's persisted. TODO: verify this
-     */
-    sector_t sector_offset = hdr_sectors;
-    std::vector<extmap::lba2obj> deleted;
-
-    for (auto e : b->entries) {
-	extmap::obj_offset oo = {b->seq, sector_offset};
-	map->update(e.lba, e.lba+e.len, oo, &deleted);
-	sector_offset += e.len;
-    }
-
-    for (auto d : deleted) {
-	auto [base, limit, ptr] = d.vals();
-	if (object_info.find(ptr.obj) == object_info.end())
-	    continue;		// skip clone base
-	object_info[ptr.obj].live -= (limit - base);
-	assert(object_info[ptr.obj].live >= 0);
-	total_live_sectors -= (limit - base);
-    }
-
-    /* live sectors, after subtracting dups */
-    auto live = object_info[b->seq].live; 
-    total_live_sectors += live;
-
-    obj_w_lock.unlock();
-
-    std::unique_lock lk(m);
-    total_sectors += b->len / 512;
-    if (next_compln == -1)
-	next_compln = b->seq;
-    lk.unlock();
-    
-    make_data_hdr(hdr_ptr, b->len, b->cache_seq, &b->entries, b->seq, &uuid);
-    size_t total_len = hdr_sectors*512 + b->len;
-
-    /* on completion, t_req calls seq_complete
-     */
-    auto t_req = new translate_req(b->seq, this, false);
-    t_req->b = b;
-
-    objname name(prefix(b->seq), b->seq);
-    auto req = objstore->make_write_req(name.c_str(), hdr_ptr, total_len);
-    outstanding_writes++;
-    req->run(t_req);
-}
-
-/* flushes any data buffered in current batch, and blocks until all 
- * outstanding writes are complete.
- * returns sequence number of last written object.
+/* write out a checkpoint. Note that we don't have to lock the objmap,
+ * since no one else is modifying it right now.
+ *
+ * possible changes:
+ * - wait for preceding writes to complete before writing?
+ * - write async rather than sync? (not really compatible with prev)
  */
-int translate_impl::flush() {
-    auto old_batch = check_batch_room(0);
-    if (old_batch == NULL)
-	return last_sent;
-
-    std::unique_lock lk(m);
-    auto _seq = old_batch->seq;
-
-    workers->put_locked(old_batch);
-
-    while (next_compln <= _seq)
-	cv.wait(lk);
-
-    return _seq;
-}
-
-/* wake up every @wait_time, if data is pending in current batch
- * for @timeout then write it to backend
- */
-void translate_impl::flush_thread(thread_pool<int> *p) {
-    pthread_setname_np(pthread_self(), "flush_thread");
-    auto wait_time = std::chrono::milliseconds(500);
-    auto timeout = std::chrono::milliseconds(cfg->flush_msec);
-    auto t0 = std::chrono::system_clock::now();
-    auto seq0 = seq.load();
-
-    while (p->running) {
-	std::unique_lock lk(*p->m);
-	if (p->cv.wait_for(lk, wait_time, [p] {return !p->running;}))
-	    return;
-	lk.unlock();
-
-	if (p->running && seq0 == seq.load() && b->len > 0) {
-	    if (std::chrono::system_clock::now() - t0 > timeout) 
-		flush();
-	}
-	else {
-	    seq0 = seq.load();
-	    t0 = std::chrono::system_clock::now();
-	}
-    }
-}
-
-/* -------------- Checkpointing -------------- */
-
-/* synchronously write a checkpoint
- */
-void translate_impl::write_checkpoint(int ckpt_seq) {
+void translate_impl::write_checkpoint(int _seq, translate_req *req) {
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
-
-    seq_record(ckpt_seq);
-
-    /* - map lock protects both object_info and map
-     * - damned if I know why I need lk(m) to keep test10 from failing,
-     *   but I do.
-     */
-    std::unique_lock lk(m);
-    std::unique_lock obj_w_lock(*map_lock);
 
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
@@ -776,7 +684,6 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
 		    .len = limit-base, .obj = (int32_t)ptr.obj,
 		    .offset = (int32_t)ptr.offset});
     }
-
     size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
 
     for (auto it = object_info.begin(); it != object_info.end(); it++) {
@@ -787,27 +694,15 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
 		    .data_sectors = (uint32_t)data,
 		    .live_sectors = (uint32_t)live});
     }
-    obj_w_lock.unlock();
-
-    /* wait until all prior objects have been acked by backend, 
-     */
-    while (next_compln < ckpt_seq && !stopped)
-	cv.wait(lk);
-    if (stopped)
-	return;
-    lk.unlock();
-
-    /* assemble the object
-     */
     size_t objs_bytes = objects.size() * sizeof(ckpt_obj);
+
     size_t hdr_bytes = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr);
-    int sectors = div_round_up(hdr_bytes + sizeof(ckpt_seq) + map_bytes +
-			       objs_bytes, 512);
+    int sectors = div_round_up(hdr_bytes + map_bytes + objs_bytes, 512);
 
     auto buf = (char*)calloc(sectors*512, 1);
     auto h = (obj_hdr*)buf;
     *h = (obj_hdr){.magic = LSVD_MAGIC, .version = 1, .vol_uuid = {0},
-		   .type = LSVD_CKPT, .seq = (uint32_t)ckpt_seq,
+		   .type = LSVD_CKPT, .seq = (uint32_t)_seq,
 		   .hdr_sectors = (uint32_t)sectors, .data_sectors = 0};
     memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
     auto ch = (obj_ckpt_hdr*)(h+1);
@@ -826,62 +721,289 @@ void translate_impl::write_checkpoint(int ckpt_seq) {
     
     /* and write it
      */
-    objname name(prefix(ckpt_seq), ckpt_seq);
+    objname name(prefix(_seq), _seq);
     objstore->write_object(name.c_str(), buf, sectors*512);
-    seq_complete(ckpt_seq);	// no locks held
     free(buf);
 
-    /* Now re-write the superblock with the new list of checkpoints
-     */
-    lk.lock();
-    checkpoints.push_back(ckpt_seq);
-    size_t offset = sizeof(*super_h) + sizeof(*super_sh);
+    req->done = true;
+    req->cv.notify_all();
+}
 
-    /* trim checkpoints. This function is the only place we modify
-     * checkpoints[]
-     */
-    std::vector<int> ckpts_to_delete;
-    while (checkpoints.size() > 3) {
-	ckpts_to_delete.push_back(checkpoints.front());
-	checkpoints.erase(checkpoints.begin());
+
+
+/* 
+ * handle a "tentative" garbage collection request.
+ *
+ * the request has a list of LBA ranges, the object ranges the
+ * ranges pointed to when they were selected for GC, and the data 
+ * those locations contained at that time.
+ *
+ * writes are not blocked while GC is building these requests, so
+ * some ranges may have been overwritten. 
+ *
+ * to process the request: (a) revalidate all mappings, discarding 
+ * any which have changed, and (b) assign a sequence number
+ * this guarantees that the contents reflect the map state after all
+ * previous seq#s and before all following ones.
+ */
+void translate_impl::write_gc(int _seq, translate_req *req) {
+    req->_seq = _seq;
+    
+    int data_sectors = 0;
+    for (const auto &e : req->entries)
+	data_sectors += e.len;
+
+    int max_hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+	(cfg->batch_size / 2048) * sizeof(data_map);
+    int max_hdr_sectors = div_round_up(max_hdr_bytes, 512);
+
+    auto buf = req->gc_buf = (char*)malloc((max_hdr_sectors+data_sectors)*512);
+    memset(buf, 0, max_hdr_sectors*512);
+    auto data_ptr = buf + max_hdr_sectors*512;
+    auto data_ptr0 = data_ptr;
+    auto in_ptr = req->gc_data;
+
+    int _data_sectors = 0;	// actual sectors in GC write
+    std::vector<data_map> obj_extents;
+
+    req->local_buf_base = data_ptr;
+    for (auto const & [base, len, obj, offset] : req->entries) {
+	auto limit = base+len;
+	for (auto it2 = map->lookup(base);
+	     it2 != map->end() && it2->base() < limit; it2++) {
+	     /* [_base,_limit] is a piece of the extent
+	      * obj_base is where that piece starts in the object
+	      */
+	    auto [_base, _limit, ptr] = it2->vals(base, limit);
+	    if (ptr.obj != obj)
+		continue;
+
+	    sector_t _sectors = _limit - _base;
+	    _data_sectors += _sectors;
+	    int bytes = _sectors*512;
+
+	    sector_t extent_offset = _base - base;
+	    memcpy(data_ptr, in_ptr + extent_offset*512, bytes);
+	    data_ptr += bytes;
+	    obj_extents.push_back((data_map){
+		    (uint64_t)_base, (uint64_t)(_limit-_base)});
+	}
+	in_ptr += len*512;
     }
-    lk.unlock();
-    
-    /* this is the only place we modify *super_sh
-     */
-    super_sh->ckpts_offset = offset;
-    super_sh->ckpts_len = checkpoints.size() * sizeof(ckpt_seq);
-    auto pc = (uint32_t*)(super_buf + offset);
-    for (size_t i = 0; i < checkpoints.size(); i++)
-	*pc++ = checkpoints[i];
-	
-    if (stopped)
-	return;
-    
-    objstore->write_object(super_name, super_buf, 4096);
+    req->local_buf_limit = data_ptr;
+    data_sectors = (data_ptr - data_ptr0) / 512;
 
-    for (auto c : ckpts_to_delete) {
-	objname name(prefix(c), c);
-	objstore->delete_object(name.c_str());
+    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+	obj_extents.size() * sizeof(data_map);
+    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    
+    sector_t offset = hdr_sectors;
+    data_ptr = data_ptr0;
+    std::vector<extmap::lba2obj> deleted;
+    req->entries.clear();	// replace with actual extents written
+
+    std::unique_lock obj_w_lock(*map_lock); // protect the readers
+    for (auto const &e : obj_extents) {
+	extmap::obj_offset oo = {_seq, offset};
+	map->update(e.lba, e.lba+e.len, oo, &deleted);
+	offset += e.len;
+	req->entries.push_back((ckpt_mapentry){
+		(int64_t)e.lba, (int64_t)e.len, 0, 0});
+    }
+    obj_w_lock.unlock();
+
+    for (auto &d : deleted) {
+	auto [base, limit, ptr] = d.vals();
+	if (object_info.find(ptr.obj) == object_info.end())
+	    continue;	// skip clone base
+	object_info[ptr.obj].live -= (limit - base);
+	assert(object_info[ptr.obj].live >= 0);
+	total_live_sectors -= (limit - base);
+    }
+    
+    gc_sectors_written += data_sectors; // only written in this thread
+    auto hdr = data_ptr0 - hdr_sectors*512;
+    make_gc_hdr(hdr, _seq, data_sectors,
+		obj_extents.data(), obj_extents.size());
+
+    auto h = (obj_hdr*)hdr;
+    assert(h->hdr_sectors == hdr_sectors);
+    
+    obj_info oi = {.hdr = hdr_sectors, .data = data_sectors,
+		   .live = data_sectors};
+    object_info[_seq] = oi;
+
+    auto _p = (uint64_t *)(hdr + 512*hdr_sectors);
+    assert(*_p != 0);
+    
+    objname name(prefix(_seq), _seq);
+    auto req2 = objstore->make_write_req(name.c_str(), hdr,
+					(hdr_sectors+data_sectors)*512);
+    outstanding_writes++;
+    req2->run(req);
+}
+
+
+void translate_impl::process_batch(int _seq, translate_req *req)
+{
+    req->_seq = _seq;
+
+    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+	req->entries.size() * sizeof(data_map);
+    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    char *hdr_ptr = req->data_ptr - hdr_sectors*512;
+    int data_sectors = req->len/512;
+
+    /* update the object info table
+     */
+    std::unique_lock obj_w_lock(*map_lock);
+    obj_info oi = {.hdr = hdr_sectors, .data = data_sectors,
+		   .live = data_sectors};
+    object_info[_seq] = oi;
+
+    /* and the object map (copy entries to right format at same time)
+     */
+    sector_t sector_offset = hdr_sectors;
+    std::vector<extmap::lba2obj> deleted;
+    std::vector<data_map> dm_entries;
+    
+    for (auto e : req->entries) {
+	extmap::obj_offset oo = {_seq, sector_offset};
+	map->update(e.lba, e.lba+e.len, oo, &deleted);
+	sector_offset += e.len;
+	dm_entries.push_back((data_map){(uint64_t)e.lba, (uint64_t)e.len});
+    }
+
+    for (auto d : deleted) {
+	auto [base, limit, ptr] = d.vals();
+	if (object_info.find(ptr.obj) == object_info.end())
+	    continue;		// skip clone base
+	object_info[ptr.obj].live -= (limit - base);
+	assert(object_info[ptr.obj].live >= 0);
+	total_live_sectors -= (limit - base);
+    }
+
+    /* update total and live sectors *after* dups are removed
+     */
+    auto live = object_info[_seq].live; 
+    total_live_sectors += live;
+    total_sectors += data_sectors; // doesn't count headers
+
+    make_data_hdr(hdr_ptr, data_sectors*512, 0, &dm_entries, _seq, &uuid);
+    
+    objname name(prefix(_seq), _seq);
+    auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr,
+					(hdr_sectors+data_sectors)*512);
+    outstanding_writes++;
+    req2->run(req);
+}
+
+
+void translate_impl::worker_thread(thread_pool<translate_req*> *p) {
+    pthread_setname_np(pthread_self(), "batch_worker");
+    while (p->running) {
+	std::unique_lock lk(m);
+	translate_req *req;
+	if (!p->get_locked(lk, req)) 
+           return;
+
+	/* note - flush operation has to put any partial batch on the
+	 * queue before queing a flush request
+	 */
+	if (req->op == REQ_FLUSH) {
+	    while (outstanding_writes > 0)
+		cv.wait(lk);
+	    req->done = true;
+	    req->cv.notify_all();
+	}
+	/* request and batch will be deleted on completion
+	 * map is updated before any following requests are processed
+	 */
+	else if (req->op == REQ_PUT) {
+	    auto _seq = seq++;
+	    lk.unlock();
+	    process_batch(_seq, req);
+	}
+	/* generate a checkpoint before any following requests processed
+	 */
+	else if (req->op == REQ_CKPT) {
+	    auto _seq = seq++;
+	    lk.unlock();
+	    write_checkpoint(_seq, req);
+	}
+	else if (req->op == REQ_GC) {
+	    auto _seq = seq++;
+	    active_gc_objs.insert(_seq);
+	    lk.unlock();
+	    write_gc(_seq, req);
+	}
+	else
+	    assert(false);
     }
 }
 
-/* called on shutdown
- */
-int translate_impl::checkpoint(void) {
-    auto old_batch = check_batch_room(0);
-    if (old_batch != NULL) {
-	std::unique_lock lk(m);
-	auto _seq = old_batch->seq;
-	workers->put_locked(old_batch);
 
-	while (next_compln <= _seq)
-	    cv.wait(lk);
+/* flushes any data buffered in current batch, and blocks until all 
+ * outstanding writes are complete.
+ */
+void translate_impl::flush(void) {
+    std::unique_lock lk(m);
+    
+    if (current->len > 0) {
+	workers->put_locked(current);
+	current = new translate_req(REQ_PUT, cfg->batch_size, this);
     }
 
-    int _seq = seq++;
-    write_checkpoint(_seq);
-    return _seq;
+    auto flush_req = new translate_req(REQ_FLUSH, this);
+    workers->put_locked(flush_req);
+    lk.unlock();
+    flush_req->wait();
+}
+
+void translate_impl::checkpoint(void) {
+    std::unique_lock lk(m);
+    
+    if (current->len > 0) {
+	workers->put_locked(current);
+	current = new translate_req(REQ_PUT, cfg->batch_size, this);
+    }
+
+    auto ckpt_req = new translate_req(REQ_CKPT, this);
+    workers->put_locked(ckpt_req);
+    lk.unlock();
+    ckpt_req->wait();
+}
+
+
+/* wake up every @wait_time, if data is pending in current batch
+ * for @timeout then submit it for writing to the backend. 
+ * Unlike flush() we don't bother waiting until it completes.
+ */
+void translate_impl::flush_thread(thread_pool<int> *p) {
+    pthread_setname_np(pthread_self(), "flush_thread");
+    auto wait_time = std::chrono::milliseconds(500);
+    auto timeout = std::chrono::milliseconds(cfg->flush_msec);
+    auto t0 = std::chrono::system_clock::now();
+    auto seq0 = seq.load();
+
+    std::unique_lock lk(*p->m);
+    while (p->running) {
+	p->cv.wait_for(lk, wait_time);
+	if (!p->running)
+	    break;
+
+	if (p->running && seq0 == seq.load() && current->len > 0) {
+	    if (std::chrono::system_clock::now() - t0 < timeout)
+		continue;
+	    workers->put_locked(current);
+	    current = new translate_req(REQ_PUT, cfg->batch_size, this);
+	}
+	else {
+	    seq0 = seq.load();
+	    t0 = std::chrono::system_clock::now();
+	}
+    }
+    printf("flush thread (%lx) exiting\n", pthread_self());
 }
 
 
@@ -931,6 +1053,11 @@ void translate_impl::do_gc(bool *running) {
 	object_info.erase(o);
     obj_w_lock.unlock();
     
+    std::unique_lock lk(m);
+    int last_ckpt = (checkpoints.size() > 0) ?
+	checkpoints.back() : seq.load();
+    lk.unlock();
+
     /* create list of object info in increasing order of 
      * utilization, i.e. (live data) / (total size)
      */
@@ -938,14 +1065,17 @@ void translate_impl::do_gc(bool *running) {
     int calculated_total = 0;
     std::set<std::tuple<double,int,int>> utilization;
     for (auto p : object_info)  {
+	if (p.first > last_ckpt)
+	    continue;
 	auto [hdrlen, datalen, live] = p.second;
 	double rho = 1.0 * live / datalen;
 	sector_t sectors = hdrlen + datalen;
 	calculated_total += datalen;
 	utilization.insert(std::make_tuple(rho, p.first, sectors));
-	assert(sectors <= 20*1024*1024/512);
+	assert(sectors <= 20*1024*1024/512); // WTF??
     }
-    
+    obj_r_lock.unlock();
+
     /* gather list of objects needing cleaning, return if none
      */
     const double threshold = cfg->gc_threshold / 100.0;
@@ -964,24 +1094,29 @@ void translate_impl::do_gc(bool *running) {
      * - make bitmap from objs_to_clean
      * - find all entries in map pointing to those objects
      */
-    std::vector<bool> bitmap(max_obj+1);
+    std::set<int> objects;
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++)
-	bitmap[it->first] = true;
+	objects.insert(it->first);
 
+    int max_obj_sectors = 0;
+    for (auto o : objects) {
+	auto _sectors = object_info[o].hdr + object_info[o].data;
+	max_obj_sectors = std::max(_sectors, max_obj_sectors);
+    }
+    
+    obj_r_lock.lock();
     extmap::objmap live_extents;
     for (auto it = map->begin(); it != map->end(); it++) {
 	auto [base, limit, ptr] = it->vals();
-	if (ptr.obj <= max_obj && bitmap[ptr.obj])
+	if (ptr.obj <= max_obj && objects.find(ptr.obj) != objects.end())
 	    live_extents.update(base, limit, ptr);
     }
     obj_r_lock.unlock();
 
-    /* everything before this point was in-memory only, with the 
-     * translation instance mutex held, doing no I/O.
-     */
-
-    /* this is really gross. We really should check to see if data is
-     * in the read cache, and put retrieved data there...
+    /* Retrieve objects to clean, save to local file, build map
+     * TODO: 
+     *  1. range read when appropriate
+     *  2. get data from read cache when possible
      */
     if (live_extents.size() > 0) {
 	/* temporary file, delete on close. 
@@ -990,26 +1125,24 @@ void translate_impl::do_gc(bool *running) {
 	sprintf(temp, "%s/gc.XXXXXX", cfg->cache_dir.c_str());
 	int fd = mkstemp(temp);
 
-	/* read all objects in completely. Someday we can check to see whether
-	 * (a) data is already in cache, or (b) sparse reading would be quicker
+	/* read all objects in completely
 	 */
-	extmap::cachemap file_map;
+	std::map<int,int> file_map; // obj# -> sector offset in file
 	sector_t offset = 0;
-	char *buf = (char*)malloc(20*1024*1024);
+	char *buf = (char*)malloc(max_obj_sectors*512);
 
 	for (auto [i,sectors] : objs_to_clean) {
 	    objname name(prefix(i), i);
 	    objstore->read_object(name.c_str(), buf, sectors*512UL, 0);
 	    gc_sectors_read += sectors;
-	    extmap::obj_offset _base = {i, 0}, _limit = {i, sectors};
-	    file_map.update(_base, _limit, offset);
+	    file_map[i] = offset;
 	    if (write(fd, buf, sectors*512) < 0)
 		throw("no space");
 	    offset += sectors;
 	}
 	free(buf);
 
-	auto file_offset = offset;
+	auto file_end = offset;
 
 	std::vector<_extent> all_extents;
 	for (auto it = live_extents.begin(); it != live_extents.end(); it++) {
@@ -1022,141 +1155,50 @@ void translate_impl::do_gc(bool *running) {
 	std::queue<translate_req*> requests;
 	
 	while (all_extents.size() > 0) {
-	    sector_t sectors = 0, max = 16 * 1024; // 8MB
+	    sector_t sectors = 0, max = cfg->batch_size / 512;
+	    std::vector<_extent> extents;
 	    
 	    auto it = all_extents.begin();
 	    while (it != all_extents.end() && sectors < max) {
-		auto [base, limit, ptr] = *it++;
-		sectors += (limit - base);
-		(void)ptr;	// suppress warning
-	    }
-	    std::vector<_extent> extents(std::make_move_iterator(all_extents.begin()),
-					 std::make_move_iterator(it));
-	    all_extents.erase(all_extents.begin(), it);
-	    
-	    /* figure out what we need to read from the file, create
-	     * the header etc., then drop the lock and actually read it.
-	     */
-	    size_t prepend = 2048*sizeof(data_map) + 512;
-	    char *_buf = (char*)malloc(sectors * 512 + prepend);
-	    char *buf = _buf + prepend;
-
-	    /* file offset, buffer ptr, length */
-	    std::vector<std::tuple<sector_t,char*,size_t>> to_read; 
-	    
-	    off_t byte_offset = 0;
-	    sector_t data_sectors = 0;
-	    std::vector<data_map> obj_extents;
-
-	    /* the extents may have been fragmented in the meantime...
-	     */
-	    sector_t _debug_sector = 0;
-	    std::unique_lock lk(m); // not sure exactly why test10 needs this...
-	    obj_r_lock.lock();
-	    for (auto const & [base, limit, ptr] : extents) {
-		for (auto it2 = map->lookup(base);
-		     it2->base() < limit && it2 != map->end(); it2++) {
-		     /* [_base,_limit] is a piece of the extent
-		      * obj_base is where that piece starts in the object
-		      */
-		    auto [_base, _limit, obj_base] = it2->vals(base, limit);
-
-		    /* skip if it's not still in the object, otherwise
-		     * _obj_limit is where it ends.
-		     */
-		    if (obj_base.obj != ptr.obj)
-			continue;
-		    sector_t _sectors = _limit - _base;
-		    auto obj_limit =
-			extmap::obj_offset{obj_base.obj,
-					   obj_base.offset+_sectors};
-
-		    /* file_sector is where that piece starts in 
-		     * the GC file...
-		     */
-		    auto it3 = file_map.lookup(obj_base);
-		    auto [file_base,file_limit,file_sector] =
-			it3->vals(obj_base, obj_limit);
-		    (void)file_limit; // suppress warning
-		    (void)file_base;  // suppress warning
-		    assert(file_sector != _debug_sector);
-		    _debug_sector = file_sector;
-		    size_t bytes = _sectors*512;
-		    to_read.push_back(std::make_tuple(file_sector,
-						      buf+byte_offset, bytes));
-
-		    obj_extents.push_back((data_map){(uint64_t)_base, (uint64_t)_sectors});
-
-		    data_sectors += _sectors;
-		    byte_offset += bytes;
-		}
-	    }
-	    int32_t _seq = seq++;
-	    obj_r_lock.unlock();
-	    lk.unlock();
-
-	    seq_record(_seq);
-	    gc_sectors_written += data_sectors; // only written in this thread
-	    int hdr_size = div_round_up(sizeof(obj_hdr) + sizeof(obj_data_hdr) +
-					obj_extents.size()*sizeof(data_map), 512);
-	    char *hdr = buf - hdr_size*512;
-	    int hdr_sectors = make_gc_hdr(hdr, _seq, data_sectors,
-					  obj_extents.data(), obj_extents.size());
-	    assert(hdr_size == hdr_sectors);
-	    sector_t offset = hdr_sectors;
-
-	    int gc_sectors = byte_offset / 512;
-	    obj_info oi = {.hdr = hdr_sectors, .data = gc_sectors,
-			   .live = gc_sectors};
-
-	    obj_w_lock.lock();
-	    object_info[_seq] = oi;
-	    std::vector<extmap::lba2obj> deleted;
-	    for (auto const &e : obj_extents) {
-		extmap::obj_offset oo = {_seq, offset};
-		map->update(e.lba, e.lba+e.len, oo, &deleted);
-		offset += e.len;
+		extents.push_back(*it);
+		sectors += (it->limit - it->base);
+		it = all_extents.erase(it);
 	    }
 
-	    for (auto &d : deleted) {
-		auto [base, limit, ptr] = d.vals();
-		if (object_info.find(ptr.obj) == object_info.end())
-		    continue;	// skip clone base
-		object_info[ptr.obj].live -= (limit - base);
-		assert(object_info[ptr.obj].live >= 0);
-		total_live_sectors -= (limit - base);
-	    }
-	    obj_w_lock.unlock();
+	    auto req = new translate_req(REQ_GC, this);
+	    auto file_data = req->gc_data = (char*)malloc(sectors * 512);
+	    size_t file_data_len = 0;
 
-	    /* Now we actually read from the file
-	     */
-	    for (auto const & tpl : to_read) {
-		auto [file_sector, ptr, bytes] = tpl;
-		assert(file_sector < file_offset);  // total file size
-		auto err = pread(fd, ptr, bytes, file_sector*512);
+	    for (auto [base, limit, ptr] : extents) {
+		auto file_sector = file_map[ptr.obj] + ptr.offset;
+		auto sectors = limit - base;
+		assert(file_sector + sectors <= file_end);
+		size_t bytes = sectors * 512;
+		auto err = pread(fd, file_data + file_data_len, bytes,
+				 file_sector*512);
 		assert(err == (ssize_t)bytes);
+		req->entries.push_back((ckpt_mapentry){
+			.lba = base, .len = limit-base,
+			    .obj = (int)ptr.obj, .offset = (int)ptr.offset});
+		file_data_len += bytes;
 	    }
-	    
-	    auto t_req = new translate_req(_seq, this, true);
-	    t_req->to_free.push_back(_buf);
 
-	    if (stopped)
-		return;
-	    
-	    objname name(prefix(_seq), _seq);
-	    auto req = objstore->make_write_req(name.c_str(), hdr,
-						(hdr_sectors+data_sectors)*512);
-	    outstanding_writes++;
-	    req->run(t_req);
-	    requests.push(t_req);
+	    std::unique_lock lk(m);
+	    requests.push(req);
+	    workers->put_locked(req);
+	    lk.unlock();
 	    
 	    while (requests.size() > 8) {
+		if (stopped)
+		    return;
 		auto t = requests.front();
 		t->wait();
 		requests.pop();
 	    }
 	}
 	while (requests.size() > 0) {
+	    if (stopped)
+		return;
 	    auto t = requests.front();
 	    t->wait();
 	    requests.pop();
@@ -1165,6 +1207,8 @@ void translate_impl::do_gc(bool *running) {
 	unlink(temp);
     }
 
+    /* defer deletes until we've cleaned the whole batch. 
+     */
     obj_w_lock.lock();
     for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	total_sectors -= object_info[it->first].data;
@@ -1172,23 +1216,24 @@ void translate_impl::do_gc(bool *running) {
     }
     obj_w_lock.unlock();
     
-    /* write checkpoint *before* deleting any objects
-     */
     if (stopped)
 	return;
+
+    /* write checkpoint *before* deleting any objects. 
+     * use single-threaded delete for now
+     */
     if (objs_to_clean.size()) {
-	int ckpt_seq = seq++;
-	write_checkpoint(ckpt_seq);
-    
+	checkpoint();
 	for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
 	    objname name(prefix(it->first), it->first);
 	    objstore->delete_object(name.c_str());
-	    gc_deleted++;		// single-threaded, no lock needed
+	    gc_deleted++;
 	}
     }
 }
 
 void translate_impl::stop_gc(void) {
+    stopped = true;
     delete misc_threads;
     std::unique_lock lk(m);
     while (gc_running)
@@ -1382,6 +1427,7 @@ int translate_remove_image(backend *objstore, const char *name) {
 	    objname obj(name, c);
 	    objstore->delete_object(obj.c_str());
 	}
+	free(ckpt_buf);
     }
     /* delete any objects after the last checkpoint, up to the first run of
      * 32 missing sequence numbers

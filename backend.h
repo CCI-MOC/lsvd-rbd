@@ -15,6 +15,7 @@ class request;
 class backend {
 public:
     virtual ~backend(){}
+    virtual void stop(void) = 0;
     
     /* synchronous I/O methods, return 0 / -1 for success/error
      */

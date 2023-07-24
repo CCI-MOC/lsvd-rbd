@@ -78,7 +78,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 
     /* read superblock and initialize translation layer
      */
-    xlate = make_translate(objstore, &cfg, &map, &map_lock);
+    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock);
     size = xlate->init(name, true);
 
     /* figure out cache file name, create it if necessary
@@ -107,8 +107,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name) {
 	throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(js->write_super, fd, xlate, &cfg);
-    rcache = make_read_cache(js->read_super, fd, false,
-			     xlate, &map, &map_lock, objstore);
+    rcache = make_read_cache(js->read_super, fd, 
+			     xlate, &map, &bufmap, &map_lock, objstore);
     free(js);
 
     // if (!__lsvd_dbg_no_gc)
@@ -163,6 +163,7 @@ int rbd_image::image_close(void) {
     delete wcache;
     xlate->stop_gc();
     xlate->checkpoint();
+    objstore->stop();
     delete xlate;
     delete objstore;
     close(fd);
@@ -286,7 +287,6 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off,
 
 extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
-    //do_log("'f', 0, 0, []\n");
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
     auto img = p->img = (rbd_image*)image;
@@ -352,10 +352,8 @@ class rbd_aio_req : public request {
     std::mutex        m;
     std::condition_variable cv;
 
-
-    std::set<void*> wc_work;
-    std::set<request*> rc_work;
-
+    std::vector<request*> requests;
+    
     void notify_parent(void) {
 	//assert(!m.try_lock());
         if (p != NULL) {
@@ -371,7 +369,6 @@ class rbd_aio_req : public request {
 
     void notify_w(request *req) {
 	std::unique_lock lk(m);
-	wc_work.erase((void*)req);
 	auto z = --n_req;
 	if (z > 0)
 	    return;
@@ -408,7 +405,6 @@ class rbd_aio_req : public request {
 	    smartiov *_iov = new smartiov(tmp.data(), tmp.size());
 	    to_free.push_back(_iov);
 	    auto wcw = img->wcache->writev(this, offset/512, _iov);
-	    wc_work.insert((void*)wcw);
 	    offset += _sectors*512L;
 	}
 
@@ -426,7 +422,7 @@ class rbd_aio_req : public request {
 	    child->release();
 
 	std::unique_lock lk(m);
-	rc_work.erase(child);
+	//do_log("rr done %d %p\n", n_req.load(), child);
         if (--n_req > 0)
 	    return;
 
@@ -445,40 +441,16 @@ class rbd_aio_req : public request {
 
     void run_r() {
 	__reqs++;
-        /* we're not done until n_req == 0 && launched == true
-         */
-	size_t _offset = 0, _end = aligned_iovs.bytes();
-	std::vector<request*> requests;
+	//std::vector<request*> requests;
+
+	img->rcache->handle_read(img, offset, &aligned_iovs, requests);
 	
-        while (_offset < _end) {
-	    smartiov wcache_iov = aligned_iovs.slice(_offset,_end);
-            auto [skip,wait,req] =
-                img->wcache->async_readv(offset, &wcache_iov);
-	    if (req != NULL) {
-		requests.push_back(req);
-		rc_work.insert(req);
-	    }
-            while (skip > 0) {
-		smartiov rcache_iov = aligned_iovs.slice(_offset, _offset+skip);
-                auto [skip2, wait2, req2] =
-                    img->rcache->async_readv(offset, &rcache_iov);
-		if (req2) {
-		    requests.push_back(req2);
-		    rc_work.insert(req2);
-		}
-
-		aligned_iovs.zero(_offset, _offset+skip2);
-                skip -= (skip2 + wait2);
-                _offset += (skip2 + wait2);
-                offset += (skip2 + wait2);
-            }
-            _offset += wait;
-            offset += wait;
-	}
-
-	n_req += requests.size();
-	for (auto const & r : requests)
+	n_req = requests.size();
+	//do_log("rbd_read %ld:\n", offset/512);
+	for (auto const & r : requests) {
+	    //do_log(" %p\n", r);
 	    r->run(this);
+	}
 	
 	std::unique_lock lk(m);
 	if (requests.size() == 0)
@@ -503,13 +475,7 @@ class rbd_aio_req : public request {
 	_sector = offset / 512;
 	status = status_;	// 0 or REQ_WAIT
 	sectors = iovs.bytes() / 512L;
-#if 0
-	if (op == OP_WRITE) {
-	    do_log("%s %ld\n", op == OP_READ ? "R" : "W", sectors);
-	    if (iovs.size() > 10)
-		do_log(" big\n");
-	}
-#endif
+
 	if (iovs.aligned(512))
 	    aligned_iovs = iovs;
 	else {
@@ -718,6 +684,7 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
 	return -1;
     auto objstore = get_backend(&cfg, io, NULL);
     auto rv = translate_create_image(objstore, name, size);
+    objstore->stop();
     delete objstore;
     return rv;
 }
@@ -739,6 +706,7 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name) {
     auto cache_file = cfg.cache_filename(uu, name);
     unlink(cache_file.c_str());
     rv = translate_remove_image(objstore, name);
+    objstore->stop();
     delete objstore;
     return rv;
 }

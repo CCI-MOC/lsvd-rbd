@@ -1,3 +1,6 @@
+lsvd_rnd_test
+lsvd_crash_test
+
 # coverage
 *.gcov
 *.gcda

@@ -160,7 +160,8 @@ size_t make_data_hdr(char *hdr, size_t bytes, uint64_t cache_seq,
 
     *dh = (obj_data_hdr){.cache_seq = cache_seq,
 			 .objs_cleaned_offset = 0, . objs_cleaned_len = 0,
-			 .data_map_offset = o2, .data_map_len = l2};
+			 .data_map_offset = o2, .data_map_len = l2,
+			 .is_gc = 0};
 
     auto dm = (data_map*)(dh+1);
     for (auto e : *entries)
