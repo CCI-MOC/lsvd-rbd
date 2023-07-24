@@ -8,43 +8,36 @@
  *              LGPL-2.1-or-later
  */
 
-#include <fcntl.h>
-#include <unistd.h>
-
-#include <uuid/uuid.h>
-
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <shared_mutex>
-#include <thread>
-
 #include <algorithm>
-
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
+#include <fcntl.h>
 #include <map>
+#include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <stack>
+#include <string>
+#include <thread>
+#include <unistd.h>
+#include <uuid/uuid.h>
 #include <vector>
 
-#include <cassert>
-#include <string>
-
-#include "extent.h"
-#include "journal.h"
-#include "smartiov.h"
-
 #include "backend.h"
+#include "config.h"
+#include "extent.h"
+#include "fake_rbd.h"
+#include "image.h"
+#include "journal.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
 #include "read_cache.h"
 #include "request.h"
+#include "smartiov.h"
 #include "translate.h"
 #include "write_cache.h"
-
-#include "config.h"
-#include "fake_rbd.h"
-#include "image.h"
 
 extern void do_log(const char *, ...);
 extern void fp_log(const char *, ...);
@@ -62,7 +55,6 @@ bool __lsvd_dbg_no_gc = false;
 
 backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
 {
-
     if (cfg->backend == BACKEND_FILE)
         return make_file_backend(name);
     if (cfg->backend == BACKEND_RADOS)
@@ -72,7 +64,6 @@ backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
 {
-
     if (cfg.read() < 0)
         return -1;
     objstore = get_backend(&cfg, io, name);

@@ -1,14 +1,13 @@
 #include <unistd.h>
 #include <uuid/uuid.h>
 
-#include <map>
-#include <queue>
-#include <thread>
-
 #include <atomic>
 #include <condition_variable>
+#include <map>
 #include <mutex>
+#include <queue>
 #include <shared_mutex>
+#include <thread>
 
 #include "backend.h"
 #include "config.h"
@@ -17,18 +16,14 @@
 #include "image.h"
 #include "journal.h"
 #include "lsvd_types.h"
+#include "misc_cache.h"
+#include "nvme.h"
+#include "objects.h"
 #include "read_cache.h"
+#include "request.h"
 #include "smartiov.h"
 #include "translate.h"
 #include "write_cache.h"
-
-#include "objects.h"
-#include "request.h"
-
-#include "misc_cache.h"
-#include "nvme.h"
-
-#include "config.h"
 
 // tuple :	used for retrieving maps
 struct tuple {

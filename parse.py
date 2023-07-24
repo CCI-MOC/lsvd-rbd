@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import zlib
 import os
 import lsvd_types as lsvd
 import sys
@@ -15,7 +16,7 @@ args = parser.parse_args()
 
 if args.rados:
     import rados
-    pool,oid = args.object.split('/')
+    pool, oid = args.object.split('/')
     cluster = rados.Rados(conffile='')
     cluster.connect()
     if not cluster.pool_exists(pool):
@@ -30,9 +31,10 @@ else:
     obj = f.read(None)
     f.close()
 
+
 def read_obj(name):
     if args.rados:
-        pool,oid = name.split('/')
+        pool, oid = name.split('/')
         if not cluster.pool_exists(pool):
             raise RuntimeError('Pool not found: ' + pool)
         ioctx = cluster.open_ioctx(pool)
@@ -44,10 +46,13 @@ def read_obj(name):
         f.close()
     return obj
 
+
 o2 = l1 = lsvd.sizeof_hdr
 
+
 def fmt_ckpt(ckpts):
-    return map(lambda x: "%d (0x%x)" % (x,x), ckpts)
+    return map(lambda x: "%d (0x%x)" % (x, x), ckpts)
+
 
 def fmt_obj_cleaned(objs):
     l = []
@@ -55,11 +60,14 @@ def fmt_obj_cleaned(objs):
         l.append("[%d %d]" % (o.seq, o.was_deleted))
     return l
 
+
 def fmt_obj(objs):
     l = []
     for o in objs:
-        l.append("[obj=%d hdr=%d data=%d live=%d]" % (o.seq, o.hdr_sectors, o.data_sectors, o.live_sectors))
+        l.append("[obj=%d hdr=%d data=%d live=%d]" %
+                 (o.seq, o.hdr_sectors, o.data_sectors, o.live_sectors))
     return l
+
 
 def fmt_data_map(maps):
     l = []
@@ -67,29 +75,32 @@ def fmt_data_map(maps):
         l.append("[%d %d]" % (m.lba, m.len))
     return l
 
+
 def fmt_ckpt_map(maps):
     l = []
     for m in maps:
         l.append("[%d+%d -> %d+%d]" % (m.lba, m.len, m.obj, m.offset))
     return l
 
+
 def read_ckpts(buf, base, bytes):
     if bytes <= 0:
-        return [ ]
+        return []
     n = bytes//4
     ckpts = (c_int * n).from_buffer(buf[base:base+bytes])
     return [_ for _ in ckpts]
 
-import zlib
+
 print('crc:          %08x' % zlib.crc32(obj))
+
 
 def print_clone(c, name, indent):
     uu = uuid.UUID(bytes=bytes(c.vol_uuid))
-    print(indent + 'clone base:    ', str(name,'utf-8'))
+    print(indent + 'clone base:    ', str(name, 'utf-8'))
     print(indent + '  last seq:    ', c.last_seq)
     print(indent + '      uuid:    ', str(uu))
 
-    _name = str(name,'utf-8')
+    _name = str(name, 'utf-8')
     obj = read_obj(_name)
     o2 = lsvd.sizeof_hdr
     o3 = o2+lsvd.sizeof_super_hdr
@@ -102,7 +113,7 @@ def print_clone(c, name, indent):
         name = obj[o2:o2+c.name_len]
         print_clone(c, name, '  ')
 
-    
+
 h = lsvd.hdr.from_buffer(bytearray(obj[0:l1]))
 if h.type == lsvd.LSVD_SUPER:
     o3 = o2+lsvd.sizeof_super_hdr
@@ -132,16 +143,20 @@ if h.type == lsvd.LSVD_SUPER:
         print_clone(c, name, '')
 
     print('snaps:         ', '[tbd]')
-    
+
 elif h.type == lsvd.LSVD_DATA:
     o3 = o2+lsvd.sizeof_data_hdr
     dh = lsvd.data_hdr.from_buffer(bytearray(obj[o2:o3]))
-        
-    o5 = dh.objs_cleaned_offset; l5 = dh.objs_cleaned_len
-    objs = (lsvd.obj_cleaned * (l5//lsvd.sizeof_obj_cleaned)).from_buffer(bytearray(obj[o5:o5+l5]))
 
-    o6 = dh.map_offset; l6 = dh.map_len
-    maps = (lsvd.data_map * (l6//lsvd.sizeof_data_map)).from_buffer(bytearray(obj[o6:o6+l6]))
+    o5 = dh.objs_cleaned_offset
+    l5 = dh.objs_cleaned_len
+    objs = (lsvd.obj_cleaned * (l5//lsvd.sizeof_obj_cleaned)
+            ).from_buffer(bytearray(obj[o5:o5+l5]))
+
+    o6 = dh.map_offset
+    l6 = dh.map_len
+    maps = (lsvd.data_map * (l6//lsvd.sizeof_data_map)
+            ).from_buffer(bytearray(obj[o6:o6+l6]))
 
     print('name:     ', args.object)
     print('magic:    ', 'OK' if h.magic == lsvd.LSVD_MAGIC else '**BAD**')
@@ -152,26 +167,31 @@ elif h.type == lsvd.LSVD_DATA:
     print('n_data:   ', h.data_sectors)
     print('crc:      ', '%08x' % h.crc)
     print('wseq:     ', dh.cache_seq)
-    print('cleaned:  ', dh.objs_cleaned_offset, ':', ', '.join(fmt_obj_cleaned(objs)))
+    print('cleaned:  ', dh.objs_cleaned_offset,
+          ':', ', '.join(fmt_obj_cleaned(objs)))
     if args.nowrap:
-            print('map:')
-            print(' ' + '\n '.join(fmt_data_map(maps)))
+        print('map:')
+        print(' ' + '\n '.join(fmt_data_map(maps)))
     else:
-        print('map:      ', '%d+%d' % (dh.map_offset,dh.map_len), ':', ', '.join(fmt_data_map(maps)))
-    
+        print('map:      ', '%d+%d' % (dh.map_offset, dh.map_len),
+              ':', ', '.join(fmt_data_map(maps)))
+
 elif h.type == lsvd.LSVD_CKPT:
     o3 = o2+lsvd.sizeof_ckpt_hdr
     ch = lsvd.ckpt_hdr.from_buffer(bytearray(obj[o2:o3]))
 
-    o4 = ch.ckpts_offset; l4 = ch.ckpts_len
+    o4 = ch.ckpts_offset
+    l4 = ch.ckpts_len
     ckpts = (c_uint * (l4//4)).from_buffer(bytearray(obj[o4:o4+l4]))
-    
-    o5 = ch.objs_offset; l5 = ch.objs_len
+
+    o5 = ch.objs_offset
+    l5 = ch.objs_len
 
     if o5+l5 > len(obj):
         objs_txt = 'OBJECT TOO SHORT (%d bytes)' % len(obj)
     else:
-        objs = (lsvd.ckpt_obj * (l5//lsvd.sizeof_ckpt_obj)).from_buffer(bytearray(obj[o5:o5+l5]))
+        objs = (lsvd.ckpt_obj * (l5//lsvd.sizeof_ckpt_obj)
+                ).from_buffer(bytearray(obj[o5:o5+l5]))
         if args.nowrap:
             objs_txt = '\n ' + '\n '.join(fmt_obj(objs))
         else:
@@ -180,11 +200,13 @@ elif h.type == lsvd.LSVD_CKPT:
 #    o6 = ch.deletes_offset; l6 = ch.deletes_len
 #    dels = (lsvd.deferred_delete * (l5//lsvd.sizeof_deferred_delete)).from_buffer(bytearray(obj[o6:o6+l6]))
 
-    o7 = ch.map_offset; l7 = ch.map_len
+    o7 = ch.map_offset
+    l7 = ch.map_len
     if o7+l7 > len(obj):
         map_txt = 'OBJECT TOO SHORT (%d bytes)' % len(obj)
     else:
-        maps = (lsvd.ckpt_mapentry * (l7//lsvd.sizeof_ckpt_mapentry)).from_buffer(bytearray(obj[o7:o7+l7]))
+        maps = (lsvd.ckpt_mapentry * (l7//lsvd.sizeof_ckpt_mapentry)
+                ).from_buffer(bytearray(obj[o7:o7+l7]))
         if args.nowrap:
             map_txt = '\n ' + '\n '.join(fmt_ckpt_map(maps))
         else:
@@ -198,11 +220,11 @@ elif h.type == lsvd.LSVD_CKPT:
     print('n_hdr:    ', h.hdr_sectors)
     print('n_data:   ', h.data_sectors)
     print('crc:      ', '%08x' % h.crc)
-    
+
     print('cache_seq:', ch.cache_seq)
     print('ckpts:    ', ch.ckpts_offset, ':', ', '.join(fmt_ckpt(ckpts)))
     print('objs:     ', ch.objs_offset, ':', objs_txt)
     print('map:      ', ch.map_offset, ':', map_txt)
-    
+
 else:
     print("invalid type:", h.type)
