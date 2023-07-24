@@ -744,6 +744,27 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req)
     objstore->write_object(name.c_str(), buf, sectors * 512);
     free(buf);
 
+    checkpoints.push_back(_seq);
+    size_t offset = sizeof(*super_h) + sizeof(*super_sh);
+    std::vector<int> ckpts_to_delete;
+    while (checkpoints.size() > 3) {
+        ckpts_to_delete.push_back(checkpoints.front());
+        checkpoints.erase(checkpoints.begin());
+    }
+
+    super_sh->ckpts_offset = offset;
+    super_sh->ckpts_len = checkpoints.size() * sizeof(uint32_t);
+    auto pc = (uint32_t *)(super_buf + offset);
+    for (size_t i = 0; i < checkpoints.size(); i++)
+        *pc++ = checkpoints[i];
+
+    objstore->write_object(super_name, super_buf, 4096);
+
+    for (auto c : ckpts_to_delete) {
+        objname name(prefix(c), c);
+        objstore->delete_object(name.c_str());
+    }
+
     req->done = true;
     req->cv.notify_all();
 }
@@ -846,7 +867,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
                 obj_extents.size());
 
     auto h = (obj_hdr *)hdr;
-    assert(h->hdr_sectors == hdr_sectors);
+    assert((int)h->hdr_sectors == hdr_sectors);
 
     obj_info oi = {
         .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
@@ -1205,7 +1226,7 @@ void translate_impl::do_gc(bool *running)
             workers->put_locked(req);
             lk.unlock();
 
-            while (requests.size() > 8) {
+            while ((int)requests.size() > 8) {
                 if (stopped)
                     return;
                 auto t = requests.front();
@@ -1213,6 +1234,7 @@ void translate_impl::do_gc(bool *running)
                 requests.pop();
             }
         }
+
         while (requests.size() > 0) {
             if (stopped)
                 return;
