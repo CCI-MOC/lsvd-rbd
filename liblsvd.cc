@@ -137,6 +137,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     rcache =
         make_read_cache(0, read_fd, xlate, &map, &bufmap, &map_lock, objstore);
     free(jrs);
+    free(jws);
 
     if (!__lsvd_dbg_no_gc)
         xlate->start_gc();
