@@ -73,7 +73,8 @@ int lsvd_config::read()
             F_CONFIG_H_INT(words[0], words[1], batch_size);
             F_CONFIG_INT(words[0], words[1], wcache_batch);
             F_CONFIG_H_INT(words[0], words[1], wcache_chunk);
-            F_CONFIG_STR(words[0], words[1], cache_dir);
+            F_CONFIG_STR(words[0], words[1], rcache_dir);
+            F_CONFIG_STR(words[0], words[1], wcache_dir);
             F_CONFIG_INT(words[0], words[1], xlate_window);
             F_CONFIG_TABLE(words[0], words[1], backend, m);
             F_CONFIG_H_INT(words[0], words[1], cache_size);
@@ -89,7 +90,8 @@ int lsvd_config::read()
     ENV_CONFIG_H_INT(batch_size);
     ENV_CONFIG_INT(wcache_batch);
     ENV_CONFIG_H_INT(wcache_chunk);
-    ENV_CONFIG_STR(cache_dir);
+    ENV_CONFIG_STR(rcache_dir);
+    ENV_CONFIG_STR(wcache_dir);
     ENV_CONFIG_INT(xlate_window);
     ENV_CONFIG_TABLE(backend, m);
     ENV_CONFIG_H_INT(cache_size);
@@ -101,19 +103,22 @@ int lsvd_config::read()
     return 0; // success
 }
 
-std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name)
+std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name, cfg_cache_type type)
 {
     char buf[256]; // PATH_MAX
     std::string file(name);
     file = fs::path(file).filename();
+    const char *dir;
 
-    sprintf(buf, "%s/%s.cache", cache_dir.c_str(), file.c_str());
+    dir = (type == READ) ? rcache_dir.c_str() : wcache_dir.c_str();
+
+    sprintf(buf, "%s/%s.cache", dir, file.c_str());
     if (access(buf, R_OK | W_OK) == 0)
         return std::string((const char *)buf);
 
     char uuid_s[64];
     uuid_unparse(uuid, uuid_s);
-    sprintf(buf, "%s/%s.cache", cache_dir.c_str(), uuid_s);
+    sprintf(buf, "%s/%s.cache", dir, uuid_s);
     return std::string((const char *)buf);
 }
 

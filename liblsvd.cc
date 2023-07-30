@@ -85,10 +85,15 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     /* figure out cache file name, create it if necessary
      */
-    std::string cache = cfg.cache_filename(xlate->uuid, name);
-    if (access(cache.c_str(), R_OK | W_OK) < 0) {
+    
+    /*
+     * TODO: Open 2 files. One for wcache and one for rcache
+    */
+    std::string rcache_name = cfg.cache_filename(xlate->uuid, name, READ);
+    std::string wcache_name = cfg.cache_filename(xlate->uuid, name, WRITE);
+    if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
         int cache_pages = cfg.cache_size / 4096;
-        int fd = open(cache.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
+        int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (fd < 0)
             return fd;
         if (make_cache(fd, xlate->uuid, cache_pages) < 0)
@@ -96,20 +101,33 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         close(fd);
     }
 
-    fd = open(cache.c_str(), O_RDWR);
-    if (fd < 0)
+    if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
+        int cache_pages = cfg.cache_size / 4096;
+        int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
+        if (fd < 0)
+            return fd;
+        if (make_cache(fd, xlate->uuid, cache_pages) < 0)
+            return -1;
+        close(fd);
+    }
+
+    read_fd = open(rcache_name.c_str(), O_RDWR | O_DIRECT);
+    if (read_fd < 0)
+        return -1;
+    write_fd = open(wcache_name.c_str(), O_RDWR | O_DIRECT);
+    if (write_fd < 0)
         return -1;
 
     j_super *js = (j_super *)aligned_alloc(512, 4096);
-    if (pread(fd, (char *)js, 4096, 0) < 0)
+    if (pread(read_fd, (char *)js, 4096, 0) < 0)
         return -1;
     if (js->magic != LSVD_MAGIC || js->type != LSVD_J_SUPER)
         return -1;
     if (memcmp(js->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
         throw("object and cache UUIDs don't match");
 
-    wcache = make_write_cache(js->write_super, fd, xlate, &cfg);
-    rcache = make_read_cache(js->read_super, fd, xlate, &map, &bufmap,
+    wcache = make_write_cache(js->write_super, write_fd, xlate, &cfg);
+    rcache = make_read_cache(js->read_super, read_fd, xlate, &map, &bufmap,
                              &map_lock, objstore);
     free(js);
 
@@ -173,7 +191,7 @@ int rbd_image::image_close(void)
     objstore->stop();
     delete xlate;
     delete objstore;
-    close(fd);
+    close(read_fd);
     return 0;
 }
 
@@ -733,8 +751,10 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     uuid_t uu;
     if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
         return rv;
-    auto cache_file = cfg.cache_filename(uu, name);
-    unlink(cache_file.c_str());
+    auto rcache_file = cfg.cache_filename(uu, name, READ);
+    unlink(rcache_file.c_str());
+    auto wcache_file = cfg.cache_filename(uu, name, WRITE);
+    unlink(wcache_file.c_str());
     rv = translate_remove_image(objstore, name);
     objstore->stop();
     delete objstore;

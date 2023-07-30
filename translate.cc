@@ -1157,8 +1157,8 @@ void translate_impl::do_gc(bool *running)
     if (live_extents.size() > 0) {
         /* temporary file, delete on close.
          */
-        char temp[cfg->cache_dir.size() + 20];
-        sprintf(temp, "%s/gc.XXXXXX", cfg->cache_dir.c_str());
+        char temp[cfg->rcache_dir.size() + 20];
+        sprintf(temp, "%s/gc.XXXXXX", cfg->rcache_dir.c_str());
         int fd = mkstemp(temp);
 
         /* read all objects in completely
