@@ -9,6 +9,7 @@
  */
 
 #include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -85,10 +86,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     /* figure out cache file name, create it if necessary
      */
-    
+
     /*
      * TODO: Open 2 files. One for wcache and one for rcache
-    */
+     */
     std::string rcache_name = cfg.cache_filename(xlate->uuid, name, READ);
     std::string wcache_name = cfg.cache_filename(xlate->uuid, name, WRITE);
     if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
@@ -118,21 +119,27 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     if (write_fd < 0)
         return -1;
 
-    j_super *js = (j_super *)aligned_alloc(512, 4096);
-    if (pread(read_fd, (char *)js, 4096, 0) < 0)
+    j_read_super *jrs = (j_read_super *)aligned_alloc(512, 4096);
+    if (pread(read_fd, (char *)jrs, 4096, 0) < 0)
         return -1;
-    if (js->magic != LSVD_MAGIC || js->type != LSVD_J_SUPER)
+    if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
         return -1;
-    if (memcmp(js->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
+    j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
+    if (pread(write_fd, (char *)jws, 4096, 0) < 0)
+        return -1;
+    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
+        return -1;
+    if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0 ||
+        memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
         throw("object and cache UUIDs don't match");
 
-    wcache = make_write_cache(js->write_super, write_fd, xlate, &cfg);
-    rcache = make_read_cache(js->read_super, read_fd, xlate, &map, &bufmap,
-                             &map_lock, objstore);
-    free(js);
+    wcache = make_write_cache(0, write_fd, xlate, &cfg);
+    rcache =
+        make_read_cache(0, read_fd, xlate, &map, &bufmap, &map_lock, objstore);
+    free(jrs);
 
     if (!__lsvd_dbg_no_gc)
-	xlate->start_gc();
+        xlate->start_gc();
 
     return 0;
 }

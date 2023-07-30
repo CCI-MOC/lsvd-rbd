@@ -90,6 +90,8 @@ struct j_write_super {
     int32_t len_start; // type: j_length
     int32_t len_blocks;
     int32_t len_entries;
+
+    uuid_t vol_uuid;
 } __attribute__((packed));
 
 /* probably in the third 4KB block, never gets overwritten (overwrite map in
@@ -114,6 +116,8 @@ struct j_read_super {
      */
     int32_t map_start; // extmap::obj_offset
     int32_t map_blocks;
+
+    uuid_t vol_uuid;
 } __attribute__((packed));
 
 /* this goes in the first 4KB block in the cache partition, and never
