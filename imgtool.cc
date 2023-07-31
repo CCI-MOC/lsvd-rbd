@@ -1,4 +1,5 @@
 #include <argp.h>
+#include <cstdlib>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@ const char *backend = "file";
 const char *image_name;
 const char *cache_dir;
 const char *cache_dev;
+cfg_cache_type cache_type = READ;
 enum _op { OP_CREATE = 1, OP_DELETE = 2, OP_INFO = 3, OP_MKCACHE };
 enum _op op;
 size_t size = 0;
@@ -40,6 +42,7 @@ static struct argp_option options[] = {
     {"rados", 'O', 0, 0, "use RADOS"},
     {"create", 'C', 0, 0, "create image"},
     {"mkcache", 'k', "DEV", 0, "use DEV as cache"},
+    {"cache-type", 't', "R/W", 0, "R for read cache, W for write cache (default: R)"},
     {"size", 'z', "SIZE", 0, "size in bytes (M/G=2^20,2^30)"},
     {"delete", 'D', 0, 0, "delete image"},
     {"info", 'I', 0, 0, "show image information"},
@@ -47,6 +50,10 @@ static struct argp_option options[] = {
 };
 
 static char args_doc[] = "IMAGE";
+
+extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
+extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
+int (*make_cache) (int fd, uuid_t &uuid, int n_pages) = init_rcache;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -71,6 +78,18 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case 'I':
         op = OP_INFO;
+        break;
+    case 't':
+        if (arg[0] == 'R') {
+            cache_type = READ;
+            make_cache = init_rcache;
+        }
+        else if (arg[0] == 'W'){
+            cache_type = WRITE;
+            make_cache = init_wcache;
+        }
+        else
+            argp_usage(state);
         break;
     case 'k':
         op = OP_MKCACHE;
@@ -105,10 +124,10 @@ void info(rados_ioctx_t io, const char *image_name)
     printf("cache: %s\n", cache_file.c_str());
 }
 
-extern int make_cache(int fd, uuid_t &uuid, int n_pages);
+// extern int make_cache(int fd, uuid_t &uuid, int n_pages);
 extern size_t getsize64(int fd);
 
-void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name)
+void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name, cfg_cache_type type)
 {
     int rv, fd = open(dev_name, O_RDWR);
     if (fd < 0) {
@@ -128,7 +147,7 @@ void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name)
         printf("error reading superblock: %d\n", rv);
         exit(1);
     }
-    auto cache_file = cfg.cache_filename(uu, image_name);
+    auto cache_file = cfg.cache_filename(uu, image_name, type);
 
     auto n_pages = sz / 4096;
     if (make_cache(fd, uu, n_pages) < 0) {
@@ -147,8 +166,12 @@ int main(int argc, char **argv)
     argp_parse(&argp, argc, argv, 0, 0, 0);
 
     setenv("LSVD_BACKEND", backend, 1);
-    if (cache_dir != NULL)
-        setenv("LSVD_CACHE_DIR", cache_dir, 1);
+    if (cache_dir != NULL) {
+        if (cache_type == READ)
+            setenv("LSVD_RCACHE_DIR", cache_dir, 1);
+        else
+            setenv("LSVD_WCACHE_DIR", cache_dir, 1);
+    }
     rados_ioctx_t io = 0;
     if (op == OP_CREATE && size > 0)
         rbd_create(io, image_name, size, NULL);
@@ -157,5 +180,5 @@ int main(int argc, char **argv)
     else if (op == OP_INFO)
         info(io, image_name);
     else if (op == OP_MKCACHE)
-        mk_cache(io, image_name, cache_dev);
+        mk_cache(io, image_name, cache_dev, cache_type);
 }

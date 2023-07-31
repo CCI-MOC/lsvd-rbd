@@ -58,7 +58,9 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
  * don't break them out into a .h
  */
 
-extern int make_cache(int fd, uuid_t &uuid, int n_pages);
+// extern int make_cache(int fd, uuid_t &uuid, int n_pages);
+extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
+extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
 bool __lsvd_dbg_no_gc = false;
 
@@ -97,7 +99,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (fd < 0)
             return fd;
-        if (make_cache(fd, xlate->uuid, cache_pages) < 0)
+        if (init_rcache(fd, xlate->uuid, cache_pages) < 0)
             return -1;
         close(fd);
     }
@@ -107,7 +109,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (fd < 0)
             return fd;
-        if (make_cache(fd, xlate->uuid, cache_pages) < 0)
+        if (init_wcache(fd, xlate->uuid, cache_pages) < 0)
             return -1;
         close(fd);
     }
