@@ -99,11 +99,18 @@ int init_rcache(int fd, uuid_t &uuid, int n_pages)
     *r_super = (j_read_super){LSVD_MAGIC,      LSVD_J_R_SUPER, 1,      128,
                               r_base + r_meta, r_units,        r_base, r_meta, {0}};
     memcpy(r_super->vol_uuid, uuid, sizeof(uuid_t));
-    write(fd, buf, 4096);
+    if (!write(fd, buf, 4096)) {
+        perror("read cache write");
+        return -1;
+    }
 
     memset(buf, 0, 4096);
-    for (int i = 1; i < 1 + r_pages + r_meta; i++)
-        write(fd, buf, 4096);
+    for (int i = 1; i < 1 + r_pages + r_meta; i++) {
+        if (!write(fd, buf, 4096)) {
+            perror("read cache write");
+            return -1;
+        }
+    }
 
     return 0;
 }
@@ -129,11 +136,18 @@ int init_wcache(int fd, uuid_t &uuid, int n_pages)
                                0,          0,
                                0,          0, {0}};
     memcpy(w_super->vol_uuid, uuid, sizeof(uuid_t));
-    write(fd, buf, 4096);
+    if (!write(fd, buf, 4096)) {
+        perror("write cache write");
+        return -1;
+    }
 
     memset(buf, 0, 4096);
-    for (int i = 1; i < 1 + w_pages + w_meta; i++)
-        write(fd, buf, 4096);
+    for (int i = 1; i < 1 + w_pages + w_meta; i++) {
+        if (!write(fd, buf, 4096)) {
+            perror("write cache write");
+            return -1;
+        }
+    }
 
     return 0;
 }
