@@ -130,8 +130,8 @@ int init_wcache(int fd, uuid_t &uuid, int n_pages)
     *w_super = (j_write_super){LSVD_MAGIC, LSVD_J_W_SUPER,
                                1,          1,
                                1,          1,
-                               1 + w_meta, 1 + w_meta + w_pages,
-                               1 + w_meta, 0,
+                               1 + w_meta, 1 + w_meta,
+                               1 + w_meta + w_pages, 1 + w_meta,
                                0,          0,
                                0,          0,
                                0,          0, {0}};
