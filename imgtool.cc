@@ -119,7 +119,6 @@ void info(rados_ioctx_t io, const char *image_name)
         printf("error reading superblock: %d\n", rv);
         exit(1);
     }
-    // auto cache_file = cfg.cache_filename(uu, image_name, cache_type);
     auto rcache_file = cfg.cache_filename(uu, image_name, READ);
     auto wcache_file = cfg.cache_filename(uu, image_name, WRITE);
     printf("image: %s\n", image_name);
@@ -127,7 +126,6 @@ void info(rados_ioctx_t io, const char *image_name)
     printf("write cache: %s\n", wcache_file.c_str());
 }
 
-// extern int make_cache(int fd, uuid_t &uuid, int n_pages);
 extern size_t getsize64(int fd);
 
 void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name, cfg_cache_type type)

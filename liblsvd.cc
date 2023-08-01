@@ -58,7 +58,6 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
  * don't break them out into a .h
  */
 
-// extern int make_cache(int fd, uuid_t &uuid, int n_pages);
 extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
