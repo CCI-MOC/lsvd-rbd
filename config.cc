@@ -109,16 +109,18 @@ std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name, cfg_cach
     std::string file(name);
     file = fs::path(file).filename();
     const char *dir;
+    const char *f_ext;
 
     dir = (type == READ) ? rcache_dir.c_str() : wcache_dir.c_str();
+    f_ext = (type == READ) ? "rcache" : "wcache";
 
-    sprintf(buf, "%s/%s.cache", dir, file.c_str());
+    sprintf(buf, "%s/%s.%s", dir, file.c_str(), f_ext);
     if (access(buf, R_OK | W_OK) == 0)
         return std::string((const char *)buf);
 
     char uuid_s[64];
     uuid_unparse(uuid, uuid_s);
-    sprintf(buf, "%s/%s.cache", dir, uuid_s);
+    sprintf(buf, "%s/%s.%s", dir, uuid_s, f_ext);
     return std::string((const char *)buf);
 }
 
