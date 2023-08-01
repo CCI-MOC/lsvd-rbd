@@ -201,6 +201,7 @@ int rbd_image::image_close(void)
     delete xlate;
     delete objstore;
     close(read_fd);
+    close(write_fd);
     return 0;
 }
 
