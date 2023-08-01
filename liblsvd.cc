@@ -113,10 +113,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         close(fd);
     }
 
-    read_fd = open(rcache_name.c_str(), O_RDWR | O_DIRECT);
+    read_fd = open(rcache_name.c_str(), O_RDWR);
     if (read_fd < 0)
         return -1;
-    write_fd = open(wcache_name.c_str(), O_RDWR | O_DIRECT);
+    write_fd = open(wcache_name.c_str(), O_RDWR);
     if (write_fd < 0)
         return -1;
 
