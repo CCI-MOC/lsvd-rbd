@@ -19,7 +19,7 @@ const char *backend = "file";
 const char *image_name;
 const char *cache_dir;
 const char *cache_dev;
-cfg_cache_type cache_type = READ;
+cfg_cache_type cache_type = LSVD_CFG_READ;
 enum _op { OP_CREATE = 1, OP_DELETE = 2, OP_INFO = 3, OP_MKCACHE };
 enum _op op;
 size_t size = 0;
@@ -81,11 +81,11 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case 't':
         if (arg[0] == 'R') {
-            cache_type = READ;
+            cache_type = LSVD_CFG_READ;
             make_cache = init_rcache;
         }
         else if (arg[0] == 'W'){
-            cache_type = WRITE;
+            cache_type = LSVD_CFG_WRITE;
             make_cache = init_wcache;
         }
         else
@@ -119,8 +119,8 @@ void info(rados_ioctx_t io, const char *image_name)
         printf("error reading superblock: %d\n", rv);
         exit(1);
     }
-    auto rcache_file = cfg.cache_filename(uu, image_name, READ);
-    auto wcache_file = cfg.cache_filename(uu, image_name, WRITE);
+    auto rcache_file = cfg.cache_filename(uu, image_name, LSVD_CFG_READ);
+    auto wcache_file = cfg.cache_filename(uu, image_name, LSVD_CFG_WRITE);
     printf("image: %s\n", image_name);
     printf("read cache: %s\n", rcache_file.c_str());
     printf("write cache: %s\n", wcache_file.c_str());
@@ -168,7 +168,7 @@ int main(int argc, char **argv)
 
     setenv("LSVD_BACKEND", backend, 1);
     if (cache_dir != NULL) {
-        if (cache_type == READ)
+        if (cache_type == LSVD_CFG_READ)
             setenv("LSVD_RCACHE_DIR", cache_dir, 1);
         else
             setenv("LSVD_WCACHE_DIR", cache_dir, 1);

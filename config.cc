@@ -111,8 +111,8 @@ std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name, cfg_cach
     const char *dir;
     const char *f_ext;
 
-    dir = (type == READ) ? rcache_dir.c_str() : wcache_dir.c_str();
-    f_ext = (type == READ) ? "rcache" : "wcache";
+    dir = (type == LSVD_CFG_READ) ? rcache_dir.c_str() : wcache_dir.c_str();
+    f_ext = (type == LSVD_CFG_READ) ? "rcache" : "wcache";
 
     sprintf(buf, "%s/%s.%s", dir, file.c_str(), f_ext);
     if (access(buf, R_OK | W_OK) == 0)

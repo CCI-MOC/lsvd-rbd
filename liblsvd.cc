@@ -91,8 +91,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     /*
      * TODO: Open 2 files. One for wcache and one for rcache
      */
-    std::string rcache_name = cfg.cache_filename(xlate->uuid, name, READ);
-    std::string wcache_name = cfg.cache_filename(xlate->uuid, name, WRITE);
+    std::string rcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
+    std::string wcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
     if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
         int cache_pages = cfg.cache_size / 4096;
         int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
@@ -761,9 +761,9 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     uuid_t uu;
     if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
         return rv;
-    auto rcache_file = cfg.cache_filename(uu, name, READ);
+    auto rcache_file = cfg.cache_filename(uu, name, LSVD_CFG_READ);
     unlink(rcache_file.c_str());
-    auto wcache_file = cfg.cache_filename(uu, name, WRITE);
+    auto wcache_file = cfg.cache_filename(uu, name, LSVD_CFG_WRITE);
     unlink(wcache_file.c_str());
     rv = translate_remove_image(objstore, name);
     objstore->stop();

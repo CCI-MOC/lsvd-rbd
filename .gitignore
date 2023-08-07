@@ -52,3 +52,4 @@ lsvd_crash_test
 compile_commands.json
 
 imgtool
+.vscode

@@ -17,7 +17,7 @@
 
 enum cfg_backend { BACKEND_FILE = 1, BACKEND_RADOS = 2 };
 
-enum cfg_cache_type { READ = 1, WRITE = 2 };
+enum cfg_cache_type { LSVD_CFG_READ = 1, LSVD_CFG_WRITE = 2 };
 
 class lsvd_config
 {
