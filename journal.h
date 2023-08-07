@@ -55,7 +55,7 @@ struct j_hdr {
     int32_t prev;          // reverse link for recovery
 } __attribute__((packed));
 
-/* probably in the second 4KB block of the parition
+/* In the second 4KB block of the write cache,
  * this gets overwritten every time we re-write the map. We assume the 4KB write
  * is atomic, and write out the new map before updating the superblock.
  */
@@ -94,7 +94,7 @@ struct j_write_super {
     uuid_t vol_uuid;
 } __attribute__((packed));
 
-/* probably in the third 4KB block, never gets overwritten (overwrite map in
+/* In the first 4KB block of read cache, never gets overwritten (overwrite map in
  * place) uses a fixed map with 1 entry per 64KB block to update atomically:
  * - reclaim batch of blocks, then write map. (free entries: obj=0)
  * - allocate blocks, then write map
@@ -116,22 +116,6 @@ struct j_read_super {
      */
     int32_t map_start; // extmap::obj_offset
     int32_t map_blocks;
-
-    uuid_t vol_uuid;
-} __attribute__((packed));
-
-/* this goes in the first 4KB block in the cache partition, and never
- * gets modified
- */
-struct j_super {
-    uint32_t magic;
-    uint32_t type;    // LSVD_J_SUPER
-    uint32_t version; // 1
-
-    /* both are single blocks, so we only need a block number
-     */
-    uint32_t write_super;
-    uint32_t read_super;
 
     uuid_t vol_uuid;
 } __attribute__((packed));
