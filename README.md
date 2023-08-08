@@ -32,7 +32,8 @@ Parameters are:
 - `batch_size`, `LSVD_BATCH_SIZE`: size of objects written to the backend, in bytes (K/M recognized as 1024, 1024\*1024). Default: 8MiB
 - `wcache_batch`: write cache batching (see below)
 - `wcache_chunk': maximum size of atomic write, in bytes - larger writes will be split and may be non-atomic.
-- `cache_dir` - directory used for cache file and GC temporary files. Note that `lsvd_imgtool` can format a partition for cache and symlink it into this directory, although the performance improvement seems limited.
+- `rcache_dir` - directory used for read cache file and GC temporary files. Note that `lsvd_imgtool` can format a partition for cache and symlink it into this directory, although the performance improvement seems limited.
+- `wcache_dir` - directory used for write cache file
 - `xlate_window`: max writes (i.e. objects) in flight to the backend. Note that this value is coupled to the size of the write cache, which must be big enough to hold all outstanding writes in case of a crash.
 - `hard_sync` (untested): "flush" forces all batched writes to the backend.
 - `backend`: "file" or "rados" (default rados). The "file" backend is for testing only
@@ -54,7 +55,8 @@ build$ sudo bin/lsvd_imgtool --create --rados \
 
 Then you can start QEMU:
 ```
-build$ sudo env LSVD_CACHE_DIR=/mnt/nvme/lsvd \
+build$ sudo env LSVD_RCACHE_DIR=/mnt/nvme/lsvd \
+         LSVD_WCACHE_DIR=/mnt/nvme/lsvd \
          LSVD_CACHE_SIZE=1000m \
          LD_PRELOAD=$PWD/lib/liblsvd.so \
 		 LD_LIBRARY_PATH=$PWD/lib \
@@ -96,7 +98,7 @@ build$ sudo bin/lsvd_imgtool --create --rados \
 	--cache-dir=/mnt/nvme/lsvd --size=10g ec83b_pool/fio-target
 
 build$ sudo env LD_PRELOAD=$PWD/lib/liblsvd.so \
-    LSVD_CACHE_DIR=/mnt/nvme/test fio rbd-w.fio
+    LSVD_RCACHE_DIR=/mnt/nvme/test LSVD_WCACHE_DIR=/mnt/nvme/test fio rbd-w.fio
 ```
 
 Note that FIO random write throughput varies widely depending on which version you use.

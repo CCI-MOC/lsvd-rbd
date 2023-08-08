@@ -66,7 +66,9 @@ make -j10 release # debug for debug build. debug build is not optimised and has 
 # In the ceph-nvmeof directory. replace lsvd.conf with path to nvmeof conf file
 # This starts up the control server
 # LD_PRELOAD to hijack rbd with LSVD
-sudo LD_PRELOAD=<path/to/liblsvd.so> PYTHONPATH=./spdk/python/ python3 -m control -c ./lsvd.conf
+sudo LD_PRELOAD=<path/to/liblsvd.so> PYTHONPATH=./spdk/python/\ 
+        LSVD_RCACHE_DIR=<read/cache/dir> LSVD_WCACHE_DIR=<write/cache/dir>\
+        python3 -m control -c ./lsvd.conf
 
 # use -i <name used in imgtool earlier>
 python3 -m control.cli create_bdev -i rbd/fio-target -p rbd -b Ceph0
