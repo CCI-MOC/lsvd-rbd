@@ -9,6 +9,7 @@
  *              LGPL-2.1-or-later
  */
 
+#include <cstdio>
 #include <ctype.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -109,12 +110,13 @@ std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name, cfg_cach
     std::string file(name);
     file = fs::path(file).filename();
     const char *dir;
-    const char *f_ext;
 
     dir = (type == LSVD_CFG_READ) ? rcache_dir.c_str() : wcache_dir.c_str();
-    f_ext = (type == LSVD_CFG_READ) ? "rcache" : "wcache";
 
-    sprintf(buf, "%s/%s.%s", dir, file.c_str(), f_ext);
+    if (LSVD_CFG_READ)
+        sprintf(buf, "%s/lsvd_read.cache", dir);
+    else if (LSVD_CFG_WRITE)
+        sprintf(buf, "%s/%s.wcache", dir, file.c_str());
     if (access(buf, R_OK | W_OK) == 0)
         return std::string((const char *)buf);
 

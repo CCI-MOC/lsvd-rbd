@@ -63,6 +63,10 @@ extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
 bool __lsvd_dbg_no_gc = false;
 
+/* Read cache file and read cache instance */
+int read_fd = 0;
+static read_cache *rcache = NULL;
+
 backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
 {
 
@@ -85,24 +89,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock);
     size = xlate->init(name, true);
 
-    /* figure out cache file name, create it if necessary
-     */
-
-    /*
-     * TODO: Open 2 files. One for wcache and one for rcache
-     */
-    std::string rcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
+    /* figure out cache file name, create it if necessary */
     std::string wcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
-    if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
-        int cache_pages = cfg.cache_size / 4096;
-        int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (fd < 0)
-            return fd;
-        if (init_rcache(fd, xlate->uuid, cache_pages) < 0)
-            return -1;
-        close(fd);
-    }
-
     if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
         int cache_pages = cfg.cache_size / 4096;
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
@@ -113,32 +101,51 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         close(fd);
     }
 
-    read_fd = open(rcache_name.c_str(), O_RDWR);
-    if (read_fd < 0)
-        return -1;
     write_fd = open(wcache_name.c_str(), O_RDWR);
     if (write_fd < 0)
         return -1;
 
-    j_read_super *jrs = (j_read_super *)aligned_alloc(512, 4096);
-    if (pread(read_fd, (char *)jrs, 4096, 0) < 0)
-        return -1;
-    if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
-        return -1;
     j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
     if (pread(write_fd, (char *)jws, 4096, 0) < 0)
         return -1;
     if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
         return -1;
-    if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0 ||
-        memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
-        throw("object and cache UUIDs don't match");
+    if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
+        throw("object and cache UUID does not match for write cache");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache =
-        make_read_cache(0, read_fd, xlate, &map, &bufmap, &map_lock, objstore);
-    free(jrs);
     free(jws);
+
+    /* Only initiate rcache if it has not but created yet */
+    if (!read_fd) {
+        std::string rcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
+
+        if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
+            int cache_pages = cfg.cache_size / 4096;
+            int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
+            if (fd < 0)
+                return fd;
+            if (init_rcache(fd, xlate->uuid, cache_pages) < 0)
+                return -1;
+            close(fd);
+        }
+
+        read_fd = open(rcache_name.c_str(), O_RDWR);
+        if (read_fd < 0)
+            return -1;
+
+        j_read_super *jrs = (j_read_super *)aligned_alloc(512, 4096);
+        if (pread(read_fd, (char *)jrs, 4096, 0) < 0)
+            return -1;
+        if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
+            return -1;
+        if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
+            throw("object and cache UUID does not match for read cache");
+        
+        rcache =
+            make_read_cache(0, read_fd, xlate, &map, &bufmap, &map_lock, objstore);
+        free(jrs);
+    }
 
     if (!__lsvd_dbg_no_gc)
         xlate->start_gc();
@@ -164,7 +171,7 @@ rbd_image *make_rbd_image(backend *b, translate *t, write_cache *w,
     img->objstore = b;
     img->xlate = t;
     img->wcache = w;
-    img->rcache = r;
+    rcache = r; // TODO: Should this be removed when rcache is global?
     return img;
 }
 
@@ -488,7 +495,7 @@ class rbd_aio_req : public request
         __reqs++;
         // std::vector<request*> requests;
 
-        img->rcache->handle_read(img, offset, &aligned_iovs, requests);
+        rcache->handle_read(img, offset, &aligned_iovs, requests);
 
         n_req = requests.size();
         // do_log("rbd_read %ld:\n", offset/512);
