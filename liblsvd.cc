@@ -116,7 +116,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
     free(jws);
 
-    /* Only initiate rcache if it has not but created yet */
+    /* Only initiate rcache if it has not been created yet */
     if (!read_fd) {
         std::string rcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
 
