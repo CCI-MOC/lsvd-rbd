@@ -113,16 +113,17 @@ std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name, cfg_cach
 
     dir = (type == LSVD_CFG_READ) ? rcache_dir.c_str() : wcache_dir.c_str();
 
-    if (LSVD_CFG_READ)
+    if (type == LSVD_CFG_READ)
         sprintf(buf, "%s/lsvd_read.cache", dir);
-    else if (LSVD_CFG_WRITE)
+    else if (type == LSVD_CFG_WRITE) {
         sprintf(buf, "%s/%s.wcache", dir, file.c_str());
-    if (access(buf, R_OK | W_OK) == 0)
-        return std::string((const char *)buf);
+        if (access(buf, R_OK | W_OK) == 0)
+            return std::string((const char *)buf);
 
-    char uuid_s[64];
-    uuid_unparse(uuid, uuid_s);
-    sprintf(buf, "%s/%s.%s", dir, uuid_s, f_ext);
+        char uuid_s[64];
+        uuid_unparse(uuid, uuid_s);
+        sprintf(buf, "%s/%s.wcache", dir, uuid_s);
+    }
     return std::string((const char *)buf);
 }
 
