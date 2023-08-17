@@ -34,6 +34,10 @@ int init_rcache(int fd, int n_pages)
     *r_super =
         (j_read_super){LSVD_MAGIC, LSVD_J_R_SUPER, 1,      128, r_base + r_meta,
                        r_units,    r_base,         r_meta };
+    if (!write(fd, buf, 4096)) {
+        perror("read cache write");
+        return -1;
+    }
 
     memset(buf, 0, 4096);
     for (int i = 1; i < 1 + r_pages + r_meta; i++) {
