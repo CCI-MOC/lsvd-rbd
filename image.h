@@ -61,7 +61,7 @@ struct rbd_image {
     backend *objstore;
     translate *xlate;
     write_cache *wcache;
-    // read_cache *rcache;
+    read_cache *rcache;
     // int read_fd; /* read cache file */
     int write_fd; /* write cache file */
 

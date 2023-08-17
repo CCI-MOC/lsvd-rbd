@@ -32,7 +32,7 @@ class read_cache
     virtual void write_map(void) = 0;
 };
 
-extern read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
+extern read_cache *make_read_cache(rbd_image *img, translate *_be,
                                    extmap::objmap *map, extmap::bufmap *bufmap,
                                    std::shared_mutex *m, backend *_io);
 

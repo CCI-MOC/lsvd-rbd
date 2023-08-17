@@ -116,8 +116,6 @@ struct j_read_super {
      */
     int32_t map_start; // objname_map in objname.h
     int32_t map_blocks;
-
-    uuid_t vol_uuid;
 } __attribute__((packed));
 
 #endif

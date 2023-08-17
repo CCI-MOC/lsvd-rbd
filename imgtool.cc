@@ -51,9 +51,8 @@ static struct argp_option options[] = {
 
 static char args_doc[] = "IMAGE";
 
-extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
+extern int init_rcache(int fd, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
-int (*make_cache) (int fd, uuid_t &uuid, int n_pages) = init_rcache;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -82,11 +81,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 't':
         if (arg[0] == 'R') {
             cache_type = LSVD_CFG_READ;
-            make_cache = init_rcache;
         }
         else if (arg[0] == 'W'){
             cache_type = LSVD_CFG_WRITE;
-            make_cache = init_wcache;
         }
         else
             argp_usage(state);
@@ -151,7 +148,12 @@ void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name, cf
     auto cache_file = cfg.cache_filename(uu, image_name, type);
 
     auto n_pages = sz / 4096;
-    if (make_cache(fd, uu, n_pages) < 0) {
+    int ret = 0;
+    if (type == LSVD_CFG_READ)
+        ret = init_rcache(fd, n_pages);
+    else
+        ret = init_wcache(fd, uu, n_pages);
+    if (ret < 0) {
         printf("make_cache failed\n");
         exit(1);
     }

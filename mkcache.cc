@@ -20,7 +20,7 @@
 #include "lsvd_types.h"
 #include "objname.h"
 
-int init_rcache(int fd, uuid_t &uuid, int n_pages)
+int init_rcache(int fd, int n_pages)
 {
     page_t r_units = n_pages / 16;
     page_t r_pages = n_pages;
@@ -33,12 +33,7 @@ int init_rcache(int fd, uuid_t &uuid, int n_pages)
     auto r_super = (j_read_super *)buf;
     *r_super =
         (j_read_super){LSVD_MAGIC, LSVD_J_R_SUPER, 1,      128, r_base + r_meta,
-                       r_units,    r_base,         r_meta, {0}};
-    memcpy(r_super->vol_uuid, uuid, sizeof(uuid_t));
-    if (!write(fd, buf, 4096)) {
-        perror("read cache write");
-        return -1;
-    }
+                       r_units,    r_base,         r_meta };
 
     memset(buf, 0, 4096);
     for (int i = 1; i < 1 + r_pages + r_meta; i++) {
