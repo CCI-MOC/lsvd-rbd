@@ -18,20 +18,22 @@
 #include "extent.h"
 #include "journal.h"
 #include "lsvd_types.h"
+#include "objname.h"
 
 int init_rcache(int fd, uuid_t &uuid, int n_pages)
 {
     page_t r_units = n_pages / 16;
     page_t r_pages = n_pages;
-    page_t r_meta = div_round_up(r_units * sizeof(extmap::obj_offset), 4096);
+    page_t r_meta = div_round_up(r_units * sizeof(objname_map), 4096);
     page_t r_base = 1;
 
     char buf[4096];
 
     memset(buf, 0, sizeof(buf));
     auto r_super = (j_read_super *)buf;
-    *r_super = (j_read_super){LSVD_MAGIC,      LSVD_J_R_SUPER, 1,      128,
-                              r_base + r_meta, r_units,        r_base, r_meta, {0}};
+    *r_super =
+        (j_read_super){LSVD_MAGIC, LSVD_J_R_SUPER, 1,      128, r_base + r_meta,
+                       r_units,    r_base,         r_meta, {0}};
     memcpy(r_super->vol_uuid, uuid, sizeof(uuid_t));
     if (!write(fd, buf, 4096)) {
         perror("read cache write");
@@ -61,14 +63,23 @@ int init_wcache(int fd, uuid_t &uuid, int n_pages)
 
     memset(buf, 0, sizeof(buf));
     auto w_super = (j_write_super *)buf;
-    *w_super = (j_write_super){LSVD_MAGIC, LSVD_J_W_SUPER,
-                               1,          1,
-                               1,          1,
-                               1 + w_meta, 1 + w_meta,
-                               1 + w_meta + w_pages, 1 + w_meta,
-                               0,          0,
-                               0,          0,
-                               0,          0, {0}};
+    *w_super = (j_write_super){LSVD_MAGIC,
+                               LSVD_J_W_SUPER,
+                               1,
+                               1,
+                               1,
+                               1,
+                               1 + w_meta,
+                               1 + w_meta,
+                               1 + w_meta + w_pages,
+                               1 + w_meta,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               {0}};
     memcpy(w_super->vol_uuid, uuid, sizeof(uuid_t));
     if (!write(fd, buf, 4096)) {
         perror("write cache write");

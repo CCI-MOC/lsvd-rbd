@@ -114,7 +114,7 @@ struct j_read_super {
 
     /* each has @cache_segments entries
      */
-    int32_t map_start; // extmap::obj_offset
+    int32_t map_start; // objname_map in objname.h
     int32_t map_blocks;
 
     uuid_t vol_uuid;

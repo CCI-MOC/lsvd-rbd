@@ -64,7 +64,7 @@ extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 bool __lsvd_dbg_no_gc = false;
 
 /* Read cache file and read cache instance */
-int read_fd = 0;
+static int read_fd = 0;
 static read_cache *rcache = NULL;
 
 backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
@@ -116,7 +116,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
     free(jws);
 
-    /* Only initiate rcache if it has not been created yet */
+    /* Only initialize rcache if it has not been created yet */
     if (!read_fd) {
         std::string rcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
 
@@ -139,8 +139,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
             return -1;
         if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
             return -1;
-        if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
-            throw("object and cache UUID does not match for read cache");
+        /* if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0) */
+        /*     throw("object and cache UUID does not match for read cache"); */
         
         rcache =
             make_read_cache(0, read_fd, xlate, &map, &bufmap, &map_lock, objstore);
@@ -604,7 +604,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
                             char *buf, rbd_completion_t c)
 {
     // do_log("rbd_aio_read\n");
-    fp_log("rbd_aio_read: offset = %lu, len = %u\n", offset, len);
+    // fp_log("rbd_aio_read: offset = %lu, len = %u\n", offset, len);
     rbd_image *img = (rbd_image *)image;
     auto p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);

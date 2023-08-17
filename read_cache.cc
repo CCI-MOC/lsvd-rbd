@@ -46,6 +46,7 @@
 #include "write_cache.h"
 
 extern void do_log(const char *, ...);
+extern void fp_log(const char *, ...);
 
 /* rotating window statistics so we can forget the past...
  */
@@ -96,8 +97,8 @@ class read_cache_impl : public read_cache
 
     j_read_super *super;
 
-    extmap::obj_offset *rmap;
-    std::map<extmap::obj_offset, int> map;
+    objname_map *rmap;
+    std::unordered_map<objname_map, int> map;
     bool map_dirty = false;
 
     /* if map[obj,offset] = n:
@@ -204,8 +205,8 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
     written.insert(written.end(), super->units, false);
     fetching.insert(fetching.end(), super->units, false);
     pending.init(super->units);
-    int rmap_bytes = round_up(super->units * sizeof(extmap::obj_offset), 4096);
-    rmap = (extmap::obj_offset *)aligned_alloc(512, rmap_bytes);
+    int rmap_bytes = round_up(super->units * sizeof(objname_map), 4096);
+    rmap = (objname_map *)aligned_alloc(512, rmap_bytes);
     memset((char *)rmap, 0, rmap_bytes);
 
     auto val = ssd->read((char *)rmap, super->map_blocks * 4096,
@@ -214,7 +215,7 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
         throw("read flatmap");
 
     for (int i = 0; i < super->units; i++) {
-        if (rmap[i].obj != 0) {
+        if (rmap[i].obj[0] != '\0') {
             map[rmap[i]] = i;
             written[i] = true;
         } else
@@ -249,10 +250,10 @@ void read_cache_impl::evict(int n)
     std::uniform_int_distribution<int> uni(0, super->units - 1);
     for (int i = 0; i < n; i++) {
         int j = uni(rng);
-        while (rmap[j].obj == 0 || in_use[j] > 0)
+        while (rmap[j].obj[0] == '\0' || in_use[j] > 0)
             j = uni(rng);
         auto oo = rmap[j];
-        rmap[j] = (extmap::obj_offset){0, 0};
+        memset(&rmap[j], 0, sizeof(objname_map));
         map.erase(oo);
         free_blocks.push(j);
     }
@@ -285,6 +286,7 @@ void read_cache_impl::evict_thread(thread_pool<int> *p)
          */
         auto t = std::chrono::system_clock::now();
         if (n > 0 || (t - t0) > timeout) {
+            fp_log("UPDATING READ CACHE\n");
             size_t bytes = 4096 * super->map_blocks;
             auto buf = (char *)aligned_alloc(512, bytes);
             memcpy(buf, (char *)rmap, bytes);
@@ -584,6 +586,11 @@ class cache_fill_req : public rcache_generic_request
             r->in_use[blk]--;
             r->fetching[blk] = false;
             r->pending_fills--;
+
+            r->rmap[blk] = objname_map::make_key(
+                objname(r->be->prefix(oo.obj), oo.obj), oo.offset);
+            r->map_dirty = true;
+
             r->cv.notify_all();
             lk.unlock();
 
@@ -672,8 +679,10 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
 
         /* objects are cached in aligned blocks of size <block_sectors>
          */
-        extmap::obj_offset key = {objptr.obj,
-                                  round_down(objptr.offset, block_sectors)};
+        objname_map key =
+            objname_map::make_key(objname(be->prefix(objptr.obj), objptr.obj),
+                                  round_down(objptr.offset, block_sectors));
+        extmap::obj_offset obj_off = {objptr.obj, key.offset};
         sector_t offset_limit = std::min(key.offset + block_sectors,
                                          (int)(objptr.offset + sectors));
 
@@ -750,6 +759,7 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
             fetching[i] = true;
             map[key] = i;
             rmap[i] = key;
+            map_dirty = true;
 
             sector_t sectors = offset_limit - objptr.offset;
             limit2 = base + sectors;
@@ -765,7 +775,7 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
              * - iovec etc.
              */
             auto nvme_base = nvme_sector(i);
-            auto req = new cache_fill_req(this, i, sector_in_blk, key,
+            auto req = new cache_fill_req(this, i, sector_in_blk, obj_off,
                                           nvme_base, slice);
             requests.push_back(req);
 
