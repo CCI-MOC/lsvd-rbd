@@ -747,7 +747,7 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     return rv;
 }
 
-extern int rbd_clone(rados_ioctx_t io, const char *name, const char *base_name, size_t size)
+extern int rbd_clone(rados_ioctx_t io, const char *name, const char *base_name)
 {
     lsvd_config cfg;
     auto rv = cfg.read();
