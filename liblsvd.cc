@@ -747,6 +747,10 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     return rv;
 }
 
+/* create a new image with "name", which is a clone of "base_name".
+ * it finds the last sequence of base_name and records it so it knows which
+ * objects can be shared between the new image and the base image.
+ */
 extern int rbd_clone(rados_ioctx_t io, const char *name, const char *base_name)
 {
     lsvd_config cfg;
