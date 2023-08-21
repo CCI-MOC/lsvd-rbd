@@ -8,6 +8,7 @@
  *              LGPL-2.1-or-later
  */
 
+#include <cstdint>
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -1419,7 +1420,8 @@ int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu)
     return 0;
 }
 
-int translate_clone_image(backend *objstore, const char *name, const char *base_name)
+int translate_clone_image(backend *objstore, const char *name,
+                          const char *base_name)
 {
     char base_buf[4096], buf[4096];
     memset(base_buf, 0, 4096);
@@ -1436,7 +1438,7 @@ int translate_clone_image(backend *objstore, const char *name, const char *base_
     auto sh = (super_hdr *)(hdr + 1);
     auto ci = (clone_info *)(sh + 1);
 
-    ci->last_seq = base_sh->vol_size; // TODO: How else to take last seq?
+    ci->last_seq = 0;
     ci->name_len = strlen(base_name);
     memcpy(ci->name, base_name, ci->name_len);
     memcpy(ci->vol_uuid, base_hdr->vol_uuid, sizeof(uuid_t));
@@ -1444,8 +1446,13 @@ int translate_clone_image(backend *objstore, const char *name, const char *base_
     sh->clones_offset = sizeof(obj_hdr) + sizeof(super_hdr);
     sh->clones_len = sizeof(clone_info) + ci->name_len;
 
+    std::vector<uint32_t> ckpts;
+    decode_offset_len<uint32_t>(base_buf, base_sh->ckpts_offset, base_sh->ckpts_len, ckpts);
+    if (ckpts.size() > 0)
+        ci->last_seq = ckpts.back();
+
     rv = objstore->write_object(name, buf, 4096);
-    
+
     return rv;
 }
 
