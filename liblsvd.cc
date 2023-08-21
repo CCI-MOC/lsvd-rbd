@@ -8,6 +8,7 @@
  *              LGPL-2.1-or-later
  */
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
@@ -736,11 +737,24 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     uuid_t uu;
     if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
         return rv;
-    auto rcache_file = cfg.cache_filename(uu, name, LSVD_CFG_READ);
-    unlink(rcache_file.c_str());
+    /* auto rcache_file = cfg.cache_filename(uu, name, LSVD_CFG_READ); */
+    /* unlink(rcache_file.c_str()); */
     auto wcache_file = cfg.cache_filename(uu, name, LSVD_CFG_WRITE);
     unlink(wcache_file.c_str());
     rv = translate_remove_image(objstore, name);
+    objstore->stop();
+    delete objstore;
+    return rv;
+}
+
+extern int rbd_clone(rados_ioctx_t io, const char *name, const char *base_name, size_t size)
+{
+    lsvd_config cfg;
+    auto rv = cfg.read();
+    if (rv < 0)
+        return rv;
+    auto objstore = get_backend(&cfg, io, NULL);
+    rv = translate_clone_image(objstore, name, base_name);
     objstore->stop();
     delete objstore;
     return rv;

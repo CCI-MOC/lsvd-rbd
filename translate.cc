@@ -353,6 +353,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
     /* is this a clone?
      */
     if (super_sh->clones_len > 0) {
+        printf("CLONE DETECTED\n");
         char buf[4096];
         auto ci = (clone_info *)(_buf + super_sh->clones_offset);
         auto obj_name = (char *)(ci + 1);
@@ -1376,11 +1377,8 @@ ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt)
     return 0;
 }
 
-int translate_create_image(backend *objstore, const char *name, uint64_t size)
+inline void new_image_hdr(backend *objstore, char *buf, uint64_t size)
 {
-    char buf[4096];
-    memset(buf, 0, 4096);
-
     auto _hdr = (obj_hdr *)buf;
     *_hdr = (obj_hdr){LSVD_MAGIC,
                       1,          // version
@@ -1397,6 +1395,14 @@ int translate_create_image(backend *objstore, const char *name, uint64_t size)
                           0,       0,  // checkpoint offset, len
                           0,       0,  // clone offset, len
                           0,       0}; // snap offset, len
+}
+
+int translate_create_image(backend *objstore, const char *name, uint64_t size)
+{
+    char buf[4096];
+    memset(buf, 0, 4096);
+
+    new_image_hdr(objstore, buf, size);
 
     auto rv = objstore->write_object(name, buf, 4096);
     return rv;
@@ -1411,6 +1417,36 @@ int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu)
     auto hdr = (obj_hdr *)buf;
     memcpy(uu, hdr->vol_uuid, sizeof(uuid_t));
     return 0;
+}
+
+int translate_clone_image(backend *objstore, const char *name, const char *base_name)
+{
+    char base_buf[4096], buf[4096];
+    memset(base_buf, 0, 4096);
+    memset(buf, 0, 4096);
+
+    int rv = objstore->read_object(base_name, base_buf, sizeof(base_buf), 0);
+    if (rv < 0)
+        return rv;
+    auto base_hdr = (obj_hdr *)base_buf;
+    auto base_sh = (super_hdr *)(base_hdr + 1);
+
+    new_image_hdr(objstore, buf, base_sh->vol_size * 512);
+    auto hdr = (obj_hdr *)buf;
+    auto sh = (super_hdr *)(hdr + 1);
+    auto ci = (clone_info *)(sh + 1);
+
+    ci->last_seq = base_sh->vol_size; // TODO: How else to take last seq?
+    ci->name_len = strlen(base_name);
+    memcpy(ci->name, base_name, ci->name_len);
+    memcpy(ci->vol_uuid, base_hdr->vol_uuid, sizeof(uuid_t));
+
+    sh->clones_offset = sizeof(obj_hdr) + sizeof(super_hdr);
+    sh->clones_len = sizeof(clone_info) + ci->name_len;
+
+    rv = objstore->write_object(name, buf, 4096);
+    
+    return rv;
 }
 
 int translate_remove_image(backend *objstore, const char *name)

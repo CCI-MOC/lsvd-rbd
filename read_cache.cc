@@ -148,7 +148,6 @@ class shared_read_cache
         return val;
     }
 
-
     void write_map(void);
 };
 
@@ -223,9 +222,6 @@ shared_read_cache::~shared_read_cache()
 
 class read_cache_impl : public read_cache
 {
-
-    // std::mutex m;
-
     rbd_image *img;
     extmap::objmap *obj_map;
     std::shared_mutex *obj_lock;
@@ -493,7 +489,8 @@ class cache_hit_request : public rcache_generic_request
     {
         r = r_;
         blk = blk_;
-        nvme_req = shared_rcache->ssd->make_read_request(&iovs, nvme_sector * 512L);
+        nvme_req =
+            shared_rcache->ssd->make_read_request(&iovs, nvme_sector * 512L);
     }
     ~cache_hit_request() {}
 
@@ -622,7 +619,8 @@ class cache_fill_req : public rcache_generic_request
              */
             size_t len = shared_rcache->block_sectors * 512;
             crc1 = (uint32_t)crc32(0, (unsigned char *)buf, len);
-            nvme_req = shared_rcache->ssd->make_write_request(buf, len, nvme_sector * 512L);
+            nvme_req = shared_rcache->ssd->make_write_request(
+                buf, len, nvme_sector * 512L);
             state = WRITE_PENDING;
             nvme_req->run(this);
         } else if (state == WRITE_PENDING) {
@@ -733,18 +731,20 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
 
         /* objects are cached in aligned blocks of size <block_sectors>
          */
-        objname_map key =
-            objname_map::make_key(objname(be->prefix(objptr.obj), objptr.obj),
-                                  round_down(objptr.offset, shared_rcache->block_sectors));
+        objname_map key = objname_map::make_key(
+            objname(be->prefix(objptr.obj), objptr.obj),
+            round_down(objptr.offset, shared_rcache->block_sectors));
         extmap::obj_offset obj_off = {objptr.obj, key.offset};
-        sector_t offset_limit = std::min(key.offset + shared_rcache->block_sectors,
-                                         (int)(objptr.offset + sectors));
+        sector_t offset_limit =
+            std::min(key.offset + shared_rcache->block_sectors,
+                     (int)(objptr.offset + sectors));
 
         /* if we find the data in cache, fetch it
          */
         if (shared_rcache->map.find(key) != shared_rcache->map.end()) {
             sector_t sectors = (offset_limit - objptr.offset);
-            sector_t sector_in_blk = objptr.offset % shared_rcache->block_sectors;
+            sector_t sector_in_blk =
+                objptr.offset % shared_rcache->block_sectors;
             limit2 = base + sectors;
 
             int i = shared_rcache->map[key];
@@ -761,7 +761,8 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
                 shared_rcache->pending[i].push_back(req);
                 requests.push_back(req);
             } else {
-                auto nvme_location = shared_rcache->nvme_sector(i) + sector_in_blk;
+                auto nvme_location =
+                    shared_rcache->nvme_sector(i) + sector_in_blk;
                 auto req = new cache_hit_request(this, i, nvme_location, slice);
                 requests.push_back(req);
             }
@@ -780,9 +781,10 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
          * TODO: don't let hits get too high
          */
         auto [served, fetched] = shared_rcache->hit_stats.vals();
-        bool use_cache = (shared_rcache->free_blocks.size() > 0) &&
-                         ((served * 3) > (fetched * 2)) &&
-                         (shared_rcache->pending_fills < shared_rcache->fill_window);
+        bool use_cache =
+            (shared_rcache->free_blocks.size() > 0) &&
+            ((served * 3) > (fetched * 2)) &&
+            (shared_rcache->pending_fills < shared_rcache->fill_window);
 
         /* if we bypass the cache, send the entire read to the backend
          * without worrying about cache block alignment
@@ -818,7 +820,8 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
             sector_t sectors = offset_limit - objptr.offset;
             limit2 = base + sectors;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
-            sector_t sector_in_blk = objptr.offset % shared_rcache->block_sectors;
+            sector_t sector_in_blk =
+                objptr.offset % shared_rcache->block_sectors;
 
             /* parameters to the request:
              * - lba range of this request
@@ -853,7 +856,4 @@ void shared_read_cache::write_map(void)
 }
 
 /* TODO: Currently workaround */
-void read_cache_impl::write_map(void)
-{
-    shared_rcache->write_map();
-}
+void read_cache_impl::write_map(void) { shared_rcache->write_map(); }

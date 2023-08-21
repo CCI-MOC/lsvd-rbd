@@ -19,8 +19,9 @@ const char *backend = "file";
 const char *image_name;
 const char *cache_dir;
 const char *cache_dev;
+const char *base_image;
 cfg_cache_type cache_type = LSVD_CFG_READ;
-enum _op { OP_CREATE = 1, OP_DELETE = 2, OP_INFO = 3, OP_MKCACHE };
+enum _op { OP_CREATE = 1, OP_DELETE = 2, OP_INFO = 3, OP_MKCACHE = 4, OP_CLONE };
 enum _op op;
 size_t size = 0;
 
@@ -46,6 +47,7 @@ static struct argp_option options[] = {
     {"size", 'z', "SIZE", 0, "size in bytes (M/G=2^20,2^30)"},
     {"delete", 'D', 0, 0, "delete image"},
     {"info", 'I', 0, 0, "show image information"},
+    {"clone", 'L', "BASE", 0, "clone an image"},
     {0},
 };
 
@@ -91,6 +93,10 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'k':
         op = OP_MKCACHE;
         cache_dev = arg;
+        break;
+    case 'L':
+        op = OP_CLONE;
+        base_image = arg;
         break;
     case ARGP_KEY_END:
         if (op == 0 || (op == OP_CREATE && size == 0))
@@ -184,4 +190,6 @@ int main(int argc, char **argv)
         info(io, image_name);
     else if (op == OP_MKCACHE)
         mk_cache(io, image_name, cache_dev, cache_type);
+    else if (op == OP_CLONE)
+        rbd_clone(io, image_name, base_image);
 }
