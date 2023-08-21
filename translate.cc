@@ -1427,12 +1427,14 @@ int translate_clone_image(backend *objstore, const char *name,
     memset(base_buf, 0, 4096);
     memset(buf, 0, 4096);
 
+    /* get the information of the base image */
     int rv = objstore->read_object(base_name, base_buf, sizeof(base_buf), 0);
     if (rv < 0)
         return rv;
     auto base_hdr = (obj_hdr *)base_buf;
     auto base_sh = (super_hdr *)(base_hdr + 1);
 
+    /* create new image with clone_info */
     new_image_hdr(objstore, buf, base_sh->vol_size * 512);
     auto hdr = (obj_hdr *)buf;
     auto sh = (super_hdr *)(hdr + 1);
@@ -1446,6 +1448,7 @@ int translate_clone_image(backend *objstore, const char *name,
     sh->clones_offset = sizeof(obj_hdr) + sizeof(super_hdr);
     sh->clones_len = sizeof(clone_info) + ci->name_len;
 
+    /* find the last sequence of the base image */
     std::vector<uint32_t> ckpts;
     decode_offset_len<uint32_t>(base_buf, base_sh->ckpts_offset, base_sh->ckpts_len, ckpts);
     if (ckpts.size() > 0)
