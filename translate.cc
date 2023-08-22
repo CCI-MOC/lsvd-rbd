@@ -747,7 +747,7 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req)
     free(buf);
 
     checkpoints.push_back(_seq);
-    size_t offset = sizeof(*super_h) + sizeof(*super_sh);
+    size_t offset = sizeof(*super_h) + sizeof(*super_sh) + super_sh->clones_offset;
     std::vector<int> ckpts_to_delete;
     while (checkpoints.size() > 3) {
         ckpts_to_delete.push_back(checkpoints.front());
