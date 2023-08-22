@@ -354,7 +354,6 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
     /* is this a clone?
      */
     if (super_sh->clones_len > 0) {
-        printf("CLONE DETECTED\n");
         char buf[4096];
         auto ci = (clone_info *)(_buf + super_sh->clones_offset);
         auto obj_name = (char *)(ci + 1);
