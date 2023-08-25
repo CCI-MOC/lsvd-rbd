@@ -1447,11 +1447,21 @@ int translate_clone_image(backend *objstore, const char *name,
     sh->clones_offset = sizeof(obj_hdr) + sizeof(super_hdr);
     sh->clones_len = sizeof(clone_info) + ci->name_len;
 
-    /* find the last sequence of the base image */
+    /* find the last sequence of the base image and add the checkpoints 
+     * from base image to the clone so we know it exists */
     std::vector<uint32_t> ckpts;
     decode_offset_len<uint32_t>(base_buf, base_sh->ckpts_offset, base_sh->ckpts_len, ckpts);
-    if (ckpts.size() > 0)
+
+    int n_ckpts = ckpts.size();
+    if (n_ckpts > 0) {
+        size_t offset = sizeof(*hdr) + sizeof(*sh) + sh->clones_offset;
         ci->last_seq = ckpts.back();
+        sh->ckpts_offset = offset;
+        sh->ckpts_len = ckpts.size() * sizeof(uint32_t);
+        auto pc = (uint32_t *)(buf + offset);
+        for (size_t i = 0; i < n_ckpts; i++)
+            *pc++ = ckpts[i];
+    }
 
     rv = objstore->write_object(name, buf, 4096);
 
