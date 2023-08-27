@@ -873,8 +873,10 @@ void translate_impl::write_gc(int _seq, translate_req *req)
         .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
     object_info[_seq] = oi;
 
-    auto _p = (uint64_t *)(hdr + 512 * hdr_sectors);
-    assert(*_p != 0);
+    // old debug code, for use with lsvd_crash_test and lsvd_rnd_test -
+    // crashes if client writes all zeros
+    //auto _p = (uint64_t *)(hdr + 512 * hdr_sectors);
+    //assert(*_p != 0);
 
     objname name(prefix(_seq), _seq);
     auto req2 = objstore->make_write_req(name.c_str(), hdr,
