@@ -20,7 +20,7 @@ spdk_dir=/home/isaackhor/code/spdk/
 lsvd_dir=/home/isaackhor/code/lsvd-rbd/
 experiment_dir=/home/isaackhor/code/lsvd-rbd/experiments/
 results_dir=$experiment_dir/results/
-outfile=$experiment_dir/results/$cur_time.txt
+outfile=$experiment_dir/results/$cur_time.$pool_name.lsvd.txt
 
 gateway_host=dl380p-5
 client_host=dl380p-6
@@ -46,7 +46,6 @@ sh -c 'echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages'
 # start server
 mkdir -p /mnt/nvme/lsvd-rcache /mnt/nvme/lsvd-wcache
 export LD_PRELOAD=$lsvd_dir/liblsvd.so
-# FIXME move to nvme
 export LSVD_RCACHE_DIR=/mnt/nvme/lsvd-rcache
 export LSVD_WCACHE_DIR=/mnt/nvme/lsvd-wcache
 scripts/rpc.py spdk_kill_instance SIGTERM > /dev/null || true
