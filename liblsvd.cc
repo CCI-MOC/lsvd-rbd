@@ -305,7 +305,6 @@ extern "C" void rbd_aio_release(rbd_completion_t c)
 
 extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
 {
-    fp_log("rbd_discard\n");
     auto img = (rbd_image *)image;
     img->xlate->trim(ofs, len);
     return 0;
@@ -314,7 +313,6 @@ extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
 extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
                                rbd_completion_t c)
 {
-    fp_log("rbd_aio_discard\n");
     auto p = (lsvd_completion *)c;
     auto img = p->img = (rbd_image *)image;
     img->xlate->trim(off, len);
@@ -337,7 +335,6 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 
 extern "C" int rbd_flush(rbd_image_t image)
 {
-    fp_log("rbd_flush\n");
     auto img = (rbd_image *)image;
     if (img->cfg.hard_sync)
         img->xlate->flush();
@@ -439,6 +436,7 @@ class rbd_aio_req : public request
         // TODO: this is horribly ugly
 
         std::unique_lock lk(m);
+	std::vector<request*> requests;
 
         for (sector_t s_offset = 0; s_offset < sectors;
              s_offset += max_sectors) {
@@ -447,9 +445,12 @@ class rbd_aio_req : public request
                 s_offset * 512L, s_offset * 512L + _sectors * 512L);
             smartiov *_iov = new smartiov(tmp.data(), tmp.size());
             to_free.push_back(_iov);
-            auto wcw = img->wcache->writev(this, offset / 512, _iov);
+            auto req = img->wcache->writev(offset / 512, _iov);
+            requests.push_back(req);
             offset += _sectors * 512L;
         }
+	for (auto r : requests)
+	    r->run(this);
 
         auto x = (status |= REQ_LAUNCHED);
 
@@ -596,8 +597,6 @@ class rbd_aio_req : public request
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
                             char *buf, rbd_completion_t c)
 {
-    // do_log("rbd_aio_read\n");
-    fp_log("rbd_aio_read: offset = %lu, len = %u\n", offset, len);
     rbd_image *img = (rbd_image *)image;
     auto p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -611,9 +610,6 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
                              uint64_t offset, rbd_completion_t c)
 {
-    fp_log("rbd_aio_readv: offset = %lu, iov_base = %p, iov_len = %u, iovcnt = "
-           "%d\n",
-           offset, iov->iov_base, iov->iov_len, iovcnt);
     rbd_image *img = (rbd_image *)image;
     auto p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -627,9 +623,6 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
                               int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-    fp_log("rbd_aio_writev: offset = %lu, iov_base = %p, iov_len = %u, iovcnt "
-           "= %d\n",
-           offset, iov->iov_base, iov->iov_len, iovcnt);
     rbd_image *img = (rbd_image *)image;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -643,7 +636,6 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
                              const char *buf, rbd_completion_t c)
 {
-    fp_log("rbd_aio_write: offset = %lu, len = %u\n", offset, len);
     rbd_image *img = (rbd_image *)image;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
@@ -660,8 +652,6 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
-    // do_log("rbd_read %d\n", (int)(off / 512));
-    fp_log("rbd_read: offset = %lu, len = %u\n", off, len);
     rbd_image *img = (rbd_image *)image;
     auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
 
@@ -673,8 +663,6 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
                          const char *buf)
 {
-    fp_log("rbd_write: offset = %lu, len = %u\n", off, len);
-    // do_log("rbd_write\n");
     rbd_image *img = (rbd_image *)image;
     auto req =
         new rbd_aio_req(OP_WRITE, img, NULL, off, REQ_WAIT, (char *)buf, len);
@@ -685,7 +673,6 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
 
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
-    fp_log("rbd_aio_wait_for_complete\n");
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
     p->done_released += 20;
@@ -706,8 +693,6 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
                         size_t infosize)
 {
-    // do_log("rbd_stat\n");
-    fp_log("rbd_stat\n");
     rbd_image *img = (rbd_image *)image;
     memset(info, 0, sizeof(*info));
     info->size = img->size;
@@ -719,8 +704,6 @@ extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
 
 extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
 {
-    // do_log("rbd_get_size\n");
-    fp_log("rbd_get_size\n");
     rbd_image *img = (rbd_image *)image;
     *size = img->size;
     return 0;
@@ -781,7 +764,6 @@ extern "C" int rbd_aio_writesame(rbd_image_t image, uint64_t off, size_t len,
                                  const char *buf, size_t data_len,
                                  rbd_completion_t c, int op_flags)
 {
-    fp_log("rbd_aio_writesame\n");
     int n = div_round_up(len, data_len);
     iovec iov[n];
     int niovs = 0;
@@ -798,7 +780,6 @@ extern "C" int rbd_aio_write_zeroes(rbd_image_t image, uint64_t off, size_t len,
                                     rbd_completion_t c, int zero_flags,
                                     int op_flags)
 {
-    fp_log("rbd_aio_write_zeroes\n");
     return rbd_aio_writesame(image, off, len, zeropage, 4096, c, op_flags);
 }
 
@@ -806,7 +787,7 @@ extern "C" int rbd_aio_write_zeroes(rbd_image_t image, uint64_t off, size_t len,
  */
 extern "C" int rbd_invalidate_cache(rbd_image_t image)
 {
-    fp_log("rbd_invalidate_cache\n");
+    fp_log("rbd_invalidate_cache: not implemented\n");
     return 0;
 }
 
@@ -814,33 +795,33 @@ extern "C" int rbd_invalidate_cache(rbd_image_t image)
  */
 extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
 {
-    fp_log("rbd_resize\n");
+    fp_log("rbd_resize: not implemented\n");
     return -1;
 }
 
 extern "C" int rbd_snap_create(rbd_image_t image, const char *snapname)
 {
-    fp_log("rbd_snap_create\n");
+    fp_log("rbd_snap_create: not implemented\n");
     return -1;
 }
 extern "C" int rbd_snap_list(rbd_image_t image, rbd_snap_info_t *snaps,
                              int *max_snaps)
 {
-    fp_log("rbd_snap_list\n");
+    fp_log("rbd_snap_list: not implemented\n");
     return -1;
 }
 extern "C" void rbd_snap_list_end(rbd_snap_info_t *snaps)
 {
-    fp_log("rbd_snap_list_end\n");
+    fp_log("rbd_snap_list_end: not implemented\n");
 }
 extern "C" int rbd_snap_remove(rbd_image_t image, const char *snapname)
 {
-    fp_log("rbd_snap_remove\n");
+    fp_log("rbd_snap_remove: not implemented\n");
     return -1;
 }
 extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
 {
-    fp_log("rbd_snap_rollback\n");
+    fp_log("rbd_snap_rollback: not implemented\n");
     return -1;
 }
 
@@ -851,7 +832,7 @@ extern "C" int rbd_diff_iterate2(rbd_image_t image, const char *fromsnapname,
                                  int (*cb)(uint64_t, size_t, int, void *),
                                  void *arg)
 {
-    fp_log("rbd_diff_iterate2\n");
+    fp_log("rbd_diff_iterate2: not implemented\n");
     return *(int *)0;
 }
 
@@ -860,7 +841,7 @@ extern "C" int rbd_encryption_format(rbd_image_t image,
                                      rbd_encryption_options_t opts,
                                      size_t opts_size)
 {
-    fp_log("rbd_encryption_format\n");
+    fp_log("rbd_encryption_format: not implemented\n");
     return *(int *)0;
 }
 
@@ -869,19 +850,19 @@ extern "C" int rbd_encryption_load(rbd_image_t image,
                                    rbd_encryption_options_t opts,
                                    size_t opts_size)
 {
-    fp_log("rbd_encryption_load\n");
+    fp_log("rbd_encryption_load: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" int rbd_get_features(rbd_image_t image, uint64_t *features)
 {
-    fp_log("rbd_get_features\n");
+    fp_log("rbd_get_features: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" int rbd_get_flags(rbd_image_t image, uint64_t *flags)
 {
-    fp_log("rbd_get_flags\n");
+    fp_log("rbd_get_flags: not implemented\n");
     return *(int *)0;
 }
 
@@ -890,40 +871,40 @@ static int _tmp;
 
 extern "C" void rbd_image_spec_cleanup(rbd_image_spec_t *image)
 {
-    fp_log("rbd_image_spec_cleanup\n");
+    fp_log("rbd_image_spec_cleanup: not implemented\n");
     ASSERT_FAIL();
 }
 
 extern "C" void rbd_linked_image_spec_cleanup(rbd_linked_image_spec_t *image)
 {
-    fp_log("rbd_linked_image_spec_cleanup\n");
+    fp_log("rbd_linked_image_spec_cleanup: not implemented\n");
     ASSERT_FAIL();
 }
 
 extern "C" int rbd_mirror_image_enable(rbd_image_t image)
 {
-    fp_log("rbd_mirror_image_enable\n");
+    fp_log("rbd_mirror_image_enable: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" int rbd_mirror_image_enable2(rbd_image_t image,
                                         rbd_mirror_image_mode_t mode)
 {
-    fp_log("rbd_mirror_image_enable2\n");
+    fp_log("rbd_mirror_image_enable2: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" void
 rbd_mirror_image_get_info_cleanup(rbd_mirror_image_info_t *mirror_image_info)
 {
-    fp_log("rbd_mirror_image_get_info_cleanup\n");
+    fp_log("rbd_mirror_image_get_info_cleanup: not implemented\n");
     ASSERT_FAIL();
 }
 
 extern "C" void rbd_mirror_image_global_status_cleanup(
     rbd_mirror_image_global_status_t *mirror_image_global_status)
 {
-    fp_log("rbd_mirror_image_global_status_cleanup\n");
+    fp_log("rbd_mirror_image_global_status_cleanup: not implemented\n");
     ASSERT_FAIL();
 }
 
@@ -933,7 +914,7 @@ extern "C" int rbd_mirror_peer_site_add(rados_ioctx_t io_ctx, char *uuid,
                                         const char *site_name,
                                         const char *client_name)
 {
-    fp_log("rbd_mirror_peer_site_add\n");
+    fp_log("rbd_mirror_peer_site_add: not implemented\n");
     return *(int *)0;
 }
 
@@ -941,14 +922,14 @@ extern "C" int rbd_mirror_peer_site_get_attributes(
     rados_ioctx_t p, const char *uuid, char *keys, size_t *max_key_len,
     char *values, size_t *max_value_len, size_t *key_value_count)
 {
-    fp_log("rbd_mirror_peer_site_get_attributes\n");
+    fp_log("rbd_mirror_peer_site_get_attributes: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" int rbd_mirror_peer_site_remove(rados_ioctx_t io_ctx,
                                            const char *uuid)
 {
-    fp_log("rbd_mirror_peer_site_remove\n");
+    fp_log("rbd_mirror_peer_site_remove: not implemented\n");
     return *(int *)0;
 }
 
@@ -958,7 +939,7 @@ extern "C" int rbd_mirror_peer_site_set_attributes(rados_ioctx_t p,
                                                    const char *values,
                                                    size_t key_value_count)
 {
-    fp_log("rbd_mirror_peer_site_set_attributes\n");
+    fp_log("rbd_mirror_peer_site_set_attributes: not implemented\n");
     return *(int *)0;
 }
 
@@ -966,7 +947,7 @@ extern "C" int rbd_mirror_peer_site_set_name(rados_ioctx_t io_ctx,
                                              const char *uuid,
                                              const char *site_name)
 {
-    fp_log("rbd_mirror_peer_site_set_name\n");
+    fp_log("rbd_mirror_peer_site_set_name: not implemented\n");
     return *(int *)0;
 }
 
@@ -974,19 +955,19 @@ extern "C" int rbd_mirror_peer_site_set_client_name(rados_ioctx_t io_ctx,
                                                     const char *uuid,
                                                     const char *client_name)
 {
-    fp_log("rbd_mirror_peer_site_set_client_name\n");
+    fp_log("rbd_mirror_peer_site_set_client_name: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" void rbd_pool_stats_create(rbd_pool_stats_t *stats)
 {
-    fp_log("rbd_pool_stats_create\n");
+    fp_log("rbd_pool_stats_create: not implemented\n");
     ASSERT_FAIL();
 }
 
 extern "C" void rbd_pool_stats_destroy(rbd_pool_stats_t stats)
 {
-    fp_log("rbd_pool_stats_destroy\n");
+    fp_log("rbd_pool_stats_destroy: not implemented\n");
     ASSERT_FAIL();
 }
 
@@ -994,13 +975,13 @@ extern "C" int rbd_pool_stats_option_add_uint64(rbd_pool_stats_t stats,
                                                 int stat_option,
                                                 uint64_t *stat_val)
 {
-    fp_log("rbd_pool_stats_option_add_uint64\n");
+    fp_log("rbd_pool_stats_option_add_uint64: not implemented\n");
     return *(int *)0;
 }
 
 extern "C" void rbd_trash_get_cleanup(rbd_trash_image_info_t *info)
 {
-    fp_log("rbd_trash_get_cleanup\n");
+    fp_log("rbd_trash_get_cleanup: not implemented\n");
     ASSERT_FAIL();
 }
 
