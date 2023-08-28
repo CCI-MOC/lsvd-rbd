@@ -114,7 +114,8 @@ void create_thick(char *name, long size) {
      */
     std::queue<writer*> q;
     long sector = 0;
-
+    int pct = 0;
+    
     for (int i = 1; i <= n_objs; i++) {
 	sector_t data_sectors = 16 * 1024;
 	size_t data_bytes = data_sectors * 512;
@@ -145,6 +146,12 @@ void create_thick(char *name, long size) {
 	    _r->wait_for();
 	    delete _r;
 	}
+
+	int _pct = i * 100 / n_objs;
+	if (pct != _pct) {
+	    printf("%d%%\r", pct = _pct);
+	    fflush(stdout);
+	}
     }
 
     while (q.size() > 0) {
@@ -153,6 +160,7 @@ void create_thick(char *name, long size) {
 	_r->wait_for();
 	delete _r;
     }
+    printf("\n");
 
     /* now create a checkpoint listing all the objects we created and
      * their extents
