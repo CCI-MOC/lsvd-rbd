@@ -139,7 +139,6 @@ void create_thick(char *name, long size) {
 	auto r = new writer(hdr_buf);
 	q.push(r);
 	req->run(r);
-	printf("wrote %s\n", oname);
 	while (q.size() > 16) {
 	    auto _r = q.front();
 	    q.pop();
