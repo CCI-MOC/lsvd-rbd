@@ -254,7 +254,8 @@ class rados_be_request : public request
     {
         auto req = (rados_be_request *)ptr;
         int rv = rados_aio_get_return_value(c);
-        // assert(rv >= 0);
+        if (rv >= 0)
+            do_log("rados aio returned %d", rv);
         req->notify(NULL);
     }
 

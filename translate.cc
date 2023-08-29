@@ -216,7 +216,7 @@ class translate_impl : public translate
         int first_seq = 0;
     };
     std::vector<clone> clone_list;
-    int last_clone_seq = 0;
+    uint32_t last_clone_seq = 0;
     char super_name[128];
 
     /* superblock has two sections: [obj_hdr] [super_hdr]
@@ -1108,7 +1108,7 @@ void translate_impl::do_gc(bool *running)
     int calculated_total = 0;
     std::set<std::tuple<double, int, int>> utilization;
     for (auto p : object_info) {
-        if (p.first > last_ckpt || p.first < last_clone_seq)
+        if (p.first > last_ckpt || (uint32_t) p.first < last_clone_seq)
             continue;
         auto [hdrlen, datalen, live] = p.second;
         double rho = 1.0 * live / datalen;
@@ -1458,7 +1458,7 @@ int translate_clone_image(backend *objstore, const char *name,
     std::vector<uint32_t> ckpts;
     decode_offset_len<uint32_t>(base_buf, base_sh->ckpts_offset, base_sh->ckpts_len, ckpts);
 
-    int n_ckpts = ckpts.size();
+    size_t n_ckpts = ckpts.size();
     if (n_ckpts > 0) {
         size_t offset = sizeof(*hdr) + sizeof(*sh) + sh->clones_offset;
         ci->last_seq = ckpts.back();
