@@ -203,6 +203,8 @@ void run_test(unsigned long seed, struct cfg *cfg)
     setenv("LSVD_CACHE_SIZE", cfg->cache_size, 1);
     setenv("LSVD_BACKEND", cfg->backend, 1);
     setenv("LSVD_CACHE_DIR", cfg->cache_dir, 1);
+    setenv("LSVD_RCACHE_DIR", cfg->cache_dir, 1);
+    setenv("LSVD_WCACHE_DIR", cfg->cache_dir, 1);
 
     if (!started || cfg->restart) {
         // clean_cache(cfg->cache_dir);
@@ -303,21 +305,21 @@ static struct argp_option options[] = {
     {0},
 };
 
-struct cfg _cfg = {"/tmp",          // cache_dir
-                   "/tmp/bkt/obj",  // obj_prefix
-                   "100m",          // cache_size
-                   "file",          // backend
-                   10000,           // run_len
-                   16,              // window
-                   1024 * 1024 * 2, // image_sectors,
-                   0.0,             // read_fraction
-                   1,               // n_runs
-                   {},              // seeds
-                   false,           // reopen
-                   true,            // restart
-                   false,           // verbose
-                   false,           // existing
-                   false};          // deterministic
+struct cfg _cfg = {.cache_dir = "/tmp",		     // cache_dir
+                   .cache_size = "100m",	     // cache_size
+                   .obj_prefix = "/tmp/bkt/obj",     // obj_prefix
+                   .backend = "file",          // backend
+                   .run_len = 10000,           // run_len
+                   .window = 16,	       // window
+                   .image_sectors = 1024 * 1024 * 2, // image_sectors,
+                   .read_fraction = 0.0,             // read_fraction
+		   .n_runs = 1,			     // n_runs
+                   .seeds = {},			     // seeds
+                   .reopen = false,		     // reopen
+                   .restart = true,		     // restart
+                   .verbose = false,		     // verbose
+                   .existing = false,		     // existing
+                   .deterministic = false};          // deterministic
 
 off_t parseint(char *s)
 {

@@ -11,17 +11,6 @@
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H
 
-struct write_cache_work {
-  public:
-    request *req;
-    sector_t lba;
-    smartiov *iov;
-    write_cache_work(request *r, sector_t a, smartiov *v)
-        : req(r), lba(a), iov(v)
-    {
-    }
-};
-
 /* all addresses are in units of 4KB blocks
  */
 class write_cache
@@ -33,8 +22,7 @@ class write_cache
 
     virtual ~write_cache() {}
 
-    virtual write_cache_work *writev(request *req, sector_t lba,
-                                     smartiov *iov) = 0;
+    virtual request *writev(sector_t lba, smartiov *iov) = 0;
 
     virtual void do_write_checkpoint(void) = 0;
 };
