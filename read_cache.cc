@@ -242,12 +242,13 @@ static std::mt19937 rng(17); // for deterministic testing
 #endif
 
 /* evict 'n' blocks from cache, using random eviction
+ * called with mutex *unlocked*
  */
 void read_cache_impl::evict(int n)
 {
-    // assert(!m.try_lock());       // m must be locked
     std::uniform_int_distribution<int> uni(0, super->units - 1);
     for (int i = 0; i < n; i++) {
+	std::unique_lock lk(m);
         int j = uni(rng);
         while (rmap[j].obj == 0 || in_use[j] > 0)
             j = uni(rng);
@@ -264,9 +265,8 @@ void read_cache_impl::evict_thread(thread_pool<int> *p)
     auto t0 = std::chrono::system_clock::now();
     auto timeout = std::chrono::seconds(20);
 
-    std::unique_lock<std::mutex> lk(m);
-
     while (p->running) {
+	std::unique_lock<std::mutex> lk(m);
         p->cv.wait_for(lk, wait_time);
         if (!p->running)
             return;
@@ -274,6 +274,8 @@ void read_cache_impl::evict_thread(thread_pool<int> *p)
         int n = 0;
         if ((int)free_blocks.size() < super->units / 16)
             n = super->units / 4 - free_blocks.size();
+	lk.unlock();
+	
         if (n)
             evict(n);
 
@@ -453,7 +455,7 @@ class cache_hit_request : public rcache_generic_request
         if (child)
             child->release();
         std::unique_lock lk(r->m);
-        r->in_use[blk]--;
+        r->in_use[blk]--;	// CACHE HIT IN_USE DEC
         parent->notify(this);
         finish();
     }
@@ -581,7 +583,7 @@ class cache_fill_req : public rcache_generic_request
                 req->copy_in(buf);
             r->pending[blk].clear();
 
-            r->in_use[blk]--;
+            r->in_use[blk]--;	// CACHE FILL IN_USE DECR
             r->fetching[blk] = false;
             r->pending_fills--;
             r->cv.notify_all();
@@ -684,11 +686,10 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
             sector_t sector_in_blk = objptr.offset % block_sectors;
             limit2 = base + sectors;
 
-            int i = map[key];
-            in_use[i]++;
 
             hit_stats.serve(sectors);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
+            int i = map[key];
 
             if (fetching[i]) {
                 auto req =
@@ -698,6 +699,7 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
                 pending[i].push_back(req);
                 requests.push_back(req);
             } else {
+		in_use[i]++;	// CACHE HIT IN_USE INCR
                 auto nvme_location = nvme_sector(i) + sector_in_blk;
                 auto req = new cache_hit_request(this, i, nvme_location, slice);
                 requests.push_back(req);
@@ -746,7 +748,7 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
             int i = free_blocks.front();
             free_blocks.pop();
 
-            in_use[i]++;
+            in_use[i]++;	// CACHE FILL IN_USE INCR
             fetching[i] = true;
             map[key] = i;
             rmap[i] = key;
