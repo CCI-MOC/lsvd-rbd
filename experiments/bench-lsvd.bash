@@ -14,29 +14,33 @@ fi
 
 # pool must already exist
 pool_name=$1
-
 cur_time=$(date +"%FT%T")
-spdk_dir=/home/pjd/spdk/
-lsvd_dir=/home/pjd/new-stuff/
-experiment_dir=/home/pjd/new-stuff/experiments/
+
+spdk_dir=/home/isaackhor/code/spdk/
+lsvd_dir=/home/isaackhor/code/lsvd-rbd/
+experiment_dir=$lsvd_dir/experiments/
 results_dir=$experiment_dir/results/
-outfile=$experiment_dir/results/$cur_time.$pool_name.lsvd.txt
+outfile=$results_dir/$cur_time.$pool_name.lsvd.txt
 
 gateway_host=dl380p-5
 client_host=dl380p-6
 
+# imgname=$cur_time
+imgname=test-80g # pre-allocated thick 80g image on pool 'triple-ssd'
+blocksize=4096
+
 # Build LSVD
+echo '===Building LSVD...'
 cd $lsvd_dir
 # make clean
 make -j20 release
 # make -j10 debug
-make imgtool
-make thick-image
+make -j20 imgtool
+make -j20 thick-image
 
-IMG=$cur_time
 # Create the image
 #./imgtool --create --rados --size=10g $pool_name/$cur_time
-./thick-image --size=80g $pool_name/$IMG
+# ./thick-image --size=80g $pool_name/$imgname
 #./imgtool --create --rados --size=10g rbd/fio-target
 
 # setup spdk
@@ -47,12 +51,14 @@ cd $spdk_dir
 sh -c 'echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages'
 
 # kill existing spdk instances
+echo '===Killing existing spdk instances...'
 scripts/rpc.py spdk_kill_instance SIGTERM > /dev/null || true
-pkill nvmf_tgt || true
-pkill reactor_0 || true
+pkill -f nvmf_tgt || true
+pkill -f reactor_0 || true
 sleep 5
 
 # start server
+echo '===Starting spdk...'
 mkdir -p /mnt/nvme/lsvd-rcache /mnt/nvme/lsvd-wcache
 export LD_PRELOAD=$lsvd_dir/liblsvd.so
 export LSVD_RCACHE_DIR=/mnt/nvme/lsvd-rcache
@@ -67,7 +73,7 @@ printf "\n\n\n===Starting automated test on pool: $pool_name===\n\n" >> $outfile
 scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
 # syntax: bdev_rbd_create <name> <pool> <image-name> <block_size> [-c <cluster_name>]
 # image must already exist
-scripts/rpc.py bdev_rbd_create $pool_name $pool_name/$IMG 4096 -c rbd_cluster
+scripts/rpc.py bdev_rbd_create $pool_name $pool_name/$imgname $blocksize -c rbd_cluster
 
 # create subsystem
 scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
@@ -93,4 +99,4 @@ scripts/rpc.py spdk_kill_instance SIGTERM
 sleep 5
 
 cd $lsvd_dir
-./imgtool --delete --rados $pool_name/$IMG
+# ./imgtool --delete --rados $pool_name/$imgname
