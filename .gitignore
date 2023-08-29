@@ -51,5 +51,6 @@ lsvd_crash_test
 .cache
 compile_commands.json
 
+thick-image
 imgtool
 .vscode

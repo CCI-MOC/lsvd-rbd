@@ -51,7 +51,12 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
 
 extern int make_cache(int fd, uuid_t &uuid, int n_pages);
 
-bool __lsvd_dbg_no_gc = false;
+#ifdef DEBUG_NO_GC
+bool __lsvd_dbg_no_gc = true;
+#else
+bool __lsvd_dbg_no_gc = true;
+#endif
+
 
 backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
 {

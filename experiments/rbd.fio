@@ -19,4 +19,3 @@ time_based
 [rbd_iodepth32]
 iodepth=1
 #iodepth=64
-

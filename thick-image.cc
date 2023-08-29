@@ -201,6 +201,7 @@ void create_thick(char *name, long size) {
 	extmap[i-1].len = 16*1024;
 	extmap[i-1].obj = i;
 	extmap[i-1].offset = 1;
+	lba += 16*1024;
     }
 
     char oname[128];

@@ -292,12 +292,13 @@ static std::mt19937 rng(17); // for deterministic testing
 #endif
 
 /* evict 'n' blocks from cache, using random eviction
+ * called with mutex *unlocked*
  */
 void shared_read_cache::evict(int n)
 {
-    // assert(!m.try_lock());       // m must be locked
     std::uniform_int_distribution<int> uni(0, super->units - 1);
     for (int i = 0; i < n; i++) {
+        std::unique_lock lk(m);
         int j = uni(rng);
         while (rmap[j].obj[0] == '\0' || in_use[j] > 0)
             j = uni(rng);
@@ -314,9 +315,8 @@ void shared_read_cache::evict_thread(thread_pool<int> *p)
     auto t0 = std::chrono::system_clock::now();
     auto timeout = std::chrono::seconds(20);
 
-    std::unique_lock<std::mutex> lk(m);
-
     while (p->running) {
+        std::unique_lock<std::mutex> lk(m);
         p->cv.wait_for(lk, wait_time);
         if (!p->running)
             return;
@@ -324,6 +324,8 @@ void shared_read_cache::evict_thread(thread_pool<int> *p)
         int n = 0;
         if ((int)free_blocks.size() < super->units / 16)
             n = super->units / 4 - free_blocks.size();
+        lk.unlock();
+
         if (n)
             evict(n);
 
@@ -747,11 +749,9 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
                 objptr.offset % shared_rcache->block_sectors;
             limit2 = base + sectors;
 
-            int i = shared_rcache->map[key];
-            shared_rcache->in_use[i]++;
-
             shared_rcache->hit_stats.serve(sectors);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
+            int i = shared_rcache->map[key];
 
             if (shared_rcache->fetching[i]) {
                 auto req =
@@ -761,6 +761,7 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
                 shared_rcache->pending[i].push_back(req);
                 requests.push_back(req);
             } else {
+                shared_rcache->in_use[i]++;
                 auto nvme_location =
                     shared_rcache->nvme_sector(i) + sector_in_blk;
                 auto req = new cache_hit_request(this, i, nvme_location, slice);
