@@ -11,13 +11,8 @@ for pair in $*; do
 done
 
 printf "===Starting client benchmark\n\n"
-_iodepth=${iodepth:-256}
-echo iodepth: $_iodepth
-_blksize=${blksize:-4k}
-echo blksize: $_blksize
 
-#trap 'umount /mnt/bench_filesystem; nvme disconnect -n nqn.2016-06.io.spdk:cnode1; exit' SIGINT SIGTERM EXIT
-trap 'nvme disconnect -n nqn.2016-06.io.spdk:cnode1; exit' SIGINT SIGTERM EXIT
+trap 'umount /mnt/fsbench; nvme disconnect -n nqn.2016-06.io.spdk:cnode1; exit' SIGINT SIGTERM EXIT
 
 # if [ "$EUID" -ne 0 ]
 #   then echo "Please run as root"
@@ -37,89 +32,57 @@ printf "Using device $dev_name\n"
 
 # === run the benchmarks ===
 
-#num_fio_processes=4
-njobs=1
-fio_iodepth=$_iodepth
+num_fio_processes=4
+fio_size="80GB"
+fio_iodepth=${iodepth:-256}
+fio_bs=${blksize:-4k}
 
-printf "\n\n\n===Random reads===\n\n"
-fio \
-	--name=fio-randread \
-	--rw=randread \
-	--filename=$dev_name \
-	--direct=1 \
-	--bs=$_blksize \
-	--ioengine=io_uring \
-	--iodepth=$fio_iodepth \
-	--time_based \
-	--runtime=60 \
-	--iodepth=$fio_iodepth \
-	--numjobs=$njobs \
-	--group_reporting \
-	--eta-newline=1 \
-	--readonly
+# fio
 
-sleep 15
+function run_fio {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	fio \
+		--name=fio-"$1" \
+		--rw=$1 \
+		--filename=/dev/$dev_name \
+		--size=$fio_size \
+		--direct=1 \
+		--bs=$4 \
+		--ioengine=io_uring \
+		--iodepth=$3 \
+		--runtime=$2 \
+		--time_based \
+		--numjobs=$num_fio_processes \
+		--group_reporting \
+		--eta-newline=1 \
+	sleep 15
+}
 
-printf "\n\n\n===Random writes===\n\n"
-fio \
-	--name=fio-randwrite \
-	--rw=randwrite \
-	--filename=$dev_name \
-	--direct=1 \
-	--bs=$_blksize \
-	--ioengine=io_uring \
-	--iodepth=$fio_iodepth \
-	--runtime=60 \
-	--time_based \
-	--numjobs=$njobs \
-	--group_reporting \
-	--eta-newline=1 \
+run_fio randread 60 $fio_iodepth $fio_bs
+run_fio randwrite 60 $fio_iodepth $fio_bs
+run_fio read 60 $fio_iodepth $fio_bs
+run_fio write 60 $fio_iodepth $fio_bs
 
-sleep 15
+printf "\n\n"
+printf "========================================="
+printf "=== Trying out different queue depths ==="
+printf "========================================="
+printf "\n\n"
 
-printf "\n\n\n===Sequential reads===\n\n"
-fio \
-	--name=fio-seqread \
-	--rw=read \
-	--filename=$dev_name \
-	--direct=1 \
-	--bs=$_blksize \
-	--ioengine=io_uring \
-	--iodepth=$fio_iodepth \
-	--runtime=60 \
-	--time_based \
-	--numjobs=$njobs \
-	--group_reporting \
-	--eta-newline=1 \
-	--readonly
-
-sleep 15
-
-printf "\n\n\n===Sequential writes===\n\n"
-fio \
-	--name=fio-seqwrite \
-	--rw=write \
-	--filename=$dev_name \
-	--direct=1 \
-	--bs=$_blksize \
-	--ioengine=io_uring \
-	--iodepth=$fio_iodepth \
-	--runtime=60 \
-	--time_based \
-	--numjobs=$njobs \
-	--group_reporting \
-	--eta-newline=1 \
-
+run_fio randread 60 1 $fio_bs
+run_fio randwrite 60 32 $fio_bs
+run_fio randwrite 60 64 $fio_bs
+run_fio randwrite 60 128 $fio_bs
 
 # filesystem benchmarks
 
-# mkfs.ext4 /dev/$dev_name
-# mkdir -p /mnt/fsbench
-# mount /dev/$dev_name /mnt/fsbench
+mkfs.ext4 /dev/$dev_name
+mkdir -p /mnt/fsbench
+mount /dev/$dev_name /mnt/fsbench
 
-# /usr/local/bin/filebench -f /tmp/filebench-varmail.txt
-# /usr/local/bin/filebench -f /tmp/filebench-fileserver.txt
-# /usr/local/bin/filebench -f /tmp/filebench-oltp.txt
+filebench -f /tmp/filebench-varmail.txt
+filebench -f /tmp/filebench-fileserver.txt
+filebench -f /tmp/filebench-oltp.txt
 
 # === disconnect and cleanup ===
 # in the trap SIGTERM above
