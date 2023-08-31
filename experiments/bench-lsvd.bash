@@ -70,17 +70,12 @@ export LSVD_GC_THRESHOLD=40
 # == setup spdk target ===
 printf "\n\n\n===Starting automated test on pool: $pool_name===\n\n" >> $outfile
 
-# setup the bdevs. the image must already exist
 scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
 # syntax: bdev_rbd_create <name> <pool> <image-name> <block_size> [-c <cluster_name>]
 # image must already exist
 scripts/rpc.py bdev_rbd_create $pool_name $pool_name/$imgname $blocksize -c rbd_cluster
-
-# create subsystem
 scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
 scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 Ceph0
-
-# setup listener
 scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 10.1.0.5 -s 9922
 
@@ -88,9 +83,6 @@ scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 
 cd $experiment_dir
 scp ./filebench-*.txt root@$client_host:/tmp/
 ssh $client_host "bash -s" < client-bench.bash 2>&1 | tee -a $outfile
-
-# echo Hit ENTER to terminate...
-# read a
 
 # cleanup
 cd $spdk_dir

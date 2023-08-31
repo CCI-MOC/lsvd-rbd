@@ -69,9 +69,9 @@ run_fio read 60 $fio_iodepth $fio_bs
 run_fio write 60 $fio_iodepth $fio_bs
 
 printf "\n\n"
-printf "========================================="
-printf "=== Trying out different queue depths ==="
-printf "========================================="
+printf "=========================================\n"
+printf "=== Trying out different queue depths ===\n"
+printf "=========================================\n"
 printf "\n\n"
 
 run_fio randwrite 60 1 $fio_bs
@@ -81,9 +81,9 @@ run_fio randwrite 60 64 $fio_bs
 run_fio randwrite 60 128 $fio_bs
 
 # printf "\n\n"
-# printf "========================================"
-# printf "=== Trying out different block sizes ==="
-# printf "========================================"
+# printf "========================================\n"
+# printf "=== Trying out different block sizes ===\n"
+# printf "========================================\n"
 # printf "\n\n"
 
 # run_fio read 60 $fio_iodepth 8k
@@ -101,11 +101,12 @@ printf "\n==== Creating filesystem ====\n"
 mkfs.ext4 $dev_name
 mkdir -p /mnt/fsbench
 mount $dev_name /mnt/fsbench
+rm -rf /mnt/fsbench/*
 
 printf "\n\n"
-printf "========================================="
-printf "=== Running filebench workloads       ==="
-printf "========================================="
+printf "=========================================\n"
+printf "=== Running filebench workloads       ===\n"
+printf "=========================================\n"
 printf "\n\n"
 
 # filebench hangs if ASLR is on
