@@ -32,8 +32,8 @@ blocksize=4096
 # Build LSVD
 echo '===Building LSVD...'
 cd $lsvd_dir
-# make clean
-make -j20 release
+make clean
+make -j20 debug
 # make -j10 debug
 make -j20 imgtool
 make -j20 thick-image
@@ -84,4 +84,6 @@ scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 Ceph0
 scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 10.1.0.5 -s 9922
 
-wait
+# attach gdb
+lsvd_pid=$(ps aux | perl -lane 'print @F[1] if /nvmf_tgt/ and not /perl/')
+gdb attach $lsvd_pid -ex cont
