@@ -26,8 +26,12 @@ nvme discover -t tcp -a 10.1.0.5 -s 9922
 
 #dev_name=$(nvme connect -t tcp  --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal | perl -lane 'print @F[1]')"n1"
 nvme connect -t tcp  --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
-# nvme connect sometimes gives the wrong name
-dev_name=$(nvme list | grep SPDK | awk '{print $1}')
+sleep 5
+
+nvme list
+# nvme connect sometimes gives the wrong name (you had one job >_<)
+# dev_name=$(nvme list | grep SPDK | awk '{print $1}')
+dev_name=$(nvme list | perl -lane 'print @F[0] if /SPDK/')
 printf "Using device $dev_name\n"
 
 # === run the benchmarks ===
@@ -61,8 +65,8 @@ function run_fio {
 
 run_fio randread 60 $fio_iodepth $fio_bs
 run_fio randwrite 60 $fio_iodepth $fio_bs
-# run_fio read 60 $fio_iodepth $fio_bs
-# run_fio write 60 $fio_iodepth $fio_bs
+run_fio read 60 $fio_iodepth $fio_bs
+run_fio write 60 $fio_iodepth $fio_bs
 
 printf "\n\n"
 printf "========================================="
@@ -70,7 +74,8 @@ printf "=== Trying out different queue depths ==="
 printf "========================================="
 printf "\n\n"
 
-run_fio randread 60 1 $fio_bs
+run_fio randwrite 60 1 $fio_bs
+run_fio randwrite 60 8 $fio_bs
 run_fio randwrite 60 32 $fio_bs
 run_fio randwrite 60 64 $fio_bs
 run_fio randwrite 60 128 $fio_bs
@@ -86,9 +91,27 @@ run_fio randwrite 60 128 $fio_bs
 
 # filesystem benchmarks
 
+# make sure old filesystem and mounts are gone
+# wipefs -a $dev_name
+dd if=/dev/zero of=$dev_name bs=1M count=10
+umount $dev_name || true
+
+printf "\n==== Creating filesystem ====\n"
+
 mkfs.ext4 $dev_name
 mkdir -p /mnt/fsbench
 mount $dev_name /mnt/fsbench
+
+printf "\n\n"
+printf "========================================="
+printf "=== Running filebench workloads       ==="
+printf "========================================="
+printf "\n\n"
+
+# filebench hangs if ASLR is on
+# don't ask who spent a whole day trying to debug LSVD only to find out it was ASLR
+# definitely not Isaac, he would never do that :(
+echo 0 > /proc/sys/kernel/randomize_va_space
 
 filebench -f /tmp/filebench-varmail.txt
 filebench -f /tmp/filebench-fileserver.txt
