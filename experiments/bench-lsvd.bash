@@ -26,7 +26,7 @@ gateway_host=dl380p-5
 client_host=dl380p-6
 
 # imgname=$cur_time
-imgname=test-80g # pre-allocated thick 80g image on pool 'triple-ssd'
+imgname=prealloc-80g # pre-allocated thick 80g image on pool 'triple-ssd'
 blocksize=4096
 
 # Build LSVD
@@ -53,6 +53,7 @@ sh -c 'echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages'
 # kill existing spdk instances
 echo '===Killing existing spdk instances...'
 scripts/rpc.py spdk_kill_instance SIGTERM > /dev/null || true
+scripts/rpc.py spdk_kill_instance SIGKILL > /dev/null || true
 pkill -f nvmf_tgt || true
 pkill -f reactor_0 || true
 sleep 5

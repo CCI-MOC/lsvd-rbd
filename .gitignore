@@ -54,3 +54,7 @@ compile_commands.json
 thick-image
 imgtool
 .vscode
+
+# don't try to add results by default
+# manually add with -f
+experiments/results/

@@ -108,7 +108,6 @@ void create_thick(char *name, long size) {
     auto be = make_rados_backend(NULL);
 
     int n_objs = size / (16384 * 512);
-    int ckpt_seq = n_objs+1;
 
     /* create all the data objects, each with a single 8MB extent
      */
@@ -117,7 +116,7 @@ void create_thick(char *name, long size) {
     int pct = 0;
     
     for (int i = 1; i <= n_objs; i++) {
-	sector_t data_sectors = 16 * 1024;
+	uint32_t data_sectors = 16 * 1024;
 	size_t data_bytes = data_sectors * 512;
 	auto hdr_buf = (char*)calloc(data_bytes+512, 1);
 
@@ -140,7 +139,7 @@ void create_thick(char *name, long size) {
 	auto r = new writer(hdr_buf);
 	q.push(r);
 	req->run(r);
-	while (q.size() > 16) {
+	while (q.size() > 32) {
 	    auto _r = q.front();
 	    q.pop();
 	    _r->wait_for();
@@ -149,7 +148,7 @@ void create_thick(char *name, long size) {
 
 	int _pct = i * 100 / n_objs;
 	if (pct != _pct) {
-	    printf("%d%%\r", pct = _pct);
+	    printf("Thick provisioning: %d%% complete...\r", pct = _pct);
 	    fflush(stdout);
 	}
     }
@@ -160,17 +159,16 @@ void create_thick(char *name, long size) {
 	_r->wait_for();
 	delete _r;
     }
-    printf("\n");
 
     /* now create a checkpoint listing all the objects we created and
      * their extents
      */
-    int objmap_bytes = n_objs * sizeof(ckpt_obj);
-    int extmap_bytes = n_objs * sizeof(ckpt_mapentry);
+    uint32_t objmap_bytes = n_objs * sizeof(ckpt_obj);
+    uint32_t extmap_bytes = n_objs * sizeof(ckpt_mapentry);
 
     int ckpt_bytes = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr) +
 	objmap_bytes + extmap_bytes;
-    int ckpt_sectors = div_round_up(ckpt_bytes, 512);
+    uint32_t ckpt_sectors = div_round_up(ckpt_bytes, 512);
 
     auto ckpt_buf = (char*)calloc(ckpt_sectors*512, 1);
     auto ch = (obj_hdr*)ckpt_buf;
@@ -180,9 +178,9 @@ void create_thick(char *name, long size) {
     auto cph = (obj_ckpt_hdr*)(ch+1);
 
     auto objmap = (ckpt_obj*)(cph + 1);
-    int objmap_offset = (char*)objmap - ckpt_buf;
+    uint32_t objmap_offset = (char*)objmap - ckpt_buf;
 
-    int extmap_offset = objmap_offset + objmap_bytes;
+    uint32_t extmap_offset = objmap_offset + objmap_bytes;
     auto extmap = (ckpt_mapentry*)(ckpt_buf + extmap_offset);
 
     *(cph) = {0, 0, 0, objmap_offset, objmap_bytes, 0, 0,
@@ -226,6 +224,8 @@ void create_thick(char *name, long size) {
     *ckpt = n_objs+1;
     
     be->write_object(name, sb_data, 4096);
+
+    printf("Thick provisioning: 100%% complete...done\n");
 }
 
 int main(int argc, char **argv) {

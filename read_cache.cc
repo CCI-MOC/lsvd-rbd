@@ -118,6 +118,7 @@ class shared_read_cache
     sized_vector<std::vector<pending_read_request *>> pending;
 
     nvme *ssd;
+    lsvd_config *cfg;
 
     friend class cache_hit_request;
     friend class direct_read_req;
@@ -128,9 +129,9 @@ class shared_read_cache
     std::condition_variable cv;
 
     window_ctr hit_stats;
-
-    int pending_fills = 0;
-    int fill_window = 12;
+    int        pending_fills = 0; // max = cfg->fetch_window 
+    int        fetch_window = 0;
+    int        fetch_ratio = 0;
 
     thread_pool<int> misc_threads;
 
@@ -169,6 +170,9 @@ shared_read_cache::shared_read_cache(lsvd_config &cfg)
             throw("cannot initialize read cache");
         close(fd);
     }
+
+    fetch_window = cfg.fetch_window;
+    fetch_ratio = cfg.fetch_ratio;
 
     read_fd = open(rcache_name.c_str(), O_RDWR);
     if (read_fd < 0)
@@ -781,10 +785,9 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
          * TODO: don't let hits get too high
          */
         auto [served, fetched] = shared_rcache->hit_stats.vals();
-        bool use_cache =
-            (shared_rcache->free_blocks.size() > 0) &&
-            ((served * 3) > (fetched * 2)) &&
-            (shared_rcache->pending_fills < shared_rcache->fill_window);
+        bool use_cache = (shared_rcache->free_blocks.size() > 0) &&
+            (served > fetched*(shared_rcache->fetch_ratio/100.0)) &&
+            (shared_rcache->pending_fills < shared_rcache->fetch_window);
 
         /* if we bypass the cache, send the entire read to the backend
          * without worrying about cache block alignment
