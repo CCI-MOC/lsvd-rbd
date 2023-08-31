@@ -82,6 +82,8 @@ int lsvd_config::read()
             F_CONFIG_INT(words[0], words[1], ckpt_interval);
             F_CONFIG_INT(words[0], words[1], flush_msec);
             F_CONFIG_INT(words[0], words[1], gc_threshold);
+            F_CONFIG_INT(words[0], words[1], fetch_window);
+            F_CONFIG_INT(words[0], words[1], fetch_ratio);
         }
         fp.close();
         break;
@@ -99,6 +101,8 @@ int lsvd_config::read()
     ENV_CONFIG_INT(ckpt_interval);
     ENV_CONFIG_INT(flush_msec);
     ENV_CONFIG_INT(gc_threshold);
+    ENV_CONFIG_INT(fetch_window);
+    ENV_CONFIG_INT(fetch_ratio);
 
     return 0; // success
 }

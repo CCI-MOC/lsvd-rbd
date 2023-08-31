@@ -119,6 +119,7 @@ class read_cache_impl : public read_cache
     translate *be;
     backend *io;
     nvme *ssd;
+    lsvd_config *cfg;
 
     friend class cache_hit_request;
     friend class direct_read_req;
@@ -128,9 +129,7 @@ class read_cache_impl : public read_cache
     std::condition_variable cv;
 
     window_ctr hit_stats;
-
-    int pending_fills = 0;
-    int fill_window = 12;
+    int        pending_fills = 0; // max = cfg->fetch_window 
 
     thread_pool<int> misc_threads; // eviction thread, for now
 
@@ -152,8 +151,9 @@ class read_cache_impl : public read_cache
 
   public:
     read_cache_impl(uint32_t blkno, int _fd, translate *_be,
-                    extmap::objmap *map, extmap::bufmap *bufmap,
+                    lsvd_config *cfg, extmap::objmap *map, extmap::bufmap *bufmap,
                     std::shared_mutex *m, backend *_io);
+
     ~read_cache_impl();
 
     void handle_read(rbd_image *img, size_t offset, smartiov *iovs,
@@ -171,16 +171,17 @@ class read_cache_impl : public read_cache
 /* factory function so we can hide implementation
  */
 read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
+                            lsvd_config *cfg,
                             extmap::objmap *map, extmap::bufmap *bufmap,
                             std::shared_mutex *m, backend *_io)
 {
-    return new read_cache_impl(blkno, _fd, _be, map, bufmap, m, _io);
+    return new read_cache_impl(blkno, _fd, _be, cfg, map, bufmap, m, _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
 read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
-                                 extmap::objmap *omap, extmap::bufmap *bmap,
+                                 lsvd_config *cfg_, extmap::objmap *omap, extmap::bufmap *bmap,
                                  std::shared_mutex *maplock, backend *io_)
     : hit_stats(5000000), misc_threads(&m)
 {
@@ -189,7 +190,8 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
     obj_lock = maplock;
     be = be_;
     io = io_;
-
+    cfg = cfg_;
+    
     const char *name = "read_cache_cb";
     ssd = make_nvme(fd_, name);
 
@@ -720,8 +722,8 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
          */
         auto [served, fetched] = hit_stats.vals();
         bool use_cache = (free_blocks.size() > 0) &&
-                         ((served * 3) > (fetched * 2)) &&
-                         (pending_fills < fill_window);
+            (served > fetched*(cfg->fetch_ratio/100.0)) &&
+            (pending_fills < cfg->fetch_window);
 
         /* if we bypass the cache, send the entire read to the backend
          * without worrying about cache block alignment

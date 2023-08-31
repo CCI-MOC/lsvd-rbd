@@ -136,7 +136,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
     rcache =
-        make_read_cache(0, read_fd, xlate, &map, &bufmap, &map_lock, objstore);
+        make_read_cache(0, read_fd, xlate, &cfg,
+                        &map, &bufmap, &map_lock, objstore);
     free(jrs);
     free(jws);
 
