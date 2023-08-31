@@ -24,7 +24,7 @@
 #include "request.h"
 #include "smartiov.h"
 
-void do_log(const char *, ...);
+extern void do_log(const char *, ...);
 
 class rados_backend : public backend
 {

@@ -33,8 +33,8 @@ liblsvd.so:  $(OBJS)
 imgtool: imgtool.o $(OBJS)
 	$(CXX) -o $@ imgtool.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
 
-thick-image: thick-image.o rados_backend.o
-	$(CXX) -o $@ thick-image.o rados_backend.o -lrados -luuid
+thick-image: thick-image.o rados_backend.o lsvd_debug.o
+	$(CXX) -o $@ thick-image.o rados_backend.o lsvd_debug.o -lrados -luuid
 
 lsvd_rnd_test: lsvd_rnd_test.o $(OBJS)
 	$(CXX) -o $@ lsvd_rnd_test.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
