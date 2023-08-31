@@ -337,7 +337,6 @@ void shared_read_cache::evict_thread(thread_pool<int> *p)
          */
         auto t = std::chrono::system_clock::now();
         if (n > 0 || (t - t0) > timeout) {
-            fp_log("UPDATING READ CACHE\n");
             size_t bytes = 4096 * super->map_blocks;
             auto buf = (char *)aligned_alloc(512, bytes);
             memcpy(buf, (char *)rmap, bytes);
