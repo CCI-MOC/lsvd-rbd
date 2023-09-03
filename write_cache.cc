@@ -296,6 +296,8 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad,
 
     auto start = previous_hdr = next_alloc;
     next_alloc += n;
+    if (next_alloc == super->limit)
+	next_alloc = super->base;
     return start;
 }
 
