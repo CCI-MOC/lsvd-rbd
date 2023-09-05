@@ -19,14 +19,15 @@ cur_time=$(date +"%FT%T")
 spdk_dir=/home/isaackhor/code/spdk/
 lsvd_dir=/home/isaackhor/code/lsvd-rbd/
 experiment_dir=$lsvd_dir/experiments/
-results_dir=$experiment_dir/results/
+results_dir=$lsvd_dir/experiments/results/
 outfile=$results_dir/$cur_time.$pool_name.lsvd.txt
 
 gateway_host=dl380p-5
 client_host=dl380p-6
 
 # imgname=$cur_time
-imgname=prealloc-80g # pre-allocated thick 80g image on pool 'triple-ssd'
+# imgname=prealloc-80g # pre-allocated thick 80g image on pool 'triple-ssd'
+imgname=lsvd-benchmark-thick-80g
 blocksize=4096
 
 # Build LSVD
@@ -39,9 +40,11 @@ make -j20 imgtool
 make -j20 thick-image
 
 # Create the image
-#./imgtool --create --rados --size=10g $pool_name/$cur_time
-# ./thick-image --size=80g $pool_name/$imgname
 #./imgtool --create --rados --size=10g rbd/fio-target
+#./imgtool --create --rados --size=10g $pool_name/$cur_time
+# only re-provision when we start a new run to preserve previous image for debugging
+./imgtool --delete --rados $pool_name/$imgname || true
+./thick-image --size=80g $pool_name/$imgname
 
 # setup spdk
 cd $spdk_dir
@@ -65,6 +68,7 @@ export LD_PRELOAD=$lsvd_dir/liblsvd.so
 export LSVD_RCACHE_DIR=/mnt/nvme/lsvd-rcache
 export LSVD_WCACHE_DIR=/mnt/nvme/lsvd-wcache
 export LSVD_GC_THRESHOLD=40
+export fetch_window=0 # number of cache block fills -- 0 is bypass cache
 ./build/bin/nvmf_tgt &
 
 # == setup spdk target ===
@@ -83,6 +87,7 @@ scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 
 cd $experiment_dir
 scp ./filebench-*.txt root@$client_host:/tmp/
 ssh $client_host "bash -s" < client-bench.bash 2>&1 | tee -a $outfile
+perl -lane 'print if s/RESULT: //' $outfile | tee -a $outfile
 
 # cleanup
 cd $spdk_dir

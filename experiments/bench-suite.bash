@@ -7,7 +7,7 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
-./bench-lsvd.bash rbd
-./bench-lsvd.bash test_hdd_pool
-./bench-rbd.bash rbd
-./bench-rbd.bash test_hdd_pool
+./bench-lsvd.bash triple-ssd
+# ./bench-lsvd.bash test_hdd_pool
+./bench-rbd.bash triple-ssd
+# ./bench-rbd.bash test_hdd_pool
