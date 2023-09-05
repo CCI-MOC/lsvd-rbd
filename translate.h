@@ -45,7 +45,7 @@ class translate
 
 extern translate *make_translate(backend *_io, lsvd_config *cfg,
                                  extmap::objmap *map, extmap::bufmap *bufmap,
-                                 std::shared_mutex *m);
+                                 std::shared_mutex *m, std::mutex *buf_m);
 
 extern int translate_create_image(backend *objstore, const char *name,
                                   uint64_t size);

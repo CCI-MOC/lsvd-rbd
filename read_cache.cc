@@ -129,9 +129,9 @@ class shared_read_cache
     std::condition_variable cv;
 
     window_ctr hit_stats;
-    int        pending_fills = 0; // max = cfg->fetch_window 
-    int        fetch_window = 0;
-    int        fetch_ratio = 0;
+    int pending_fills = 0; // max = cfg->fetch_window
+    int fetch_window = 0;
+    int fetch_ratio = 0;
 
     thread_pool<int> misc_threads;
 
@@ -230,6 +230,7 @@ class read_cache_impl : public read_cache
     extmap::objmap *obj_map;
     std::shared_mutex *obj_lock;
     extmap::bufmap *buf_map;
+    std::mutex *bufmap_lock;
 
     translate *be;
     backend *io;
@@ -254,7 +255,8 @@ class read_cache_impl : public read_cache
 
   public:
     read_cache_impl(rbd_image *_img, translate *_be, extmap::objmap *map,
-                    extmap::bufmap *bufmap, std::shared_mutex *m, backend *_io);
+                    extmap::bufmap *bufmap, std::shared_mutex *m,
+                    std::mutex *bmap_lock, backend *_io);
 
     void handle_read(rbd_image *img, size_t offset, smartiov *iovs,
                      std::vector<request *> &requests);
@@ -266,21 +268,23 @@ class read_cache_impl : public read_cache
  */
 read_cache *make_read_cache(rbd_image *img, translate *_be, extmap::objmap *map,
                             extmap::bufmap *bufmap, std::shared_mutex *m,
-                            backend *_io)
+                            std::mutex *bmap_lock, backend *_io)
 {
-    return new read_cache_impl(img, _be, map, bufmap, m, _io);
+    return new read_cache_impl(img, _be, map, bufmap, m, bmap_lock, _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
 read_cache_impl::read_cache_impl(rbd_image *img_, translate *be_,
                                  extmap::objmap *omap, extmap::bufmap *bmap,
-                                 std::shared_mutex *maplock, backend *io_)
+                                 std::shared_mutex *maplock,
+                                 std::mutex *bmap_lock, backend *io_)
 {
     img = img_;
     obj_map = omap;
     buf_map = bmap;
     obj_lock = maplock;
+    bufmap_lock = bmap_lock;
     be = be_;
     io = io_;
 
@@ -664,6 +668,7 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
     // TODO: Separate this code so we don't need to hold global lock like this..
     std::unique_lock lk(shared_rcache->m);
     std::shared_lock lk2(*obj_lock);
+    std::unique_lock lk3(*bufmap_lock);
 
     auto it1 = buf_map->end();
     if (buf_map->size() > 0)
@@ -785,8 +790,9 @@ void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
          * TODO: don't let hits get too high
          */
         auto [served, fetched] = shared_rcache->hit_stats.vals();
-        bool use_cache = (shared_rcache->free_blocks.size() > 0) &&
-            (served > fetched*(shared_rcache->fetch_ratio/100.0)) &&
+        bool use_cache =
+            (shared_rcache->free_blocks.size() > 0) &&
+            (served > fetched * (shared_rcache->fetch_ratio / 100.0)) &&
             (shared_rcache->pending_fills < shared_rcache->fetch_window);
 
         /* if we bypass the cache, send the entire read to the backend

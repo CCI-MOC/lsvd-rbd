@@ -58,7 +58,10 @@ function run_fio {
 		--time_based \
 		--numjobs=$num_fio_processes \
 		--group_reporting \
-		--eta-newline=1
+		--eta-newline=1 | tee /tmp/client-bench-results.txt
+
+	printf "\nRESULT: Fio (iodepth=$3) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 15
 }
@@ -69,9 +72,9 @@ run_fio read 60 $fio_iodepth $fio_bs
 run_fio write 60 $fio_iodepth $fio_bs
 
 printf "\n\n"
-printf "========================================="
-printf "=== Trying out different queue depths ==="
-printf "========================================="
+printf "=========================================\n"
+printf "=== Trying out different queue depths ===\n"
+printf "=========================================\n"
 printf "\n\n"
 
 run_fio randwrite 60 1 $fio_bs
@@ -81,9 +84,9 @@ run_fio randwrite 60 64 $fio_bs
 run_fio randwrite 60 128 $fio_bs
 
 # printf "\n\n"
-# printf "========================================"
-# printf "=== Trying out different block sizes ==="
-# printf "========================================"
+# printf "========================================\n"
+# printf "=== Trying out different block sizes ===\n"
+# printf "========================================\n"
 # printf "\n\n"
 
 # run_fio read 60 $fio_iodepth 8k
@@ -93,19 +96,21 @@ run_fio randwrite 60 128 $fio_bs
 
 # make sure old filesystem and mounts are gone
 # wipefs -a $dev_name
-dd if=/dev/zero of=$dev_name bs=1M count=10
+dd if=/dev/zero of=$dev_name bs=1M count=100
 umount $dev_name || true
+umount /mnt/fsbench || true
 
 printf "\n==== Creating filesystem ====\n"
 
 mkfs.ext4 $dev_name
 mkdir -p /mnt/fsbench
 mount $dev_name /mnt/fsbench
+rm -rf /mnt/fsbench/*
 
 printf "\n\n"
-printf "========================================="
-printf "=== Running filebench workloads       ==="
-printf "========================================="
+printf "=========================================\n"
+printf "=== Running filebench workloads       ===\n"
+printf "=========================================\n"
 printf "\n\n"
 
 # filebench hangs if ASLR is on
@@ -113,9 +118,17 @@ printf "\n\n"
 # definitely not Isaac, he would never do that :(
 echo 0 > /proc/sys/kernel/randomize_va_space
 
-filebench -f /tmp/filebench-varmail.txt
-filebench -f /tmp/filebench-fileserver.txt
-filebench -f /tmp/filebench-oltp.txt
+function run_filebench {
+	printf "\n\n===Filebench: workload=$1===\n\n"
+	filebench -f $1 | tee /tmp/client-bench-results.txt
+
+	printf "\nRESULT: Filebench $1:"
+	perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+}
+
+run_filebench /tmp/filebench-varmail.txt
+run_filebench /tmp/filebench-fileserver.txt
+run_filebench /tmp/filebench-oltp.txt
 
 # === disconnect and cleanup ===
 # in the trap SIGTERM above
