@@ -82,7 +82,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     /* read superblock and initialize translation layer
      */
-    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock);
+    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
     size = xlate->init(name, true);
 
     /* figure out cache file name, create it if necessary
@@ -137,7 +137,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
     rcache =
         make_read_cache(0, read_fd, xlate, &cfg,
-                        &map, &bufmap, &map_lock, objstore);
+                        &map, &bufmap, &map_lock, &bufmap_lock, objstore);
     free(jrs);
     free(jws);
 
@@ -211,6 +211,7 @@ extern "C" int rbd_close(rbd_image_t image)
     rbd_image *img = (rbd_image *)image;
     img->image_close();
     delete img;
+
     return 0;
 }
 

@@ -38,6 +38,8 @@
 #include "misc_cache.h"
 #include "smartiov.h"
 
+#include "lsvd_debug.h"
+
 void do_log(const char *, ...);
 void fp_log(const char *, ...);
 extern void log_time(uint64_t loc, uint64_t val); // debug
@@ -182,6 +184,8 @@ class translate_impl : public translate
     extmap::objmap *map;         // shared object map
     extmap::bufmap *bufmap;      // shared object map
     std::shared_mutex *map_lock; // locks the object map
+    std::mutex *bufmap_lock;
+    
     lsvd_config *cfg;
 
     std::atomic<int> seq;
@@ -263,7 +267,7 @@ class translate_impl : public translate
 
   public:
     translate_impl(backend *_io, lsvd_config *cfg_, extmap::objmap *map,
-                   extmap::bufmap *bufmap, std::shared_mutex *m);
+                   extmap::bufmap *bufmap, std::shared_mutex *m, std::mutex *buf_m);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
@@ -295,7 +299,7 @@ const char *translate_impl::prefix(int seq)
 
 translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
                                extmap::objmap *map_, extmap::bufmap *bufmap_,
-                               std::shared_mutex *m_)
+                               std::shared_mutex *m_, std::mutex *buf_m)
 {
     misc_threads = new thread_pool<int>(&m);
     workers = new thread_pool<translate_req *>(&m);
@@ -304,13 +308,14 @@ translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
     map = map_;
     bufmap = bufmap_;
     map_lock = m_;
+    bufmap_lock = buf_m;
     cfg = cfg_;
 }
 
 translate *make_translate(backend *_io, lsvd_config *cfg, extmap::objmap *map,
-                          extmap::bufmap *bufmap, std::shared_mutex *m)
+                          extmap::bufmap *bufmap, std::shared_mutex *m, std::mutex *buf_m)
 {
-    return (translate *)new translate_impl(_io, cfg, map, bufmap, m);
+    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m);
 }
 
 translate_impl::~translate_impl()
@@ -559,7 +564,8 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
     /* save extent and pointer into bufmap.
      */
     auto ptr = current->append(base, &siov);
-    std::unique_lock obj_w_lock(*map_lock);
+    std::unique_lock obj_w_lock(*bufmap_lock);
+    
     assert(ptr >= current->local_buf_base &&
            ptr + (limit - base) * 512 <= current->local_buf_limit);
     assert(ptr != NULL);
@@ -571,16 +577,16 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
 }
 
 /* TRIM is not guaranteed durable, because:
- * 1. it doesn't remove data in the write cache
- * 2. it doesn't remove data in the write pipeline
- * 3. it's not logged, so the map update isn't persistent until the
- *    next checkpoint
+ * 1. it doesn't remove data in the write pipeline
+ * 2. it's not logged to the journal
+ * 3. it's not logged in data objects
+ * in other words, it's not persistent until the next checkpoint.
  *
  * to implement durable discard we would need to:
- * - flush write cache map entries
- * - insert the discard, in order, into a batch
- * - persist it in the object data header
- * possible solution: reserve a tombstone bit in struct data_map
+ * - add a tombstone record type to the write journal
+ * - reserve a bit in struct data_map to indicate a trim with no data
+ *
+ * (note that we need to persist TRIM in order, as it can get overwritten)
  * TODO: do we need durable discard?
  */
 ssize_t translate_impl::trim(size_t offset, size_t len)
@@ -645,7 +651,7 @@ void translate_req::notify(request *child)
         /* remove extents from tx->bufmap, but only if they still
          * point to this buffer
          */
-        std::unique_lock obj_w_lock(*tx->map_lock);
+        std::unique_lock obj_w_lock(*tx->bufmap_lock);
         std::vector<std::pair<sector_t, sector_t>> extents;
         for (auto const &e : entries) {
             auto limit = e.lba + e.len;
@@ -898,6 +904,7 @@ void translate_impl::process_batch(int _seq, translate_req *req)
     /* update the object info table
      */
     std::unique_lock obj_w_lock(*map_lock);
+
     obj_info oi = {
         .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
     object_info[_seq] = oi;
@@ -906,7 +913,9 @@ void translate_impl::process_batch(int _seq, translate_req *req)
      */
     sector_t sector_offset = hdr_sectors;
     std::vector<extmap::lba2obj> deleted;
+    deleted.reserve(req->entries.size());
     std::vector<data_map> dm_entries;
+    dm_entries.reserve(req->entries.size());
 
     for (auto e : req->entries) {
         extmap::obj_offset oo = {_seq, sector_offset};
@@ -923,6 +932,8 @@ void translate_impl::process_batch(int _seq, translate_req *req)
         assert(object_info[ptr.obj].live >= 0);
         total_live_sectors -= (limit - base);
     }
+
+    obj_w_lock.unlock();
 
     /* update total and live sectors *after* dups are removed
      */

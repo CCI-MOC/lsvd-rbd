@@ -75,7 +75,7 @@ class write_cache_impl : public write_cache
     uint32_t allocate(page_t n, page_t &pad, page_t &n_pad, page_t &prev);
     j_write_super *super;
     page_t previous_hdr = 0;
-    page_t next_alloc;
+    page_t next_alloc = 0;
 
     /* these are used by wcache_write_req
      */
@@ -500,7 +500,8 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
         next_alloc = super->base;
     } else if (roll_log_forward() < 0)
         throw("write log roll-forward failed");
-
+    next_alloc = super->base;
+    
     super->clean = false;
     if (nvme_w->write(buf, 4096, 4096L * super_blkno) < 4096)
         throw_fs_error("wcache");
@@ -538,9 +539,10 @@ request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
     auto req = new wcache_write_req(lba, iovs, pages, page, n_pad - 1, pad,
                                     prev, this);
     auto [iov, iovcnt] = iovs->c_iov();
-    be->writev(req->seq, lba * 512, iov, iovcnt);
-
     outstanding_writes++;
+    lk.unlock();
+    
+    be->writev(req->seq, lba * 512, iov, iovcnt);
 
     return req;
 }

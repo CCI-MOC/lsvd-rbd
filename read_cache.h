@@ -35,6 +35,6 @@ class read_cache
 extern read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
                                    lsvd_config *cfg,
                                    extmap::objmap *map, extmap::bufmap *bufmap,
-                                   std::shared_mutex *m, backend *_io);
+                                   std::shared_mutex *m, std::mutex *bufmap_m, backend *_io);
 
 #endif
