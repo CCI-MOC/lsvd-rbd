@@ -21,22 +21,22 @@ trap 'umount /mnt/fsbench || nvme disconnect -n nqn.2016-06.io.spdk:cnode1; exit
 
 modprobe nvme-fabrics
 
+gw_ip=${gw_ip:-10.1.0.5}
 # see that it's there
-nvme discover -t tcp -a 10.1.0.5 -s 9922
+nvme discover -t tcp -a $gw_ip -s 9922
 
-#dev_name=$(nvme connect -t tcp  --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal | perl -lane 'print @F[1]')"n1"
-nvme connect -t tcp  --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+nvme connect -t tcp  --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
 sleep 5
 
 nvme list
 # nvme connect sometimes gives the wrong name (you had one job >_<)
-# dev_name=$(nvme list | grep SPDK | awk '{print $1}')
 dev_name=$(nvme list | perl -lane 'print @F[0] if /SPDK/')
 printf "Using device $dev_name\n"
 
 # === run the benchmarks ===
 
-num_fio_processes=4
+#num_fio_processes=4
+num_fio_processes=1
 fio_size="80GB"
 fio_iodepth=${iodepth:-256}
 fio_bs=${blksize:-4k}
@@ -58,6 +58,7 @@ function run_fio {
 		--time_based \
 		--numjobs=$num_fio_processes \
 		--group_reporting \
+		--randrepeat=0 \
 		--eta-newline=1 | tee /tmp/client-bench-results.txt
 
 	printf "\nRESULT: Fio (iodepth=$3) $1:"
@@ -78,10 +79,14 @@ printf "=========================================\n"
 printf "\n\n"
 
 run_fio randwrite 60 1 $fio_bs
-run_fio randwrite 60 8 $fio_bs
 run_fio randwrite 60 32 $fio_bs
 run_fio randwrite 60 64 $fio_bs
 run_fio randwrite 60 128 $fio_bs
+
+run_fio randread 60 1 $fio_bs
+run_fio randread 60 32 $fio_bs
+run_fio randread 60 64 $fio_bs
+run_fio randread 60 128 $fio_bs
 
 # printf "\n\n"
 # printf "========================================\n"
@@ -89,20 +94,22 @@ run_fio randwrite 60 128 $fio_bs
 # printf "========================================\n"
 # printf "\n\n"
 
-# run_fio read 60 $fio_iodepth 8k
-# run_fio write 60 $fio_iodepth 16k
+run_fio read 60 64 16k
+run_fio read 60 64 64k
+run_fio write 60 64 16k
+run_fio write 60 64 64k
 
 # filesystem benchmarks
 
 # make sure old filesystem and mounts are gone
 # wipefs -a $dev_name
 dd if=/dev/zero of=$dev_name bs=1M count=100
-umount $dev_name || true
+#umount $dev_name || true
 umount /mnt/fsbench || true
 
 printf "\n==== Creating filesystem ====\n"
 
-mkfs.ext4 $dev_name
+mkfs.ext4 -E nodiscard $dev_name
 mkdir -p /mnt/fsbench
 mount $dev_name /mnt/fsbench
 rm -rf /mnt/fsbench/*
