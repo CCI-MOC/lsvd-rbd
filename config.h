@@ -34,6 +34,7 @@ class lsvd_config
     int ckpt_interval = 500;             // objects
     int flush_msec = 2000;               // flush timeout
     int gc_threshold = 60;               // GC threshold, percent
+    int gc_window = 4;			 // max GC writes outstanding
     int fetch_window = 12;               // read cache fetches
     int fetch_ratio = 67;                // anti-thrash ratio, percent
     int no_gc = 0;			 // turn off GC

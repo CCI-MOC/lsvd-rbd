@@ -85,6 +85,7 @@ int lsvd_config::read()
             F_CONFIG_INT(words[0], words[1], fetch_window);
             F_CONFIG_INT(words[0], words[1], fetch_ratio);
             F_CONFIG_INT(words[0], words[1], no_gc);
+            F_CONFIG_INT(words[0], words[1], gc_window);
         }
         fp.close();
         break;
@@ -105,6 +106,7 @@ int lsvd_config::read()
     ENV_CONFIG_INT(fetch_window);
     ENV_CONFIG_INT(fetch_ratio);
     ENV_CONFIG_INT(no_gc);
+    ENV_CONFIG_INT(gc_window);
 
     return 0; // success
 }

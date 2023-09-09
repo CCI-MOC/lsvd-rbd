@@ -1246,7 +1246,7 @@ void translate_impl::do_gc(bool *running)
             workers->put_locked(req);
             lk.unlock();
 
-            while ((int)requests.size() > 8 && *running) {
+            while ((int)requests.size() > cfg->gc_window && *running) {
                 if (stopped)
                     return;
                 auto t = requests.front();
