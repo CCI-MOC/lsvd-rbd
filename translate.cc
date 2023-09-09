@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <uuid/uuid.h>
 #include <zlib.h>
@@ -343,6 +344,8 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
         parser->read_super(super_name, ckpts, clones, snaps, uuid);
     if (bytes < 0)
         return bytes;
+    if (_buf == NULL)
+	return -ENOENT;
     int n_ckpts = ckpts.size();
 
     super_buf = _buf;
@@ -1121,7 +1124,6 @@ void translate_impl::do_gc(bool *running)
         sector_t sectors = hdrlen + datalen;
         calculated_total += datalen;
         utilization.insert(std::make_tuple(rho, p.first, sectors));
-        assert(sectors <= 20 * 1024 * 1024 / 512); // WTF??
     }
     obj_r_lock.unlock();
 
@@ -1159,6 +1161,8 @@ void translate_impl::do_gc(bool *running)
         auto [base, limit, ptr] = it->vals();
         if (ptr.obj <= max_obj && objects.find(ptr.obj) != objects.end())
             live_extents.update(base, limit, ptr);
+	if (!*running)		// forced exit
+	    return;
     }
     obj_r_lock.unlock();
 
@@ -1173,6 +1177,7 @@ void translate_impl::do_gc(bool *running)
         char temp[cfg->rcache_dir.size() + 20];
         sprintf(temp, "%s/gc.XXXXXX", cfg->rcache_dir.c_str());
         int fd = mkstemp(temp);
+	unlink(temp);
 
         /* read all objects in completely
          */
@@ -1188,6 +1193,8 @@ void translate_impl::do_gc(bool *running)
             if (write(fd, buf, sectors * 512) < 0)
                 throw("no space");
             offset += sectors;
+	    if (!*running)
+		return;
         }
         free(buf);
 
@@ -1239,16 +1246,18 @@ void translate_impl::do_gc(bool *running)
             workers->put_locked(req);
             lk.unlock();
 
-            while ((int)requests.size() > 8) {
+            while ((int)requests.size() > 8 && *running) {
                 if (stopped)
                     return;
                 auto t = requests.front();
                 t->wait();
                 requests.pop();
             }
+	    if (!*running)
+		return;
         }
 
-        while (requests.size() > 0) {
+        while (requests.size() > 0 && *running) {
             if (stopped)
                 return;
             auto t = requests.front();
@@ -1256,7 +1265,7 @@ void translate_impl::do_gc(bool *running)
             requests.pop();
         }
         close(fd);
-        unlink(temp);
+        //unlink(temp);
     }
 
     /* defer deletes until we've cleaned the whole batch.

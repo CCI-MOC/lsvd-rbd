@@ -36,6 +36,7 @@ class lsvd_config
     int gc_threshold = 60;               // GC threshold, percent
     int fetch_window = 12;               // read cache fetches
     int fetch_ratio = 67;                // anti-thrash ratio, percent
+    int no_gc = 0;			 // turn off GC
 
     lsvd_config() {}
     ~lsvd_config() {}

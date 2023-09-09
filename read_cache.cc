@@ -40,7 +40,6 @@
 #include "request.h"
 #include "translate.h"
 
-#include "image.h"
 #include "objname.h"
 #include "read_cache.h"
 #include "write_cache.h"
@@ -111,7 +110,6 @@ class read_cache_impl : public read_cache
     std::vector<int> written;
     sized_vector<std::vector<pending_read_request *>> pending;
 
-    rbd_image *img;
     extmap::objmap *obj_map;
     std::shared_mutex *obj_lock;
     extmap::bufmap *buf_map;
@@ -157,7 +155,7 @@ class read_cache_impl : public read_cache
 
     ~read_cache_impl();
 
-    void handle_read(rbd_image *img, size_t offset, smartiov *iovs,
+    void handle_read(size_t offset, smartiov *iovs,
                      std::vector<request *> &requests);
 
     sector_t nvme_sector(int blk)
@@ -598,7 +596,7 @@ class cache_fill_req : public rcache_generic_request
     }
 };
 
-void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
+void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
                                   std::vector<request *> &requests)
 {
     sector_t base = offset / 512;

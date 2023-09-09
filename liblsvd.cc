@@ -61,8 +61,6 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
 extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
-bool __lsvd_dbg_no_gc = false;
-
 backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
 {
 
@@ -141,9 +139,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     free(jrs);
     free(jws);
 
-    if (!__lsvd_dbg_no_gc)
+    if (!cfg.no_gc)
         xlate->start_gc();
-
     return 0;
 }
 
@@ -196,7 +193,8 @@ int rbd_image::image_close(void)
     wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
-    xlate->stop_gc();
+    if (!cfg.no_gc)
+	xlate->stop_gc();
     xlate->checkpoint();
     objstore->stop();
     delete xlate;
@@ -491,7 +489,7 @@ class rbd_aio_req : public request
         __reqs++;
         // std::vector<request*> requests;
 
-        img->rcache->handle_read(img, offset, &aligned_iovs, requests);
+        img->rcache->handle_read(offset, &aligned_iovs, requests);
 
         n_req = requests.size();
         // do_log("rbd_read %ld:\n", offset/512);
