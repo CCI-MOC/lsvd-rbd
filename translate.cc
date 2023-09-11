@@ -21,6 +21,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <vector>
+#include <list>
 
 #include <algorithm>
 #include <map>
@@ -229,7 +230,11 @@ class translate_impl : public translate
     super_hdr *super_sh = NULL;
     size_t super_len;
 
-    std::set<int> active_gc_objs; // for wait_object_ready
+    /* GC can't delete an object if the read logic has a
+     * request outstanding to it - skip, and dead object reaping
+     * will get it on the next pass.
+     */
+    std::map<int,int> reading_objects;
 
     thread_pool<translate_req *> *workers;
     thread_pool<int> *misc_threads; // so we can stop ckpt, gc first
@@ -279,10 +284,11 @@ class translate_impl : public translate
 
     ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov, int iovcnt);
     ssize_t trim(size_t offset, size_t len);
-
     void wait_for_room(void);
-    ssize_t readv(size_t offset, iovec *iov, int iovcnt);
-    void wait_object_ready(int obj);
+
+    void object_read_start(int obj); // mark object as busy - can't delete
+    void object_read_end(int obj);
+
     void start_gc(void);
 
     const char *prefix(int seq);
@@ -620,14 +626,28 @@ void translate_impl::wait_for_room(void)
         cv.wait(lk);
 }
 
-/* TODO: change to track outstanding objects, remove on notify
+/* if there's an outstanding read on an object, we can't delete it in
+ * garbage collection.
  */
-void translate_impl::wait_object_ready(int obj)
+void translate_impl::object_read_start(int obj)
 {
     std::unique_lock lk(m);
-    while (active_gc_objs.find(obj) != active_gc_objs.end())
-        cv.wait(lk);
+    if (reading_objects.find(obj) == reading_objects.end())
+	reading_objects[obj] = 0;
+    else
+	reading_objects[obj] = reading_objects[obj]+1;
 }
+
+void translate_impl::object_read_end(int obj)
+{
+    std::unique_lock lk(m);
+    auto i = reading_objects[obj];
+    if (i == 1)
+	reading_objects.erase(obj);
+    else
+	reading_objects[obj] = i-1;
+}
+
 
 /* NOTE - currently not called for REQ_CKPT, which
  * uses sync write
@@ -640,13 +660,10 @@ void translate_req::notify(request *child)
     if (op == REQ_PUT || op == REQ_GC) {
         /* wake up anyone waiting for TX window room
          * -> lock tx->m before tx->map_lock
-         * also wakes up wait_object_ready
          */
         std::unique_lock lk(tx->m);
         // if (--tx->outstanding_writes < tx->cfg->xlate_window)
         tx->outstanding_writes--;
-        if (op == REQ_GC)
-            tx->active_gc_objs.erase(_seq);
         tx->cv.notify_all();
     }
 
@@ -987,7 +1004,6 @@ void translate_impl::worker_thread(thread_pool<translate_req *> *p)
             write_checkpoint(_seq, req);
         } else if (req->op == REQ_GC) {
             auto _seq = seq++;
-            active_gc_objs.insert(_seq);
             lk.unlock();
             write_gc(_seq, req);
         } else
@@ -1087,6 +1103,15 @@ void translate_impl::do_gc(bool *running)
 
     std::queue<request *> deletes;
     for (auto const &o : dead_objects) {
+	/*
+	 * if there's an outstanding read on an object, we can't
+	 * delete it yet
+	 */
+	{
+	    std::unique_lock lk(m);
+	    if (reading_objects.find(o) != reading_objects.end())
+		continue;
+	}
         objname name(prefix(o), o);
         auto r = objstore->delete_object_req(name.c_str());
         r->run(NULL);
@@ -1286,7 +1311,17 @@ void translate_impl::do_gc(bool *running)
     if (objs_to_clean.size()) {
         checkpoint();
         for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
-            objname name(prefix(it->first), it->first);
+	    /*
+	     * if there's an outstanding read on an object, we can't
+	     * delete it yet
+	     */
+	    auto obj = it->first;
+	    {
+		std::unique_lock lk(m);
+		if (reading_objects.find(obj) != reading_objects.end())
+		    continue;
+	    }
+            objname name(prefix(obj), obj);
             objstore->delete_object(name.c_str());
             gc_deleted++;
         }
@@ -1334,69 +1369,6 @@ void translate_impl::gc_thread(thread_pool<int> *p)
 }
 
 /* ---------------- Debug ---------------- */
-
-/* synchronous read from offset (in bytes)
- */
-ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt)
-{
-    smartiov iovs(iov, iovcnt);
-    size_t len = iovs.bytes();
-    int64_t base = offset / 512;
-    int64_t sectors = len / 512, limit = base + sectors;
-
-    /* various things break when map size is zero
-     */
-    if (map->size() == 0) {
-        iovs.zero();
-        return len;
-    }
-
-    /* object number, offset (bytes), length (bytes) */
-    std::vector<std::tuple<int, size_t, size_t>> regions;
-
-    auto prev = base;
-    {
-        std::unique_lock lk(m);
-        std::shared_lock slk(*map_lock);
-
-        for (auto it = map->lookup(base);
-             it != map->end() && it->base() < limit; it++) {
-            auto [_base, _limit, oo] = it->vals(base, limit);
-            if (_base > prev) { // unmapped
-                size_t _len = (_base - prev) * 512;
-                regions.push_back(std::tuple(-1, 0, _len));
-            }
-            size_t _len = (_limit - _base) * 512, _offset = oo.offset * 512;
-            regions.push_back(std::tuple((int)oo.obj, _offset, _len));
-            prev = _limit;
-        }
-    }
-
-    if (regions.size() == 0) {
-        iovs.zero();
-        return 0;
-    }
-
-    size_t iov_offset = 0;
-    for (auto [obj, _offset, _len] : regions) {
-        auto slice = iovs.slice(iov_offset, iov_offset + _len);
-        if (obj == -1)
-            slice.zero();
-        else {
-            objname name(prefix(obj), obj);
-            auto [iov, iovcnt] = slice.c_iov();
-            objstore->read_object(name.c_str(), iov, iovcnt, _offset);
-        }
-        iov_offset += _len;
-    }
-
-    if (iov_offset < iovs.bytes()) {
-        auto slice = iovs.slice(iov_offset, len - iov_offset);
-        slice.zero();
-    }
-
-    return 0;
-}
 
 int translate_create_image(backend *objstore, const char *name, uint64_t size)
 {

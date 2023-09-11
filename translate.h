@@ -34,8 +34,9 @@ class translate
                            int iovcnt) = 0;
     virtual ssize_t trim(size_t offset, size_t len) = 0;
     virtual void wait_for_room(void) = 0;
-    virtual ssize_t readv(size_t offset, iovec *iov, int iovcnt) = 0;
-    virtual void wait_object_ready(int obj) = 0;
+
+    virtual void object_read_start(int obj) = 0;
+    virtual void object_read_end(int obj) = 0;
 
     virtual const char *prefix(int seq) = 0; /* for read cache */
 

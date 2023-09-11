@@ -472,16 +472,19 @@ class direct_read_req : public rcache_generic_request
 
     request *obj_req = NULL;
     request *parent = NULL;
+    read_cache_impl *r = NULL;
+    extmap::obj_offset oo;
 
     std::mutex m;
     bool done = false;
     bool release = false;
 
   public:
-    direct_read_req(read_cache_impl *r, extmap::obj_offset oo, smartiov &slice)
+    direct_read_req(read_cache_impl *r_, extmap::obj_offset oo_, smartiov &slice)
         : iovs(slice)
     {
-        r->be->wait_object_ready(oo.obj);
+	oo = oo_;
+	r = r_;
         objname name(r->be->prefix(oo.obj), oo.obj);
         auto [iov, iovcnt] = iovs.c_iov();
         obj_req =
@@ -492,13 +495,15 @@ class direct_read_req : public rcache_generic_request
     void run(request *parent_)
     {
         parent = parent_;
-        obj_req->run(this);
+	r->be->object_read_start(oo.obj);
+	obj_req->run(this);
     }
 
     void notify(request *child)
     {
         if (child)
             child->release();
+	r->be->object_read_end(oo.obj);
         parent->notify(this);
         finish();
     }
@@ -536,7 +541,6 @@ class cache_fill_req : public rcache_generic_request
         buf = (char *)aligned_alloc(512, r->block_sectors * 512);
         memset(buf, 'A', 64 * 1024);
 
-        r->be->wait_object_ready(oo.obj);
         objname name(r->be->prefix(oo.obj), oo.obj);
         obj_req = r->io->make_read_req(name.c_str(), 512L * oo.offset, buf,
                                        r->block_sectors * 512);
@@ -548,7 +552,8 @@ class cache_fill_req : public rcache_generic_request
     {
         parent = parent_;
         state = FETCH_PENDING;
-        obj_req->run(this);
+	r->be->object_read_start(oo.obj);
+	obj_req->run(this);
     }
 
     void notify(request *child)
@@ -556,6 +561,8 @@ class cache_fill_req : public rcache_generic_request
         if (child)
             child->release();
         if (state == FETCH_PENDING) {
+	    r->be->object_read_end(oo.obj);
+
             // /* complete any higher-layer requests waiting on this
             //  */
             // std::unique_lock lk(r->m);
