@@ -262,8 +262,9 @@ class translate_impl : public translate
 
     void worker_thread(thread_pool<translate_req *> *p);
 
-    sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
-                         data_map *extents, int n_extents);
+    void make_obj_hdr(char *buf, uint32_t seq,
+		      sector_t hdr_sectors, sector_t data_sectors,
+		      data_map *extents, int n_extents, bool is_gc);
 
     void do_gc(bool *running);
     void gc_thread(thread_pool<int> *p);
@@ -516,14 +517,16 @@ void translate_impl::shutdown(void) {}
 
 /* create header for a GC object
  */
-sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
-                                     data_map *extents, int n_extents)
+void translate_impl::make_obj_hdr(char *buf, uint32_t _seq,
+				  sector_t hdr_sectors, sector_t data_sectors,
+				  data_map *extents, int n_extents, bool is_gc)
 {
     auto h = (obj_hdr *)buf;
     auto dh = (obj_data_hdr *)(h + 1);
-    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = n_extents * sizeof(data_map),
-             hdr_bytes = o1 + l1;
-    sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
+    uint32_t map_offset = sizeof(*h) + sizeof(*dh),
+	map_len = n_extents * sizeof(data_map);
+    uint32_t hdr_bytes = map_offset + map_len;
+    assert(hdr_bytes <= hdr_sectors*512);
 
     *h = (obj_hdr){.magic = LSVD_MAGIC,
                    .version = 1,
@@ -531,16 +534,16 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
                    .type = LSVD_DATA,
                    .seq = _seq,
                    .hdr_sectors = (uint32_t)hdr_sectors,
-                   .data_sectors = (uint32_t)sectors,
+                   .data_sectors = (uint32_t)data_sectors,
                    .crc = 0};
     memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
     *dh = (obj_data_hdr){.cache_seq = 0,
                          .objs_cleaned_offset = 0,
                          .objs_cleaned_len = 0,
-                         .data_map_offset = o1,
-                         .data_map_len = l1,
-                         .is_gc = 1};
+                         .data_map_offset = map_offset,
+                         .data_map_len = map_len,
+                         .is_gc = is_gc};
 
     data_map *dm = (data_map *)(dh + 1);
     for (int i = 0; i < n_extents; i++)
@@ -549,8 +552,6 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
     assert(hdr_bytes == ((char *)dm - buf));
     memset(buf + hdr_bytes, 0, 512 * hdr_sectors - hdr_bytes); // valgrind
     h->crc = (uint32_t)crc32(0, (const unsigned char *)buf, 512 * hdr_sectors);
-
-    return hdr_sectors;
 }
 
 /* ----------- data transfer logic -------------*/
@@ -579,8 +580,6 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
            ptr + (limit - base) * 512 <= current->local_buf_limit);
     assert(ptr != NULL);
     bufmap->update(base, limit, ptr);
-    // for (auto it = bufmap->begin(); it != bufmap->end(); it++)
-    //     assert(it->ptr().buf != NULL);
 
     return 0;
 }
@@ -861,7 +860,8 @@ void translate_impl::write_gc(int _seq, translate_req *req)
 
     int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
                     obj_extents.size() * sizeof(data_map);
-    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    int hdr_pages = div_round_up(hdr_bytes, 4096);
+    int hdr_sectors = hdr_pages * 8;
 
     sector_t offset = hdr_sectors;
     data_ptr = data_ptr0;
@@ -889,8 +889,8 @@ void translate_impl::write_gc(int _seq, translate_req *req)
 
     gc_sectors_written += data_sectors; // only written in this thread
     auto hdr = data_ptr0 - hdr_sectors * 512;
-    make_gc_hdr(hdr, _seq, data_sectors, obj_extents.data(),
-                obj_extents.size());
+    make_obj_hdr(hdr, _seq, hdr_sectors, data_sectors, obj_extents.data(),
+		 obj_extents.size(), true);
 
     auto h = (obj_hdr *)hdr;
     assert((int)h->hdr_sectors == hdr_sectors);
@@ -898,11 +898,6 @@ void translate_impl::write_gc(int _seq, translate_req *req)
     obj_info oi = {
         .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
     object_info[_seq] = oi;
-
-    // old debug code, for use with lsvd_crash_test and lsvd_rnd_test -
-    // crashes if client writes all zeros
-    //auto _p = (uint64_t *)(hdr + 512 * hdr_sectors);
-    //assert(*_p != 0);
 
     objname name(prefix(_seq), _seq);
     auto req2 = objstore->make_write_req(name.c_str(), hdr,
@@ -915,9 +910,11 @@ void translate_impl::process_batch(int _seq, translate_req *req)
 {
     req->_seq = _seq;
 
-    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
-                    req->entries.size() * sizeof(data_map);
-    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    int offset = sizeof(obj_hdr) + sizeof(obj_data_hdr),
+	len = req->entries.size() * sizeof(data_map);
+    int hdr_bytes = offset + len;
+    int hdr_pages = div_round_up(hdr_bytes, 4096);
+    int hdr_sectors = hdr_pages * 8;
     char *hdr_ptr = req->data_ptr - hdr_sectors * 512;
     int data_sectors = req->len / 512;
 
@@ -961,7 +958,8 @@ void translate_impl::process_batch(int _seq, translate_req *req)
     total_live_sectors += live;
     total_sectors += data_sectors; // doesn't count headers
 
-    make_data_hdr(hdr_ptr, data_sectors * 512, 0, &dm_entries, _seq, &uuid);
+    make_obj_hdr(hdr_ptr, _seq, hdr_sectors, data_sectors,
+		 dm_entries.data(), dm_entries.size(), false);
 
     objname name(prefix(_seq), _seq);
     auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr,
