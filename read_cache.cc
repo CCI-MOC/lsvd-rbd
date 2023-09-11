@@ -46,7 +46,6 @@
 #include "request.h"
 #include "translate.h"
 
-#include "image.h"
 #include "objname.h"
 #include "read_cache.h"
 #include "write_cache.h"
@@ -226,7 +225,6 @@ shared_read_cache::~shared_read_cache()
 
 class read_cache_impl : public read_cache
 {
-    rbd_image *img;
     extmap::objmap *obj_map;
     std::shared_mutex *obj_lock;
     extmap::bufmap *buf_map;
@@ -254,11 +252,11 @@ class read_cache_impl : public read_cache
     char *get_cacheline_buf(int n);
 
   public:
-    read_cache_impl(rbd_image *_img, translate *_be, extmap::objmap *map,
+    read_cache_impl(lsvd_config cfg, translate *_be, extmap::objmap *map,
                     extmap::bufmap *bufmap, std::shared_mutex *m,
                     std::mutex *bmap_lock, backend *_io);
 
-    void handle_read(rbd_image *img, size_t offset, smartiov *iovs,
+    void handle_read(size_t offset, smartiov *iovs,
                      std::vector<request *> &requests);
 
     void write_map(void);
@@ -266,21 +264,20 @@ class read_cache_impl : public read_cache
 
 /* factory function so we can hide implementation
  */
-read_cache *make_read_cache(rbd_image *img, translate *_be, extmap::objmap *map,
+read_cache *make_read_cache(lsvd_config cfg, translate *_be, extmap::objmap *map,
                             extmap::bufmap *bufmap, std::shared_mutex *m,
                             std::mutex *bmap_lock, backend *_io)
 {
-    return new read_cache_impl(img, _be, map, bufmap, m, bmap_lock, _io);
+    return new read_cache_impl(cfg, _be, map, bufmap, m, bmap_lock, _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
-read_cache_impl::read_cache_impl(rbd_image *img_, translate *be_,
+read_cache_impl::read_cache_impl(lsvd_config cfg, translate *be_,
                                  extmap::objmap *omap, extmap::bufmap *bmap,
                                  std::shared_mutex *maplock,
                                  std::mutex *bmap_lock, backend *io_)
 {
-    img = img_;
     obj_map = omap;
     buf_map = bmap;
     obj_lock = maplock;
@@ -289,7 +286,7 @@ read_cache_impl::read_cache_impl(rbd_image *img_, translate *be_,
     io = io_;
 
     if (!read_fd)
-        shared_rcache = std::make_shared<shared_read_cache>(img_->cfg);
+        shared_rcache = std::make_shared<shared_read_cache>(cfg);
 }
 
 #if 0
@@ -529,16 +526,19 @@ class direct_read_req : public rcache_generic_request
 
     request *obj_req = NULL;
     request *parent = NULL;
+    read_cache_impl *r = NULL;
+    extmap::obj_offset oo;
 
     std::mutex m;
     bool done = false;
     bool release = false;
 
   public:
-    direct_read_req(read_cache_impl *r, extmap::obj_offset oo, smartiov &slice)
+    direct_read_req(read_cache_impl *r_, extmap::obj_offset oo_, smartiov &slice)
         : iovs(slice)
     {
-        r->be->wait_object_ready(oo.obj);
+	oo = oo_;
+	r = r_;
         objname name(r->be->prefix(oo.obj), oo.obj);
         auto [iov, iovcnt] = iovs.c_iov();
         obj_req =
@@ -549,13 +549,15 @@ class direct_read_req : public rcache_generic_request
     void run(request *parent_)
     {
         parent = parent_;
-        obj_req->run(this);
+	r->be->object_read_start(oo.obj);
+	obj_req->run(this);
     }
 
     void notify(request *child)
     {
         if (child)
             child->release();
+	r->be->object_read_end(oo.obj);
         parent->notify(this);
         finish();
     }
@@ -593,7 +595,6 @@ class cache_fill_req : public rcache_generic_request
         buf = (char *)aligned_alloc(512, shared_rcache->block_sectors * 512);
         memset(buf, 'A', 64 * 1024);
 
-        r->be->wait_object_ready(oo.obj);
         objname name(r->be->prefix(oo.obj), oo.obj);
         obj_req = r->io->make_read_req(name.c_str(), 512L * oo.offset, buf,
                                        shared_rcache->block_sectors * 512);
@@ -605,7 +606,8 @@ class cache_fill_req : public rcache_generic_request
     {
         parent = parent_;
         state = FETCH_PENDING;
-        obj_req->run(this);
+	r->be->object_read_start(oo.obj);
+	obj_req->run(this);
     }
 
     void notify(request *child)
@@ -613,6 +615,8 @@ class cache_fill_req : public rcache_generic_request
         if (child)
             child->release();
         if (state == FETCH_PENDING) {
+	    r->be->object_read_end(oo.obj);
+
             // /* complete any higher-layer requests waiting on this
             //  */
             // std::unique_lock lk(r->m);
@@ -659,7 +663,7 @@ class cache_fill_req : public rcache_generic_request
     }
 };
 
-void read_cache_impl::handle_read(rbd_image *img, size_t offset, smartiov *iovs,
+void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
                                   std::vector<request *> &requests)
 {
     sector_t base = offset / 512;

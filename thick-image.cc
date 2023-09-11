@@ -118,10 +118,10 @@ void create_thick(char *name, long size) {
     for (int i = 1; i <= n_objs; i++) {
 	uint32_t data_sectors = 16 * 1024;
 	size_t data_bytes = data_sectors * 512;
-	auto hdr_buf = (char*)calloc(data_bytes+512, 1);
+	auto hdr_buf = (char*)calloc(data_bytes+4096, 1);
 
 	auto h = (obj_hdr*)hdr_buf;
-	*h = {LSVD_MAGIC, 1, {0}, LSVD_DATA, 0, 1, data_sectors, 0};
+	*h = {LSVD_MAGIC, 1, {0}, LSVD_DATA, 0, 8, data_sectors, 0};
 	memcpy(h->vol_uuid, uu, sizeof(uu));
 
 	auto dh = (obj_data_hdr*)(h+1);
@@ -135,7 +135,7 @@ void create_thick(char *name, long size) {
 	map1->len = 16384;
 	sector += 16384;
 
-	auto req = be->make_write_req(oname, hdr_buf, data_bytes+512);
+	auto req = be->make_write_req(oname, hdr_buf, data_bytes+4096);
 	auto r = new writer(hdr_buf);
 	q.push(r);
 	req->run(r);

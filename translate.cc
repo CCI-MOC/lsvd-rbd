@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <uuid/uuid.h>
 #include <zlib.h>
@@ -21,6 +22,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <vector>
+#include <list>
 
 #include <algorithm>
 #include <map>
@@ -230,7 +232,11 @@ class translate_impl : public translate
     super_hdr *super_sh = NULL;
     size_t super_len;
 
-    std::set<int> active_gc_objs; // for wait_object_ready
+    /* GC can't delete an object if the read logic has a
+     * request outstanding to it - skip, and dead object reaping
+     * will get it on the next pass.
+     */
+    std::map<int,int> reading_objects;
 
     thread_pool<translate_req *> *workers;
     thread_pool<int> *misc_threads; // so we can stop ckpt, gc first
@@ -258,8 +264,9 @@ class translate_impl : public translate
 
     void worker_thread(thread_pool<translate_req *> *p);
 
-    sector_t make_gc_hdr(char *buf, uint32_t seq, sector_t sectors,
-                         data_map *extents, int n_extents);
+    void make_obj_hdr(char *buf, uint32_t seq,
+		      sector_t hdr_sectors, sector_t data_sectors,
+		      data_map *extents, int n_extents, bool is_gc);
 
     void do_gc(bool *running);
     void gc_thread(thread_pool<int> *p);
@@ -280,10 +287,11 @@ class translate_impl : public translate
 
     ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov, int iovcnt);
     ssize_t trim(size_t offset, size_t len);
-
     void wait_for_room(void);
-    ssize_t readv(size_t offset, iovec *iov, int iovcnt);
-    void wait_object_ready(int obj);
+
+    void object_read_start(int obj); // mark object as busy - can't delete
+    void object_read_end(int obj);
+
     void start_gc(void);
 
     const char *prefix(int seq);
@@ -345,6 +353,8 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
         parser->read_super(super_name, ckpts, clones, snaps, uuid);
     if (bytes < 0)
         return bytes;
+    if (_buf == NULL)
+	return -ENOENT;
     int n_ckpts = ckpts.size();
 
     super_buf = _buf;
@@ -512,14 +522,16 @@ void translate_impl::shutdown(void) {}
 
 /* create header for a GC object
  */
-sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
-                                     data_map *extents, int n_extents)
+void translate_impl::make_obj_hdr(char *buf, uint32_t _seq,
+				  sector_t hdr_sectors, sector_t data_sectors,
+				  data_map *extents, int n_extents, bool is_gc)
 {
     auto h = (obj_hdr *)buf;
     auto dh = (obj_data_hdr *)(h + 1);
-    uint32_t o1 = sizeof(*h) + sizeof(*dh), l1 = n_extents * sizeof(data_map),
-             hdr_bytes = o1 + l1;
-    sector_t hdr_sectors = div_round_up(hdr_bytes, 512);
+    uint32_t map_offset = sizeof(*h) + sizeof(*dh),
+	map_len = n_extents * sizeof(data_map);
+    uint32_t hdr_bytes = map_offset + map_len;
+    assert(hdr_bytes <= hdr_sectors*512);
 
     *h = (obj_hdr){.magic = LSVD_MAGIC,
                    .version = 1,
@@ -527,16 +539,16 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
                    .type = LSVD_DATA,
                    .seq = _seq,
                    .hdr_sectors = (uint32_t)hdr_sectors,
-                   .data_sectors = (uint32_t)sectors,
+                   .data_sectors = (uint32_t)data_sectors,
                    .crc = 0};
     memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
 
     *dh = (obj_data_hdr){.cache_seq = 0,
                          .objs_cleaned_offset = 0,
                          .objs_cleaned_len = 0,
-                         .data_map_offset = o1,
-                         .data_map_len = l1,
-                         .is_gc = 1};
+                         .data_map_offset = map_offset,
+                         .data_map_len = map_len,
+                         .is_gc = is_gc};
 
     data_map *dm = (data_map *)(dh + 1);
     for (int i = 0; i < n_extents; i++)
@@ -545,8 +557,6 @@ sector_t translate_impl::make_gc_hdr(char *buf, uint32_t _seq, sector_t sectors,
     assert(hdr_bytes == ((char *)dm - buf));
     memset(buf + hdr_bytes, 0, 512 * hdr_sectors - hdr_bytes); // valgrind
     h->crc = (uint32_t)crc32(0, (const unsigned char *)buf, 512 * hdr_sectors);
-
-    return hdr_sectors;
 }
 
 /* ----------- data transfer logic -------------*/
@@ -575,8 +585,6 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
            ptr + (limit - base) * 512 <= current->local_buf_limit);
     assert(ptr != NULL);
     bufmap->update(base, limit, ptr);
-    // for (auto it = bufmap->begin(); it != bufmap->end(); it++)
-    //     assert(it->ptr().buf != NULL);
 
     return 0;
 }
@@ -622,14 +630,28 @@ void translate_impl::wait_for_room(void)
         cv.wait(lk);
 }
 
-/* TODO: change to track outstanding objects, remove on notify
+/* if there's an outstanding read on an object, we can't delete it in
+ * garbage collection.
  */
-void translate_impl::wait_object_ready(int obj)
+void translate_impl::object_read_start(int obj)
 {
     std::unique_lock lk(m);
-    while (active_gc_objs.find(obj) != active_gc_objs.end())
-        cv.wait(lk);
+    if (reading_objects.find(obj) == reading_objects.end())
+	reading_objects[obj] = 0;
+    else
+	reading_objects[obj] = reading_objects[obj]+1;
 }
+
+void translate_impl::object_read_end(int obj)
+{
+    std::unique_lock lk(m);
+    auto i = reading_objects[obj];
+    if (i == 1)
+	reading_objects.erase(obj);
+    else
+	reading_objects[obj] = i-1;
+}
+
 
 /* NOTE - currently not called for REQ_CKPT, which
  * uses sync write
@@ -642,13 +664,10 @@ void translate_req::notify(request *child)
     if (op == REQ_PUT || op == REQ_GC) {
         /* wake up anyone waiting for TX window room
          * -> lock tx->m before tx->map_lock
-         * also wakes up wait_object_ready
          */
         std::unique_lock lk(tx->m);
         // if (--tx->outstanding_writes < tx->cfg->xlate_window)
         tx->outstanding_writes--;
-        if (op == REQ_GC)
-            tx->active_gc_objs.erase(_seq);
         tx->cv.notify_all();
     }
 
@@ -846,7 +865,8 @@ void translate_impl::write_gc(int _seq, translate_req *req)
 
     int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
                     obj_extents.size() * sizeof(data_map);
-    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    int hdr_pages = div_round_up(hdr_bytes, 4096);
+    int hdr_sectors = hdr_pages * 8;
 
     sector_t offset = hdr_sectors;
     data_ptr = data_ptr0;
@@ -874,8 +894,8 @@ void translate_impl::write_gc(int _seq, translate_req *req)
 
     gc_sectors_written += data_sectors; // only written in this thread
     auto hdr = data_ptr0 - hdr_sectors * 512;
-    make_gc_hdr(hdr, _seq, data_sectors, obj_extents.data(),
-                obj_extents.size());
+    make_obj_hdr(hdr, _seq, hdr_sectors, data_sectors, obj_extents.data(),
+		 obj_extents.size(), true);
 
     auto h = (obj_hdr *)hdr;
     assert((int)h->hdr_sectors == hdr_sectors);
@@ -883,11 +903,6 @@ void translate_impl::write_gc(int _seq, translate_req *req)
     obj_info oi = {
         .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
     object_info[_seq] = oi;
-
-    // old debug code, for use with lsvd_crash_test and lsvd_rnd_test -
-    // crashes if client writes all zeros
-    //auto _p = (uint64_t *)(hdr + 512 * hdr_sectors);
-    //assert(*_p != 0);
 
     objname name(prefix(_seq), _seq);
     auto req2 = objstore->make_write_req(name.c_str(), hdr,
@@ -900,9 +915,11 @@ void translate_impl::process_batch(int _seq, translate_req *req)
 {
     req->_seq = _seq;
 
-    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
-                    req->entries.size() * sizeof(data_map);
-    int hdr_sectors = div_round_up(hdr_bytes, 512);
+    int offset = sizeof(obj_hdr) + sizeof(obj_data_hdr),
+	len = req->entries.size() * sizeof(data_map);
+    int hdr_bytes = offset + len;
+    int hdr_pages = div_round_up(hdr_bytes, 4096);
+    int hdr_sectors = hdr_pages * 8;
     char *hdr_ptr = req->data_ptr - hdr_sectors * 512;
     int data_sectors = req->len / 512;
 
@@ -946,7 +963,8 @@ void translate_impl::process_batch(int _seq, translate_req *req)
     total_live_sectors += live;
     total_sectors += data_sectors; // doesn't count headers
 
-    make_data_hdr(hdr_ptr, data_sectors * 512, 0, &dm_entries, _seq, &uuid);
+    make_obj_hdr(hdr_ptr, _seq, hdr_sectors, data_sectors,
+		 dm_entries.data(), dm_entries.size(), false);
 
     objname name(prefix(_seq), _seq);
     auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr,
@@ -989,7 +1007,6 @@ void translate_impl::worker_thread(thread_pool<translate_req *> *p)
             write_checkpoint(_seq, req);
         } else if (req->op == REQ_GC) {
             auto _seq = seq++;
-            active_gc_objs.insert(_seq);
             lk.unlock();
             write_gc(_seq, req);
         } else
@@ -1089,6 +1106,15 @@ void translate_impl::do_gc(bool *running)
 
     std::queue<request *> deletes;
     for (auto const &o : dead_objects) {
+	/*
+	 * if there's an outstanding read on an object, we can't
+	 * delete it yet
+	 */
+	{
+	    std::unique_lock lk(m);
+	    if (reading_objects.find(o) != reading_objects.end())
+		continue;
+	}
         objname name(prefix(o), o);
         auto r = objstore->delete_object_req(name.c_str());
         r->run(NULL);
@@ -1126,7 +1152,6 @@ void translate_impl::do_gc(bool *running)
         sector_t sectors = hdrlen + datalen;
         calculated_total += datalen;
         utilization.insert(std::make_tuple(rho, p.first, sectors));
-        assert(sectors <= 20 * 1024 * 1024 / 512); // WTF??
     }
     obj_r_lock.unlock();
 
@@ -1164,6 +1189,8 @@ void translate_impl::do_gc(bool *running)
         auto [base, limit, ptr] = it->vals();
         if (ptr.obj <= max_obj && objects.find(ptr.obj) != objects.end())
             live_extents.update(base, limit, ptr);
+	if (!*running)		// forced exit
+	    return;
     }
     obj_r_lock.unlock();
 
@@ -1178,6 +1205,7 @@ void translate_impl::do_gc(bool *running)
         char temp[cfg->rcache_dir.size() + 20];
         sprintf(temp, "%s/gc.XXXXXX", cfg->rcache_dir.c_str());
         int fd = mkstemp(temp);
+	unlink(temp);
 
         /* read all objects in completely
          */
@@ -1193,6 +1221,8 @@ void translate_impl::do_gc(bool *running)
             if (write(fd, buf, sectors * 512) < 0)
                 throw("no space");
             offset += sectors;
+	    if (!*running)
+		return;
         }
         free(buf);
 
@@ -1244,16 +1274,18 @@ void translate_impl::do_gc(bool *running)
             workers->put_locked(req);
             lk.unlock();
 
-            while ((int)requests.size() > 8) {
+            while ((int)requests.size() > cfg->gc_window && *running) {
                 if (stopped)
                     return;
                 auto t = requests.front();
                 t->wait();
                 requests.pop();
             }
+	    if (!*running)
+		return;
         }
 
-        while (requests.size() > 0) {
+        while (requests.size() > 0 && *running) {
             if (stopped)
                 return;
             auto t = requests.front();
@@ -1261,7 +1293,7 @@ void translate_impl::do_gc(bool *running)
             requests.pop();
         }
         close(fd);
-        unlink(temp);
+        //unlink(temp);
     }
 
     /* defer deletes until we've cleaned the whole batch.
@@ -1282,7 +1314,17 @@ void translate_impl::do_gc(bool *running)
     if (objs_to_clean.size()) {
         checkpoint();
         for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
-            objname name(prefix(it->first), it->first);
+	    /*
+	     * if there's an outstanding read on an object, we can't
+	     * delete it yet
+	     */
+	    auto obj = it->first;
+	    {
+		std::unique_lock lk(m);
+		if (reading_objects.find(obj) != reading_objects.end())
+		    continue;
+	    }
+            objname name(prefix(obj), obj);
             objstore->delete_object(name.c_str());
             gc_deleted++;
         }
@@ -1327,71 +1369,6 @@ void translate_impl::gc_thread(thread_pool<int> *p)
         gc_running = false;
         gc_cv.notify_all();
     }
-}
-
-/* ---------------- Debug ---------------- */
-
-/* synchronous read from offset (in bytes)
- */
-ssize_t translate_impl::readv(size_t offset, iovec *iov, int iovcnt)
-{
-    smartiov iovs(iov, iovcnt);
-    size_t len = iovs.bytes();
-    int64_t base = offset / 512;
-    int64_t sectors = len / 512, limit = base + sectors;
-
-    /* various things break when map size is zero
-     */
-    if (map->size() == 0) {
-        iovs.zero();
-        return len;
-    }
-
-    /* object number, offset (bytes), length (bytes) */
-    std::vector<std::tuple<int, size_t, size_t>> regions;
-
-    auto prev = base;
-    {
-        std::unique_lock lk(m);
-        std::shared_lock slk(*map_lock);
-
-        for (auto it = map->lookup(base);
-             it != map->end() && it->base() < limit; it++) {
-            auto [_base, _limit, oo] = it->vals(base, limit);
-            if (_base > prev) { // unmapped
-                size_t _len = (_base - prev) * 512;
-                regions.push_back(std::tuple(-1, 0, _len));
-            }
-            size_t _len = (_limit - _base) * 512, _offset = oo.offset * 512;
-            regions.push_back(std::tuple((int)oo.obj, _offset, _len));
-            prev = _limit;
-        }
-    }
-
-    if (regions.size() == 0) {
-        iovs.zero();
-        return 0;
-    }
-
-    size_t iov_offset = 0;
-    for (auto [obj, _offset, _len] : regions) {
-        auto slice = iovs.slice(iov_offset, iov_offset + _len);
-        if (obj == -1)
-            slice.zero();
-        else {
-            objname name(prefix(obj), obj);
-            auto [iov, iovcnt] = slice.c_iov();
-            objstore->read_object(name.c_str(), iov, iovcnt, _offset);
-        }
-        iov_offset += _len;
-    }
-
-    if (iov_offset < iovs.bytes()) {
-        auto slice = iovs.slice(iov_offset, len - iov_offset);
-        slice.zero();
-    }
-
-    return 0;
 }
 
 inline void new_image_hdr(backend *objstore, char *buf, uint64_t size)

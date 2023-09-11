@@ -13,7 +13,6 @@
 #include "config.h"
 #include "extent.h"
 #include "fake_rbd.h"
-#include "image.h"
 #include "journal.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
@@ -40,12 +39,6 @@ struct getmap_s {
     int max;
     struct tuple *t;
 };
-
-extern translate *image_2_xlate(rbd_image_t image);
-
-// struct rbd_image;
-extern rbd_image *make_rbd_image(backend *b, translate *t, write_cache *w,
-                                 read_cache *r);
 
 char *logbuf, *p_log, *end_log;
 #include <stdarg.h>

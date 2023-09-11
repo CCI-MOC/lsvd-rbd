@@ -16,14 +16,17 @@ fi
 pool_name=$1
 cur_time=$(date +"%FT%T")
 
-spdk_dir=/home/isaackhor/code/spdk/
-lsvd_dir=/home/isaackhor/code/lsvd-rbd/
+spdk_dir=${spdk_dir:-/home/isaackhor/code/spdk/}
+lsvd_dir=${lsvd_dir:-/home/isaackhor/code/lsvd-rbd/}
 experiment_dir=$lsvd_dir/experiments/
 results_dir=$lsvd_dir/experiments/results/
 outfile=$results_dir/$cur_time.$pool_name.rbd.txt
 
-gateway_host=dl380p-5
-client_host=dl380p-6
+gw_ip=${gw_ip:-10.1.0.5}
+gw_ip=$(ip addr | grep inet | fgrep inet\ 10.1 | \
+	   sed -e 's/.*inet //' -e 's,/.*,,')
+echo GATEWAY IP=$gw_ip
+client_ip=${client_ip:-10.1.0.6}
 
 # imgname=$cur_time
 imgname=prealloc-80g-rbd # pre-allocated thick 80g image on pool 'triple-ssd'
@@ -70,12 +73,12 @@ scripts/rpc.py bdev_rbd_create $pool_name $imgname $blocksize -c rbd_cluster
 scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
 scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 Ceph0
 scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
-scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 10.1.0.5 -s 9922
+scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gw_ip -s 9922
 
 # == run benchmark and collect results ===
 cd $experiment_dir
-scp ./filebench-*.txt root@$client_host:/tmp/
-ssh $client_host "bash -s" < client-bench.bash 2>&1 | tee -a $outfile
+scp ./filebench-*.txt root@$client_ip:/tmp/
+ssh $client_ip "bash -s gw_ip=$gw_ip" < client-bench.bash 2>&1 | tee -a $outfile
 perl -lane 'print if s/RESULT: //' $outfile | tee -a $outfile
 
 # cleanup

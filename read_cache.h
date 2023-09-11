@@ -18,21 +18,22 @@
 struct j_read_super;
 #include "config.h"
 #include "extent.h"
-#include "image.h"
 #include "smartiov.h"
+
+class translate;
 
 class read_cache
 {
   public:
     virtual ~read_cache(){};
 
-    virtual void handle_read(rbd_image *img, size_t offset, smartiov *iovs,
+    virtual void handle_read(size_t offset, smartiov *iovs,
                              std::vector<request *> &requests) = 0;
 
     virtual void write_map(void) = 0;
 };
 
-extern read_cache *make_read_cache(rbd_image *img, translate *_be,
+extern read_cache *make_read_cache(lsvd_config cfg, translate *_be,
                                    extmap::objmap *map, extmap::bufmap *bufmap,
                                    std::shared_mutex *m, std::mutex *bufmap_m, backend *_io);
 
