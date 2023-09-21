@@ -128,7 +128,7 @@ class read_cache_impl : public read_cache
     std::condition_variable cv;
 
     window_ctr hit_stats;
-    int        pending_fills = 0; // max = cfg->fetch_window 
+    int pending_fills = 0; // max = cfg->fetch_window
 
     thread_pool<int> misc_threads; // eviction thread, for now
 
@@ -149,8 +149,8 @@ class read_cache_impl : public read_cache
     char *get_cacheline_buf(int n);
 
   public:
-    read_cache_impl(uint32_t blkno, int _fd, translate *_be,
-                    lsvd_config *cfg, extmap::objmap *map, extmap::bufmap *bufmap,
+    read_cache_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
+                    extmap::objmap *map, extmap::bufmap *bufmap,
                     std::shared_mutex *m, std::mutex *bufmap_m, backend *_io);
 
     ~read_cache_impl();
@@ -170,18 +170,21 @@ class read_cache_impl : public read_cache
 /* factory function so we can hide implementation
  */
 read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
-                            lsvd_config *cfg,
-                            extmap::objmap *map, extmap::bufmap *bufmap,
-                            std::shared_mutex *m, std::mutex *bufmap_m, backend *_io)
+                            lsvd_config *cfg, extmap::objmap *map,
+                            extmap::bufmap *bufmap, std::shared_mutex *m,
+                            std::mutex *bufmap_m, backend *_io)
 {
-    return new read_cache_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m, _io);
+    return new read_cache_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m,
+                               _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
 read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
-                                 lsvd_config *cfg_, extmap::objmap *omap, extmap::bufmap *bmap,
-                                 std::shared_mutex *maplock, std::mutex *bmap_lock, backend *io_)
+                                 lsvd_config *cfg_, extmap::objmap *omap,
+                                 extmap::bufmap *bmap,
+                                 std::shared_mutex *maplock,
+                                 std::mutex *bmap_lock, backend *io_)
     : hit_stats(5000000), misc_threads(&m)
 {
     obj_map = omap;
@@ -191,9 +194,9 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
     be = be_;
     io = io_;
     cfg = cfg_;
-    
+
     const char *name = "read_cache_cb";
-    ssd = make_nvme(fd_, name);
+    ssd = make_nvme_aio(fd_, name);
 
     char *buf = (char *)aligned_alloc(512, 4096);
     if (ssd->read(buf, 4096, 4096L * blkno) < 0)
@@ -250,7 +253,7 @@ void read_cache_impl::evict(int n)
 {
     std::uniform_int_distribution<int> uni(0, super->units - 1);
     for (int i = 0; i < n; i++) {
-	std::unique_lock lk(m);
+        std::unique_lock lk(m);
         int j = uni(rng);
         while (rmap[j].obj == 0 || in_use[j] > 0)
             j = uni(rng);
@@ -268,7 +271,7 @@ void read_cache_impl::evict_thread(thread_pool<int> *p)
     auto timeout = std::chrono::seconds(20);
 
     while (p->running) {
-	std::unique_lock<std::mutex> lk(m);
+        std::unique_lock<std::mutex> lk(m);
         p->cv.wait_for(lk, wait_time);
         if (!p->running)
             return;
@@ -276,8 +279,8 @@ void read_cache_impl::evict_thread(thread_pool<int> *p)
         int n = 0;
         if ((int)free_blocks.size() < super->units / 16)
             n = super->units / 4 - free_blocks.size();
-	lk.unlock();
-	
+        lk.unlock();
+
         if (n)
             evict(n);
 
@@ -457,7 +460,7 @@ class cache_hit_request : public rcache_generic_request
         if (child)
             child->release();
         std::unique_lock lk(r->m);
-        r->in_use[blk]--;	// CACHE HIT IN_USE DEC
+        r->in_use[blk]--; // CACHE HIT IN_USE DEC
         parent->notify(this);
         finish();
     }
@@ -480,11 +483,12 @@ class direct_read_req : public rcache_generic_request
     bool release = false;
 
   public:
-    direct_read_req(read_cache_impl *r_, extmap::obj_offset oo_, smartiov &slice)
+    direct_read_req(read_cache_impl *r_, extmap::obj_offset oo_,
+                    smartiov &slice)
         : iovs(slice)
     {
-	oo = oo_;
-	r = r_;
+        oo = oo_;
+        r = r_;
         objname name(r->be->prefix(oo.obj), oo.obj);
         auto [iov, iovcnt] = iovs.c_iov();
         obj_req =
@@ -495,15 +499,15 @@ class direct_read_req : public rcache_generic_request
     void run(request *parent_)
     {
         parent = parent_;
-	r->be->object_read_start(oo.obj);
-	obj_req->run(this);
+        r->be->object_read_start(oo.obj);
+        obj_req->run(this);
     }
 
     void notify(request *child)
     {
         if (child)
             child->release();
-	r->be->object_read_end(oo.obj);
+        r->be->object_read_end(oo.obj);
         parent->notify(this);
         finish();
     }
@@ -552,8 +556,8 @@ class cache_fill_req : public rcache_generic_request
     {
         parent = parent_;
         state = FETCH_PENDING;
-	r->be->object_read_start(oo.obj);
-	obj_req->run(this);
+        r->be->object_read_start(oo.obj);
+        obj_req->run(this);
     }
 
     void notify(request *child)
@@ -561,7 +565,7 @@ class cache_fill_req : public rcache_generic_request
         if (child)
             child->release();
         if (state == FETCH_PENDING) {
-	    r->be->object_read_end(oo.obj);
+            r->be->object_read_end(oo.obj);
 
             // /* complete any higher-layer requests waiting on this
             //  */
@@ -592,7 +596,7 @@ class cache_fill_req : public rcache_generic_request
                 req->copy_in(buf);
             r->pending[blk].clear();
 
-            r->in_use[blk]--;	// CACHE FILL IN_USE DECR
+            r->in_use[blk]--; // CACHE FILL IN_USE DECR
             r->fetching[blk] = false;
             r->pending_fills--;
             r->cv.notify_all();
@@ -696,7 +700,6 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             sector_t sector_in_blk = objptr.offset % block_sectors;
             limit2 = base + sectors;
 
-
             hit_stats.serve(sectors);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             int i = map[key];
@@ -709,7 +712,7 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
                 pending[i].push_back(req);
                 requests.push_back(req);
             } else {
-		in_use[i]++;	// CACHE HIT IN_USE INCR
+                in_use[i]++; // CACHE HIT IN_USE INCR
                 auto nvme_location = nvme_sector(i) + sector_in_blk;
                 auto req = new cache_hit_request(this, i, nvme_location, slice);
                 requests.push_back(req);
@@ -730,8 +733,8 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
          */
         auto [served, fetched] = hit_stats.vals();
         bool use_cache = (free_blocks.size() > 0) &&
-            (served > fetched*(cfg->fetch_ratio/100.0)) &&
-            (pending_fills < cfg->fetch_window);
+                         (served > fetched * (cfg->fetch_ratio / 100.0)) &&
+                         (pending_fills < cfg->fetch_window);
 
         /* if we bypass the cache, send the entire read to the backend
          * without worrying about cache block alignment
@@ -758,7 +761,7 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             int i = free_blocks.front();
             free_blocks.pop();
 
-            in_use[i]++;	// CACHE FILL IN_USE INCR
+            in_use[i]++; // CACHE FILL IN_USE INCR
             fetching[i] = true;
             map[key] = i;
             rmap[i] = key;
