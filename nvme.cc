@@ -108,6 +108,12 @@ class nvme_aio : public nvme
         return (request *)req;
     }
 
+    static void call_send_request_notify(void *parent, long res)
+    {
+        nvme_aio_request *r = (nvme_aio_request *)parent;
+        r->notify2(res);
+    }
+
   private:
     class nvme_aio_request : public request
     {
@@ -157,11 +163,11 @@ class nvme_aio : public nvme
             parent = parent_;
             if (op == OP_WRITE) {
                 e_io_prep_pwritev(&eio, nvme_ptr->fd, _iovs.data(),
-                                  _iovs.size(), ofs, call_send_request_notify,
-                                  this);
+                                  _iovs.size(), ofs,
+                                  nvme_aio::call_send_request_notify, this);
             } else
                 e_io_prep_preadv(&eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
-                                 ofs, call_send_request_notify, this);
+                                 ofs, nvme_aio::call_send_request_notify, this);
             e_io_submit(nvme_ptr->ioctx, &eio);
         }
 
@@ -200,13 +206,15 @@ class nvme_uring : public nvme
     io_uring ring;
     std::thread uring_cqe_worker;
 
+    std::atomic_bool cqe_worker_should_continue = true;
+
   public:
     int fd;
 
     nvme_uring(int fd_, const char *name_)
     {
         fd = fd_;
-        io_uring_queue_init(64, &ring, NULL);
+        io_uring_queue_init(64, &ring, 0);
         uring_cqe_worker =
             std::thread(&nvme_uring::uring_completion_worker, this);
     }
@@ -259,9 +267,10 @@ class nvme_uring : public nvme
 
     void uring_completion_worker()
     {
-        while (true) {
+        __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
+        while (cqe_worker_should_continue.load()) {
             io_uring_cqe *cqe;
-            auto res = io_uring_wait_cqe(&ring, &cqe);
+            auto res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
 
             // TODO handle error
             if (res != 0)
@@ -385,12 +394,4 @@ nvme *make_nvme_aio(int fd, const char *name)
 nvme *make_nvme_uring(int fd, const char *name)
 {
     return (nvme *)new nvme_uring(fd, name);
-}
-
-/* ------- nvme_aio_request implementation -------- */
-
-void call_send_request_notify(void *parent, long res)
-{
-    nvme_aio_request *r = (nvme_aio_request *)parent;
-    r->notify2(res);
 }
