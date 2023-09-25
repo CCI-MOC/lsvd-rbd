@@ -7,6 +7,7 @@ CC = g++
 # -fno-omit-frame-pointer is so perf gets good stack traces
 CFLAGS = -ggdb3 -Wall $(OPT)
 CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT) -fno-omit-frame-pointer
+CXXFLAGS += -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a
 SOFLAGS = -shared -fPIC
 
 OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
@@ -15,49 +16,51 @@ OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 CFILES = $(OBJS:.o=.cc)
 
 debug: CXXFLAGS += -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
-# debug: CXXFLAGS += -Wall -Wextra -Wconversion -Wdouble-promotion -Wno-sign-conversion
+debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion
+debug: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline -Wl,-rpath=/usr/lib/liburing.so.2.5
+debug: CXXFLAGS += -Wno-conversion -Wno-unused-parameter
 release: CXXFLAGS += -O3
 
-debug: liblsvd.so
+debug: liblsvd.so lsvd_rnd_test
 release: liblsvd.so
 
 all: release imgtool
 
 liblsvd.so:  $(OBJS)
-	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
+	$(CXX) -std=c++17 $(CFILES) -o liblsvd.so $(OPT) $(CXXFLAGS) $(SOFLAGS)
 
 %.o: %.d
 
 # CRC_OBJS = crc32.o crc32_simd.o
 
 imgtool: imgtool.o $(OBJS)
-	$(CXX) -o $@ imgtool.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
+	$(CXX) -o $@ imgtool.o $(OBJS) $(CXXFLAGS)
 
 thick-image: thick-image.o rados_backend.o
 	$(CXX) -o $@ thick-image.o rados_backend.o -lrados -luuid
 
 lsvd_rnd_test: lsvd_rnd_test.o $(OBJS)
-	$(CXX) -o $@ lsvd_rnd_test.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
+	$(CXX) -o $@ lsvd_rnd_test.o $(OBJS) $(CXXFLAGS)
 
 lsvd_crash_test: lsvd_crash_test.o $(OBJS)
-	$(CXX) -o $@ lsvd_crash_test.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid -lz
+	$(CXX) -o $@ lsvd_crash_test.o $(OBJS) $(CXXFLAGS)
 
 test-1: test-1.o $(OBJS)
-	$(CXX) -o $@ test-1.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
+	$(CXX) -o $@ test-1.o $(OBJS) $(CXXFLAGS)
 test-2: test-2.o $(OBJS)
-	$(CXX) -o $@ test-2.o $(OBJS) -lstdc++fs -lpthread -lrados -lrt -laio -luuid
+	$(CXX) -o $@ test-2.o $(OBJS) $(CXXFLAGS)
 
 test7: test7.o $(OBJS)
-	$(CXX) -o $@ test7.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test7.o $(OBJS) $(CRC_OBJS) $(CXXFLAGS)
 
 test8: test8.o $(OBJS)
-	$(CXX) -o $@ test8.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test8.o $(OBJS) $(CRC_OBJS) $(CXXFLAGS)
 
 test9: test9.o $(OBJS)
-	$(CXX) -o $@ test9.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test9.o $(OBJS) $(CRC_OBJS) $(CXXFLAGS)
 
 test10: test10.o $(OBJS)
-	$(CXX) -o $@ test10.o $(OBJS) $(CRC_OBJS) -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados
+	$(CXX) -o $@ test10.o $(OBJS) $(CRC_OBJS) $(CXXFLAGS)
 
 # Add .d to Make's recognized suffixes.
 SUFFIXES += .d
