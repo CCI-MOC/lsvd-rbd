@@ -26,22 +26,20 @@ gateway_host=dl380p-5
 client_host=dl380p-6
 
 # imgname=$cur_time
-imgname=thin-filebench # pre-allocated thick 80g image on pool 'triple-ssd'
+imgname=thin-debug # pre-allocated thick 80g image on pool 'triple-ssd'
 blocksize=4096
 
 # Build LSVD
 echo '===Building LSVD...'
 cd $lsvd_dir
-make clean
+# make clean
 make -j20 debug
-# make -j20 release
 make -j20 imgtool
 make -j20 thick-image
 
 # Create the image
-#./imgtool --create --rados --size=10g $pool_name/$cur_time
-# ./thick-image --size=80g $pool_name/$imgname
-#./imgtool --create --rados --size=10g rbd/fio-target
+./imgtool --delete --rados $pool_name/$imgname || true
+./imgtool --create --rados --size=10g $pool_name/$imgname
 
 # setup spdk
 cd $spdk_dir
@@ -56,35 +54,32 @@ scripts/rpc.py spdk_kill_instance SIGTERM > /dev/null || true
 scripts/rpc.py spdk_kill_instance SIGKILL > /dev/null || true
 pkill -f nvmf_tgt || true
 pkill -f reactor_0 || true
-sleep 5
+# sleep 5
 
 # start server
 echo '===Starting spdk...'
 mkdir -p /mnt/nvme/lsvd-rcache /mnt/nvme/lsvd-wcache
-export LD_PRELOAD=$lsvd_dir/liblsvd.so
+export LD_PRELOAD="$lsvd_dir/liblsvd.so /usr/lib/liburing.so"
 export LSVD_RCACHE_DIR=/mnt/nvme/lsvd-rcache
 export LSVD_WCACHE_DIR=/mnt/nvme/lsvd-wcache
 export LSVD_GC_THRESHOLD=40
 ./build/bin/nvmf_tgt &
+
+sleep 3
 
 # == setup spdk target ===
 printf "\n\n\n===Starting automated test on pool: $pool_name===\n\n" >> $outfile
 
 # setup the bdevs. the image must already exist
 scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
-# syntax: bdev_rbd_create <name> <pool> <image-name> <block_size> [-c <cluster_name>]
-# image must already exist
 scripts/rpc.py bdev_rbd_create $pool_name $pool_name/$imgname $blocksize -c rbd_cluster
-
-# create subsystem
 scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
 scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 Ceph0
-
-# setup listener
 scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 10.1.0.5 -s 9922
 
 # attach gdb
-# lsvd_pid=$(ps aux | perl -lane 'print @F[1] if /nvmf_tgt/ and not /perl/')
+lsvd_pid=$(ps aux | perl -lane 'print @F[1] if /nvmf_tgt/ and not /perl/')
 # gdb attach $lsvd_pid -ex cont
+gdb attach $lsvd_pid
 wait

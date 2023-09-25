@@ -42,11 +42,10 @@ make -j20 imgtool
 make -j20 thick-image
 
 # Create the image
-#./imgtool --create --rados --size=10g rbd/fio-target
-#./imgtool --create --rados --size=10g $pool_name/$cur_time
 # only re-provision when we start a new run to preserve previous image for debugging
 ./imgtool --delete --rados $pool_name/$imgname || true
 ./thick-image --size=80g $pool_name/$imgname
+#./imgtool --create --rados --size=10g $pool_name/$cur_time
 
 # setup spdk
 cd $spdk_dir
@@ -87,7 +86,8 @@ scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 
 
 # == run benchmark and collect results ===
 cd $experiment_dir
-scp ./filebench-*.txt root@$client_ip:/tmp/
+ssh $client_ip 'mkdir -p /tmp/filebench'
+scp ./filebench-workloads/*.f root@$client_ip:/tmp/filebench/
 ssh $client_ip "bash -s gw_ip=$gw_ip iodepth=256" < client-bench.bash 2>&1 | tee -a $outfile
 
 perl -lane 'print if s/RESULT: //' $outfile | tee -a $outfile

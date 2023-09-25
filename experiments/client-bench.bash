@@ -133,9 +133,9 @@ function run_filebench {
 	perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
 }
 
-run_filebench /tmp/filebench-varmail.txt
-run_filebench /tmp/filebench-fileserver.txt
-run_filebench /tmp/filebench-oltp.txt
+for workload in /tmp/filebench/*.f; do
+	run_filebench $workload
+done
 
 # === disconnect and cleanup ===
 # in the trap SIGTERM above
