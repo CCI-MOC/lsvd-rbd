@@ -23,7 +23,7 @@
 # Use is subject to license terms.
 #
 
-set $dir=/mnt_benchmarks
+set $dir=/mnt/fsbench
 set $filesize=1g
 set $iosize=8k
 set $nthreads=1

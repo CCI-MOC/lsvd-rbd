@@ -23,7 +23,7 @@
 # Use is subject to license terms.
 #
 
-set $dir=/mnt_benchmarks
+set $dir=/mnt/fsbench
 
 set $eventrate=0
 set $runtime=30

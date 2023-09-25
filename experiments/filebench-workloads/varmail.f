@@ -23,7 +23,7 @@
 # Use is subject to license terms.
 #
 
-set $dir=/mnt_benchmarks
+set $dir=/mnt/fsbench
 set $nfiles=900000
 set $meandirwidth=1000000
 #set $filesize=cvar(type=cvar-gamma,parameters=mean:16384;gamma:1.5)
