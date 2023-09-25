@@ -219,12 +219,6 @@ class nvme_uring : public nvme
         assert(ioret == 0);
         // debug("io_uring queue initialised");
 
-        // TEMPORARY UGLY HACK, copied from running io_uring-cp under gdb
-        // ring.sq.ring_mask = 63;
-        // ring.sq.ring_entries = 64;
-        // ring.cq.ring_mask = 127;
-        // ring.cq.ring_entries = 128;
-
         uring_cqe_worker =
             std::thread(&nvme_uring::uring_completion_worker, this);
     }
@@ -355,6 +349,10 @@ class nvme_uring : public nvme
 
         void on_complete(int result)
         {
+            // tmp debugging hack
+            if(op_ == OP_READ)
+                raise(SIGTRAP);
+
             if (parent_)
                 parent_->notify(this);
 
@@ -411,5 +409,5 @@ nvme *make_nvme_aio(int fd, const char *name)
 
 nvme *make_nvme_uring(int fd, const char *name)
 {
-    return (nvme *)new nvme_uring(fd, name);
+    return (nvme *)new nvme_aio(fd, name);
 }
