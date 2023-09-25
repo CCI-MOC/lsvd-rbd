@@ -25,6 +25,7 @@
 #include "misc_cache.h"
 #include "request.h"
 #include "smartiov.h"
+// #include "utils.h"
 #include <liburing.h>
 
 #include "nvme.h"
@@ -214,7 +215,16 @@ class nvme_uring : public nvme
     nvme_uring(int fd_, const char *name_)
     {
         fd = fd_;
-        io_uring_queue_init(64, &ring, 0);
+        auto ioret = io_uring_queue_init(64, &ring, 0);
+        assert(ioret == 0);
+        // debug("io_uring queue initialised");
+
+        // TEMPORARY UGLY HACK, copied from running io_uring-cp under gdb
+        // ring.sq.ring_mask = 63;
+        // ring.sq.ring_entries = 64;
+        // ring.cq.ring_mask = 127;
+        // ring.cq.ring_entries = 128;
+
         uring_cqe_worker =
             std::thread(&nvme_uring::uring_completion_worker, this);
     }
@@ -270,7 +280,8 @@ class nvme_uring : public nvme
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
         while (cqe_worker_should_continue.load()) {
             io_uring_cqe *cqe;
-            auto res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
+            // auto res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
+            auto res = io_uring_wait_cqe(&ring, &cqe);
 
             // TODO handle error
             if (res != 0)
@@ -283,6 +294,8 @@ class nvme_uring : public nvme
                 req->on_fail(-1 * cqe->res);
             else
                 req->on_complete(cqe->res);
+
+            io_uring_cqe_seen(&ring, cqe);
         }
     }
 
@@ -305,18 +318,23 @@ class nvme_uring : public nvme
       public:
         nvme_uring_request(smartiov *iovs, size_t offset, lsvd_op op,
                            nvme_uring *nvmu)
-            : nvmu_(nvmu), op_(op), iovs_(*iovs), offset_(offset)
+            : nvmu_(nvmu), op_(op), offset_(offset)
         {
+            iovs_.ingest(iovs->data(), iovs->size());
         }
 
         nvme_uring_request(char *buf, size_t len, size_t offset, lsvd_op op,
                            nvme_uring *nvmu)
-            : nvmu_(nvmu), op_(op), iovs_(buf, len), offset_(offset)
+            : nvmu_(nvmu), op_(op), offset_(offset)
         {
+            iovs_.push_back((iovec){buf, len});
         }
 
         void run(request *parent)
         {
+            // debug("submitting uring request, type {}, len {}", op_,
+                //   iovs_.bytes());
+            // debug("setting parent to {}", parent);
             parent_ = parent;
             io_uring_sqe *sqe = io_uring_get_sqe(&nvmu_->ring);
             assert(sqe != NULL);

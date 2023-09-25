@@ -196,7 +196,7 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
     cfg = cfg_;
 
     const char *name = "read_cache_cb";
-    ssd = make_nvme_aio(fd_, name);
+    ssd = make_nvme_uring(fd_, name);
 
     char *buf = (char *)aligned_alloc(512, 4096);
     if (ssd->read(buf, 4096, 4096L * blkno) < 0)
