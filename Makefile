@@ -15,7 +15,9 @@ OBJS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 	rados_backend.o lsvd_debug.o liblsvd.o
 CFILES = $(OBJS:.o=.cc)
 
-debug: CXXFLAGS += -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
+debug: CXXFLAGS += -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
+# debug: CXXFLAGS += -fsanitize=address
+debug: CXXFLAGS += -fsanitize=thread
 debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion
 debug: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline -Wl,-rpath=/usr/lib/liburing.so.2.5
 debug: CXXFLAGS += -Wno-conversion -Wno-unused-parameter
