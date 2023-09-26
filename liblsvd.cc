@@ -47,6 +47,7 @@
 #include "config.h"
 #include "fake_rbd.h"
 #include "image.h"
+#include "utils.h"
 
 extern void do_log(const char *, ...);
 extern void fp_log(const char *, ...);
@@ -80,7 +81,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     /* read superblock and initialize translation layer
      */
-    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
+    xlate =
+        make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
     size = xlate->init(name, true);
 
     /* figure out cache file name, create it if necessary
@@ -89,8 +91,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     /*
      * TODO: Open 2 files. One for wcache and one for rcache
      */
-    std::string rcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
-    std::string wcache_name = cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
+    std::string rcache_name =
+        cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
+    std::string wcache_name =
+        cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
     if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
         int cache_pages = cfg.cache_size / 4096;
         int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
@@ -133,9 +137,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache =
-        make_read_cache(0, read_fd, xlate, &cfg,
-                        &map, &bufmap, &map_lock, &bufmap_lock, objstore);
+    rcache = make_read_cache(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
+                             &bufmap_lock, objstore);
     free(jrs);
     free(jws);
 
@@ -194,7 +197,7 @@ int rbd_image::image_close(void)
     wcache->do_write_checkpoint();
     delete wcache;
     if (!cfg.no_gc)
-	xlate->stop_gc();
+        xlate->stop_gc();
     xlate->checkpoint();
     objstore->stop();
     delete xlate;
@@ -436,7 +439,7 @@ class rbd_aio_req : public request
         // TODO: this is horribly ugly
 
         std::unique_lock lk(m);
-	std::vector<request*> requests;
+        std::vector<request *> requests;
 
         for (sector_t s_offset = 0; s_offset < sectors;
              s_offset += max_sectors) {
@@ -449,8 +452,9 @@ class rbd_aio_req : public request
             requests.push_back(req);
             offset += _sectors * 512L;
         }
-	for (auto r : requests)
-	    r->run(this);
+
+        for (auto r : requests)
+            r->run(this);
 
         auto x = (status |= REQ_LAUNCHED);
 
@@ -468,7 +472,9 @@ class rbd_aio_req : public request
 
         std::unique_lock lk(m);
         // do_log("rr done %d %p\n", n_req.load(), child);
-        if (--n_req > 0)
+        n_req.fetch_sub(1, std::memory_order_seq_cst);
+        // debug("n_req {}", n_req.load());
+        if (n_req > 0)
             return;
 
         if (aligned_buf) // copy from aligned *after* read
