@@ -25,7 +25,7 @@
 #include "misc_cache.h"
 #include "request.h"
 #include "smartiov.h"
-// #include "utils.h"
+#include "utils.h"
 #include <liburing.h>
 
 #include "nvme.h"
@@ -205,6 +205,7 @@ class nvme_uring : public nvme
 {
   private:
     io_uring ring;
+    std::mutex uring_mtx;
     std::thread uring_cqe_worker;
 
     std::atomic_bool cqe_worker_should_continue = true;
@@ -215,7 +216,7 @@ class nvme_uring : public nvme
     nvme_uring(int fd_, const char *name_)
     {
         fd = fd_;
-        auto ioret = io_uring_queue_init(64, &ring, 0);
+        auto ioret = io_uring_queue_init(256, &ring, 0);
         assert(ioret == 0);
         // debug("io_uring queue initialised");
 
@@ -223,7 +224,12 @@ class nvme_uring : public nvme
             std::thread(&nvme_uring::uring_completion_worker, this);
     }
 
-    ~nvme_uring() { io_uring_queue_exit(&ring); }
+    ~nvme_uring()
+    {
+        io_uring_queue_exit(&ring);
+        cqe_worker_should_continue = false;
+        uring_cqe_worker.join();
+    }
 
     int read(void *buf, size_t count, off_t offset)
     {
@@ -274,8 +280,8 @@ class nvme_uring : public nvme
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
         while (cqe_worker_should_continue.load()) {
             io_uring_cqe *cqe;
-            // auto res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
-            auto res = io_uring_wait_cqe(&ring, &cqe);
+            auto res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
+            // auto res = io_uring_wait_cqe(&ring, &cqe);
 
             // TODO handle error
             if (res != 0)
@@ -326,32 +332,33 @@ class nvme_uring : public nvme
 
         void run(request *parent)
         {
-            // debug("submitting uring request, type {}, len {}", op_,
-                //   iovs_.bytes());
-            // debug("setting parent to {}", parent);
             parent_ = parent;
-            io_uring_sqe *sqe = io_uring_get_sqe(&nvmu_->ring);
-            assert(sqe != NULL);
 
-            // TODO prep_write instead of writev if iov has only 1 element
-            if (op_ == OP_WRITE)
-                io_uring_prep_writev(sqe, nvmu_->fd, iovs_.data(), iovs_.size(),
-                                     offset_);
-            else if (op_ == OP_READ)
-                io_uring_prep_readv(sqe, nvmu_->fd, iovs_.data(), iovs_.size(),
-                                    offset_);
-            else
-                assert(false);
+            {
+                std::unique_lock lk(nvmu_->uring_mtx);
+                io_uring_sqe *sqe = io_uring_get_sqe(&nvmu_->ring);
+                assert(sqe != NULL);
 
-            io_uring_sqe_set_data(sqe, this);
-            io_uring_submit(&nvmu_->ring);
+                // TODO prep_write instead of writev if iov has only 1 element
+                if (op_ == OP_WRITE)
+                    io_uring_prep_writev(sqe, nvmu_->fd, iovs_.data(),
+                                         iovs_.size(), offset_);
+                else if (op_ == OP_READ)
+                    io_uring_prep_readv(sqe, nvmu_->fd, iovs_.data(),
+                                        iovs_.size(), offset_);
+                else
+                    assert(false);
+
+                io_uring_sqe_set_data(sqe, this);
+                io_uring_submit(&nvmu_->ring);
+            }
         }
 
         void on_complete(int result)
         {
-            // tmp debugging hack
-            if(op_ == OP_READ)
-                raise(SIGTRAP);
+            // debug trap, to be removed
+            // if(op_ == OP_READ)
+            //     raise(SIGTRAP);
 
             if (parent_)
                 parent_->notify(this);
@@ -372,6 +379,7 @@ class nvme_uring : public nvme
         void on_fail(int errnum)
         {
             // TODO there's no failure path yet so just no-op
+            log_error("nvme uring request failed");
             return;
         }
 
@@ -409,5 +417,5 @@ nvme *make_nvme_aio(int fd, const char *name)
 
 nvme *make_nvme_uring(int fd, const char *name)
 {
-    return (nvme *)new nvme_aio(fd, name);
+    return (nvme *)new nvme_uring(fd, name);
 }
