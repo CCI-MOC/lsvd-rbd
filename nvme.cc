@@ -318,16 +318,15 @@ class nvme_uring : public nvme
       public:
         nvme_uring_request(smartiov *iovs, size_t offset, lsvd_op op,
                            nvme_uring *nvmu)
-            : nvmu_(nvmu), op_(op), offset_(offset)
+            : nvmu_(nvmu), iovs_(iovs->data(), iovs->size()), op_(op),
+              offset_(offset)
         {
-            iovs_.ingest(iovs->data(), iovs->size());
         }
 
         nvme_uring_request(char *buf, size_t len, size_t offset, lsvd_op op,
                            nvme_uring *nvmu)
-            : nvmu_(nvmu), op_(op), offset_(offset)
+            : nvmu_(nvmu), iovs_(buf, len), op_(op), offset_(offset)
         {
-            iovs_.push_back((iovec){buf, len});
         }
 
         void run(request *parent)
