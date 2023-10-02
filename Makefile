@@ -83,6 +83,6 @@ clean:
 	rm -f liblsvd.so bdus mkdisk $(OBJS) $(DEPS) *.o *.d test7 test8 imgtool
 
 install-deps:
-	sudo apt install libfmt-dev libaio-dev librados-dev libbdus-dev libuuid-dev libz-dev mold
+	sudo apt install libfmt-dev libaio-dev librados-dev mold
 	echo "You'll have to compile the latest version of liburing yourself"
 
