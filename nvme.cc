@@ -226,9 +226,9 @@ class nvme_uring : public nvme
 
     ~nvme_uring()
     {
-        io_uring_queue_exit(&ring);
         cqe_worker_should_continue = false;
         uring_cqe_worker.join();
+        io_uring_queue_exit(&ring);
     }
 
     int read(void *buf, size_t count, off_t offset)
@@ -278,7 +278,7 @@ class nvme_uring : public nvme
     void uring_completion_worker()
     {
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
-        while (cqe_worker_should_continue.load()) {
+        while (cqe_worker_should_continue.load(std::memory_order_seq_cst)) {
             io_uring_cqe *cqe;
             auto res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
             // auto res = io_uring_wait_cqe(&ring, &cqe);
