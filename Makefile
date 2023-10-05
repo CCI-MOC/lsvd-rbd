@@ -37,6 +37,8 @@ LSVD_DEPS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
 	rados_backend.o lsvd_debug.o liblsvd.o
 LSVD_OBJS = $(LSVD_DEPS:%.o=$(BUILD_DIR)/%.o)
 
+-include $(BUILD_DIR)/*.d
+
 liblsvd.so: $(LSVD_OBJS)
 	$(CXX) $(SOFLAGS) -o $@ $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
