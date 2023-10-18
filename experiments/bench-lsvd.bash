@@ -35,7 +35,7 @@ blocksize=4096
 # Build LSVD
 echo '===Building LSVD...'
 cd $lsvd_dir
-# make clean
+make clean
 make -j20 release
 # make -j10 debug
 make -j20 imgtool

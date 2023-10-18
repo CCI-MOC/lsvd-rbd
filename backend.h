@@ -2,10 +2,9 @@
  * definitions from sys/uio.h in order to have base functions for write and read
  * operations for IO
  */
+#pragma once
 
-#ifndef BACKEND_H
-#define BACKEND_H
-
+#include <memory>
 #include <string>
 #include <sys/uio.h>
 
@@ -17,7 +16,6 @@ class backend
 {
   public:
     virtual ~backend() {}
-    virtual void stop(void) = 0;
 
     /* synchronous I/O methods, return 0 / -1 for success/error
      */
@@ -32,17 +30,15 @@ class backend
 
     /* async I/O
      */
-    virtual request *make_write_req(const char *name, iovec *iov,
-                                    int iovcnt) = 0;
-    virtual request *make_write_req(const char *name, char *buf,
-                                    size_t len) = 0;
-    virtual request *make_read_req(const char *name, size_t offset, iovec *iov,
-                                   int iovcnt) = 0;
-    virtual request *make_read_req(const char *name, size_t offset, char *buf,
-                                   size_t len) = 0;
+    virtual std::unique_ptr<request> make_write_req(const char *name,
+                                                    iovec *iov, int iovcnt) = 0;
+    virtual std::unique_ptr<request> make_write_req(const char *name, char *buf,
+                                                    size_t len) = 0;
+    virtual std::unique_ptr<request>
+    make_read_req(const char *name, size_t offset, iovec *iov, int iovcnt) = 0;
+    virtual std::unique_ptr<request>
+    make_read_req(const char *name, size_t offset, char *buf, size_t len) = 0;
 };
 
-extern backend *make_file_backend(const char *prefix);
-extern backend *make_rados_backend(rados_ioctx_t io);
-
-#endif
+extern std::unique_ptr<backend> make_file_backend(const char *prefix);
+extern std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io);

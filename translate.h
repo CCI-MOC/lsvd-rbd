@@ -1,19 +1,8 @@
-/*
- * file:        translate.h
- * description: core translation layer - interface
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
+#pragma once
 
-#ifndef TRANSLATE_H
-#define TRANSLATE_H
-
-struct iovec;
-class backend;
-class lsvd_config;
+#include "smartiov.h"
+#include "backend.h"
+#include "config.h"
 
 class translate
 {
@@ -44,7 +33,7 @@ class translate
     virtual void start_gc(void) = 0;
 };
 
-extern translate *make_translate(backend *_io, lsvd_config *cfg,
+extern std::unique_ptr<translate> make_translate(backend *_io, lsvd_config *cfg,
                                  extmap::objmap *map, extmap::bufmap *bufmap,
                                  std::shared_mutex *m, std::mutex *buf_m);
 
@@ -52,5 +41,3 @@ extern int translate_create_image(backend *objstore, const char *name,
                                   uint64_t size);
 extern int translate_remove_image(backend *objstore, const char *name);
 extern int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu);
-
-#endif

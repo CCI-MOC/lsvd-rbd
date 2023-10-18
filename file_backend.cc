@@ -63,7 +63,6 @@ class file_backend : public backend
   public:
     file_backend(const char *prefix);
     ~file_backend();
-    void stop(void) {}
 
     /* see backend.h
      */
@@ -76,12 +75,14 @@ class file_backend : public backend
 
     /* async I/O
      */
-    request *make_write_req(const char *name, iovec *iov, int iovcnt);
-    request *make_write_req(const char *name, char *buf, size_t len);
-    request *make_read_req(const char *name, size_t offset, iovec *iov,
-                           int iovcnt);
-    request *make_read_req(const char *name, size_t offset, char *buf,
-                           size_t len);
+    std::unique_ptr<request> make_write_req(const char *name, iovec *iov,
+                                            int iovcnt);
+    std::unique_ptr<request> make_write_req(const char *name, char *buf,
+                                            size_t len);
+    std::unique_ptr<request> make_read_req(const char *name, size_t offset,
+                                           iovec *iov, int iovcnt);
+    std::unique_ptr<request> make_read_req(const char *name, size_t offset,
+                                           char *buf, size_t len);
     thread_pool<file_backend_req *> workers;
 };
 
@@ -219,6 +220,7 @@ class file_backend_req : public request
         be = be_;
         strcpy(name, name_);
     }
+
     file_backend_req(enum lsvd_op op_, const char *name_, char *buf, size_t len,
                      size_t offset_, file_backend *be_)
     {
@@ -232,8 +234,18 @@ class file_backend_req : public request
     ~file_backend_req() {}
 
     void wait() {} // TODO: ?????
-    void run(request *parent);
-    void notify(request *child);
+
+    void run(request *parent_)
+    {
+        parent = parent_;
+        be->workers.put(this);
+    }
+
+    void notify(request *child)
+    {
+        parent->notify(this);
+    }
+
     void release(){};
 
     void exec(void)
@@ -288,48 +300,40 @@ void file_backend::worker(thread_pool<file_backend_req *> *p)
     }
 }
 
-/* TODO: run() ought to return error/success
- */
-void file_backend_req::run(request *parent_)
-{
-    parent = parent_;
-    be->workers.put(this);
-}
-
-/* TODO: this assumes no use of wait/release
- */
-void file_backend_req::notify(request *unused)
-{
-    parent->notify(this);
-    delete this;
-}
-
-request *file_backend::make_write_req(const char *name, iovec *iov, int niov)
+std::unique_ptr<request> file_backend::make_write_req(const char *name,
+                                                      iovec *iov, int niov)
 {
     assert(access(name, F_OK) != 0);
     verify_obj(iov, niov);
-    return new file_backend_req(OP_WRITE, name, iov, niov, 0, this);
+    return std::make_unique<file_backend_req>(OP_WRITE, name, iov, niov, 0,
+                                              this);
 }
-request *file_backend::make_write_req(const char *name, char *buf, size_t len)
+std::unique_ptr<request> file_backend::make_write_req(const char *name,
+                                                      char *buf, size_t len)
 {
     assert(access(name, F_OK) != 0);
-    return new file_backend_req(OP_WRITE, name, buf, len, 0, this);
+    return std::make_unique<file_backend_req>(OP_WRITE, name, buf, len, 0,
+                                              this);
 }
 
-request *file_backend::make_read_req(const char *name, size_t offset,
-                                     iovec *iov, int iovcnt)
+std::unique_ptr<request> file_backend::make_read_req(const char *name,
+                                                     size_t offset, iovec *iov,
+                                                     int iovcnt)
 {
-    return new file_backend_req(OP_READ, name, iov, iovcnt, offset, this);
+    return std::make_unique<file_backend_req>(OP_READ, name, iov, iovcnt,
+                                              offset, this);
 }
 
-request *file_backend::make_read_req(const char *name, size_t offset, char *buf,
-                                     size_t len)
+std::unique_ptr<request> file_backend::make_read_req(const char *name,
+                                                     size_t offset, char *buf,
+                                                     size_t len)
 {
     iovec iov = {buf, len};
-    return new file_backend_req(OP_READ, name, &iov, 1, offset, this);
+    return std::make_unique<file_backend_req>(OP_READ, name, &iov, 1, offset,
+                                              this);
 }
 
-backend *make_file_backend(const char *prefix)
+std::unique_ptr<backend> make_file_backend(const char *prefix)
 {
-    return new file_backend(prefix);
+    return std::make_unique<file_backend>(prefix);
 }

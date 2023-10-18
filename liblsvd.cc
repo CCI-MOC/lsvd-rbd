@@ -62,7 +62,8 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
 extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
-backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
+std::unique_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
+                                     const char *name)
 {
 
     if (cfg->backend == BACKEND_FILE)
@@ -81,8 +82,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     /* read superblock and initialize translation layer
      */
-    xlate =
-        make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
+    xlate = make_translate(objstore.get(), &cfg, &map, &bufmap, &map_lock,
+                           &bufmap_lock);
     size = xlate->init(name, true);
 
     /* figure out cache file name, create it if necessary
@@ -136,14 +137,14 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
         throw("object and cache UUIDs don't match");
 
-    wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache = make_read_cache(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
-                             &bufmap_lock, objstore);
+    wcache = write_cache::make_write_cache(0, write_fd, xlate.get(), &cfg);
+    rcache = make_read_cache(0, read_fd, xlate.get(), &cfg, &map, &bufmap,
+                             &map_lock, &bufmap_lock, objstore.get());
     free(jrs);
     free(jws);
 
-    if (!cfg.no_gc)
-        xlate->start_gc();
+    // if (!cfg.no_gc)
+    //     xlate->start_gc();
     return 0;
 }
 
@@ -161,18 +162,13 @@ void rbd_image::notify(rbd_completion_t c)
 rbd_image *make_rbd_image(backend *b, translate *t, write_cache *w,
                           read_cache *r)
 {
-    auto img = new rbd_image;
-    img->objstore = b;
-    img->xlate = t;
-    img->wcache = w;
-    img->rcache = r;
-    return img;
-}
-
-translate *image_2_xlate(rbd_image_t image)
-{
-    auto img = (rbd_image *)image;
-    return img->xlate;
+    NOT_IMPLEMENTED();
+    // auto img = new rbd_image;
+    // img->objstore = b;
+    // img->xlate = t;
+    // img->wcache = w;
+    // img->rcache = r;
+    // return img;
 }
 
 rbd_image_t __lsvd_dbg_img;
@@ -192,16 +188,11 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 int rbd_image::image_close(void)
 {
     rcache->write_map();
-    delete rcache;
     wcache->flush();
     wcache->do_write_checkpoint();
-    delete wcache;
     if (!cfg.no_gc)
         xlate->stop_gc();
     xlate->checkpoint();
-    objstore->stop();
-    delete xlate;
-    delete objstore;
     close(read_fd);
     close(write_fd);
     return 0;
@@ -227,12 +218,9 @@ struct lsvd_completion {
     int retval;
     std::mutex m;
     std::condition_variable cv;
-    /* done: += 1
-     * released: += 10
-     * caller waiting: += 20
-     */
-    std::atomic<int> done_released = 0;
-    request *req;
+
+    std::unique_ptr<request> req;
+    std::atomic<bool> is_complete = false;
 
     lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
 
@@ -245,20 +233,14 @@ struct lsvd_completion {
             cb((rbd_completion_t)this, arg);
         img->notify((rbd_completion_t)this);
 
-        std::unique_lock lk(m);
-        int x = (done_released += 1);
+        is_complete = true;
         cv.notify_all();
-        if (x == 11) {
-            lk.unlock();
-            delete this;
-        }
     }
 
-    void release()
+    void wait()
     {
-        int x = (done_released += 10);
-        if (x == 11)
-            delete this;
+        std::unique_lock lock(m);
+        cv.wait(lock, [&] { return is_complete == true; });
     }
 };
 
@@ -303,7 +285,7 @@ extern "C" void rbd_aio_release(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
-    p->release();
+    delete p;
 }
 
 extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
@@ -358,8 +340,6 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-static std::atomic<int> __reqs;
-
 enum rbd_req_status {
     REQ_NOWAIT = 0,
     REQ_COMPLETE = 1,
@@ -386,13 +366,13 @@ class rbd_aio_req : public request
     std::vector<smartiov *> to_free;
 
     std::atomic<int> n_req = 0;
-    std::atomic<int> status = 0;
+    std::atomic<bool> is_complete = false;
     std::mutex m;
     std::condition_variable cv;
 
-    std::vector<request *> requests;
+    std::vector<std::unique_ptr<request>> subrequests;
 
-    void notify_parent(void)
+    void complete_request(void)
     {
         // assert(!m.try_lock());
         if (p != NULL) {
@@ -402,8 +382,10 @@ class rbd_aio_req : public request
                 p->complete(0);
             }
         }
-        if (status & REQ_WAIT)
-            cv.notify_all();
+
+        // std::unique_lock lk(m);
+        is_complete = true;
+        cv.notify_all();
     }
 
     void notify_w(request *req)
@@ -414,14 +396,7 @@ class rbd_aio_req : public request
             return;
 
         img->wcache->release_room(sectors);
-
-        auto x = (status |= REQ_COMPLETE);
-        if (x & REQ_LAUNCHED) {
-            lk.unlock();
-            notify_parent();
-            if (!(x & REQ_WAIT))
-                delete this;
-        }
+        complete_request();
     }
 
     void run_w()
@@ -439,7 +414,6 @@ class rbd_aio_req : public request
         // TODO: this is horribly ugly
 
         std::unique_lock lk(m);
-        std::vector<request *> requests;
 
         for (sector_t s_offset = 0; s_offset < sectors;
              s_offset += max_sectors) {
@@ -449,27 +423,16 @@ class rbd_aio_req : public request
             smartiov *_iov = new smartiov(tmp.data(), tmp.size());
             to_free.push_back(_iov);
             auto req = img->wcache->writev(offset / 512, _iov);
-            requests.push_back(req);
+            subrequests.push_back(std::move(req));
             offset += _sectors * 512L;
         }
 
-        for (auto r : requests)
+        for (auto &r : subrequests)
             r->run(this);
-
-        auto x = (status |= REQ_LAUNCHED);
-
-        if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
-            lk.unlock();
-            notify_parent();
-            delete this;
-        }
     }
 
     void notify_r(request *child)
     {
-        if (child)
-            child->release();
-
         std::unique_lock lk(m);
         // do_log("rr done %d %p\n", n_req.load(), child);
         n_req.fetch_sub(1, std::memory_order_seq_cst);
@@ -477,42 +440,32 @@ class rbd_aio_req : public request
         if (n_req > 0)
             return;
 
+        // all the sub-requests are done
+
         if (aligned_buf) // copy from aligned *after* read
             iovs.copy_in(aligned_buf);
 
-        auto x = (status |= REQ_COMPLETE);
-
-        if (x & REQ_LAUNCHED) {
-            lk.unlock();
-            notify_parent();
-            if (!(x & REQ_WAIT))
-                delete this;
-        }
+        complete_request();
     }
 
     void run_r()
     {
-        __reqs++;
         // std::vector<request*> requests;
 
-        img->rcache->handle_read(offset, &aligned_iovs, requests);
-
-        n_req = requests.size();
+        img->rcache->handle_read(offset, &aligned_iovs, subrequests);
+        n_req = subrequests.size();
         // do_log("rbd_read %ld:\n", offset/512);
-        for (auto const &r : requests) {
+        for (auto const &r : subrequests) {
             // do_log(" %p\n", r);
             r->run(this);
         }
 
         std::unique_lock lk(m);
-        if (requests.size() == 0)
-            status |= REQ_COMPLETE;
-        auto x = (status |= REQ_LAUNCHED);
-
-        if (x == (REQ_LAUNCHED | REQ_COMPLETE)) {
+        // potential special case if there were no requests?
+        if (n_req == 0) {
+            // debug("special case: 0 read requests");
             lk.unlock();
-            notify_parent();
-            delete this;
+            complete_request();
         }
     }
 
@@ -526,7 +479,6 @@ class rbd_aio_req : public request
             assert(p->magic == LSVD_MAGIC);
         offset = offset_; // byte offset into volume
         _sector = offset / 512;
-        status = status_; // 0 or REQ_WAIT
         sectors = iovs.bytes() / 512L;
 
         if (iovs.aligned(512))
@@ -559,6 +511,9 @@ class rbd_aio_req : public request
             delete iov;
     }
 
+    rbd_aio_req(const rbd_aio_req &src) = delete;
+    rbd_aio_req &operator=(const rbd_aio_req &src) = delete;
+
     /* note that there's no child request until read cache is updated
      * to use request/notify model.
      */
@@ -575,12 +530,8 @@ class rbd_aio_req : public request
      */
     void wait()
     {
-        assert(status & REQ_WAIT);
         std::unique_lock lk(m);
-        while (!(status & REQ_COMPLETE))
-            cv.wait(lk);
-        lk.unlock();
-        delete this;
+        cv.wait(lk, [&] { return is_complete == true; });
     }
 
     void release() {}
@@ -592,12 +543,6 @@ class rbd_aio_req : public request
         else
             run_w();
     }
-
-    static void aio_read_cb(void *ptr)
-    {
-        auto req = (rbd_aio_req *)ptr;
-        req->notify(NULL);
-    }
 };
 
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
@@ -606,9 +551,10 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
     rbd_image *img = (rbd_image *)image;
     auto p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
-    p->img = img;
 
-    p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, buf, len);
+    p->img = img;
+    p->req = std::make_unique<rbd_aio_req>(OP_READ, img, p, offset, REQ_NOWAIT,
+                                           buf, len);
     p->req->run(NULL);
     return 0;
 }
@@ -621,7 +567,8 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
     assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
-    p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, iov, iovcnt);
+    p->req = std::make_unique<rbd_aio_req>(OP_READ, img, p, offset, REQ_NOWAIT,
+                                           iov, iovcnt);
     p->req->run(NULL);
     return 0;
 }
@@ -634,7 +581,8 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
-    p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT, iov, iovcnt);
+    p->req = std::make_unique<rbd_aio_req>(OP_WRITE, img, p, offset, REQ_NOWAIT,
+                                           iov, iovcnt);
     p->req->run(NULL);
     return 0;
 }
@@ -647,8 +595,8 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
-    p->req =
-        new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT, (char *)buf, len);
+    p->req = std::make_unique<rbd_aio_req>(OP_WRITE, img, p, offset, REQ_NOWAIT,
+                                           (char *)buf, len);
     p->req->run(NULL);
 
     return 0;
@@ -659,10 +607,10 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     rbd_image *img = (rbd_image *)image;
-    auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
+    auto req = rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
 
-    req->run(NULL);
-    req->wait();
+    req.run(NULL);
+    req.wait();
     return 0;
 }
 
@@ -671,9 +619,9 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
 {
     rbd_image *img = (rbd_image *)image;
     auto req =
-        new rbd_aio_req(OP_WRITE, img, NULL, off, REQ_WAIT, (char *)buf, len);
-    req->run(NULL);
-    req->wait();
+        rbd_aio_req(OP_WRITE, img, nullptr, off, REQ_WAIT, (char *)buf, len);
+    req.run(NULL);
+    req.wait();
     return 0;
 }
 
@@ -681,15 +629,7 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
-    p->done_released += 20;
-    std::unique_lock lk(p->m);
-    while ((p->done_released.load() & 1) == 0)
-        p->cv.wait(lk);
-    int x = (p->done_released -= 20);
-    if (x == 11) {
-        lk.unlock();
-        delete p;
-    }
+    p->wait();
     return 0;
 }
 
@@ -729,9 +669,7 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
     if (cfg.read() < 0)
         return -1;
     auto objstore = get_backend(&cfg, io, NULL);
-    auto rv = translate_create_image(objstore, name, size);
-    objstore->stop();
-    delete objstore;
+    auto rv = translate_create_image(objstore.get(), name, size);
     return rv;
 }
 
@@ -748,15 +686,16 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
         return rv;
     auto objstore = get_backend(&cfg, io, NULL);
     uuid_t uu;
-    if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
+    if ((rv = translate_get_uuid(objstore.get(), name, uu)) < 0)
         return rv;
+
     auto rcache_file = cfg.cache_filename(uu, name, LSVD_CFG_READ);
     unlink(rcache_file.c_str());
+
     auto wcache_file = cfg.cache_filename(uu, name, LSVD_CFG_WRITE);
     unlink(wcache_file.c_str());
-    rv = translate_remove_image(objstore, name);
-    objstore->stop();
-    delete objstore;
+
+    rv = translate_remove_image(objstore.get(), name);
     return rv;
 }
 

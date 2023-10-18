@@ -8,39 +8,38 @@
  *              LGPL-2.1-or-later
  */
 
-#include <string.h>
-#include <sys/uio.h>
-#include <unistd.h>
-#include <errno.h>
-
-#include <uuid/uuid.h>
-#include <zlib.h>
-
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
-#include <mutex>
-#include <shared_mutex>
-#include <vector>
+#include <errno.h>
 #include <list>
-
-#include <algorithm>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <stack>
+#include <string.h>
+#include <sys/uio.h>
 #include <thread>
+#include <unistd.h>
+#include <uuid/uuid.h>
+#include <vector>
+#include <zlib.h>
 
+#include "backend.h"
 #include "config.h"
 #include "extent.h"
+#include "lsvd_debug.h"
 #include "lsvd_types.h"
+#include "misc_cache.h"
 #include "objects.h"
 #include "objname.h"
 #include "request.h"
-#include "translate.h"
-
-#include "backend.h"
-#include "misc_cache.h"
 #include "smartiov.h"
-
-#include "lsvd_debug.h"
+#include "threadsafe.h"
+#include "translate.h"
+#include "utils.h"
 
 void do_log(const char *, ...);
 void fp_log(const char *, ...);
@@ -87,10 +86,10 @@ enum work_type { REQ_PUT = 1, REQ_FLUSH = 2, REQ_CKPT = 3, REQ_GC = 4 };
 
 class translate_impl;
 
-/* TODO: local_buf_base/limit are set in constructor for PUT,
+/**
+ * TODO: local_buf_base/limit are set in constructor for PUT,
  * translate_impl::write_gc for GC. this should be uniform...
  */
-
 class translate_req : public request
 {
     work_type op;
@@ -122,6 +121,15 @@ class translate_req : public request
 
     int _seq;
 
+    std::unique_ptr<request> subrequest;
+
+    // This is a very ugly hack to manipulate the refcount for ourself.
+    // The idea is that when we're done, we free this pointer, so if nobody
+    // else needs us we will self-destruct
+    // The "proper" way would be to rework the ownership structure of the
+    // requests, but I'm taking the lazy route here
+    std::shared_ptr<translate_req> self_ptr;
+
   public:
     char *append(int64_t lba, smartiov *iov)
     {
@@ -142,6 +150,12 @@ class translate_req : public request
 
     ~translate_req() {}
 
+    translate_req(work_type op_, translate_impl *tx_)
+    {
+        op = op_;
+        tx = tx_;
+    }
+
     /* NOTE - this assumes the only significant header entry is the map
      */
     translate_req(work_type op_, size_t bytes, translate_impl *tx_)
@@ -158,24 +172,37 @@ class translate_req : public request
         local_buf_limit = data_ptr + bytes;
     }
 
-    translate_req(work_type op_, translate_impl *tx_)
+    static std::shared_ptr<translate_req> make_put(size_t bytes,
+                                                   translate_impl *tx_)
     {
-        op = op_;
-        tx = tx_;
+        auto r = std::make_shared<translate_req>(REQ_PUT, bytes, tx_);
+        r->self_ptr = r;
+        return r;
+    }
+
+    static std::shared_ptr<translate_req> make_other(work_type op_,
+                                                     translate_impl *tx_)
+    {
+        auto r = std::make_shared<translate_req>(op_, tx_);
+        r->self_ptr = r;
+        return r;
     }
 
     void wait(void)
     {
         std::unique_lock lk(m);
-        while (!done)
-            cv.wait(lk);
+        cv.wait(lk, [&] { return done == true; });
         lk.unlock();
-        delete this; // always call wait
     }
 
     void notify(request *child);
+
     void run(request *parent) {} // unused
-    void release(void) {}        // unused
+    void release(void)
+    {
+        log_warn("this should never be called");
+        self_ptr.reset();
+    }
 };
 
 class translate_impl : public translate
@@ -187,14 +214,14 @@ class translate_impl : public translate
     extmap::bufmap *bufmap;      // shared object map
     std::shared_mutex *map_lock; // locks the object map
     std::mutex *bufmap_lock;
-    
+
     lsvd_config *cfg;
 
     std::atomic<int> seq;
     uint64_t ckpt_cache_seq = 0; // from last data object
 
     friend class translate_req;
-    translate_req *current = NULL;
+    std::shared_ptr<translate_req> current = NULL;
 
     /* info on live data objects - all sizes in sectors
      * checkpoints are tracked in @checkpoints, and in the superblock
@@ -234,9 +261,13 @@ class translate_impl : public translate
      * request outstanding to it - skip, and dead object reaping
      * will get it on the next pass.
      */
-    std::map<int,int> reading_objects;
+    std::map<int, int> reading_objects;
 
-    thread_pool<translate_req *> *workers;
+    std::vector<std::thread> child_threads;
+
+    std::atomic_bool should_worker_thread_continue = true;
+    MPSCQueue<std::shared_ptr<translate_req>> requests_queue;
+
     thread_pool<int> *misc_threads; // so we can stop ckpt, gc first
 
     /* for triggering GC
@@ -254,17 +285,322 @@ class translate_impl : public translate
     std::condition_variable gc_cv;
     void stop_gc(void);
 
-    object_reader *parser;
+    std::unique_ptr<object_reader> parser;
 
-    void write_checkpoint(int seq, translate_req *req);
-    void process_batch(int seq, translate_req *req);
-    void write_gc(int _seq, translate_req *req);
+    /* write out a checkpoint. Note that we don't have to lock the objmap,
+     * since no one else is modifying it right now.
+     *
+     * possible changes:
+     * - wait for preceding writes to complete before writing?
+     * - write async rather than sync? (not really compatible with prev)
+     */
+    void write_checkpoint(int _seq, std::shared_ptr<translate_req> req)
+    {
+        std::vector<ckpt_mapentry> entries;
+        std::vector<ckpt_obj> objects;
 
-    void worker_thread(thread_pool<translate_req *> *p);
+        for (auto it = map->begin(); it != map->end(); it++) {
+            auto [base, limit, ptr] = it->vals();
+            entries.push_back((ckpt_mapentry){.lba = base,
+                                              .len = limit - base,
+                                              .obj = (int32_t)ptr.obj,
+                                              .offset = (int32_t)ptr.offset});
+        }
+        size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
 
-    void make_obj_hdr(char *buf, uint32_t seq,
-		      sector_t hdr_sectors, sector_t data_sectors,
-		      data_map *extents, int n_extents, bool is_gc);
+        for (auto it = object_info.begin(); it != object_info.end(); it++) {
+            auto obj_num = it->first;
+            auto [hdr, data, live] = it->second;
+            objects.push_back((ckpt_obj){.seq = (uint32_t)obj_num,
+                                         .hdr_sectors = (uint32_t)hdr,
+                                         .data_sectors = (uint32_t)data,
+                                         .live_sectors = (uint32_t)live});
+        }
+        size_t objs_bytes = objects.size() * sizeof(ckpt_obj);
+
+        size_t hdr_bytes = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr);
+        int sectors = div_round_up(hdr_bytes + map_bytes + objs_bytes, 512);
+
+        auto buf = (char *)calloc(sectors * 512, 1);
+        auto h = (obj_hdr *)buf;
+        *h = (obj_hdr){.magic = LSVD_MAGIC,
+                       .version = 1,
+                       .vol_uuid = {0},
+                       .type = LSVD_CKPT,
+                       .seq = (uint32_t)_seq,
+                       .hdr_sectors = (uint32_t)sectors,
+                       .data_sectors = 0,
+                       .crc = 0};
+        memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
+        auto ch = (obj_ckpt_hdr *)(h + 1);
+
+        uint32_t o1 = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr),
+                 o2 = o1 + objs_bytes;
+        *ch = (obj_ckpt_hdr){.cache_seq = ckpt_cache_seq,
+                             .ckpts_offset = 0,
+                             .ckpts_len = 0,
+                             .objs_offset = o1,
+                             .objs_len = o2 - o1,
+                             .deletes_offset = 0,
+                             .deletes_len = 0,
+                             .map_offset = o2,
+                             .map_len = (uint32_t)map_bytes};
+
+        auto objs = (char *)(ch + 1);
+        memcpy(objs, (char *)objects.data(), objs_bytes);
+        auto maps = objs + objs_bytes;
+        memcpy(maps, (char *)entries.data(), map_bytes);
+
+        /* and write it
+         */
+        objname name(prefix(_seq), _seq);
+        objstore->write_object(name.c_str(), buf, sectors * 512);
+        free(buf);
+
+        checkpoints.push_back(_seq);
+        size_t offset = sizeof(*super_h) + sizeof(*super_sh);
+        std::vector<int> ckpts_to_delete;
+        while (checkpoints.size() > 3) {
+            ckpts_to_delete.push_back(checkpoints.front());
+            checkpoints.erase(checkpoints.begin());
+        }
+
+        super_sh->ckpts_offset = offset;
+        super_sh->ckpts_len = checkpoints.size() * sizeof(uint32_t);
+        auto pc = (uint32_t *)(super_buf + offset);
+        for (size_t i = 0; i < checkpoints.size(); i++)
+            *pc++ = checkpoints[i];
+
+        objstore->write_object(super_name, super_buf, 4096);
+
+        for (auto c : ckpts_to_delete) {
+            objname name(prefix(c), c);
+            objstore->delete_object(name.c_str());
+        }
+
+        req->notify(nullptr);
+    }
+
+    void process_batch(int _seq, std::shared_ptr<translate_req> req)
+    {
+        req->_seq = _seq;
+
+        int offset = sizeof(obj_hdr) + sizeof(obj_data_hdr),
+            len = req->entries.size() * sizeof(data_map);
+        int hdr_bytes = offset + len;
+        int hdr_pages = div_round_up(hdr_bytes, 4096);
+        int hdr_sectors = hdr_pages * 8;
+        char *hdr_ptr = req->data_ptr - hdr_sectors * 512;
+        int data_sectors = req->len / 512;
+
+        /* update the object info table
+         */
+        std::unique_lock obj_w_lock(*map_lock);
+
+        obj_info oi = {
+            .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
+        object_info[_seq] = oi;
+
+        /* and the object map (copy entries to right format at same time)
+         */
+        sector_t sector_offset = hdr_sectors;
+        std::vector<extmap::lba2obj> deleted;
+        deleted.reserve(req->entries.size());
+        std::vector<data_map> dm_entries;
+        dm_entries.reserve(req->entries.size());
+
+        for (auto e : req->entries) {
+            extmap::obj_offset oo = {_seq, sector_offset};
+            map->update(e.lba, e.lba + e.len, oo, &deleted);
+            sector_offset += e.len;
+            dm_entries.push_back((data_map){(uint64_t)e.lba, (uint64_t)e.len});
+        }
+
+        for (auto d : deleted) {
+            auto [base, limit, ptr] = d.vals();
+            if (object_info.find(ptr.obj) == object_info.end())
+                continue; // skip clone base
+            object_info[ptr.obj].live -= (limit - base);
+            assert(object_info[ptr.obj].live >= 0);
+            total_live_sectors -= (limit - base);
+        }
+
+        obj_w_lock.unlock();
+
+        /* update total and live sectors *after* dups are removed
+         */
+        auto live = object_info[_seq].live;
+        total_live_sectors += live;
+        total_sectors += data_sectors; // doesn't count headers
+
+        make_obj_hdr(hdr_ptr, _seq, hdr_sectors, data_sectors,
+                     dm_entries.data(), dm_entries.size(), false);
+
+        objname name(prefix(_seq), _seq);
+        auto req2 = objstore->make_write_req(
+            name.c_str(), hdr_ptr, (hdr_sectors + data_sectors) * 512);
+        req->subrequest = std::move(req2);
+        outstanding_writes++;
+        req->subrequest->run(req.get());
+    }
+
+    /*
+     * handle a "tentative" garbage collection request.
+     *
+     * the request has a list of LBA ranges, the object ranges the
+     * ranges pointed to when they were selected for GC, and the data
+     * those locations contained at that time.
+     *
+     * writes are not blocked while GC is building these requests, so
+     * some ranges may have been overwritten.
+     *
+     * to process the request: (a) revalidate all mappings, discarding
+     * any which have changed, and (b) assign a sequence number
+     * this guarantees that the contents reflect the map state after all
+     * previous seq#s and before all following ones.
+     */
+    void write_gc(int _seq, std::shared_ptr<translate_req> req)
+    {
+        req->_seq = _seq;
+
+        int data_sectors = 0;
+        for (const auto &e : req->entries)
+            data_sectors += e.len;
+
+        int max_hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+                            (cfg->batch_size / 2048) * sizeof(data_map);
+        int max_hdr_sectors = div_round_up(max_hdr_bytes, 512);
+
+        auto buf = req->gc_buf =
+            (char *)malloc((max_hdr_sectors + data_sectors) * 512);
+        memset(buf, 0, max_hdr_sectors * 512);
+        auto data_ptr = buf + max_hdr_sectors * 512;
+        auto data_ptr0 = data_ptr;
+        auto in_ptr = req->gc_data;
+
+        int _data_sectors = 0; // actual sectors in GC write
+        std::vector<data_map> obj_extents;
+
+        req->local_buf_base = data_ptr;
+        for (auto const &[base, len, obj, offset] : req->entries) {
+            auto limit = base + len;
+            for (auto it2 = map->lookup(base);
+                 it2 != map->end() && it2->base() < limit; it2++) {
+                /* [_base,_limit] is a piece of the extent
+                 * obj_base is where that piece starts in the object
+                 */
+                auto [_base, _limit, ptr] = it2->vals(base, limit);
+                if (ptr.obj != obj)
+                    continue;
+
+                sector_t _sectors = _limit - _base;
+                _data_sectors += _sectors;
+                int bytes = _sectors * 512;
+
+                sector_t extent_offset = _base - base;
+                memcpy(data_ptr, in_ptr + extent_offset * 512, bytes);
+                data_ptr += bytes;
+                obj_extents.push_back(
+                    (data_map){(uint64_t)_base, (uint64_t)(_limit - _base)});
+            }
+            in_ptr += len * 512;
+        }
+        req->local_buf_limit = data_ptr;
+        data_sectors = (data_ptr - data_ptr0) / 512;
+
+        int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
+                        obj_extents.size() * sizeof(data_map);
+        int hdr_pages = div_round_up(hdr_bytes, 4096);
+        int hdr_sectors = hdr_pages * 8;
+
+        sector_t offset = hdr_sectors;
+        data_ptr = data_ptr0;
+        std::vector<extmap::lba2obj> deleted;
+        req->entries.clear(); // replace with actual extents written
+
+        std::unique_lock obj_w_lock(*map_lock); // protect the readers
+        for (auto const &e : obj_extents) {
+            extmap::obj_offset oo = {_seq, offset};
+            map->update(e.lba, e.lba + e.len, oo, &deleted);
+            offset += e.len;
+            req->entries.push_back(
+                (ckpt_mapentry){(int64_t)e.lba, (int64_t)e.len, 0, 0});
+        }
+        obj_w_lock.unlock();
+
+        for (auto &d : deleted) {
+            auto [base, limit, ptr] = d.vals();
+            if (object_info.find(ptr.obj) == object_info.end())
+                continue; // skip clone base
+            object_info[ptr.obj].live -= (limit - base);
+            assert(object_info[ptr.obj].live >= 0);
+            total_live_sectors -= (limit - base);
+        }
+
+        gc_sectors_written += data_sectors; // only written in this thread
+        auto hdr = data_ptr0 - hdr_sectors * 512;
+        make_obj_hdr(hdr, _seq, hdr_sectors, data_sectors, obj_extents.data(),
+                     obj_extents.size(), true);
+
+        auto h = (obj_hdr *)hdr;
+        assert((int)h->hdr_sectors == hdr_sectors);
+
+        obj_info oi = {
+            .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
+        object_info[_seq] = oi;
+
+        objname name(prefix(_seq), _seq);
+        req->subrequest = objstore->make_write_req(
+            name.c_str(), hdr, (hdr_sectors + data_sectors) * 512);
+        outstanding_writes++;
+        req->subrequest->run(req.get());
+    }
+
+    void worker_thread()
+    {
+        pthread_setname_np(pthread_self(), "batch_worker");
+        while (should_worker_thread_continue.load()) {
+            auto req_opt = requests_queue.dequeue_timeout();
+            if (!req_opt.has_value())
+                continue;
+            auto req = req_opt.value();
+            std::unique_lock lk(m);
+
+            /* note - flush operation has to put any partial batch on the
+             * queue before queing a flush request
+             */
+            if (req->op == REQ_FLUSH) {
+                while (outstanding_writes > 0)
+                    cv.wait(lk);
+                req->notify(nullptr);
+            }
+
+            /* request and batch will be deleted on completion
+             * map is updated before any following requests are processed
+             */
+            else if (req->op == REQ_PUT) {
+                auto _seq = seq++;
+                lk.unlock();
+                process_batch(_seq, req);
+            }
+            /* generate a checkpoint before any following requests processed
+             */
+            else if (req->op == REQ_CKPT) {
+                auto _seq = seq++;
+                lk.unlock();
+                write_checkpoint(_seq, req);
+            } else if (req->op == REQ_GC) {
+                auto _seq = seq++;
+                lk.unlock();
+                write_gc(_seq, req);
+            } else
+                assert(false);
+        }
+    }
+
+    void make_obj_hdr(char *buf, uint32_t seq, sector_t hdr_sectors,
+                      sector_t data_sectors, data_map *extents, int n_extents,
+                      bool is_gc);
 
     void do_gc(bool *running);
     void gc_thread(thread_pool<int> *p);
@@ -274,7 +610,8 @@ class translate_impl : public translate
 
   public:
     translate_impl(backend *_io, lsvd_config *cfg_, extmap::objmap *map,
-                   extmap::bufmap *bufmap, std::shared_mutex *m, std::mutex *buf_m);
+                   extmap::bufmap *bufmap, std::shared_mutex *m,
+                   std::mutex *buf_m);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
@@ -293,7 +630,67 @@ class translate_impl : public translate
     void start_gc(void);
 
     const char *prefix(int seq);
+
+    void rollover_current(std::shared_ptr<translate_req> req)
+    {
+        requests_queue.enqueue(current);
+        current = std::move(req);
+    }
 };
+
+void translate_req::notify(request *child)
+{
+    if (op == REQ_FLUSH || op == REQ_CKPT) {
+        std::unique_lock lk(m);
+        done = true;
+        cv.notify_all();
+    }
+
+    if (op == REQ_PUT || op == REQ_GC) {
+        /* wake up anyone waiting for TX window room
+         * -> lock tx->m before tx->map_lock
+         */
+        std::unique_lock lk(tx->m);
+        // if (--tx->outstanding_writes < tx->cfg->xlate_window)
+        tx->outstanding_writes--;
+        tx->cv.notify_all();
+    }
+
+    if (op == REQ_PUT) {
+        /* remove extents from tx->bufmap, but only if they still
+         * point to this buffer
+         */
+        std::unique_lock obj_w_lock(*tx->bufmap_lock);
+        std::vector<std::pair<sector_t, sector_t>> extents;
+        for (auto const &e : entries) {
+            auto limit = e.lba + e.len;
+            for (auto it2 = tx->bufmap->lookup(e.lba);
+                 it2 != tx->bufmap->end() && it2->base() < limit; it2++) {
+                auto [_base, _limit, ptr] = it2->vals(e.lba, limit);
+                if (ptr.buf >= local_buf_base && ptr.buf < local_buf_limit)
+                    extents.push_back(std::pair(_base, _limit));
+            }
+        }
+        for (auto [base, limit] : extents) {
+            tx->bufmap->trim(base, limit);
+        }
+    }
+
+    if (batch_buf != NULL) // allocated in constructor
+        free(batch_buf);
+    if (gc_buf != NULL) // allocated in write_gc
+        free(gc_buf);
+    if (gc_data != NULL) // allocated in gc threqad
+        free(gc_data);
+
+    if (op == REQ_GC) {
+        std::unique_lock lk(m);
+        done = true;
+        cv.notify_one();
+    }
+
+    self_ptr.reset();
+}
 
 const char *translate_impl::prefix(int seq)
 {
@@ -310,9 +707,8 @@ translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
                                std::shared_mutex *m_, std::mutex *buf_m)
 {
     misc_threads = new thread_pool<int>(&m);
-    workers = new thread_pool<translate_req *>(&m);
     objstore = _io;
-    parser = new object_reader(objstore);
+    parser = std::make_unique<object_reader>(objstore);
     map = map_;
     bufmap = bufmap_;
     map_lock = m_;
@@ -320,19 +716,30 @@ translate_impl::translate_impl(backend *_io, lsvd_config *cfg_,
     cfg = cfg_;
 }
 
-translate *make_translate(backend *_io, lsvd_config *cfg, extmap::objmap *map,
-                          extmap::bufmap *bufmap, std::shared_mutex *m, std::mutex *buf_m)
+std::unique_ptr<translate>
+make_translate(backend *_io, lsvd_config *cfg, extmap::objmap *map,
+               extmap::bufmap *bufmap, std::shared_mutex *m, std::mutex *buf_m)
 {
-    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m);
+    return std::make_unique<translate_impl>(_io, cfg, map, bufmap, m, buf_m);
 }
 
 translate_impl::~translate_impl()
 {
     stopped = true;
     cv.notify_all();
-    if (current)
-        delete current;
-    delete parser;
+
+    should_worker_thread_continue = false;
+    for (auto &t : child_threads)
+        t.join();
+
+    // ugly hack to clean out the remaining requests
+    while (true) {
+        auto r = requests_queue.dequeue_timeout();
+        if (!r.has_value())
+            break;
+        r->get()->self_ptr.reset();
+    }
+
     if (super_buf)
         free(super_buf);
 }
@@ -352,7 +759,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
     if (bytes < 0)
         return bytes;
     if (_buf == NULL)
-	return -ENOENT;
+        return -ENOENT;
     int n_ckpts = ckpts.size();
 
     super_buf = _buf;
@@ -362,7 +769,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
 
     memcpy(&uuid, super_h->vol_uuid, sizeof(uuid));
 
-    current = new translate_req(REQ_PUT, cfg->batch_size, this);
+    current = translate_req::make_put(cfg->batch_size, this);
     seq = 1; // empty volume case
 
     /* is this a clone?
@@ -492,8 +899,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
         objstore->delete_object(name.c_str());
     }
 
-    workers->pool.push(
-        std::thread(&translate_impl::worker_thread, this, workers));
+    child_threads.push_back(std::thread(&translate_impl::worker_thread, this));
     if (timedflush)
         misc_threads->pool.push(
             std::thread(&translate_impl::flush_thread, this, misc_threads));
@@ -518,15 +924,15 @@ void translate_impl::shutdown(void) {}
 /* create header for a GC object
  */
 void translate_impl::make_obj_hdr(char *buf, uint32_t _seq,
-				  sector_t hdr_sectors, sector_t data_sectors,
-				  data_map *extents, int n_extents, bool is_gc)
+                                  sector_t hdr_sectors, sector_t data_sectors,
+                                  data_map *extents, int n_extents, bool is_gc)
 {
     auto h = (obj_hdr *)buf;
     auto dh = (obj_data_hdr *)(h + 1);
     uint32_t map_offset = sizeof(*h) + sizeof(*dh),
-	map_len = n_extents * sizeof(data_map);
+             map_len = n_extents * sizeof(data_map);
     uint32_t hdr_bytes = map_offset + map_len;
-    assert(hdr_bytes <= hdr_sectors*512);
+    assert(hdr_bytes <= hdr_sectors * 512);
 
     *h = (obj_hdr){.magic = LSVD_MAGIC,
                    .version = 1,
@@ -566,16 +972,14 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
     sector_t base = offset / 512, limit = (offset + bytes) / 512;
 
     std::unique_lock lk(m);
-    if (!current->room(bytes)) {
-        workers->put_locked(current);
-        current = new translate_req(REQ_PUT, cfg->batch_size, this);
-    }
+    if (!current->room(bytes))
+        rollover_current(translate_req::make_put(cfg->batch_size, this));
 
     /* save extent and pointer into bufmap.
      */
     auto ptr = current->append(base, &siov);
     std::unique_lock obj_w_lock(*bufmap_lock);
-    
+
     assert(ptr >= current->local_buf_base &&
            ptr + (limit - base) * 512 <= current->local_buf_limit);
     assert(ptr != NULL);
@@ -632,9 +1036,9 @@ void translate_impl::object_read_start(int obj)
 {
     std::unique_lock lk(m);
     if (reading_objects.find(obj) == reading_objects.end())
-	reading_objects[obj] = 0;
+        reading_objects[obj] = 0;
     else
-	reading_objects[obj] = reading_objects[obj]+1;
+        reading_objects[obj] = reading_objects[obj] + 1;
 }
 
 void translate_impl::object_read_end(int obj)
@@ -642,371 +1046,9 @@ void translate_impl::object_read_end(int obj)
     std::unique_lock lk(m);
     auto i = reading_objects[obj];
     if (i == 1)
-	reading_objects.erase(obj);
+        reading_objects.erase(obj);
     else
-	reading_objects[obj] = i-1;
-}
-
-
-/* NOTE - currently not called for REQ_CKPT, which
- * uses sync write
- */
-void translate_req::notify(request *child)
-{
-    if (child)
-        child->release();
-
-    if (op == REQ_PUT || op == REQ_GC) {
-        /* wake up anyone waiting for TX window room
-         * -> lock tx->m before tx->map_lock
-         */
-        std::unique_lock lk(tx->m);
-        // if (--tx->outstanding_writes < tx->cfg->xlate_window)
-        tx->outstanding_writes--;
-        tx->cv.notify_all();
-    }
-
-    if (op == REQ_PUT) {
-        /* remove extents from tx->bufmap, but only if they still
-         * point to this buffer
-         */
-        std::unique_lock obj_w_lock(*tx->bufmap_lock);
-        std::vector<std::pair<sector_t, sector_t>> extents;
-        for (auto const &e : entries) {
-            auto limit = e.lba + e.len;
-            for (auto it2 = tx->bufmap->lookup(e.lba);
-                 it2 != tx->bufmap->end() && it2->base() < limit; it2++) {
-                auto [_base, _limit, ptr] = it2->vals(e.lba, limit);
-                if (ptr.buf >= local_buf_base && ptr.buf < local_buf_limit)
-                    extents.push_back(std::pair(_base, _limit));
-            }
-        }
-        for (auto [base, limit] : extents) {
-            tx->bufmap->trim(base, limit);
-        }
-    }
-
-    if (batch_buf != NULL) // allocated in constructor
-        free(batch_buf);
-    if (gc_buf != NULL) // allocated in write_gc
-        free(gc_buf);
-    if (gc_data != NULL) // allocated in gc threqad
-        free(gc_data);
-
-    if (op == REQ_GC) {
-        std::unique_lock lk(m);
-        done = true;
-        cv.notify_one();
-    } else
-        delete this;
-}
-
-/* write out a checkpoint. Note that we don't have to lock the objmap,
- * since no one else is modifying it right now.
- *
- * possible changes:
- * - wait for preceding writes to complete before writing?
- * - write async rather than sync? (not really compatible with prev)
- */
-void translate_impl::write_checkpoint(int _seq, translate_req *req)
-{
-    std::vector<ckpt_mapentry> entries;
-    std::vector<ckpt_obj> objects;
-
-    for (auto it = map->begin(); it != map->end(); it++) {
-        auto [base, limit, ptr] = it->vals();
-        entries.push_back((ckpt_mapentry){.lba = base,
-                                          .len = limit - base,
-                                          .obj = (int32_t)ptr.obj,
-                                          .offset = (int32_t)ptr.offset});
-    }
-    size_t map_bytes = entries.size() * sizeof(ckpt_mapentry);
-
-    for (auto it = object_info.begin(); it != object_info.end(); it++) {
-        auto obj_num = it->first;
-        auto [hdr, data, live] = it->second;
-        objects.push_back((ckpt_obj){.seq = (uint32_t)obj_num,
-                                     .hdr_sectors = (uint32_t)hdr,
-                                     .data_sectors = (uint32_t)data,
-                                     .live_sectors = (uint32_t)live});
-    }
-    size_t objs_bytes = objects.size() * sizeof(ckpt_obj);
-
-    size_t hdr_bytes = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr);
-    int sectors = div_round_up(hdr_bytes + map_bytes + objs_bytes, 512);
-
-    auto buf = (char *)calloc(sectors * 512, 1);
-    auto h = (obj_hdr *)buf;
-    *h = (obj_hdr){.magic = LSVD_MAGIC,
-                   .version = 1,
-                   .vol_uuid = {0},
-                   .type = LSVD_CKPT,
-                   .seq = (uint32_t)_seq,
-                   .hdr_sectors = (uint32_t)sectors,
-                   .data_sectors = 0};
-    memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
-    auto ch = (obj_ckpt_hdr *)(h + 1);
-
-    uint32_t o1 = sizeof(obj_hdr) + sizeof(obj_ckpt_hdr), o2 = o1 + objs_bytes;
-    *ch = (obj_ckpt_hdr){.cache_seq = ckpt_cache_seq,
-                         .ckpts_offset = 0,
-                         .ckpts_len = 0,
-                         .objs_offset = o1,
-                         .objs_len = o2 - o1,
-                         .deletes_offset = 0,
-                         .deletes_len = 0,
-                         .map_offset = o2,
-                         .map_len = (uint32_t)map_bytes};
-
-    auto objs = (char *)(ch + 1);
-    memcpy(objs, (char *)objects.data(), objs_bytes);
-    auto maps = objs + objs_bytes;
-    memcpy(maps, (char *)entries.data(), map_bytes);
-
-    /* and write it
-     */
-    objname name(prefix(_seq), _seq);
-    objstore->write_object(name.c_str(), buf, sectors * 512);
-    free(buf);
-
-    checkpoints.push_back(_seq);
-    size_t offset = sizeof(*super_h) + sizeof(*super_sh);
-    std::vector<int> ckpts_to_delete;
-    while (checkpoints.size() > 3) {
-        ckpts_to_delete.push_back(checkpoints.front());
-        checkpoints.erase(checkpoints.begin());
-    }
-
-    super_sh->ckpts_offset = offset;
-    super_sh->ckpts_len = checkpoints.size() * sizeof(uint32_t);
-    auto pc = (uint32_t *)(super_buf + offset);
-    for (size_t i = 0; i < checkpoints.size(); i++)
-        *pc++ = checkpoints[i];
-
-    objstore->write_object(super_name, super_buf, 4096);
-
-    for (auto c : ckpts_to_delete) {
-        objname name(prefix(c), c);
-        objstore->delete_object(name.c_str());
-    }
-
-    req->done = true;
-    req->cv.notify_all();
-}
-
-/*
- * handle a "tentative" garbage collection request.
- *
- * the request has a list of LBA ranges, the object ranges the
- * ranges pointed to when they were selected for GC, and the data
- * those locations contained at that time.
- *
- * writes are not blocked while GC is building these requests, so
- * some ranges may have been overwritten.
- *
- * to process the request: (a) revalidate all mappings, discarding
- * any which have changed, and (b) assign a sequence number
- * this guarantees that the contents reflect the map state after all
- * previous seq#s and before all following ones.
- */
-void translate_impl::write_gc(int _seq, translate_req *req)
-{
-    req->_seq = _seq;
-
-    int data_sectors = 0;
-    for (const auto &e : req->entries)
-        data_sectors += e.len;
-
-    int max_hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
-                        (cfg->batch_size / 2048) * sizeof(data_map);
-    int max_hdr_sectors = div_round_up(max_hdr_bytes, 512);
-
-    auto buf = req->gc_buf =
-        (char *)malloc((max_hdr_sectors + data_sectors) * 512);
-    memset(buf, 0, max_hdr_sectors * 512);
-    auto data_ptr = buf + max_hdr_sectors * 512;
-    auto data_ptr0 = data_ptr;
-    auto in_ptr = req->gc_data;
-
-    int _data_sectors = 0; // actual sectors in GC write
-    std::vector<data_map> obj_extents;
-
-    req->local_buf_base = data_ptr;
-    for (auto const &[base, len, obj, offset] : req->entries) {
-        auto limit = base + len;
-        for (auto it2 = map->lookup(base);
-             it2 != map->end() && it2->base() < limit; it2++) {
-            /* [_base,_limit] is a piece of the extent
-             * obj_base is where that piece starts in the object
-             */
-            auto [_base, _limit, ptr] = it2->vals(base, limit);
-            if (ptr.obj != obj)
-                continue;
-
-            sector_t _sectors = _limit - _base;
-            _data_sectors += _sectors;
-            int bytes = _sectors * 512;
-
-            sector_t extent_offset = _base - base;
-            memcpy(data_ptr, in_ptr + extent_offset * 512, bytes);
-            data_ptr += bytes;
-            obj_extents.push_back(
-                (data_map){(uint64_t)_base, (uint64_t)(_limit - _base)});
-        }
-        in_ptr += len * 512;
-    }
-    req->local_buf_limit = data_ptr;
-    data_sectors = (data_ptr - data_ptr0) / 512;
-
-    int hdr_bytes = sizeof(obj_hdr) + sizeof(obj_data_hdr) +
-                    obj_extents.size() * sizeof(data_map);
-    int hdr_pages = div_round_up(hdr_bytes, 4096);
-    int hdr_sectors = hdr_pages * 8;
-
-    sector_t offset = hdr_sectors;
-    data_ptr = data_ptr0;
-    std::vector<extmap::lba2obj> deleted;
-    req->entries.clear(); // replace with actual extents written
-
-    std::unique_lock obj_w_lock(*map_lock); // protect the readers
-    for (auto const &e : obj_extents) {
-        extmap::obj_offset oo = {_seq, offset};
-        map->update(e.lba, e.lba + e.len, oo, &deleted);
-        offset += e.len;
-        req->entries.push_back(
-            (ckpt_mapentry){(int64_t)e.lba, (int64_t)e.len, 0, 0});
-    }
-    obj_w_lock.unlock();
-
-    for (auto &d : deleted) {
-        auto [base, limit, ptr] = d.vals();
-        if (object_info.find(ptr.obj) == object_info.end())
-            continue; // skip clone base
-        object_info[ptr.obj].live -= (limit - base);
-        assert(object_info[ptr.obj].live >= 0);
-        total_live_sectors -= (limit - base);
-    }
-
-    gc_sectors_written += data_sectors; // only written in this thread
-    auto hdr = data_ptr0 - hdr_sectors * 512;
-    make_obj_hdr(hdr, _seq, hdr_sectors, data_sectors, obj_extents.data(),
-		 obj_extents.size(), true);
-
-    auto h = (obj_hdr *)hdr;
-    assert((int)h->hdr_sectors == hdr_sectors);
-
-    obj_info oi = {
-        .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
-    object_info[_seq] = oi;
-
-    objname name(prefix(_seq), _seq);
-    auto req2 = objstore->make_write_req(name.c_str(), hdr,
-                                         (hdr_sectors + data_sectors) * 512);
-    outstanding_writes++;
-    req2->run(req);
-}
-
-void translate_impl::process_batch(int _seq, translate_req *req)
-{
-    req->_seq = _seq;
-
-    int offset = sizeof(obj_hdr) + sizeof(obj_data_hdr),
-	len = req->entries.size() * sizeof(data_map);
-    int hdr_bytes = offset + len;
-    int hdr_pages = div_round_up(hdr_bytes, 4096);
-    int hdr_sectors = hdr_pages * 8;
-    char *hdr_ptr = req->data_ptr - hdr_sectors * 512;
-    int data_sectors = req->len / 512;
-
-    /* update the object info table
-     */
-    std::unique_lock obj_w_lock(*map_lock);
-
-    obj_info oi = {
-        .hdr = hdr_sectors, .data = data_sectors, .live = data_sectors};
-    object_info[_seq] = oi;
-
-    /* and the object map (copy entries to right format at same time)
-     */
-    sector_t sector_offset = hdr_sectors;
-    std::vector<extmap::lba2obj> deleted;
-    deleted.reserve(req->entries.size());
-    std::vector<data_map> dm_entries;
-    dm_entries.reserve(req->entries.size());
-
-    for (auto e : req->entries) {
-        extmap::obj_offset oo = {_seq, sector_offset};
-        map->update(e.lba, e.lba + e.len, oo, &deleted);
-        sector_offset += e.len;
-        dm_entries.push_back((data_map){(uint64_t)e.lba, (uint64_t)e.len});
-    }
-
-    for (auto d : deleted) {
-        auto [base, limit, ptr] = d.vals();
-        if (object_info.find(ptr.obj) == object_info.end())
-            continue; // skip clone base
-        object_info[ptr.obj].live -= (limit - base);
-        assert(object_info[ptr.obj].live >= 0);
-        total_live_sectors -= (limit - base);
-    }
-
-    obj_w_lock.unlock();
-
-    /* update total and live sectors *after* dups are removed
-     */
-    auto live = object_info[_seq].live;
-    total_live_sectors += live;
-    total_sectors += data_sectors; // doesn't count headers
-
-    make_obj_hdr(hdr_ptr, _seq, hdr_sectors, data_sectors,
-		 dm_entries.data(), dm_entries.size(), false);
-
-    objname name(prefix(_seq), _seq);
-    auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr,
-                                         (hdr_sectors + data_sectors) * 512);
-    outstanding_writes++;
-    req2->run(req);
-}
-
-void translate_impl::worker_thread(thread_pool<translate_req *> *p)
-{
-    pthread_setname_np(pthread_self(), "batch_worker");
-    while (p->running) {
-        std::unique_lock lk(m);
-        translate_req *req;
-        if (!p->get_locked(lk, req))
-            return;
-
-        /* note - flush operation has to put any partial batch on the
-         * queue before queing a flush request
-         */
-        if (req->op == REQ_FLUSH) {
-            while (outstanding_writes > 0)
-                cv.wait(lk);
-            req->done = true;
-            req->cv.notify_all();
-        }
-        /* request and batch will be deleted on completion
-         * map is updated before any following requests are processed
-         */
-        else if (req->op == REQ_PUT) {
-            auto _seq = seq++;
-            lk.unlock();
-            process_batch(_seq, req);
-        }
-        /* generate a checkpoint before any following requests processed
-         */
-        else if (req->op == REQ_CKPT) {
-            auto _seq = seq++;
-            lk.unlock();
-            write_checkpoint(_seq, req);
-        } else if (req->op == REQ_GC) {
-            auto _seq = seq++;
-            lk.unlock();
-            write_gc(_seq, req);
-        } else
-            assert(false);
-    }
+        reading_objects[obj] = i - 1;
 }
 
 /* flushes any data buffered in current batch, and blocks until all
@@ -1016,14 +1058,13 @@ void translate_impl::flush(void)
 {
     std::unique_lock lk(m);
 
-    if (current->len > 0) {
-        workers->put_locked(current);
-        current = new translate_req(REQ_PUT, cfg->batch_size, this);
-    }
+    if (current->len > 0)
+        rollover_current(translate_req::make_put(cfg->batch_size, this));
 
-    auto flush_req = new translate_req(REQ_FLUSH, this);
-    workers->put_locked(flush_req);
+    auto flush_req = translate_req::make_other(REQ_FLUSH, this);
+    requests_queue.enqueue(flush_req);
     lk.unlock();
+
     flush_req->wait();
 }
 
@@ -1031,14 +1072,13 @@ void translate_impl::checkpoint(void)
 {
     std::unique_lock lk(m);
 
-    if (current->len > 0) {
-        workers->put_locked(current);
-        current = new translate_req(REQ_PUT, cfg->batch_size, this);
-    }
+    if (current->len > 0)
+        rollover_current(translate_req::make_put(cfg->batch_size, this));
 
-    auto ckpt_req = new translate_req(REQ_CKPT, this);
-    workers->put_locked(ckpt_req);
+    auto ckpt_req = translate_req::make_other(REQ_CKPT, this);
+    requests_queue.enqueue(ckpt_req);
     lk.unlock();
+
     ckpt_req->wait();
 }
 
@@ -1063,8 +1103,7 @@ void translate_impl::flush_thread(thread_pool<int> *p)
         if (p->running && seq0 == seq.load() && current->len > 0) {
             if (std::chrono::system_clock::now() - t0 < timeout)
                 continue;
-            workers->put_locked(current);
-            current = new translate_req(REQ_PUT, cfg->batch_size, this);
+            rollover_current(translate_req::make_put(cfg->batch_size, this));
         } else {
             seq0 = seq.load();
             t0 = std::chrono::system_clock::now();
@@ -1101,15 +1140,15 @@ void translate_impl::do_gc(bool *running)
 
     std::queue<request *> deletes;
     for (auto const &o : dead_objects) {
-	/*
-	 * if there's an outstanding read on an object, we can't
-	 * delete it yet
-	 */
-	{
-	    std::unique_lock lk(m);
-	    if (reading_objects.find(o) != reading_objects.end())
-		continue;
-	}
+        /*
+         * if there's an outstanding read on an object, we can't
+         * delete it yet
+         */
+        {
+            std::unique_lock lk(m);
+            if (reading_objects.find(o) != reading_objects.end())
+                continue;
+        }
         objname name(prefix(o), o);
         auto r = objstore->delete_object_req(name.c_str());
         r->run(NULL);
@@ -1184,8 +1223,8 @@ void translate_impl::do_gc(bool *running)
         auto [base, limit, ptr] = it->vals();
         if (ptr.obj <= max_obj && objects.find(ptr.obj) != objects.end())
             live_extents.update(base, limit, ptr);
-	if (!*running)		// forced exit
-	    return;
+        if (!*running) // forced exit
+            return;
     }
     obj_r_lock.unlock();
 
@@ -1200,7 +1239,7 @@ void translate_impl::do_gc(bool *running)
         char temp[cfg->rcache_dir.size() + 20];
         sprintf(temp, "%s/gc.XXXXXX", cfg->rcache_dir.c_str());
         int fd = mkstemp(temp);
-	unlink(temp);
+        unlink(temp);
 
         /* read all objects in completely
          */
@@ -1216,8 +1255,8 @@ void translate_impl::do_gc(bool *running)
             if (write(fd, buf, sectors * 512) < 0)
                 throw("no space");
             offset += sectors;
-	    if (!*running)
-		return;
+            if (!*running)
+                return;
         }
         free(buf);
 
@@ -1231,7 +1270,7 @@ void translate_impl::do_gc(bool *running)
 
         /* outstanding writes
          */
-        std::queue<translate_req *> requests;
+        std::queue<std::shared_ptr<translate_req>> requests;
 
         while (all_extents.size() > 0) {
             sector_t sectors = 0, max = cfg->batch_size / 512;
@@ -1244,7 +1283,7 @@ void translate_impl::do_gc(bool *running)
                 it = all_extents.erase(it);
             }
 
-            auto req = new translate_req(REQ_GC, this);
+            auto req = translate_req::make_other(REQ_GC, this);
             auto file_data = req->gc_data = (char *)malloc(sectors * 512);
             size_t file_data_len = 0;
 
@@ -1266,7 +1305,7 @@ void translate_impl::do_gc(bool *running)
 
             std::unique_lock lk(m);
             requests.push(req);
-            workers->put_locked(req);
+            requests_queue.enqueue(req);
             lk.unlock();
 
             while ((int)requests.size() > cfg->gc_window && *running) {
@@ -1276,8 +1315,8 @@ void translate_impl::do_gc(bool *running)
                 t->wait();
                 requests.pop();
             }
-	    if (!*running)
-		return;
+            if (!*running)
+                return;
         }
 
         while (requests.size() > 0 && *running) {
@@ -1288,7 +1327,7 @@ void translate_impl::do_gc(bool *running)
             requests.pop();
         }
         close(fd);
-        //unlink(temp);
+        // unlink(temp);
     }
 
     /* defer deletes until we've cleaned the whole batch.
@@ -1309,16 +1348,16 @@ void translate_impl::do_gc(bool *running)
     if (objs_to_clean.size()) {
         checkpoint();
         for (auto it = objs_to_clean.begin(); it != objs_to_clean.end(); it++) {
-	    /*
-	     * if there's an outstanding read on an object, we can't
-	     * delete it yet
-	     */
-	    auto obj = it->first;
-	    {
-		std::unique_lock lk(m);
-		if (reading_objects.find(obj) != reading_objects.end())
-		    continue;
-	    }
+            /*
+             * if there's an outstanding read on an object, we can't
+             * delete it yet
+             */
+            auto obj = it->first;
+            {
+                std::unique_lock lk(m);
+                if (reading_objects.find(obj) != reading_objects.end())
+                    continue;
+            }
             objname name(prefix(obj), obj);
             objstore->delete_object(name.c_str());
             gc_deleted++;
@@ -1380,7 +1419,8 @@ int translate_create_image(backend *objstore, const char *name, uint64_t size)
                       LSVD_SUPER, // type
                       0,          // seq
                       8,          // hdr_sectors
-                      0};         // data_sectors
+                      0,          // data_sectors
+                      0};         // crc
     uuid_generate_random(_hdr->vol_uuid);
 
     auto _super = (super_hdr *)(_hdr + 1);

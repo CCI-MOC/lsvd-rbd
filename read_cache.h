@@ -27,15 +27,16 @@ class read_cache
   public:
     virtual ~read_cache(){};
 
-    virtual void handle_read(size_t offset, smartiov *iovs,
-                             std::vector<request *> &requests) = 0;
+    virtual void
+    handle_read(size_t offset, smartiov *iovs,
+                std::vector<std::unique_ptr<request>> &requests) = 0;
 
     virtual void write_map(void) = 0;
 };
 
-extern read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
-                                   lsvd_config *cfg,
-                                   extmap::objmap *map, extmap::bufmap *bufmap,
-                                   std::shared_mutex *m, std::mutex *bufmap_m, backend *_io);
+extern std::unique_ptr<read_cache>
+make_read_cache(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
+                extmap::objmap *map, extmap::bufmap *bufmap,
+                std::shared_mutex *m, std::mutex *bufmap_m, backend *_io);
 
 #endif

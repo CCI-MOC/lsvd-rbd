@@ -28,20 +28,18 @@
 #include <zlib.h> // DEBUG
 
 #include "backend.h"
-#include "lsvd_types.h"
-
-#include "extent.h"
-#include "misc_cache.h"
-#include "smartiov.h"
-
 #include "config.h"
+#include "extent.h"
 #include "journal.h"
+#include "lsvd_types.h"
+#include "misc_cache.h"
 #include "nvme.h"
-#include "request.h"
-#include "translate.h"
-
 #include "objname.h"
 #include "read_cache.h"
+#include "request.h"
+#include "smartiov.h"
+#include "translate.h"
+#include "utils.h"
 #include "write_cache.h"
 
 extern void do_log(const char *, ...);
@@ -117,7 +115,7 @@ class read_cache_impl : public read_cache
 
     translate *be;
     backend *io;
-    nvme *ssd;
+    std::unique_ptr<nvme> ssd;
     lsvd_config *cfg;
 
     friend class cache_hit_request;
@@ -156,7 +154,7 @@ class read_cache_impl : public read_cache
     ~read_cache_impl();
 
     void handle_read(size_t offset, smartiov *iovs,
-                     std::vector<request *> &requests);
+                     std::vector<std::unique_ptr<request>> &requests);
 
     sector_t nvme_sector(int blk)
     {
@@ -169,13 +167,13 @@ class read_cache_impl : public read_cache
 
 /* factory function so we can hide implementation
  */
-read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
-                            lsvd_config *cfg, extmap::objmap *map,
-                            extmap::bufmap *bufmap, std::shared_mutex *m,
-                            std::mutex *bufmap_m, backend *_io)
+std::unique_ptr<read_cache>
+make_read_cache(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
+                extmap::objmap *map, extmap::bufmap *bufmap,
+                std::shared_mutex *m, std::mutex *bufmap_m, backend *_io)
 {
-    return new read_cache_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m,
-                               _io);
+    return std::make_unique<read_cache_impl>(blkno, _fd, _be, cfg, map, bufmap,
+                                             m, bufmap_m, _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
@@ -235,8 +233,8 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
 read_cache_impl::~read_cache_impl()
 {
     misc_threads.stop(); // before we free anything threads might touch
-    delete ssd;
     free((void *)super);
+    free(rmap);
 }
 
 #if 0
@@ -331,41 +329,6 @@ void read_cache_impl::evict_thread(thread_pool<int> *p)
  * eviction will remove from map:         -> {!map, n/a}
  */
 
-/* the fact that I'm doing this seems to indicate that the request
- * class needs some work...
- */
-class rcache_generic_request : public request
-{
-    std::mutex m;
-    bool done = false;
-    bool released = false;
-
-  public:
-    rcache_generic_request() {}
-    ~rcache_generic_request() {}
-    void wait(void) {}
-
-    void release(void)
-    {
-        std::unique_lock lk(m);
-        released = true;
-        if (done) {
-            lk.unlock();
-            delete this;
-        }
-    }
-
-    void finish(void)
-    {
-        std::unique_lock lk(m);
-        done = true;
-        if (released) {
-            lk.unlock();
-            delete this;
-        }
-    }
-};
-
 /* instead of having a really complicated state machine, we
  * use separate request classes for the different types of
  * sub-requests
@@ -375,7 +338,7 @@ class rcache_generic_request : public request
  * queue this and complete via copy_in()
  * NOTE - placed up here to get the damn thing to compile
  */
-class pending_read_request : public rcache_generic_request
+class pending_read_request : public request
 {
     read_cache_impl *r;
     sector_t sector_in_blk;
@@ -410,7 +373,6 @@ class pending_read_request : public rcache_generic_request
         if (done) {
             lk.unlock();
             parent->notify(this);
-            finish();
         }
     }
 
@@ -422,21 +384,23 @@ class pending_read_request : public rcache_generic_request
         if (was_run) {
             lk.unlock();
             parent->notify(this);
-            finish();
         }
     }
+
+    void release() { NOT_IMPLEMENTED(); }
+    void wait() { NOT_IMPLEMENTED(); }
 };
 
 /* cache hit - fetch from NVMe
  */
-class cache_hit_request : public rcache_generic_request
+class cache_hit_request : public request
 {
     read_cache_impl *r;
     smartiov iovs;
     int blk;
 
     request *parent;
-    request *nvme_req;
+    std::unique_ptr<request> nvme_req;
 
   public:
     cache_hit_request(read_cache_impl *r_, int blk_, sector_t nvme_sector,
@@ -457,38 +421,35 @@ class cache_hit_request : public rcache_generic_request
 
     void notify(request *child)
     {
-        if (child)
-            child->release();
         std::unique_lock lk(r->m);
         r->in_use[blk]--; // CACHE HIT IN_USE DEC
         parent->notify(this);
-        finish();
     }
+
+    void release() { NOT_IMPLEMENTED(); }
+    void wait() { NOT_IMPLEMENTED(); }
 };
 
 /* cache bypass - read directly from backend object
  * (for thrash avoidance)
  */
-class direct_read_req : public rcache_generic_request
+class direct_read_req : public request
 {
     smartiov iovs;
 
-    request *obj_req = NULL;
+    std::unique_ptr<request> obj_req = NULL;
     request *parent = NULL;
     read_cache_impl *r = NULL;
     extmap::obj_offset oo;
 
     std::mutex m;
     bool done = false;
-    bool release = false;
 
   public:
     direct_read_req(read_cache_impl *r_, extmap::obj_offset oo_,
                     smartiov &slice)
-        : iovs(slice)
+        : iovs(slice), r(r_), oo(oo_)
     {
-        oo = oo_;
-        r = r_;
         objname name(r->be->prefix(oo.obj), oo.obj);
         auto [iov, iovcnt] = iovs.c_iov();
         obj_req =
@@ -505,15 +466,15 @@ class direct_read_req : public rcache_generic_request
 
     void notify(request *child)
     {
-        if (child)
-            child->release();
         r->be->object_read_end(oo.obj);
         parent->notify(this);
-        finish();
     }
+
+    void release() { NOT_IMPLEMENTED(); }
+    void wait() { NOT_IMPLEMENTED(); }
 };
 
-class cache_fill_req : public rcache_generic_request
+class cache_fill_req : public request
 {
     read_cache_impl *r;
     int blk = 10000000;
@@ -523,8 +484,8 @@ class cache_fill_req : public rcache_generic_request
     smartiov iovs;
     request *parent;
 
-    request *nvme_req;
-    request *obj_req;
+    std::unique_ptr<request> nvme_req;
+    std::unique_ptr<request> obj_req;
 
     char *buf;
 
@@ -562,8 +523,6 @@ class cache_fill_req : public rcache_generic_request
 
     void notify(request *child)
     {
-        if (child)
-            child->release();
         if (state == FETCH_PENDING) {
             r->be->object_read_end(oo.obj);
 
@@ -601,14 +560,16 @@ class cache_fill_req : public rcache_generic_request
             r->pending_fills--;
             r->cv.notify_all();
             lk.unlock();
-
-            finish();
         }
     }
+
+    void release() { NOT_IMPLEMENTED(); }
+    void wait() { NOT_IMPLEMENTED(); }
 };
 
-void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
-                                  std::vector<request *> &requests)
+void read_cache_impl::handle_read(
+    size_t offset, smartiov *iovs,
+    std::vector<std::unique_ptr<request>> &requests)
 {
     sector_t base = offset / 512;
     sector_t limit = base + iovs->bytes() / 512;
@@ -705,17 +666,18 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             int i = map[key];
 
             if (fetching[i]) {
-                auto req =
-                    new pending_read_request(this, i, sector_in_blk, slice);
+                auto req = std::make_unique<pending_read_request>(
+                    this, i, sector_in_blk, slice);
                 req->base = base;
                 req->limit = limit2;
-                pending[i].push_back(req);
-                requests.push_back(req);
+                pending[i].push_back(req.get());
+                requests.push_back(std::move(req));
             } else {
                 in_use[i]++; // CACHE HIT IN_USE INCR
                 auto nvme_location = nvme_sector(i) + sector_in_blk;
-                auto req = new cache_hit_request(this, i, nvme_location, slice);
-                requests.push_back(req);
+                auto req = std::make_unique<cache_hit_request>(
+                    this, i, nvme_location, slice);
+                requests.push_back(std::move(req));
             }
             _offset += (limit2 - base) * 512;
             base = limit2;
@@ -742,8 +704,8 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
         if (!use_cache) {
             sector_t sectors = limit2 - base;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
-            auto req = new direct_read_req(this, objptr, slice);
-            requests.push_back(req);
+            auto req = std::make_unique<direct_read_req>(this, objptr, slice);
+            requests.push_back(std::move(req));
 
             hit_stats.serve(sectors);
             hit_stats.fetch(sectors);
@@ -780,9 +742,9 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
              * - iovec etc.
              */
             auto nvme_base = nvme_sector(i);
-            auto req = new cache_fill_req(this, i, sector_in_blk, key,
-                                          nvme_base, slice);
-            requests.push_back(req);
+            auto req = std::make_unique<cache_fill_req>(this, i, sector_in_blk,
+                                                        key, nvme_base, slice);
+            requests.push_back(std::move(req));
 
             hit_stats.serve(sectors);
             hit_stats.fetch(block_sectors);

@@ -1,138 +1,5 @@
-/*
- * file:        write_cache.cc
- * description: write_cache implementation
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#include <uuid/uuid.h>
-
-#include <atomic>
-
-#include <map>
-#include <stack>
-#include <vector>
-
-#include <algorithm>
-#include <cassert>
-#include <condition_variable>
-#include <mutex>
-#include <shared_mutex>
-#include <thread>
-
-#include "lsvd_types.h"
-
-#include "backend.h"
-#include "extent.h"
-#include "io.h"
-#include "journal.h"
-#include "misc_cache.h"
-#include "nvme.h"
-#include "request.h"
-#include "smartiov.h"
-#include "translate.h"
-
-#include "config.h"
 #include "write_cache.h"
-
-extern void do_log(const char *, ...);
-extern void log_time(uint64_t loc, uint64_t val); // debug
-
-/* ------------- Write cache structure ------------- */
-
-class wcache_write_req;
-class write_cache_impl : public write_cache
-{
-    size_t dev_max;
-    uint32_t super_blkno;
-    lsvd_config *cfg;
-
-    std::atomic<uint64_t> sequence = 1; // write sequence #
-
-    /* bookkeeping for write throttle
-     */
-    std::mutex m2; // for total_write_pages
-    int total_write_pages = 0;
-    int max_write_pages = 0;
-    int outstanding_writes = 0;
-    size_t write_batch = 0;
-    std::condition_variable write_cv;
-
-    /* initialization stuff
-     */
-    int roll_log_forward();
-    char *_hdrbuf; // for reading at startup
-
-    thread_pool<int> *misc_threads;
-
-    void write_checkpoint(void);
-
-    /* allocate journal entry, create a header
-     */
-    uint32_t allocate(page_t n, page_t &pad, page_t &n_pad, page_t &prev);
-    j_write_super *super;
-    page_t previous_hdr = 0;
-    page_t next_alloc = 0;
-
-    /* these are used by wcache_write_req
-     */
-    friend class wcache_write_req;
-    std::mutex m;
-    translate *be;
-    j_hdr *mk_header(char *buf, uint32_t type, page_t blks, page_t prev);
-    nvme *nvme_w = NULL;
-
-  public:
-    /* throttle writes with window of max_write_pages
-     */
-    void get_room(sector_t sectors);
-    void release_room(sector_t sectors);
-    void flush(void);
-
-    write_cache_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg);
-    ~write_cache_impl();
-
-    request *writev(sector_t lba, smartiov *iov);
-
-    void do_write_checkpoint(void);
-};
-
-/* ------------- batched write request ------------- */
-
-class wcache_write_req : public request
-{
-    sector_t plba;
-
-    request *r_data = NULL;
-    char *hdr = NULL;
-    smartiov *data_iovs;
-
-    request *r_pad = NULL;
-    char *pad_hdr = NULL;
-    smartiov pad_iov;
-
-    std::atomic<int> reqs = 0; // 2 if r_pad else 1
-
-    write_cache_impl *wcache = NULL;
-
-    request *parent;
-
-  public:
-    uint64_t seq;
-
-    wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages, page_t page,
-                     page_t n_pad, page_t pad, page_t prev,
-                     write_cache *wcache);
-    ~wcache_write_req();
-    void run(request *parent);
-    void notify(request *child);
-
-    void wait() {}
-    void release() {} // TODO: free properly
-};
+#include <memory>
 
 static char *z_page;
 void pad_out(smartiov &iov, int pages)
@@ -141,104 +8,117 @@ void pad_out(smartiov &iov, int pages)
         z_page = (char *)aligned_alloc(4096, 4096);
         memset(z_page, 0, 4096); // make valgrind happy
     }
+
     for (int i = 0; i < pages; i++)
         iov.push_back((iovec){z_page, 4096});
 }
 
-/* lba,iov: request from liblsvd
- * n_pages: number of 4KB data pages (not counting header)
- * page:    page number to begin writing
- * n_pad:   number of pages to skip (not counting header)
- * pad:     page number for pad entry (0 if none)
- */
-wcache_write_req::wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages,
-                                   page_t page, page_t n_pad, page_t pad,
-                                   page_t prev, write_cache *wcache_)
+class wcache_write_req : public request
 {
-    wcache = (write_cache_impl *)wcache_;
+    char *hdr = NULL;
+    smartiov data_iovs;
+    std::unique_ptr<request> req_data;
 
-    /* if we pad, then the data record has prev=pad, and the pad
-     * has prev=prev
+    char *pad_hdr = NULL;
+    smartiov pad_iov;
+    std::unique_ptr<request> req_pad;
+
+    std::atomic<int> reqs = 0; // 2 if req_pad else 1
+    write_cache &wcache;
+    request *parent;
+
+  public:
+    uint64_t seq;
+
+    /* lba,iov: request from liblsvd
+     * n_pages: number of 4KB data pages (not counting header)
+     * page:    page number to begin writing
+     * n_pad:   number of pages to skip (not counting header)
+     * pad:     page number for pad entry (0 if none)
      */
-    if (pad != 0) {
-        pad_hdr = (char *)aligned_alloc(4096, 4096);
-        wcache->mk_header(pad_hdr, LSVD_J_PAD, n_pad + 1, prev);
-        prev = pad;
+    wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages, page_t page,
+                     page_t n_pad, page_t pad, page_t prev,
+                     write_cache &wcache_)
+        : wcache(wcache_)
+    {
+        // if we pad, then the data record has prev=pad, and the pad
+        // has prev=prev
+        if (pad != 0) {
+            pad_hdr = (char *)aligned_alloc(4096, 4096);
+            wcache.mk_header(pad_hdr, LSVD_J_PAD, n_pad + 1, prev);
+            prev = pad;
 
-        /* if we pad before journal wraparound, zero out the remaining
-         * pages to make crash recovery easier.
-         */
-        pad_iov.push_back((iovec){pad_hdr, 4096});
-        pad_out(pad_iov, n_pad);
+            // if we pad before journal wraparound, zero out the remaining
+            // pages to make crash recovery easier.
+            pad_iov.push_back((iovec){pad_hdr, 4096});
+            pad_out(pad_iov, n_pad);
+            reqs++;
+            req_pad = wcache.nvme_w->make_write_request(&pad_iov, pad * 4096L);
+        }
+
+        std::vector<j_extent> extents;
+        extents.push_back((j_extent){(uint64_t)lba, iovs->bytes() / 512});
+
+        // TODO: don't assign seq# in mk_header
+        hdr = (char *)aligned_alloc(4096, 4096);
+        j_hdr *j = wcache.mk_header(hdr, LSVD_J_DATA, 1 + n_pages, prev);
+        seq = j->seq;
+
+        j->extent_offset = sizeof(*j);
+        size_t e_bytes = extents.size() * sizeof(j_extent);
+        j->extent_len = e_bytes;
+        memcpy((void *)(hdr + sizeof(*j)), (void *)extents.data(), e_bytes);
+
+        // plba = (page + 1) * 8;
+        data_iovs.push_back((iovec){hdr, 4096});
+        auto [iov, iovcnt] = iovs->c_iov();
+        data_iovs.ingest(iov, iovcnt);
+
         reqs++;
-        r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad * 4096L);
+        req_data = wcache.nvme_w->make_write_request(&data_iovs, page * 4096L);
     }
 
-    std::vector<j_extent> extents;
-    extents.push_back((j_extent){(uint64_t)lba, iovs->bytes() / 512});
+    ~wcache_write_req()
+    {
+        free(hdr);
+        if (pad_hdr)
+            free(pad_hdr);
+    }
 
-    /* TODO: don't assign seq# in mk_header
-     */
-    hdr = (char *)aligned_alloc(4096, 4096);
-    j_hdr *j = wcache->mk_header(hdr, LSVD_J_DATA, 1 + n_pages, prev);
-    seq = j->seq;
+    void run(request *parent_)
+    {
+        parent = parent_;
+        if (req_pad)
+            req_pad->run(this);
+        req_data->run(this);
+    }
 
-    j->extent_offset = sizeof(*j);
-    size_t e_bytes = extents.size() * sizeof(j_extent);
-    j->extent_len = e_bytes;
-    memcpy((void *)(hdr + sizeof(*j)), (void *)extents.data(), e_bytes);
+    // called in order from notify_complete
+    // write cache lock must be held
+    void notify(request *child)
+    {
+        if (--reqs > 0)
+            return;
 
-    plba = (page + 1) * 8;
-    data_iovs = new smartiov();
-    data_iovs->push_back((iovec){hdr, 4096});
-    auto [iov, iovcnt] = iovs->c_iov();
-    data_iovs->ingest(iov, iovcnt);
+        parent->notify(this);
 
-    reqs++;
-    r_data = wcache->nvme_w->make_write_request(data_iovs, page * 4096L);
-}
+        std::unique_lock lk(wcache.m);
+        wcache.outstanding_writes--;
+        wcache.write_cv.notify_all();
+    }
 
-wcache_write_req::~wcache_write_req()
-{
-    free(hdr);
-    if (pad_hdr)
-        free(pad_hdr);
-    delete data_iovs;
-}
+    void wait() { NOT_IMPLEMENTED(); }
+    void release() { NOT_IMPLEMENTED(); }
+};
 
-/* called in order from notify_complete
- * write cache lock must be held
- */
-void wcache_write_req::notify(request *child)
-{
-    child->release();
-    if (--reqs > 0)
-        return;
-    parent->notify(this);
-
-    std::unique_lock lk(wcache->m);
-    wcache->outstanding_writes--;
-    wcache->write_cv.notify_all();
-
-    /* we don't implement release or wait - just delete ourselves.
-     */
-    delete this;
-}
-
-void wcache_write_req::run(request *parent_)
-{
-    parent = parent_;
-    if (r_pad)
-        r_pad->run(this);
-    r_data->run(this);
-}
+/* ------------- batched write request ------------- */
 
 /* --------------- Write Cache ------------- */
 
 /* stall write requests using window of max_write_blocks, which should
  * be <= 0.5 * write cache size.
  */
-void write_cache_impl::get_room(sector_t sectors)
+void write_cache::get_room(sector_t sectors)
 {
     int pages = sectors / 8;
     std::unique_lock lk(m2);
@@ -247,7 +127,7 @@ void write_cache_impl::get_room(sector_t sectors)
     total_write_pages += pages;
 }
 
-void write_cache_impl::release_room(sector_t sectors)
+void write_cache::release_room(sector_t sectors)
 {
     int pages = sectors / 8;
     std::unique_lock lk(m2);
@@ -260,7 +140,7 @@ void write_cache_impl::release_room(sector_t sectors)
  * get/release_room from lsvd.cc, outstanding.size() should be zero whenever
  * total_write_pages is zero. Could just flush at higher level.
  */
-void write_cache_impl::flush(void)
+void write_cache::flush(void)
 {
     std::unique_lock lk2(m2); // total_write_pages
     std::unique_lock lk(m);   // outstanding
@@ -278,8 +158,8 @@ void write_cache_impl::flush(void)
  * TODO: totally confusing that n_pad includes the header page here,
  * while it excluses the header page in wcache_write_req constructor
  */
-uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad,
-                                    page_t &prev)
+uint32_t write_cache::allocate(page_t n, page_t &pad, page_t &n_pad,
+                               page_t &prev)
 {
     // assert(!m.try_lock());
     assert(n > 0);
@@ -297,19 +177,19 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad,
     auto start = previous_hdr = next_alloc;
     next_alloc += n;
     if (next_alloc == super->limit)
-	next_alloc = super->base;
+        next_alloc = super->base;
     return start;
 }
 
 /* call with lock held
  */
-j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
-                                   page_t prev)
+j_hdr *write_cache::mk_header(char *buf, uint32_t type, page_t blks,
+                              page_t prev)
 {
     // assert(!m.try_lock());
     memset(buf, 0, 4096);
     j_hdr *h = (j_hdr *)buf;
-    // OH NO - am I using wcache->sequence or wcache->super->seq???
+    // OH NO - am I using wcache.sequence or wcache.super->seq???
     *h = (j_hdr){.magic = LSVD_MAGIC,
                  .type = type,
                  .version = 1,
@@ -325,7 +205,7 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
 /* note that this is only called on shutdown, so we don't
  * worry about locking, and we set the 'clean' flag in the superblock
  */
-void write_cache_impl::write_checkpoint(void)
+void write_cache::write_checkpoint(void)
 {
     /* shouldn't really need the copy, since it's only called on
      * shutdown, except that some unit tests call this and expect things
@@ -358,7 +238,7 @@ void write_cache_impl::write_checkpoint(void)
  *  next_acked_page
  *  sequence
  */
-int write_cache_impl::roll_log_forward()
+int write_cache::roll_log_forward()
 {
     return 0;
 
@@ -473,8 +353,8 @@ int write_cache_impl::roll_log_forward()
 #endif
 }
 
-write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
-                                   lsvd_config *cfg_)
+write_cache::write_cache(uint32_t blkno, int fd, translate *_be,
+                         lsvd_config *cfg_)
 {
 
     super_blkno = blkno;
@@ -501,7 +381,7 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
     } else if (roll_log_forward() < 0)
         throw("write log roll-forward failed");
     next_alloc = super->base;
-    
+
     super->clean = false;
     if (nvme_w->write(buf, 4096, 4096L * super_blkno) < 4096)
         throw_fs_error("wcache");
@@ -513,21 +393,22 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
     misc_threads = new thread_pool<int>(&m);
 }
 
-write_cache *make_write_cache(uint32_t blkno, int fd, translate *be,
-                              lsvd_config *cfg)
+std::unique_ptr<write_cache> write_cache::make_write_cache(uint32_t blkno,
+                                                           int fd,
+                                                           translate *be,
+                                                           lsvd_config *cfg)
 {
-    return new write_cache_impl(blkno, fd, be, cfg);
+    return std::make_unique<write_cache>(blkno, fd, be, cfg);
 }
 
-write_cache_impl::~write_cache_impl()
+write_cache::~write_cache()
 {
     delete misc_threads;
     free(super);
     free(_hdrbuf);
-    delete nvme_w;
 }
 
-request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
+std::unique_ptr<request> write_cache::writev(sector_t lba, smartiov *iovs)
 {
 
     size_t bytes = iovs->bytes();
@@ -536,15 +417,14 @@ request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
 
     std::unique_lock lk(m);
     page_t page = allocate(pages + 1, pad, n_pad, prev);
-    auto req = new wcache_write_req(lba, iovs, pages, page, n_pad - 1, pad,
-                                    prev, this);
+    auto req = std::make_unique<wcache_write_req>(lba, iovs, pages, page,
+                                                  n_pad - 1, pad, prev, *this);
     auto [iov, iovcnt] = iovs->c_iov();
     outstanding_writes++;
     lk.unlock();
-    
-    be->writev(req->seq, lba * 512, iov, iovcnt);
 
+    be->writev(req->seq, lba * 512, iov, iovcnt);
     return req;
 }
 
-void write_cache_impl::do_write_checkpoint(void) { write_checkpoint(); }
+void write_cache::do_write_checkpoint(void) { write_checkpoint(); }

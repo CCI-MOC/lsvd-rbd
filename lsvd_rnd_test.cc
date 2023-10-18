@@ -1,4 +1,5 @@
 #include <argp.h>
+#include <fmt/format.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -41,6 +42,7 @@ struct cfg {
     bool verbose;
     bool existing;
     bool deterministic;
+    bool wipe_cache;
 };
 
 /* empirical fit to the pattern of writes in the ubuntu install,
@@ -111,13 +113,9 @@ std::string get_cache_name(rbd_image_t img)
 
 void clean_cache(std::string cache_dir)
 {
-    const char *suffix = ".cache";
-    for (auto const &dir_entry : fs::directory_iterator{cache_dir}) {
-        std::string entry{dir_entry.path().filename()};
-        if (!strcmp(suffix, entry.c_str() + entry.size() - strlen(suffix)))
-            fs::remove(dir_entry.path());
-        if (!strncmp(entry.c_str(), "gc.", 3))
-            fs::remove(dir_entry.path());
+    fmt::print("Wiping cache directory {}\n", cache_dir);
+    for (auto const &dir_entry : fs::directory_iterator(cache_dir)) {
+        std::filesystem::remove_all(dir_entry.path());
     }
 }
 
@@ -207,7 +205,7 @@ void run_test(unsigned long seed, struct cfg *cfg)
     setenv("LSVD_WCACHE_DIR", cfg->cache_dir, 1);
 
     if (!started || cfg->restart) {
-        // clean_cache(cfg->cache_dir);
+        clean_cache(cfg->cache_dir);
         rbd_remove(io, cfg->obj_prefix);
         rbd_create(io, cfg->obj_prefix, cfg->image_sectors, NULL);
         sector_crc.clear();
@@ -302,23 +300,24 @@ static struct argp_option options[] = {
     {"rados", 'O', 0, 0, "use RADOS"},
     {"cache-size", 'Z', "N", 0, "cache size (K/M/G)"},
     {"deterministic", 'Q', 0, 0, "no backend non-determinism"},
+    {"wipe-cache", 'E', 0, 0, "wipe cache on startup"},
     {0},
 };
 
-struct cfg _cfg = {.cache_dir = "/tmp",		     // cache_dir
-                   .cache_size = "100m",	     // cache_size
+struct cfg _cfg = {.cache_dir = "/tmp",              // cache_dir
+                   .cache_size = "100m",             // cache_size
                    .obj_prefix = "/tmp/bkt/obj",     // obj_prefix
-                   .backend = "file",          // backend
-                   .run_len = 10000,           // run_len
-                   .window = 16,	       // window
+                   .backend = "file",                // backend
+                   .run_len = 10000,                 // run_len
+                   .window = 16,                     // window
                    .image_sectors = 1024 * 1024 * 2, // image_sectors,
                    .read_fraction = 0.0,             // read_fraction
-		   .n_runs = 1,			     // n_runs
-                   .seeds = {},			     // seeds
-                   .reopen = false,		     // reopen
-                   .restart = true,		     // restart
-                   .verbose = false,		     // verbose
-                   .existing = false,		     // existing
+                   .n_runs = 1,                      // n_runs
+                   .seeds = {},                      // seeds
+                   .reopen = false,                  // reopen
+                   .restart = true,                  // restart
+                   .verbose = false,                 // verbose
+                   .existing = false,                // existing
                    .deterministic = false};          // deterministic
 
 off_t parseint(char *s)
@@ -388,6 +387,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case 'Q':
         _cfg.deterministic = true;
+        break;
+    case 'E':
+        _cfg.wipe_cache = true;
         break;
     case ARGP_KEY_END:
         break;

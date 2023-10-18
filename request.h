@@ -1,15 +1,4 @@
-/*
- * file:        request.h
- * description: generic inter-layer request mechanism
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#ifndef REQUEST_H
-#define REQUEST_H
+#pragma once
 
 /* generic interface for requests.
  *  - run(parent): begin execution
@@ -39,5 +28,3 @@ class trivial_request : public request
     void run(request *parent) {}
     void release() {}
 };
-
-#endif

@@ -14,6 +14,7 @@
 #include <uuid/uuid.h>
 
 #include <condition_variable>
+#include <future>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
@@ -31,175 +32,6 @@
 #include "nvme.h"
 
 void do_log(const char *, ...);
-
-class nvme_aio;
-
-class nvme_aio : public nvme
-{
-  public:
-    int fd;
-    bool e_io_running = false;
-    std::thread e_io_th;
-    io_context_t ioctx;
-
-    static void sighandler(int sig) { pthread_exit(NULL); }
-
-    nvme_aio(int fd_, const char *name_)
-    {
-        fd = fd_;
-        e_io_running = true;
-        io_queue_init(64, &ioctx);
-        signal(SIGUSR2, sighandler);
-        e_io_th = std::thread(e_iocb_runner, ioctx, &e_io_running, name_);
-    }
-
-    ~nvme_aio()
-    {
-        e_io_running = false;
-        // e_io_th.join();
-        // pthread_cancel(e_io_th.native_handle());
-        pthread_kill(e_io_th.native_handle(), SIGUSR2);
-        e_io_th.join();
-        io_queue_release(ioctx);
-    }
-
-    int read(void *buf, size_t count, off_t offset)
-    {
-        return pread(fd, buf, count, offset);
-    }
-
-    int write(const void *buf, size_t count, off_t offset)
-    {
-        return pwrite(fd, buf, count, offset);
-    }
-
-    int writev(const struct iovec *iov, int iovcnt, off_t offset)
-    {
-        return pwritev(fd, iov, iovcnt, offset);
-    }
-
-    int readv(const struct iovec *iov, int iovcnt, off_t offset)
-    {
-        return preadv(fd, iov, iovcnt, offset);
-    }
-
-    request *make_write_request(smartiov *iov, size_t offset)
-    {
-        assert(offset != 0);
-        auto req = new nvme_aio_request(iov, offset, OP_WRITE, this);
-        return (request *)req;
-    }
-
-    request *make_write_request(char *buf, size_t len, size_t offset)
-    {
-        assert(offset != 0);
-        auto req = new nvme_aio_request(buf, len, offset, OP_WRITE, this);
-        return (request *)req;
-    }
-
-    request *make_read_request(smartiov *iov, size_t offset)
-    {
-        auto req = new nvme_aio_request(iov, offset, OP_READ, this);
-        return (request *)req;
-    }
-
-    request *make_read_request(char *buf, size_t len, size_t offset)
-    {
-        auto req = new nvme_aio_request(buf, len, offset, OP_READ, this);
-        return (request *)req;
-    }
-
-    static void call_send_request_notify(void *parent, long res)
-    {
-        nvme_aio_request *r = (nvme_aio_request *)parent;
-        r->notify2(res);
-    }
-
-  private:
-    class nvme_aio_request : public request
-    {
-      public:
-        e_iocb eio;
-        smartiov _iovs;
-        size_t ofs;
-        enum lsvd_op op;
-        nvme_aio *nvme_ptr;
-        request *parent;
-
-        bool released = false;
-        bool complete = false;
-        std::mutex m;
-        std::condition_variable cv;
-
-      public:
-        nvme_aio_request(smartiov *iov, size_t offset, enum lsvd_op type,
-                         nvme_aio *nvme_w)
-        {
-            _iovs.ingest(iov->data(), iov->size());
-            ofs = offset;
-            op = type;
-            nvme_ptr = nvme_w;
-        }
-
-        nvme_aio_request(char *buf, size_t len, size_t offset,
-                         enum lsvd_op type, nvme_aio *nvme_w)
-        {
-            _iovs.push_back((iovec){buf, len});
-            ofs = offset;
-            op = type;
-            nvme_ptr = nvme_w;
-        }
-
-        ~nvme_aio_request() {}
-
-        void wait()
-        {
-            std::unique_lock lk(m);
-            while (!complete)
-                cv.wait(lk);
-        }
-
-        void run(request *parent_)
-        {
-            parent = parent_;
-            if (op == OP_WRITE) {
-                e_io_prep_pwritev(&eio, nvme_ptr->fd, _iovs.data(),
-                                  _iovs.size(), ofs,
-                                  nvme_aio::call_send_request_notify, this);
-            } else
-                e_io_prep_preadv(&eio, nvme_ptr->fd, _iovs.data(), _iovs.size(),
-                                 ofs, nvme_aio::call_send_request_notify, this);
-            e_io_submit(nvme_ptr->ioctx, &eio);
-        }
-
-        void notify(request *child) {}
-
-        void notify2(long result)
-        {
-            if (parent)
-                parent->notify(this);
-            assert((size_t)result == _iovs.bytes());
-
-            std::unique_lock lk(m);
-            complete = true;
-            cv.notify_one();
-            if (released) {
-                lk.unlock();
-                delete this;
-            }
-        }
-
-        void release()
-        {
-            std::unique_lock lk(m);
-            released = true;
-            if (complete) { // TODO: atomic swap?
-                lk.unlock();
-                delete this;
-            }
-        }
-    };
-};
 
 class nvme_uring : public nvme
 {
@@ -251,32 +83,39 @@ class nvme_uring : public nvme
         return preadv(fd, iov, iovcnt, offset);
     }
 
-    request *make_write_request(smartiov *iov, size_t offset)
+    std::unique_ptr<request> make_write_request(smartiov *iov, size_t offset)
     {
         assert(offset != 0);
-        return (request *)new nvme_uring_request(iov, offset, OP_WRITE, this);
+        return std::make_unique<nvme_uring_request>(iov, offset, OP_WRITE,
+                                                    this);
     }
 
-    request *make_write_request(char *buf, size_t len, size_t offset)
+    std::unique_ptr<request> make_write_request(char *buf, size_t len,
+                                                size_t offset)
     {
         assert(offset != 0);
-        return (request *)new nvme_uring_request(buf, len, offset, OP_WRITE,
-                                                 this);
+        smartiov iov(buf, len);
+        return std::make_unique<nvme_uring_request>(&iov, offset, OP_WRITE,
+                                                    this);
     }
 
-    request *make_read_request(smartiov *iov, size_t offset)
+    std::unique_ptr<request> make_read_request(smartiov *iov, size_t offset)
     {
-        return (request *)new nvme_uring_request(iov, offset, OP_READ, this);
+        return std::make_unique<nvme_uring_request>(iov, offset, OP_READ, this);
     }
 
-    request *make_read_request(char *buf, size_t len, size_t offset)
+    std::unique_ptr<request> make_read_request(char *buf, size_t len,
+                                               size_t offset)
     {
-        return (request *)new nvme_uring_request(buf, len, offset, OP_READ,
-                                                 this);
+        smartiov iov(buf, len);
+        return std::make_unique<nvme_uring_request>(&iov, offset, OP_READ,
+                                                    this);
     }
 
     void uring_completion_worker()
     {
+        pthread_setname_np(pthread_self(), "uring_cqe_worker");
+
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
         while (cqe_worker_should_continue.load(std::memory_order_seq_cst)) {
             io_uring_cqe *cqe;
@@ -310,22 +149,12 @@ class nvme_uring : public nvme
 
         // other bookkeeping, copied from the aio version
         request *parent_;
-        bool released_ = false;
-        bool complete_ = false;
-        std::mutex completion_mtx;
-        std::condition_variable cv;
 
       public:
         nvme_uring_request(smartiov *iovs, size_t offset, lsvd_op op,
                            nvme_uring *nvmu)
-            : nvmu_(nvmu), iovs_(iovs->data(), iovs->size()), op_(op),
+            : nvmu_(nvmu), op_(op), iovs_(iovs->data(), iovs->size()),
               offset_(offset)
-        {
-        }
-
-        nvme_uring_request(char *buf, size_t len, size_t offset, lsvd_op op,
-                           nvme_uring *nvmu)
-            : nvmu_(nvmu), iovs_(buf, len), op_(op), offset_(offset)
         {
         }
 
@@ -359,20 +188,11 @@ class nvme_uring : public nvme
             // if(op_ == OP_READ)
             //     raise(SIGTRAP);
 
-            if (parent_)
-                parent_->notify(this);
-
             // if op was successful this should always be true
             assert((size_t)result == iovs_.bytes());
 
-            // directly copied from the aio version
-            std::unique_lock lk(completion_mtx);
-            complete_ = true;
-            cv.notify_all();
-            if (released_) {
-                lk.unlock();
-                delete this;
-            }
+            if (parent_)
+                parent_->notify(this);
         }
 
         void on_fail(int errnum)
@@ -382,39 +202,13 @@ class nvme_uring : public nvme
             return;
         }
 
-        void notify(request *child)
-        {
-            // no-op; the cqe worker calls on_complete directly
-            return;
-        }
-
-        void release()
-        {
-            // directly copied from the aio version
-            std::unique_lock lk(completion_mtx);
-            released_ = true;
-            if (complete_) { // TODO: atomic swap?
-                lk.unlock();
-                delete this;
-            }
-        }
-
-        void wait()
-        {
-            // directly copied from the aio version
-            std::unique_lock lk(completion_mtx);
-            while (!complete_)
-                cv.wait(lk);
-        }
+        void notify(request *child) { NOT_IMPLEMENTED(); }
+        void release() { NOT_IMPLEMENTED(); }
+        void wait() { NOT_IMPLEMENTED(); }
     };
 };
 
-nvme *make_nvme_aio(int fd, const char *name)
+std::unique_ptr<nvme> make_nvme_uring(int fd, const char *name)
 {
-    return (nvme *)new nvme_aio(fd, name);
-}
-
-nvme *make_nvme_uring(int fd, const char *name)
-{
-    return (nvme *)new nvme_uring(fd, name);
+    return std::make_unique<nvme_uring>(fd, name);
 }

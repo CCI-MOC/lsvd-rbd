@@ -14,7 +14,7 @@
 #include <vector>
 
 #ifndef LOGLV
-#define LOGLV 1
+#define LOGLV 0
 #endif
 
 #define trace(MSG, ...)                                                        \
@@ -34,14 +34,23 @@
 #define log_info(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 2)                                                        \
-            fmt::print(stderr, fg(fmt::color::yellow) | fmt::emphasis::bold,     \
+            fmt::print(stderr, fg(fmt::color::yellow) | fmt::emphasis::bold,   \
                        "[INFO {}:{} {}] " MSG "\n", __FILE__, __LINE__,        \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
-#define log_error(MSG, ...)                                                    \
+#define log_warn(MSG, ...)                                                    \
     do {                                                                       \
         if (LOGLV <= 3)                                                        \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
+                       "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
+                       __func__, ##__VA_ARGS__);                               \
+    } while (0)
+
+
+#define log_error(MSG, ...)                                                    \
+    do {                                                                       \
+        if (LOGLV <= 4)                                                        \
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
                        "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
                        __func__, ##__VA_ARGS__);                               \
@@ -80,6 +89,16 @@
     do {                                                                       \
     } while (false)
 #endif
+
+#define NOT_IMPLEMENTED()                                                        \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
+                   "[ERR {}:{} {}] Unimplemented: {}\n", __FILE__, __LINE__,   \
+                   __func__, __func__);                                        \
+        auto m = fmt::format("Function {}:{} {} not implemented.", __FILE__,   \
+                             __LINE__, __func__);                              \
+        throw std::runtime_error(m);                                           \
+    } while (false)
 
 template <class... Ts> struct overloaded : Ts... {
     using Ts::operator()...;

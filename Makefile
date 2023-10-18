@@ -9,9 +9,9 @@ BUILD_DIR = build
 # note that no-unswitch-loops also gets rid of the segfault
 # -fno-omit-frame-pointer is so perf gets good stack traces
 CFLAGS = -ggdb3 -Wall $(OPT)
-CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT) -fno-omit-frame-pointer -fPIC
+CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT) -fno-omit-frame-pointer -fPIC -lstdc++
 LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a
-LDFLAGS += -fuse-ld=mold -Wl,-rpath=/usr/lib/liburing.so.2.5
+LDFLAGS += -Wl,-rpath=/usr/lib/liburing.so.2.5
 SOFLAGS = -shared -fPIC
 
 debug: CXXFLAGS += -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
@@ -21,6 +21,7 @@ debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion -Wno-co
 debug: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline
 release: CXXFLAGS += -O3
 
+all: debug
 debug: liblsvd.so imgtool lsvd_rnd_test
 release: liblsvd.so
 
@@ -54,6 +55,12 @@ lsvd_rnd_test: lsvd_rnd_test.o $(LSVD_OBJS) liblsvd.so
 lsvd_crash_test: lsvd_crash_test.o $(LSVD_OBJS) liblsvd.so
 	$(CXX) -o $@ lsvd_crash_test.o $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
+DEBUG_CACHE = /mnt/nvme/lsvd-debug-cache/
+
+test-rnd: debug lsvd_rnd_test
+	rm -rf $(DEBUG_CACHE)/*
+	./lsvd_rnd_test --cache-dir=$(DEBUG_CACHE) --prefix=$(DEBUG_CACHE)/prefix --size=500M --seed=42 --wipe-cache
+
 test-1: test-1.o $(OBJS)
 	$(CXX) -o $@ test-1.o $(OBJS) $(CXXFLAGS)
 
@@ -85,6 +92,6 @@ clean:
 	rm -f liblsvd.so bdus mkdisk $(OBJS) $(DEPS) *.o *.d test7 test8 imgtool
 
 install-deps:
-	sudo apt install libfmt-dev libaio-dev librados-dev mold
-	echo "You'll have to compile the latest version of liburing yourself"
+	sudo apt install libfmt-dev libaio-dev librados-dev aold libboost-dev-all
+	echo "This project was built with the latest version of liburing, default ubuntu version is untested"
 

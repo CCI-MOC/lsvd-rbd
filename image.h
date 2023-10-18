@@ -1,12 +1,9 @@
-/*
- * file:        image.h
- * description: the fake RBD image.
- *
- * TODO: fix up lsvd_debug.cc and move this into lsvd.cc
- */
+#pragma once
 
-#ifndef __IMAGE_H__
-#define __IMAGE_H__
+#include "backend.h"
+#include "read_cache.h"
+#include "translate.h"
+#include "write_cache.h"
 
 struct event_socket {
     int socket;
@@ -44,11 +41,6 @@ struct event_socket {
     }
 };
 
-class read_cache;
-class write_cache;
-class backend;
-class translate;
-
 struct rbd_image {
     lsvd_config cfg;
     ssize_t size; // bytes
@@ -59,11 +51,14 @@ struct rbd_image {
     extmap::bufmap bufmap;
     std::map<int, char *> buffers;
 
-    backend *objstore;
-    translate *xlate;
-    write_cache *wcache;
-    read_cache *rcache;
-    int read_fd; /* read cache file */
+    // these are unique_ptr's for backwards compat, I'm too lazy to rewrite
+    // it all
+    std::unique_ptr<backend> objstore;
+    std::unique_ptr<translate> xlate;
+    std::unique_ptr<write_cache> wcache;
+    std::unique_ptr<read_cache> rcache;
+
+    int read_fd;  /* read cache file */
     int write_fd; /* write cache file */
 
     std::mutex m; /* protects completions */
@@ -83,5 +78,3 @@ struct rbd_image {
     int poll_io_events(rbd_completion_t *comps, int numcomp);
     void notify(rbd_completion_t c);
 };
-
-#endif

@@ -39,7 +39,6 @@ class rados_backend : public backend
   public:
     rados_backend();
     ~rados_backend();
-    void stop(void);
 
     int write_object(const char *name, iovec *iov, int iovcnt);
     int write_object(const char *name, char *buf, size_t len);
@@ -50,18 +49,23 @@ class rados_backend : public backend
 
     /* async I/O
      */
-    request *make_write_req(const char *name, iovec *iov, int iovcnt);
-    request *make_write_req(const char *name, char *buf, size_t len);
+    std::unique_ptr<request> make_write_req(const char *name, iovec *iov,
+                                            int iovcnt);
+    std::unique_ptr<request> make_write_req(const char *name, char *buf,
+                                            size_t len);
 
-    request *make_read_req(const char *name, size_t offset, iovec *iov,
-                           int iovcnt);
-    request *make_read_req(const char *name, size_t offset, char *buf,
-                           size_t len);
+    std::unique_ptr<request> make_read_req(const char *name, size_t offset,
+                                           iovec *iov, int iovcnt);
+    std::unique_ptr<request> make_read_req(const char *name, size_t offset,
+                                           char *buf, size_t len);
 };
 
 /* needed for implementation hiding
  */
-backend *make_rados_backend(rados_ioctx_t io) { return new rados_backend; }
+std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io)
+{
+    return std::make_unique<rados_backend>();
+}
 
 /* see https://docs.ceph.com/en/latest/rados/api/librados/
  * for documentation on the librados API
@@ -77,14 +81,12 @@ rados_backend::rados_backend()
         throw("rados connect");
 }
 
-void rados_backend::stop(void)
+rados_backend::~rados_backend()
 {
     if (pool_len > 0)
         rados_ioctx_destroy(io_ctx);
     rados_shutdown(cluster);
 }
-
-rados_backend::~rados_backend() {}
 
 /* if pool hasn't been initialized yet, initialize the ioctx
  * only supports one pool, exception if you try to access another one
@@ -291,31 +293,39 @@ class rados_be_request : public request
     void wait() {}
 };
 
-request *rados_backend::make_write_req(const char *name, iovec *iov, int iovcnt)
+std::unique_ptr<request> rados_backend::make_write_req(const char *name,
+                                                       iovec *iov, int iovcnt)
 {
     auto oid = pool_init(name);
     assert(*((int *)iov[0].iov_base) == LSVD_MAGIC);
-    return new rados_be_request(OP_WRITE, oid, iov, iovcnt, 0, io_ctx, &m);
+    return std::make_unique<rados_be_request>(OP_WRITE, oid, iov, iovcnt, 0,
+                                              io_ctx, &m);
 }
 
-request *rados_backend::make_write_req(const char *name, char *buf, size_t len)
+std::unique_ptr<request> rados_backend::make_write_req(const char *name,
+                                                       char *buf, size_t len)
 {
     auto oid = pool_init(name);
     assert(*((int *)buf) == LSVD_MAGIC);
-    return new rados_be_request(OP_WRITE, oid, buf, len, 0, io_ctx, &m);
+    return std::make_unique<rados_be_request>(OP_WRITE, oid, buf, len, 0,
+                                              io_ctx, &m);
 }
 
-request *rados_backend::make_read_req(const char *name, size_t offset,
-                                      iovec *iov, int iovcnt)
+std::unique_ptr<request> rados_backend::make_read_req(const char *name,
+                                                      size_t offset, iovec *iov,
+                                                      int iovcnt)
 {
     auto oid = pool_init(name);
-    return new rados_be_request(OP_READ, oid, iov, iovcnt, offset, io_ctx, &m);
+    return std::make_unique<rados_be_request>(OP_READ, oid, iov, iovcnt, offset,
+                                              io_ctx, &m);
 }
 
-request *rados_backend::make_read_req(const char *name, size_t offset,
-                                      char *buf, size_t len)
+std::unique_ptr<request> rados_backend::make_read_req(const char *name,
+                                                      size_t offset, char *buf,
+                                                      size_t len)
 {
     iovec iov = {buf, len};
     auto oid = pool_init(name);
-    return new rados_be_request(OP_READ, oid, &iov, 1, offset, io_ctx, &m);
+    return std::make_unique<rados_be_request>(OP_READ, oid, &iov, 1, offset,
+                                              io_ctx, &m);
 }
