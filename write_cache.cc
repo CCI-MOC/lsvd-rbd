@@ -13,7 +13,8 @@ void pad_out(smartiov &iov, int pages)
         iov.push_back((iovec){z_page, 4096});
 }
 
-class wcache_write_req : public request
+class wcache_write_req : public request,
+                         public std::enable_shared_from_this<wcache_write_req>
 {
     char *hdr = NULL;
     smartiov data_iovs;
@@ -25,7 +26,7 @@ class wcache_write_req : public request
 
     std::atomic<int> reqs = 0; // 2 if req_pad else 1
     write_cache &wcache;
-    request *parent;
+    sptr<request> parent;
 
   public:
     uint64_t seq;
@@ -85,22 +86,23 @@ class wcache_write_req : public request
             free(pad_hdr);
     }
 
-    void run(request *parent_)
+    void run(sptr<request> parent_)
     {
         parent = parent_;
         if (req_pad)
-            req_pad->run(this);
-        req_data->run(this);
+            req_pad->run(shared_from_this());
+        req_data->run(shared_from_this());
     }
 
     // called in order from notify_complete
     // write cache lock must be held
-    void notify(request *child)
+    void notify()
     {
         if (--reqs > 0)
             return;
 
-        parent->notify(this);
+        parent->notify();
+        parent.reset();
 
         std::unique_lock lk(wcache.m);
         wcache.outstanding_writes--;
@@ -408,7 +410,7 @@ write_cache::~write_cache()
     free(_hdrbuf);
 }
 
-std::unique_ptr<request> write_cache::writev(sector_t lba, smartiov *iovs)
+sptr<request> write_cache::writev(sector_t lba, smartiov *iovs)
 {
 
     size_t bytes = iovs->bytes();
@@ -417,7 +419,7 @@ std::unique_ptr<request> write_cache::writev(sector_t lba, smartiov *iovs)
 
     std::unique_lock lk(m);
     page_t page = allocate(pages + 1, pad, n_pad, prev);
-    auto req = std::make_unique<wcache_write_req>(lba, iovs, pages, page,
+    auto req = std::make_shared<wcache_write_req>(lba, iovs, pages, page,
                                                   n_pad - 1, pad, prev, *this);
     auto [iov, iovcnt] = iovs->c_iov();
     outstanding_writes++;

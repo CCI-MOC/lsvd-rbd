@@ -29,7 +29,7 @@ class read_cache
 
     virtual void
     handle_read(size_t offset, smartiov *iovs,
-                std::vector<std::unique_ptr<request>> &requests) = 0;
+                std::vector<sptr<request>> &requests) = 0;
 
     virtual void write_map(void) = 0;
 };

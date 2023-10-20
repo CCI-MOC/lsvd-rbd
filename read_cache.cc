@@ -106,7 +106,7 @@ class read_cache_impl : public read_cache
     std::vector<int> fetching;
     std::vector<int> in_use;
     std::vector<int> written;
-    sized_vector<std::vector<pending_read_request *>> pending;
+    sized_vector<std::vector<sptr<pending_read_request>>> pending;
 
     extmap::objmap *obj_map;
     std::shared_mutex *obj_lock;
@@ -154,7 +154,7 @@ class read_cache_impl : public read_cache
     ~read_cache_impl();
 
     void handle_read(size_t offset, smartiov *iovs,
-                     std::vector<std::unique_ptr<request>> &requests);
+                     std::vector<sptr<request>> &requests);
 
     sector_t nvme_sector(int blk)
     {
@@ -343,7 +343,7 @@ class pending_read_request : public request
     read_cache_impl *r;
     sector_t sector_in_blk;
     smartiov iovs;
-    request *parent;
+    sptr<request> parent;
     sector_t blk;
     bool was_run = false;
     bool done = false;
@@ -360,19 +360,20 @@ class pending_read_request : public request
     }
 
     ~pending_read_request() {}
-    void notify(request *r) {}
+    void notify() {}
 
     /* weird race condition - we might actually get completed before
      * the parent has called run()
      */
-    void run(request *parent_)
+    void run(sptr<request> parent_)
     {
         std::unique_lock lk(m);
         parent = parent_;
         was_run = true;
         if (done) {
             lk.unlock();
-            parent->notify(this);
+            parent->notify();
+            parent.reset();
         }
     }
 
@@ -383,23 +384,24 @@ class pending_read_request : public request
         done = true;
         if (was_run) {
             lk.unlock();
-            parent->notify(this);
+            parent->notify();
+            parent.reset();
         }
     }
 
-    void release() { NOT_IMPLEMENTED(); }
     void wait() { NOT_IMPLEMENTED(); }
 };
 
 /* cache hit - fetch from NVMe
  */
-class cache_hit_request : public request
+class cache_hit_request : public request,
+                          public std::enable_shared_from_this<cache_hit_request>
 {
     read_cache_impl *r;
     smartiov iovs;
     int blk;
 
-    request *parent;
+    sptr<request> parent;
     std::unique_ptr<request> nvme_req;
 
   public:
@@ -413,17 +415,20 @@ class cache_hit_request : public request
     }
     ~cache_hit_request() {}
 
-    void run(request *parent_)
+    void run(sptr<request> parent_)
     {
         parent = parent_;
-        nvme_req->run(this);
+        nvme_req->run(shared_from_this());
     }
 
-    void notify(request *child)
+    void notify()
     {
         std::unique_lock lk(r->m);
         r->in_use[blk]--; // CACHE HIT IN_USE DEC
-        parent->notify(this);
+
+        if (parent)
+            parent->notify();
+        parent.reset();
     }
 
     void release() { NOT_IMPLEMENTED(); }
@@ -433,12 +438,13 @@ class cache_hit_request : public request
 /* cache bypass - read directly from backend object
  * (for thrash avoidance)
  */
-class direct_read_req : public request
+class direct_read_req : public request,
+                        public std::enable_shared_from_this<direct_read_req>
 {
     smartiov iovs;
 
-    std::unique_ptr<request> obj_req = NULL;
-    request *parent = NULL;
+    sptr<request> obj_req = NULL;
+    sptr<request> parent = NULL;
     read_cache_impl *r = NULL;
     extmap::obj_offset oo;
 
@@ -457,24 +463,27 @@ class direct_read_req : public request
     }
     ~direct_read_req() {}
 
-    void run(request *parent_)
+    void run(sptr<request> parent_)
     {
         parent = parent_;
         r->be->object_read_start(oo.obj);
-        obj_req->run(this);
+        obj_req->run(shared_from_this());
     }
 
-    void notify(request *child)
+    void notify()
     {
         r->be->object_read_end(oo.obj);
-        parent->notify(this);
+        if (parent)
+            parent->notify();
+        parent.reset();
     }
 
     void release() { NOT_IMPLEMENTED(); }
     void wait() { NOT_IMPLEMENTED(); }
 };
 
-class cache_fill_req : public request
+class cache_fill_req : public request,
+                       public std::enable_shared_from_this<cache_fill_req>
 {
     read_cache_impl *r;
     int blk = 10000000;
@@ -482,10 +491,10 @@ class cache_fill_req : public request
     extmap::obj_offset oo;  // block location in object
     sector_t nvme_sector;
     smartiov iovs;
-    request *parent;
+    sptr<request> parent;
 
-    std::unique_ptr<request> nvme_req;
-    std::unique_ptr<request> obj_req;
+    sptr<request> nvme_req;
+    sptr<request> obj_req;
 
     char *buf;
 
@@ -513,15 +522,15 @@ class cache_fill_req : public request
 
     ~cache_fill_req() { free(buf); }
 
-    void run(request *parent_)
+    void run(sptr<request> parent_)
     {
         parent = parent_;
         state = FETCH_PENDING;
         r->be->object_read_start(oo.obj);
-        obj_req->run(this);
+        obj_req->run(shared_from_this());
     }
 
-    void notify(request *child)
+    void notify()
     {
         if (state == FETCH_PENDING) {
             r->be->object_read_end(oo.obj);
@@ -543,14 +552,15 @@ class cache_fill_req : public request
             crc1 = (uint32_t)crc32(0, (unsigned char *)buf, len);
             nvme_req = r->ssd->make_write_request(buf, len, nvme_sector * 512L);
             state = WRITE_PENDING;
-            nvme_req->run(this);
+            nvme_req->run(shared_from_this());
         } else if (state == WRITE_PENDING) {
             size_t len = r->block_sectors * 512;
             auto crc2 = (uint32_t)crc32(0, (unsigned char *)buf, len);
             assert(crc1 == crc2);
             std::unique_lock lk(r->m);
             iovs.copy_in(buf + sector_in_blk * 512L);
-            parent->notify(this);
+            parent->notify();
+            parent.reset();
             for (auto req : r->pending[blk])
                 req->copy_in(buf);
             r->pending[blk].clear();
@@ -567,9 +577,8 @@ class cache_fill_req : public request
     void wait() { NOT_IMPLEMENTED(); }
 };
 
-void read_cache_impl::handle_read(
-    size_t offset, smartiov *iovs,
-    std::vector<std::unique_ptr<request>> &requests)
+void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
+                                  std::vector<sptr<request>> &requests)
 {
     sector_t base = offset / 512;
     sector_t limit = base + iovs->bytes() / 512;
@@ -666,16 +675,16 @@ void read_cache_impl::handle_read(
             int i = map[key];
 
             if (fetching[i]) {
-                auto req = std::make_unique<pending_read_request>(
+                auto req = std::make_shared<pending_read_request>(
                     this, i, sector_in_blk, slice);
                 req->base = base;
                 req->limit = limit2;
-                pending[i].push_back(req.get());
-                requests.push_back(std::move(req));
+                pending[i].push_back(req);
+                requests.push_back(req);
             } else {
                 in_use[i]++; // CACHE HIT IN_USE INCR
                 auto nvme_location = nvme_sector(i) + sector_in_blk;
-                auto req = std::make_unique<cache_hit_request>(
+                auto req = std::make_shared<cache_hit_request>(
                     this, i, nvme_location, slice);
                 requests.push_back(std::move(req));
             }
@@ -704,7 +713,7 @@ void read_cache_impl::handle_read(
         if (!use_cache) {
             sector_t sectors = limit2 - base;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
-            auto req = std::make_unique<direct_read_req>(this, objptr, slice);
+            auto req = std::make_shared<direct_read_req>(this, objptr, slice);
             requests.push_back(std::move(req));
 
             hit_stats.serve(sectors);
@@ -742,7 +751,7 @@ void read_cache_impl::handle_read(
              * - iovec etc.
              */
             auto nvme_base = nvme_sector(i);
-            auto req = std::make_unique<cache_fill_req>(this, i, sector_in_blk,
+            auto req = std::make_shared<cache_fill_req>(this, i, sector_in_blk,
                                                         key, nvme_base, slice);
             requests.push_back(std::move(req));
 

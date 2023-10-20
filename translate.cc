@@ -121,7 +121,7 @@ class translate_req : public request
 
     int _seq;
 
-    std::unique_ptr<request> subrequest;
+    sptr<request> subrequest;
 
     // This is a very ugly hack to manipulate the refcount for ourself.
     // The idea is that when we're done, we free this pointer, so if nobody
@@ -195,9 +195,9 @@ class translate_req : public request
         lk.unlock();
     }
 
-    void notify(request *child);
+    void notify();
 
-    void run(request *parent) {} // unused
+    void run(sptr<request> parent) {} // unused
     void release(void)
     {
         log_warn("this should never be called");
@@ -378,7 +378,7 @@ class translate_impl : public translate
             objstore->delete_object(name.c_str());
         }
 
-        req->notify(nullptr);
+        req->notify();
     }
 
     void process_batch(int _seq, std::shared_ptr<translate_req> req)
@@ -439,9 +439,9 @@ class translate_impl : public translate
         objname name(prefix(_seq), _seq);
         auto req2 = objstore->make_write_req(
             name.c_str(), hdr_ptr, (hdr_sectors + data_sectors) * 512);
-        req->subrequest = std::move(req2);
+        req->subrequest = req2;
         outstanding_writes++;
-        req->subrequest->run(req.get());
+        req2->run(req);
     }
 
     /*
@@ -553,7 +553,7 @@ class translate_impl : public translate
         req->subrequest = objstore->make_write_req(
             name.c_str(), hdr, (hdr_sectors + data_sectors) * 512);
         outstanding_writes++;
-        req->subrequest->run(req.get());
+        req->subrequest->run(req);
     }
 
     void worker_thread()
@@ -572,7 +572,7 @@ class translate_impl : public translate
             if (req->op == REQ_FLUSH) {
                 while (outstanding_writes > 0)
                     cv.wait(lk);
-                req->notify(nullptr);
+                req->notify();
             }
 
             /* request and batch will be deleted on completion
@@ -638,7 +638,7 @@ class translate_impl : public translate
     }
 };
 
-void translate_req::notify(request *child)
+void translate_req::notify()
 {
     if (op == REQ_FLUSH || op == REQ_CKPT) {
         std::unique_lock lk(m);
@@ -1471,39 +1471,45 @@ int translate_remove_image(backend *objstore, const char *name)
         seq = ckpts.back();
         objname obj(name, seq);
         auto ckpt_buf = r.read_object_hdr(obj.c_str(), false);
-        auto c_hdr = (obj_hdr *)ckpt_buf;
-        auto c_data = (obj_ckpt_hdr *)(c_hdr + 1);
-        if (c_hdr->magic != LSVD_MAGIC || c_hdr->type != LSVD_CKPT)
+        if (ckpt_buf == NULL) {
+            log_info("No checkpoint found for {}.{}", name, seq);
+            log_info("This image is corrupted, stopping deletion.");
             return -1;
-        std::vector<ckpt_obj> objects;
-        decode_offset_len<ckpt_obj>(ckpt_buf, c_data->objs_offset,
-                                    c_data->objs_len, objects);
+        } else {
+            auto c_hdr = (obj_hdr *)ckpt_buf;
+            auto c_data = (obj_ckpt_hdr *)(c_hdr + 1);
+            if (c_hdr->magic != LSVD_MAGIC || c_hdr->type != LSVD_CKPT)
+                return -1;
+            std::vector<ckpt_obj> objects;
+            decode_offset_len<ckpt_obj>(ckpt_buf, c_data->objs_offset,
+                                        c_data->objs_len, objects);
 
-        /* delete all the objects in the objmap
-         */
-        std::queue<request *> deletes;
-        for (auto const &o : objects) {
-            objname obj(name, o.seq);
-            auto r = objstore->delete_object_req(obj.c_str());
-            r->run(NULL);
-            deletes.push(r);
-            while (deletes.size() > 8) {
+            /* delete all the objects in the objmap
+             */
+            std::queue<request *> deletes;
+            for (auto const &o : objects) {
+                objname obj(name, o.seq);
+                auto r = objstore->delete_object_req(obj.c_str());
+                r->run(NULL);
+                deletes.push(r);
+                while (deletes.size() > 8) {
+                    deletes.front()->wait();
+                    deletes.pop();
+                }
+            }
+            while (deletes.size() > 0) {
                 deletes.front()->wait();
                 deletes.pop();
             }
-        }
-        while (deletes.size() > 0) {
-            deletes.front()->wait();
-            deletes.pop();
-        }
 
-        /* delete all the checkpoints
-         */
-        for (auto const &c : ckpts) {
-            objname obj(name, c);
-            objstore->delete_object(obj.c_str());
+            /* delete all the checkpoints
+             */
+            for (auto const &c : ckpts) {
+                objname obj(name, c);
+                objstore->delete_object(obj.c_str());
+            }
+            free(ckpt_buf);
         }
-        free(ckpt_buf);
     }
     /* delete any objects after the last checkpoint, up to the first run of
      * 32 missing sequence numbers

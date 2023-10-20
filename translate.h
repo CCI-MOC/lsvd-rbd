@@ -1,8 +1,12 @@
 #pragma once
 
-#include "smartiov.h"
+#include <mutex>
+#include <shared_mutex>
+
 #include "backend.h"
 #include "config.h"
+#include "extent.h"
+#include "smartiov.h"
 
 class translate
 {
@@ -33,11 +37,10 @@ class translate
     virtual void start_gc(void) = 0;
 };
 
-extern std::unique_ptr<translate> make_translate(backend *_io, lsvd_config *cfg,
-                                 extmap::objmap *map, extmap::bufmap *bufmap,
-                                 std::shared_mutex *m, std::mutex *buf_m);
+std::unique_ptr<translate>
+make_translate(backend *_io, lsvd_config *cfg, extmap::objmap *map,
+               extmap::bufmap *bufmap, std::shared_mutex *m, std::mutex *buf_m);
 
-extern int translate_create_image(backend *objstore, const char *name,
-                                  uint64_t size);
-extern int translate_remove_image(backend *objstore, const char *name);
-extern int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu);
+int translate_create_image(backend *objstore, const char *name, uint64_t size);
+int translate_remove_image(backend *objstore, const char *name);
+int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu);

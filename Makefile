@@ -11,7 +11,7 @@ BUILD_DIR = build
 CFLAGS = -ggdb3 -Wall $(OPT)
 CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT) -fno-omit-frame-pointer -fPIC -lstdc++
 LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a
-LDFLAGS += -Wl,-rpath=/usr/lib/liburing.so.2.5
+LDFLAGS += -fuse-ld=mold -Wl,-rpath=/usr/lib/liburing.so.2.5
 SOFLAGS = -shared -fPIC
 
 debug: CXXFLAGS += -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
@@ -22,8 +22,8 @@ debug: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline
 release: CXXFLAGS += -O3
 
 all: debug
-debug: liblsvd.so imgtool lsvd_rnd_test
-release: liblsvd.so
+debug: liblsvd.so imgtool thick-image lsvd_rnd_test
+release: liblsvd.so imgtool thick-image
 
 CPP = $(wildcard *.cc)
 OBJS = $(CPP:%.cc=$(BUILD_DIR)/%.o)

@@ -9,6 +9,7 @@
 #include <sys/uio.h>
 
 #include "fake_rbd.h"
+#include "utils.h"
 
 class request;
 
@@ -30,14 +31,14 @@ class backend
 
     /* async I/O
      */
-    virtual std::unique_ptr<request> make_write_req(const char *name,
-                                                    iovec *iov, int iovcnt) = 0;
-    virtual std::unique_ptr<request> make_write_req(const char *name, char *buf,
-                                                    size_t len) = 0;
-    virtual std::unique_ptr<request>
-    make_read_req(const char *name, size_t offset, iovec *iov, int iovcnt) = 0;
-    virtual std::unique_ptr<request>
-    make_read_req(const char *name, size_t offset, char *buf, size_t len) = 0;
+    virtual sptr<request> make_write_req(const char *name, iovec *iov,
+                                         int iovcnt) = 0;
+    virtual sptr<request> make_write_req(const char *name, char *buf,
+                                         size_t len) = 0;
+    virtual sptr<request> make_read_req(const char *name, size_t offset,
+                                        iovec *iov, int iovcnt) = 0;
+    virtual sptr<request> make_read_req(const char *name, size_t offset,
+                                        char *buf, size_t len) = 0;
 };
 
 extern std::unique_ptr<backend> make_file_backend(const char *prefix);

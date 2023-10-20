@@ -75,13 +75,13 @@ class file_backend : public backend
 
     /* async I/O
      */
-    std::unique_ptr<request> make_write_req(const char *name, iovec *iov,
+    sptr<request> make_write_req(const char *name, iovec *iov,
                                             int iovcnt);
-    std::unique_ptr<request> make_write_req(const char *name, char *buf,
+    sptr<request> make_write_req(const char *name, char *buf,
                                             size_t len);
-    std::unique_ptr<request> make_read_req(const char *name, size_t offset,
+    sptr<request> make_read_req(const char *name, size_t offset,
                                            iovec *iov, int iovcnt);
-    std::unique_ptr<request> make_read_req(const char *name, size_t offset,
+    sptr<request> make_read_req(const char *name, size_t offset,
                                            char *buf, size_t len);
     thread_pool<file_backend_req *> workers;
 };
@@ -147,8 +147,8 @@ class f_delete_req : public request
     f_delete_req(const char *name) { rv = unlink(name); }
     ~f_delete_req() {}
     void wait() { delete this; }
-    void run(request *parent) {}
-    void notify(request *child) {}
+    void run(sptr<request> parent) {}
+    void notify() {}
     void release() {}
 };
 
@@ -205,7 +205,7 @@ class file_backend_req : public request
     smartiov _iovs;
     size_t offset;
     char name[64];
-    request *parent = NULL;
+    sptr<request> parent = NULL;
     file_backend *be;
     int fd = -1;
     int retval;
@@ -235,18 +235,19 @@ class file_backend_req : public request
 
     void wait() {} // TODO: ?????
 
-    void run(request *parent_)
+    void run(sptr<request> parent_)
     {
         parent = parent_;
         be->workers.put(this);
     }
 
-    void notify(request *child)
+    void notify()
     {
-        parent->notify(this);
+        if (parent)
+            parent->notify();
+        
+        parent.reset();
     }
-
-    void release(){};
 
     void exec(void)
     {
@@ -266,7 +267,7 @@ class file_backend_req : public request
                 close(fd);
             }
         }
-        notify(NULL);
+        notify();
     }
 };
 
@@ -300,36 +301,36 @@ void file_backend::worker(thread_pool<file_backend_req *> *p)
     }
 }
 
-std::unique_ptr<request> file_backend::make_write_req(const char *name,
+sptr<request> file_backend::make_write_req(const char *name,
                                                       iovec *iov, int niov)
 {
     assert(access(name, F_OK) != 0);
     verify_obj(iov, niov);
-    return std::make_unique<file_backend_req>(OP_WRITE, name, iov, niov, 0,
+    return std::make_shared<file_backend_req>(OP_WRITE, name, iov, niov, 0,
                                               this);
 }
-std::unique_ptr<request> file_backend::make_write_req(const char *name,
+sptr<request> file_backend::make_write_req(const char *name,
                                                       char *buf, size_t len)
 {
     assert(access(name, F_OK) != 0);
-    return std::make_unique<file_backend_req>(OP_WRITE, name, buf, len, 0,
+    return std::make_shared<file_backend_req>(OP_WRITE, name, buf, len, 0,
                                               this);
 }
 
-std::unique_ptr<request> file_backend::make_read_req(const char *name,
+sptr<request> file_backend::make_read_req(const char *name,
                                                      size_t offset, iovec *iov,
                                                      int iovcnt)
 {
-    return std::make_unique<file_backend_req>(OP_READ, name, iov, iovcnt,
+    return std::make_shared<file_backend_req>(OP_READ, name, iov, iovcnt,
                                               offset, this);
 }
 
-std::unique_ptr<request> file_backend::make_read_req(const char *name,
+sptr<request> file_backend::make_read_req(const char *name,
                                                      size_t offset, char *buf,
                                                      size_t len)
 {
     iovec iov = {buf, len};
-    return std::make_unique<file_backend_req>(OP_READ, name, &iov, 1, offset,
+    return std::make_shared<file_backend_req>(OP_READ, name, &iov, 1, offset,
                                               this);
 }
 

@@ -17,6 +17,9 @@
 #define LOGLV 0
 #endif
 
+template <class T> using uptr = std::unique_ptr<T>;
+template <class T> using sptr = std::shared_ptr<T>;
+
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
         if (LOGLV <= 0)                                                        \
@@ -39,7 +42,7 @@
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
-#define log_warn(MSG, ...)                                                    \
+#define log_warn(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 3)                                                        \
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
@@ -47,13 +50,22 @@
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
-
 #define log_error(MSG, ...)                                                    \
     do {                                                                       \
         if (LOGLV <= 4)                                                        \
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
                        "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
                        __func__, ##__VA_ARGS__);                               \
+    } while (0)
+
+#define throw_error(MSG, ...)                                                  \
+    do {                                                                       \
+        auto msg = fmt::format("[ERR: {}:{} {}] " MSG "\n", __FILE__,          \
+                               __LINE__, __func__, ##__VA_ARGS__);             \
+        if (LOGLV <= 4)                                                        \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
+                       msg);                                                   \
+        throw std::runtime_error(msg);                                         \
     } while (0)
 
 #ifndef NDEBUG
@@ -90,7 +102,7 @@
     } while (false)
 #endif
 
-#define NOT_IMPLEMENTED()                                                        \
+#define NOT_IMPLEMENTED()                                                      \
     do {                                                                       \
         fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
                    "[ERR {}:{} {}] Unimplemented: {}\n", __FILE__, __LINE__,   \

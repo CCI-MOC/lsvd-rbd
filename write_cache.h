@@ -75,6 +75,6 @@ class write_cache
     void release_room(sector_t sectors);
     void flush(void);
 
-    std::unique_ptr<request> writev(sector_t lba, smartiov *iov);
+    sptr<request> writev(sector_t lba, smartiov *iov);
     void do_write_checkpoint(void);
 };

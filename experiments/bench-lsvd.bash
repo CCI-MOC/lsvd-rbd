@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+set -x
 
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
@@ -27,10 +28,9 @@ gw_ip=$(ip addr | grep inet | fgrep inet\ 10.1 | \
 echo GATEWAY IP=$gw_ip
 client_ip=${client_ip:-10.1.0.6}
 
-# imgname=$cur_time
-# imgname=prealloc-80g # pre-allocated thick 80g image on pool 'triple-ssd'
-imgname=lsvd-benchmark-thick-80g
 blocksize=4096
+imgsize=20g
+imgname="lsvd-benchmark-$imgsize"
 
 # Build LSVD
 echo '===Building LSVD...'
@@ -38,14 +38,12 @@ cd $lsvd_dir
 make clean
 make -j20 release
 # make -j10 debug
-make -j20 imgtool
-make -j20 thick-image
 
 # Create the image
 # only re-provision when we start a new run to preserve previous image for debugging
-./imgtool --delete --rados $pool_name/$imgname || true
-./thick-image --size=80g $pool_name/$imgname
-#./imgtool --create --rados --size=10g $pool_name/$cur_time
+./remove_objs.py $pool_name $imgname
+./thick-image --size=$imgsize $pool_name/$imgname
+#./imgtool --create --rados --size=$imgsize $pool_name/$imgname
 
 # setup spdk
 cd $spdk_dir

@@ -148,7 +148,7 @@ class nvme_uring : public nvme
         size_t offset_;
 
         // other bookkeeping, copied from the aio version
-        request *parent_;
+        sptr<request> parent_;
 
       public:
         nvme_uring_request(smartiov *iovs, size_t offset, lsvd_op op,
@@ -158,7 +158,7 @@ class nvme_uring : public nvme
         {
         }
 
-        void run(request *parent)
+        void run(sptr<request> parent)
         {
             parent_ = parent;
 
@@ -192,7 +192,9 @@ class nvme_uring : public nvme
             assert((size_t)result == iovs_.bytes());
 
             if (parent_)
-                parent_->notify(this);
+                parent_->notify();
+
+            parent_.reset();
         }
 
         void on_fail(int errnum)
@@ -202,8 +204,7 @@ class nvme_uring : public nvme
             return;
         }
 
-        void notify(request *child) { NOT_IMPLEMENTED(); }
-        void release() { NOT_IMPLEMENTED(); }
+        void notify() { NOT_IMPLEMENTED(); }
         void wait() { NOT_IMPLEMENTED(); }
     };
 };

@@ -210,6 +210,9 @@ extern "C" int rbd_close(rbd_image_t image)
 /* RBD-level completion structure
  */
 struct lsvd_completion {
+  private:
+    sptr<request> req;
+
   public:
     int magic = LSVD_MAGIC;
     rbd_image *img;
@@ -219,8 +222,8 @@ struct lsvd_completion {
     std::mutex m;
     std::condition_variable cv;
 
-    std::unique_ptr<request> req;
     std::atomic<bool> is_complete = false;
+    std::atomic<int> refcount = 1;
 
     lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
 
@@ -231,16 +234,34 @@ struct lsvd_completion {
         retval = val;
         if (cb)
             cb((rbd_completion_t)this, arg);
+
         img->notify((rbd_completion_t)this);
 
         is_complete = true;
         cv.notify_all();
+
+        release();
+    }
+
+    void release()
+    {
+        if (refcount.fetch_sub(1) == 1)
+            delete this;
     }
 
     void wait()
     {
+        refcount++;
         std::unique_lock lock(m);
         cv.wait(lock, [&] { return is_complete == true; });
+        refcount--;
+    }
+
+    void run_subrequest(sptr<request> r)
+    {
+        refcount++;
+        req = r;
+        req->run(NULL);
     }
 };
 
@@ -285,7 +306,7 @@ extern "C" void rbd_aio_release(rbd_completion_t c)
 {
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
-    delete p;
+    p->release();
 }
 
 extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
@@ -352,7 +373,8 @@ enum rbd_req_status {
  * TODO: fix this. I merged separate read & write classes in the
  * ugliest possible way, but it works...
  */
-class rbd_aio_req : public request
+class rbd_aio_req : public request,
+                    public std::enable_shared_from_this<rbd_aio_req>
 {
     rbd_image *img;
     lsvd_completion *p;
@@ -370,10 +392,14 @@ class rbd_aio_req : public request
     std::mutex m;
     std::condition_variable cv;
 
-    std::vector<std::unique_ptr<request>> subrequests;
+    std::vector<sptr<request>> subrequests;
 
-    void complete_request(void)
+    void complete_request()
     {
+        // std::unique_lock lk(m);
+        is_complete = true;
+        cv.notify_all();
+
         // assert(!m.try_lock());
         if (p != NULL) {
             if (op == OP_READ) {
@@ -382,13 +408,9 @@ class rbd_aio_req : public request
                 p->complete(0);
             }
         }
-
-        // std::unique_lock lk(m);
-        is_complete = true;
-        cv.notify_all();
     }
 
-    void notify_w(request *req)
+    void notify_w()
     {
         std::unique_lock lk(m);
         auto z = --n_req;
@@ -423,15 +445,15 @@ class rbd_aio_req : public request
             smartiov *_iov = new smartiov(tmp.data(), tmp.size());
             to_free.push_back(_iov);
             auto req = img->wcache->writev(offset / 512, _iov);
-            subrequests.push_back(std::move(req));
+            subrequests.push_back(req);
             offset += _sectors * 512L;
         }
 
         for (auto &r : subrequests)
-            r->run(this);
+            r->run(shared_from_this());
     }
 
-    void notify_r(request *child)
+    void notify_r()
     {
         std::unique_lock lk(m);
         // do_log("rr done %d %p\n", n_req.load(), child);
@@ -457,7 +479,7 @@ class rbd_aio_req : public request
         // do_log("rbd_read %ld:\n", offset/512);
         for (auto const &r : subrequests) {
             // do_log(" %p\n", r);
-            r->run(this);
+            r->run(shared_from_this());
         }
 
         std::unique_lock lk(m);
@@ -517,12 +539,12 @@ class rbd_aio_req : public request
     /* note that there's no child request until read cache is updated
      * to use request/notify model.
      */
-    void notify(request *child)
+    void notify()
     {
         if (op == OP_READ)
-            notify_r(child);
+            notify_r();
         else
-            notify_w(child);
+            notify_w();
     }
 
     /* TODO: this is really gross. To properly fix it I need to integrate this
@@ -536,7 +558,7 @@ class rbd_aio_req : public request
 
     void release() {}
 
-    void run(request *parent /* unused */)
+    void run(sptr<request> parent)
     {
         if (op == OP_READ)
             run_r();
@@ -553,9 +575,9 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
     assert(p->magic == LSVD_MAGIC);
 
     p->img = img;
-    p->req = std::make_unique<rbd_aio_req>(OP_READ, img, p, offset, REQ_NOWAIT,
-                                           buf, len);
-    p->req->run(NULL);
+    auto req = std::make_shared<rbd_aio_req>(OP_READ, img, p, offset,
+                                             REQ_NOWAIT, buf, len);
+    p->run_subrequest(req);
     return 0;
 }
 
@@ -567,9 +589,9 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
     assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
-    p->req = std::make_unique<rbd_aio_req>(OP_READ, img, p, offset, REQ_NOWAIT,
-                                           iov, iovcnt);
-    p->req->run(NULL);
+    auto req = std::make_shared<rbd_aio_req>(OP_READ, img, p, offset,
+                                             REQ_NOWAIT, iov, iovcnt);
+    p->run_subrequest(req);
     return 0;
 }
 
@@ -581,9 +603,9 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
-    p->req = std::make_unique<rbd_aio_req>(OP_WRITE, img, p, offset, REQ_NOWAIT,
-                                           iov, iovcnt);
-    p->req->run(NULL);
+    auto req = std::make_shared<rbd_aio_req>(OP_WRITE, img, p, offset,
+                                             REQ_NOWAIT, iov, iovcnt);
+    p->run_subrequest(req);
     return 0;
 }
 
@@ -595,10 +617,9 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
     assert(p->magic == LSVD_MAGIC);
     p->img = img;
 
-    p->req = std::make_unique<rbd_aio_req>(OP_WRITE, img, p, offset, REQ_NOWAIT,
-                                           (char *)buf, len);
-    p->req->run(NULL);
-
+    auto req = std::make_shared<rbd_aio_req>(OP_WRITE, img, p, offset,
+                                             REQ_NOWAIT, (char *)buf, len);
+    p->run_subrequest(req);
     return 0;
 }
 
@@ -607,10 +628,11 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
     rbd_image *img = (rbd_image *)image;
-    auto req = rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
+    auto req = std::make_shared<rbd_aio_req>(OP_READ, img, nullptr, off,
+                                             REQ_WAIT, buf, len);
 
-    req.run(NULL);
-    req.wait();
+    req->run(NULL);
+    req->wait();
     return 0;
 }
 
@@ -618,10 +640,10 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
                          const char *buf)
 {
     rbd_image *img = (rbd_image *)image;
-    auto req =
-        rbd_aio_req(OP_WRITE, img, nullptr, off, REQ_WAIT, (char *)buf, len);
-    req.run(NULL);
-    req.wait();
+    auto req = std::make_shared<rbd_aio_req>(OP_WRITE, img, nullptr, off,
+                                             REQ_WAIT, (char *)buf, len);
+    req->run(NULL);
+    req->wait();
     return 0;
 }
 

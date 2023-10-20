@@ -8,16 +8,16 @@
  *              LGPL-2.1-or-later
  */
 
+#include <argp.h>
 #include <cassert>
 #include <condition_variable>
 #include <fcntl.h>
+#include <future>
 #include <mutex>
 #include <queue>
 #include <rados/librados.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <argp.h>
 
 #include "lsvd_types.h"
 
@@ -32,31 +32,29 @@
  * wait on them, but the backend segfaults in the case where
  * there's no higher-level request :-(
  */
-struct writer : public trivial_request {
+struct writer : public trivial_request,
+                public std::enable_shared_from_this<writer> {
     std::mutex m;
     std::condition_variable cv;
     bool done = false;
     char *buf = NULL;
 
+    std::promise<void> p;
+    std::future<void> f;
+
+    sptr<request> subrequest;
+
   public:
-    writer(char *buf_) { buf = buf_; }
+    writer(char *buf_, sptr<request> subr) : subrequest(subr), buf(buf_)
+    {
+        f = p.get_future();
+    }
+
     ~writer() { free(buf); }
 
-    void notify(request *child)
-    {
-        if (child != NULL)
-            child->release();
-        std::unique_lock lk(m);
-        done = true;
-        cv.notify_all();
-    }
-
-    void wait_for(void)
-    {
-        std::unique_lock lk(m);
-        while (!done)
-            cv.wait(lk);
-    }
+    void run(sptr<request> unused) { subrequest->run(shared_from_this()); }
+    void notify() { p.set_value(); }
+    void wait_for(void) { f.get(); }
 };
 
 static long parseint(const char *_s)
@@ -111,7 +109,7 @@ void create_thick(char *name, long size)
 
     /* create all the data objects, each with a single 8MB extent
      */
-    std::queue<writer *> q;
+    std::queue<sptr<writer>> q;
     long sector = 0;
     int pct = 0;
 
@@ -136,14 +134,14 @@ void create_thick(char *name, long size)
         sector += 16384;
 
         auto req = be->make_write_req(oname, hdr_buf, data_bytes + 4096);
-        auto r = new writer(hdr_buf);
-        q.push(r);
-        req->run(r);
+        auto wreq = std::make_shared<writer>(hdr_buf, req);
+        wreq->run(nullptr);
+        q.push(std::move(wreq));
+
         while (q.size() > 32) {
-            auto _r = q.front();
+            auto _r = std::move(q.front());
             q.pop();
             _r->wait_for();
-            delete _r;
         }
 
         int _pct = i * 100 / n_objs;
@@ -154,10 +152,9 @@ void create_thick(char *name, long size)
     }
 
     while (q.size() > 0) {
-        auto _r = q.front();
+        auto _r = std::move(q.front());
         q.pop();
         _r->wait_for();
-        delete _r;
     }
 
     /* now create a checkpoint listing all the objects we created and
