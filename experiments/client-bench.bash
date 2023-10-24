@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+set -x
 
 for pair in $*; do
     if [ ${pair#*=} != $pair ] ; then

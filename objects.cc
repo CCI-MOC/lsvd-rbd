@@ -35,6 +35,7 @@ char *object_reader::read_object_hdr(const char *name, bool fast)
     }
     return (char *)h;
 fail:
+    debug("Could not read header of object {}", name);
     free((char *)h);
     return NULL;
 }
@@ -52,6 +53,8 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
 {
     char *super_buf = read_object_hdr(name, false);
     auto super_h = (obj_hdr *)super_buf;
+    if (super_buf == NULL)
+        throw_error("Could not read superblock {}", name);
 
     if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
         super_h->type != LSVD_SUPER)
@@ -130,5 +133,3 @@ ssize_t object_reader::read_checkpoint(const char *name, uint64_t &cache_seq,
     free(buf);
     return 0;
 }
-
-

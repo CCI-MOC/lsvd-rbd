@@ -207,11 +207,17 @@ extern "C" int rbd_close(rbd_image_t image)
     return 0;
 }
 
-/* RBD-level completion structure
+/**
+ * RBD-level completion structure
+ * The refcounts are a complete hack, I couldn't explain it even if i wanted to
+ * Basically, external users will call rbd_aio_release() before we can actually
+ * free this structure, so we need to manually refcount and free it when we
+ * truly don't need it anymore
  */
-struct lsvd_completion {
+struct lsvd_completion : public std::enable_shared_from_this<lsvd_completion> {
   private:
     sptr<request> req;
+    sptr<lsvd_completion> self;
 
   public:
     int magic = LSVD_MAGIC;
@@ -227,6 +233,14 @@ struct lsvd_completion {
 
     lsvd_completion(rbd_callback_t cb_, void *arg_) : cb(cb_), arg(arg_) {}
 
+    void set_self()
+    {
+        self = shared_from_this();
+        assert(self.get() == this);
+    }
+
+    sptr<lsvd_completion> get_shared() { return shared_from_this(); }
+
     /* see Ceph AioCompletion::complete
      */
     void complete(int val)
@@ -239,29 +253,22 @@ struct lsvd_completion {
 
         is_complete = true;
         cv.notify_all();
-
-        release();
     }
 
-    void release()
-    {
-        if (refcount.fetch_sub(1) == 1)
-            delete this;
-    }
+    void release() { self.reset(); }
 
     void wait()
     {
-        refcount++;
+        auto r = shared_from_this();
         std::unique_lock lock(m);
         cv.wait(lock, [&] { return is_complete == true; });
-        refcount--;
+        r.reset();
     }
 
     void run_subrequest(sptr<request> r)
     {
-        refcount++;
         req = r;
-        req->run(NULL);
+        req->run(nullptr);
     }
 };
 
@@ -297,8 +304,9 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
                                          rbd_callback_t complete_cb,
                                          rbd_completion_t *c)
 {
-    lsvd_completion *p = new lsvd_completion(complete_cb, cb_arg);
-    *c = (rbd_completion_t)p;
+    auto p = std::make_shared<lsvd_completion>(complete_cb, cb_arg);
+    p->set_self();
+    *c = static_cast<rbd_completion_t>(p.get());
     return 0;
 }
 
@@ -335,7 +343,7 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
     if (img->cfg.hard_sync)
         img->xlate->flush();
 
-    p->complete(0); // TODO - make asynchronous
+    // p->complete(0); // TODO - make asynchronous
     return 0;
 }
 
@@ -377,7 +385,7 @@ class rbd_aio_req : public request,
                     public std::enable_shared_from_this<rbd_aio_req>
 {
     rbd_image *img;
-    lsvd_completion *p;
+    sptr<lsvd_completion> p;
     char *aligned_buf = NULL;
     uint64_t offset; // in bytes
     sector_t _sector;
@@ -496,9 +504,11 @@ class rbd_aio_req : public request,
     {
         op = op_; // OP_READ or OP_WRITE
         img = img_;
-        p = p_;
-        if (p != NULL)
+        if (p_ != NULL) {
+            p = p_->get_shared();
             assert(p->magic == LSVD_MAGIC);
+        }
+
         offset = offset_; // byte offset into volume
         _sector = offset / 512;
         sectors = iovs.bytes() / 512L;

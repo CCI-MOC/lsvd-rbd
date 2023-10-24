@@ -23,8 +23,7 @@ experiment_dir=$lsvd_dir/experiments/
 results_dir=$lsvd_dir/experiments/results/
 outfile=$results_dir/$cur_time.$pool_name.lsvd.txt
 
-gw_ip=$(ip addr | grep inet | fgrep inet\ 10.1 | \
-	   sed -e 's/.*inet //' -e 's,/.*,,')
+gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 echo GATEWAY IP=$gw_ip
 client_ip=${client_ip:-10.1.0.6}
 
@@ -69,6 +68,8 @@ export LSVD_WCACHE_DIR=/mnt/nvme/lsvd-wcache
 export LSVD_GC_THRESHOLD=40
 ###export fetch_window=0 # number of cache block fills -- 0 is bypass cache
 ./build/bin/nvmf_tgt &
+
+sleep 5
 
 # == setup spdk target ===
 printf "\n\n\n===Starting automated test on pool: $pool_name===\n\n" >> $outfile
