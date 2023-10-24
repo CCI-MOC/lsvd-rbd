@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -xeuo pipefail
+
+make clean
+make -j20 nosan
+
+# create qemu image
+
+lsvd_dir=${lsvd_dir:-/home/isaackhor/code/lsvd-rbd/}
+cd $lsvd_dir
+
+LD_PRELOAD=$lsvd_dir/liblsvd.so \
+    qemu-img create -f raw rbd:triple-ssd/lsvd-qemu-debug 20G
+
+mkdir -p /mnt/nvme/lsvd-rcache /mnt/nvme/lsvd-wcache
+export LSVD_RCACHE_DIR=/mnt/nvme/lsvd-rcache
+export LSVD_WCACHE_DIR=/mnt/nvme/lsvd-wcache
+export LSVD_GC_THRESHOLD=40
+
+LD_PRELOAD=$lsvd_dir/liblsvd.so \
+    qemu-system-x86_64 \
+    -enable-kvm \
+    -m 1024 \
+    -cdrom qemu/ubuntu2204.iso \
+    -vnc :1 -serial mon:stdio \
+    -drive format=raw,file=rbd:triple-ssd/lsvd-qemu-debug
+
+exit
+
+# This is the non-lsvd version
+
+# qemu-img create -f qcow2 local.qcow2 20G
+# qemu-system-x86_64 \
+#     -enable-kvm \
+#     -m 1024 \
+#     -cdrom ubuntu2204.iso \
+#     -nographic -serial mon:stdio -curses \
+#     -vnc :1 -serial mon:stdio \
+#     -drive format=qcow2,file=local.qcow2
