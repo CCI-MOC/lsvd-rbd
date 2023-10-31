@@ -15,13 +15,15 @@ LDFLAGS += -fuse-ld=mold -Wl,-rpath=/usr/lib/liburing.so.2.5
 SOFLAGS = -shared -fPIC
 
 debug: CXXFLAGS += -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
-debug: CXXFLAGS += -fsanitize=address
+debug: CXXFLAGS += -fsanitize=address -static-libasan
 # debug: CXXFLAGS += -fsanitize=thread
 debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion -Wno-conversion -Wno-unused-parameter
 debug: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline
+nosan: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline
 release: CXXFLAGS += -O3
 
 debug: liblsvd.so imgtool lsvd_rnd_test
+nosan: liblsvd.so imgtool lsvd_rnd_test
 release: liblsvd.so
 
 CPP = $(wildcard *.cc)

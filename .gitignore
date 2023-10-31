@@ -58,5 +58,8 @@ imgtool
 # don't try to add results by default
 # manually add with -f
 experiments/results/
+
 sidetest/
 .idea/
+*.iso
+*.qcow2

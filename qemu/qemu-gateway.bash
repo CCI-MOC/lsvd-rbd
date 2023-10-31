@@ -36,3 +36,5 @@ cd $lsvd_dir/spdk
 kill_lsvd_nvmf
 launch_lsvd_gw_background
 setup_nvmf_target
+
+wait

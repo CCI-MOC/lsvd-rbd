@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+set -x
 
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
