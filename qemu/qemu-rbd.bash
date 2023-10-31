@@ -7,7 +7,7 @@ make -j20 nosan
 
 # create qemu image
 
-lsvd_dir=${lsvd_dir:-/home/isaackhor/code/lsvd-rbd/}
+lsvd_dir=$(git rev-parse --show-toplevel)
 cd $lsvd_dir
 
 LD_PRELOAD=$lsvd_dir/liblsvd.so \
@@ -31,10 +31,9 @@ exit
 # This is the non-lsvd version
 
 # qemu-img create -f qcow2 local.qcow2 20G
-# qemu-system-x86_64 \
-#     -enable-kvm \
-#     -m 1024 \
-#     -cdrom ubuntu2204.iso \
-#     -nographic -serial mon:stdio -curses \
-#     -vnc :1 -serial mon:stdio \
-#     -drive format=qcow2,file=local.qcow2
+qemu-system-x86_64 \
+    -enable-kvm \
+    -m 1024 \
+    -cdrom qemu/ubuntu2204.iso \
+    -vnc :1 -serial mon:stdio \
+    -drive format=qcow2,file=local.qcow2
