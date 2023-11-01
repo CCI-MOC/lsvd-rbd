@@ -34,9 +34,12 @@ modprobe brd rd_size=$imgsize max_part=1 rd_nr=1
 
 kill_nvmf
 launch_gw_background
-scripts/rpc.py bdev_uring_create /dev/ram0 bdev_uring0 $blocksize
-configure_nvmf_uring /dev/ram0 4096
-configure_nvmf_transport $gw_ip
+
+# liburing issues, use aio for now
+# scripts/rpc.py bdev_uring_create /dev/ram0 bdev_uring0 $blocksize
+scripts/rpc.py bdev_aio_create /dev/ram0 bdev_uring0 $blocksize
+
+configure_nvmf_transport $gw_ip bdev_uring0
 
 run_client_bench $client_ip $outfile
 cleanup_nvmf

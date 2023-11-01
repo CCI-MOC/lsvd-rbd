@@ -15,18 +15,20 @@ function configure_nvmf_rbd {
 	local pool_name=$1
 	local imgname=$2
 	local blocksize=$3
+	local bdev_name=$4
 
 	cd $lsvd_dir/spdk
 	scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
-	scripts/rpc.py bdev_rbd_create $pool_name $imgname $blocksize -c rbd_cluster
+	scripts/rpc.py bdev_rbd_create $pool_name $imgname $blocksize -c rbd_cluster -b $bdev_name
 }
 
 function configure_nvmf_transport {
 	local gateway_ip=$1
+	local bdev_name=$2
 
 	cd $lsvd_dir/spdk
 	scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
-	scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 Ceph0
+	scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $bdev_name
 	scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 	scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 9922
 }
@@ -40,11 +42,15 @@ function launch_lsvd_gw_background {
 	export LSVD_WCACHE_DIR=$cache_parent_dir/write/
 	export LSVD_GC_THRESHOLD=40
 	LD_PRELOAD=$lsvd_dir/liblsvd.so ./build/bin/nvmf_tgt &
+
+	sleep 5
 }
 
 function launch_gw_background {
 	cd $lsvd_dir/spdk
 	./build/bin/nvmf_tgt &
+
+	sleep 5
 }
 
 function cleanup_nvmf {

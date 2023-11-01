@@ -30,12 +30,13 @@ blocksize=4096
 source $lsvd_dir/experiments/common.bash
 
 # Create the image
-rbd -p $pool_name create --thick-provision --size $imgsize $imgname
+rbd -p $pool_name rm $imgname || true
+rbd -p $pool_name create --size $imgsize $imgname
 
 kill_nvmf
 launch_gw_background
-configure_nvmf_rbd $pool_name $imgname $blocksize
-configure_nvmf_transport $gw_ip
+configure_nvmf_rbd $pool_name $imgname $blocksize bdev_rbd0
+configure_nvmf_transport $gw_ip bdev_rbd0
 
 run_client_bench $client_ip $outfile
 cleanup_nvmf

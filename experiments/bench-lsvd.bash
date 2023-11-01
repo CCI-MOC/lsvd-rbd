@@ -40,8 +40,8 @@ create_lsvd_thick $pool_name $imgname $imgsize
 
 kill_nvmf
 launch_lsvd_gw_background $cache_dir
-configure_nvmf_rbd $pool_name $imgname $blocksize
-configure_nvmf_transport $gw_ip
+configure_nvmf_rbd $pool_name $imgname $blocksize bdev_lsvd0
+configure_nvmf_transport $gw_ip bdev_lsvd0
 
 run_client_bench $client_ip $outfile
 cleanup_nvmf
