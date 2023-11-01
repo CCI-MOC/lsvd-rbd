@@ -13,7 +13,7 @@ gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
 cache_dir=/mnt/nvme/lsvd-cache/
 
-echo Running gateway on $gw_ip, client on $client_ip
+echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-qemu-ubuntu2204
 imgsize=5g
@@ -34,7 +34,7 @@ rados -p $pool_name stat $imgname
 
 cd $lsvd_dir/spdk
 kill_lsvd_nvmf
-launch_lsvd_gw_background
-setup_nvmf_target
+launch_lsvd_gw_background $cache_dir
+setup_nvmf_target $pool_name $imgname $blocksize
 
 wait

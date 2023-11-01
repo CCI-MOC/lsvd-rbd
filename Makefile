@@ -22,9 +22,9 @@ debug: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline
 nosan: CXXFLAGS += -O0 -fno-omit-frame-pointer -fno-inline
 release: CXXFLAGS += -O3
 
-debug: liblsvd.so imgtool lsvd_rnd_test
-nosan: liblsvd.so imgtool lsvd_rnd_test
-release: liblsvd.so
+debug: liblsvd.so imgtool lsvd_rnd_test thick-image
+nosan: liblsvd.so imgtool lsvd_rnd_test thick-image
+release: liblsvd.so imgtool thick-image
 
 CPP = $(wildcard *.cc)
 OBJS = $(CPP:%.cc=$(BUILD_DIR)/%.o)
@@ -82,9 +82,9 @@ unit-test-O3: unit-test.cc extent.h
 	$(CC) $(CXXFLAGS) -O3 -o $@ unit-test.cc -lstdc++fs
 
 clean:
-	rm -f liblsvd.so bdus mkdisk $(OBJS) $(DEPS) *.o *.d test7 test8 imgtool
+	@rm -f liblsvd.so bdus mkdisk $(OBJS) $(DEPS) *.o *.d test7 test8 imgtool
 
 install-deps:
 	sudo apt install libfmt-dev libaio-dev librados-dev mold
-	echo "You'll have to compile the latest version of liburing yourself"
+	# echo "You'll have to compile the latest version of liburing yourself"
 
