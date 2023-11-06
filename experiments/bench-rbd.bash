@@ -24,14 +24,14 @@ outfile=$lsvd_dir/experiments/results/$cur_time.rbd.txt
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=rbd-benchmark
-imgsize=40G
+imgsize=80G
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
 
 # Create the image
 rbd -p $pool_name rm $imgname || true
-rbd -p $pool_name create --size $imgsize $imgname
+rbd -p $pool_name create --size $imgsize --thick-provision $imgname
 
 kill_nvmf
 launch_gw_background

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -xeuo pipefail
+set -euo pipefail
 
 for pair in $*; do
 	if [ ${pair#*=} != $pair ]; then
@@ -24,7 +24,6 @@ modprobe nvme-fabrics
 gw_ip=${gw_ip:-10.1.0.5}
 # see that it's there
 nvme discover -t tcp -a $gw_ip -s 9922
-
 nvme connect -t tcp --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
 sleep 5
 

@@ -25,7 +25,7 @@ outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.txt
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-benchmark
-imgsize=40g
+imgsize=80g
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash

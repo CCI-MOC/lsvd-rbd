@@ -7,13 +7,6 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
-if [ -z "${1:-}" ]
-  then echo "Please provide a pool name"
-  exit
-fi
-
-# pool must already exist
-pool_name=$1
 cur_time=$(date +"%FT%T")
 
 lsvd_dir=$(git rev-parse --show-toplevel)
