@@ -34,6 +34,16 @@ class rados_backend : public backend
     rados_t cluster;
     rados_ioctx_t io_ctx = nullptr;
 
+    // THIS IS A UGLY HACK
+    // previous iterations of the code used names of the format 'pool/imgname'
+    // and had pool_init return the postfix after the '/', but we also need
+    // to accomodate software that just passes in an ioctx with the pool
+    // as part of the ioctx
+    // so this flag determines if pool_init will "fix" the name or not
+    // if we get an ioctx from outside, we don't, otherwise we do
+    // TODO long term fix of actually doing the names right
+    bool enable_ioctx_bypass_hack = false;
+
     char *pool_init(const char *pool_);
 
   public:
@@ -69,6 +79,9 @@ backend *make_rados_backend(rados_ioctx_t io) { return new rados_backend(io); }
 rados_backend::rados_backend(rados_ioctx_t io_)
 {
     io_ctx = io_;
+    if(io_ctx != nullptr)
+        enable_ioctx_bypass_hack = true;
+
     int r;
     if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
         throw("rados create");
@@ -94,7 +107,7 @@ rados_backend::~rados_backend() {}
  */
 char *rados_backend::pool_init(const char *name)
 {
-    if (io_ctx != nullptr)
+    if (io_ctx != nullptr && enable_ioctx_bypass_hack)
         return (char *)name;
 
     if (pool_len == 0) {
