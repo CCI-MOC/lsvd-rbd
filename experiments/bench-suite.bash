@@ -8,6 +8,4 @@ if [ "$EUID" -ne 0 ]
 fi
 
 ./bench-lsvd.bash triple-ssd
-# ./bench-lsvd.bash test_hdd_pool
 ./bench-rbd.bash triple-ssd
-# ./bench-rbd.bash test_hdd_pool

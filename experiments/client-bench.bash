@@ -3,16 +3,16 @@
 set -euo pipefail
 
 for pair in $*; do
-    if [ ${pair#*=} != $pair ] ; then
-        eval $pair
-    else
-        echo ERROR: $pair not an assignment
-    fi
+	if [ ${pair#*=} != $pair ]; then
+		eval $pair
+	else
+		echo ERROR: $pair not an assignment
+	fi
 done
 
 printf "===Starting client benchmark\n\n"
 
-trap 'umount /mnt/fsbench || nvme disconnect -n nqn.2016-06.io.spdk:cnode1; exit' SIGINT SIGTERM EXIT
+trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM EXIT
 
 # if [ "$EUID" -ne 0 ]
 #   then echo "Please run as root"
@@ -24,8 +24,7 @@ modprobe nvme-fabrics
 gw_ip=${gw_ip:-10.1.0.5}
 # see that it's there
 nvme discover -t tcp -a $gw_ip -s 9922
-
-nvme connect -t tcp  --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+nvme connect -t tcp --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
 sleep 5
 
 nvme list
@@ -38,7 +37,6 @@ printf "Using device $dev_name\n"
 #num_fio_processes=4
 num_fio_processes=1
 fio_size="80GB"
-fio_iodepth=${iodepth:-256}
 fio_bs=${blksize:-4k}
 
 # fio
@@ -67,10 +65,10 @@ function run_fio {
 	sleep 15
 }
 
-run_fio randread 60 $fio_iodepth $fio_bs
-run_fio randwrite 60 $fio_iodepth $fio_bs
-run_fio read 60 $fio_iodepth $fio_bs
-run_fio write 60 $fio_iodepth $fio_bs
+run_fio randread 60 256 $fio_bs
+run_fio randwrite 60 256 $fio_bs
+run_fio read 60 256 $fio_bs
+run_fio write 60 256 $fio_bs
 
 printf "\n\n"
 printf "=========================================\n"
@@ -123,7 +121,7 @@ printf "\n\n"
 # filebench hangs if ASLR is on
 # don't ask who spent a whole day trying to debug LSVD only to find out it was ASLR
 # definitely not Isaac, he would never do that :(
-echo 0 > /proc/sys/kernel/randomize_va_space
+echo 0 >/proc/sys/kernel/randomize_va_space
 
 function run_filebench {
 	printf "\n\n===Filebench: workload=$1===\n\n"
@@ -133,10 +131,9 @@ function run_filebench {
 	perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
 }
 
-run_filebench /tmp/filebench-varmail.txt
-run_filebench /tmp/filebench-fileserver.txt
-run_filebench /tmp/filebench-oltp.txt
+for workload in /tmp/filebench/*.f; do
+	run_filebench $workload
+done
 
 # === disconnect and cleanup ===
 # in the trap SIGTERM above
-

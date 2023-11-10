@@ -24,8 +24,7 @@ outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
-imgname=lsvd-benchmark
-imgsize=80g
+imgname=lsvd-qemu-test
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
@@ -36,12 +35,12 @@ cd $lsvd_dir
 make clean
 make -j20 release
 
-create_lsvd_thick $pool_name $imgname $imgsize
+# make sure image exists
+rados -p $pool_name stat $imgname
 
 kill_nvmf
 launch_lsvd_gw_background $cache_dir
 configure_nvmf_rbd $pool_name $imgname $blocksize bdev_lsvd0
 configure_nvmf_transport $gw_ip bdev_lsvd0
 
-run_client_bench $client_ip $outfile
-cleanup_nvmf
+wait

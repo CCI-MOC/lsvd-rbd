@@ -1,4 +1,31 @@
-# punch list
+## ATC 24 todos
+
+- benchmark against nvme drive instead of ramdisk
+- trace-driven optimisation of VM boot image - timo
+- ycsb benchmark?
+- iscsi target, effort should be minimal
+	- re-attach to the same local cache
+- make sure shared cache and cloned images work
+- per-commit benchmarks - sumatra
+
+Paper thesis:
+
+- storage gateway that's fast, scales, deploys as nvmf target
+- GC performs well (?)
+- shared gateway, read sharing allows for better performance?
+	- shared cache
+	- shared images between VMs
+	- physical machines with hardware we don't have (NVMF)
+- shared gateway and cloned images
+	- since they're derivations, they share prefixes
+	- thus share cache
+	- fleet deployments -- most machines are mostly the same and derived
+	- faster startup due to warmed cache from other machines booting?
+	- container-like sharing of base images, potential performance advantage
+- disaggregation of backend
+
+
+## old todo list
 
 `lsvd.cc`:
 - implement `rbd_aio_discard`

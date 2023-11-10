@@ -17,12 +17,12 @@
 #include <queue>
 #include <thread>
 
-#include "lsvd_types.h"
-
 #include "backend.h"
 #include "extent.h"
+#include "lsvd_types.h"
 #include "request.h"
 #include "smartiov.h"
+#include "utils.h"
 
 void do_log(const char *, ...);
 
@@ -32,12 +32,22 @@ class rados_backend : public backend
     char pool[128];
     int pool_len = 0;
     rados_t cluster;
-    rados_ioctx_t io_ctx;
+    rados_ioctx_t io_ctx = nullptr;
+
+    // THIS IS A UGLY HACK
+    // previous iterations of the code used names of the format 'pool/imgname'
+    // and had pool_init return the postfix after the '/', but we also need
+    // to accomodate software that just passes in an ioctx with the pool
+    // as part of the ioctx
+    // so this flag determines if pool_init will "fix" the name or not
+    // if we get an ioctx from outside, we don't, otherwise we do
+    // TODO long term fix of actually doing the names right
+    bool enable_ioctx_bypass_hack = false;
 
     char *pool_init(const char *pool_);
 
   public:
-    rados_backend();
+    rados_backend(rados_ioctx_t io_ctx);
     ~rados_backend();
     void stop(void);
 
@@ -61,13 +71,17 @@ class rados_backend : public backend
 
 /* needed for implementation hiding
  */
-backend *make_rados_backend(rados_ioctx_t io) { return new rados_backend; }
+backend *make_rados_backend(rados_ioctx_t io) { return new rados_backend(io); }
 
 /* see https://docs.ceph.com/en/latest/rados/api/librados/
  * for documentation on the librados API
  */
-rados_backend::rados_backend()
+rados_backend::rados_backend(rados_ioctx_t io_)
 {
+    io_ctx = io_;
+    if(io_ctx != nullptr)
+        enable_ioctx_bypass_hack = true;
+
     int r;
     if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
         throw("rados create");
@@ -79,7 +93,7 @@ rados_backend::rados_backend()
 
 void rados_backend::stop(void)
 {
-    if (pool_len > 0)
+    if (io_ctx != nullptr)
         rados_ioctx_destroy(io_ctx);
     rados_shutdown(cluster);
 }
@@ -93,6 +107,9 @@ rados_backend::~rados_backend() {}
  */
 char *rados_backend::pool_init(const char *name)
 {
+    if (io_ctx != nullptr && enable_ioctx_bypass_hack)
+        return (char *)name;
+
     if (pool_len == 0) {
         char *dst = pool;
         const char *src = name;
@@ -102,7 +119,7 @@ char *rados_backend::pool_init(const char *name)
         pool_len = dst - pool;
         int r = rados_ioctx_create(cluster, pool, &io_ctx);
         if (r < 0)
-            throw("rados pool open");
+            throw std::runtime_error("rados pool open");
     }
     assert(!memcmp(pool, name, pool_len));
     return (char *)name + pool_len + 1;

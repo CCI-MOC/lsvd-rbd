@@ -485,7 +485,7 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
     _hdrbuf = (char *)aligned_alloc(4096, 4096);
 
     const char *name = "write_cache_cb";
-    nvme_w = make_nvme(fd, name);
+    nvme_w = make_nvme_uring(fd, name);
 
     char *buf = (char *)aligned_alloc(4096, 4096);
     if (nvme_w->read(buf, 4096, 4096L * super_blkno) < 4096)
