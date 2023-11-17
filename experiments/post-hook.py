@@ -27,8 +27,8 @@ print(fio_output_file)
 filebench_output_file= os.path.join(directory, 'graphs/filebench_output.csv')
 filebench_plot_file= os.path.join(directory, 'graphs/filebench_plot.pdf')
 
-fio_output= open(fio_output_file, 'w', newline='')
-filebench_output= open(filebench_output_file, 'w', newline='')
+fio_output= open(fio_output_file, 'a', newline='')
+filebench_output= open(filebench_output_file, 'a', newline='')
 
 csv_writer_fio=csv.writer(fio_output)
 csv_writer_filebench=csv.writer(filebench_output)
