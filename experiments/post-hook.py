@@ -21,14 +21,17 @@ print(git_branch)
 
 #directory = '/home/sumatrad/lsvd-rbd/experiments/results'
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/results'
-fio_output_file= os.path.join(directory, 'graphs/fio_output.csv')
-fio_plot_file= os.path.join(directory, 'graphs/fio_plot.pdf')
+graph_dir = os.path.join(directory, 'graphs')
+if not os.path.exists(graph_dir):
+    os.makedirs(graph_dir)
+fio_output_file= os.path.join(graph_dir, 'fio_output.csv')
+fio_plot_file= os.path.join(graph_dir, 'fio_plot')
 print(fio_output_file)
-filebench_output_file= os.path.join(directory, 'graphs/filebench_output.csv')
-filebench_plot_file= os.path.join(directory, 'graphs/filebench_plot.pdf')
+filebench_output_file= os.path.join(graph_dir, 'filebench_output.csv')
+filebench_plot_file= os.path.join(graph_dir, 'filebench_plot')
 
-fio_output= open(fio_output_file, 'a', newline='')
-filebench_output= open(filebench_output_file, 'a', newline='')
+fio_output= open(fio_output_file, 'a+', newline='')
+filebench_output= open(filebench_output_file, 'a+', newline='')
 
 csv_writer_fio=csv.writer(fio_output)
 csv_writer_filebench=csv.writer(filebench_output)
@@ -39,29 +42,34 @@ if fio_output.tell() == 0:
 if filebench_output.tell() == 0:
         csv_writer_filebench.writerow(['timestamp', 'commit id', 'git_branch', 'disk_type', 'fileserver IOPS', 'fileserver IOPS/s', 'fileserver-sync IOPS', 'fileserver-sync IOPS/s',  'oltp IOPS', 'oltp IOPS/s', 'varmail IOPS', 'varmail IOPS/s'])
 
-files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+
+keywords = ['rbd', 'lsvd', 'ramdisk']
+files = [file for file in os.listdir(directory) if any(keyword in file for keyword in keywords)]
 files.sort(key=lambda x: os.path.getctime(os.path.join(directory, x)), reverse=True)
 recent_files = files[:3]
+
+# files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+# files.sort(key=lambda x: os.path.getctime(os.path.join(directory, x)), reverse=True)
+# recent_files = files[:3]
 for file_name in recent_files:
     file_path = os.path.join(directory, file_name)
     #timestamp = os.path.getctime(file_path)
-
     suffixes = {'k': 1e3, 'm': 1e6, 'g': 1e9}
+    iops_array= [None]*4
+    workload_array= [None]*8
+    file_split= file_name.split('.')
+    timestamp=file_split[0]
+    if file_split[1]=='rbd':
+        disk_type='rbd'
+    elif file_split[1]=='lsvd':
+        disk_type='lsvd'
+    else:
+        disk_type='ramdisk'
          
     print(file_path)
 
     with open(file_path, 'r') as file:
-        iops_array= [None]*4
-        workload_array= [None]*8
-        file_split= file_name.split('.')
-        timestamp=file_split[0]
-        #print("file_split : ", file_split)
-        if file_split[1]=='rbd':
-            disk_type='rbd'
-        elif file_split[1]=='lsvd':
-            disk_type='lsvd'
-        else:
-            disk_type='ramdisk'
+
         for line in file:
             if line.startswith("RESULT"):
                 #print(line)
