@@ -33,9 +33,9 @@ filebench_output_file= os.path.join(graph_dir, 'filebench_output.csv')
 filebench_plot_file= os.path.join(graph_dir, 'filebench_plot')
 run_result= os.path.join(directory, datetime.now().strftime("%Y-%m-%d") +'_output.txt')
 
-# with open(run_result, 'w') as file:
-#     os.chdir(directory)
-#     subprocess.run(['bash', script_path], stdout=file, text=True)
+with open(run_result, 'w') as file:
+    os.chdir(directory)
+    subprocess.run(['bash', script_path], stdout=file, text=True)
 
 # os.system('./nightly.bash')
 # result = subprocess.run(['bash', script_path], stdout=subprocess.PIPE, text=True)

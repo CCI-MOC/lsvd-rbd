@@ -4,3 +4,4 @@ test
 new
 new1
 txt2
+new
