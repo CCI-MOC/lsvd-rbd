@@ -17,7 +17,7 @@ commit_id=re.search('commit (\w+)', check_output(['git', 'log', '-1', 'HEAD']).d
 
 git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().decode()
 
-directory = '/home/sumatrad/lsvd-rbd/experiments/results'
+directory = '/home/sumatrad/lsvd-rbd/experiments/'
 # directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
 result_dir = os.path.join(directory, 'results')
