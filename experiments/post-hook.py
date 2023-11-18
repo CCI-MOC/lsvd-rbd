@@ -11,6 +11,9 @@ from subprocess import check_output
 import matplotlib.pyplot as plt
 import pandas as pd
 
+## TO USE THIS SCRIPT PLEASE COPY IT UNDER "lsvd-rbd/.git/hook" AND RENAME IT TO "post-commit" ##
+## ENSURE THE "directory" VARIABLE IS CHANGED RESPECTIVE TO YOUR REPO ##
+
 print('Post commit script is running...')
 
 commit_id=re.search('commit (\w+)', check_output(['git', 'log', '-1', 'HEAD']).decode()).group(1)[-6:]
