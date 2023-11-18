@@ -20,8 +20,8 @@ commit_id=re.search('commit (\w+)', check_output(['git', 'log', '-1', 'HEAD']).d
 
 git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().decode()
 
-directory = '/home/sumatrad/lsvd-rbd/experiments/'
-# directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/'
+# directory = '/home/sumatrad/lsvd-rbd/experiments/'
+directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
 result_dir = os.path.join(directory, 'results')
 graph_dir = os.path.join(result_dir, 'graphs')
@@ -157,8 +157,8 @@ axes1 = axes1.flatten()
 #for i, column_name in enumerate(df_fio.columns[1:-1]):
 for i, column_name in enumerate(fio_col):  
     for group_value in fio_group_values:
-        subset = df_fio[df_fio['disk_type'] == group_value]
-        axes1[i].plot(subset['commit id'], subset[column_name], label=f'{group_value}')
+        subset = df_fio[df_fio['disk_type'].values == group_value]
+        axes1[i].plot(subset['commit id'].values, subset[column_name].values, label=f'{group_value}')
 
     axes1[i].set_xlabel('commit id')
     axes1[i].set_ylabel(f'{column_name}')
@@ -186,8 +186,8 @@ axes2 = axes2.flatten()
 #for i, column_name in enumerate(df_fio.columns[1:-1]):
 for i, column_name in enumerate(filebench_col):  
     for group_value in filebench_group_values:
-        subset = df_filebench[df_filebench['disk_type'] == group_value]
-        axes2[i].plot(subset['commit id'], subset[column_name], label=f'{group_value}')
+        subset = df_filebench[df_filebench['disk_type'].values == group_value]
+        axes2[i].plot(subset['commit id'].values, subset[column_name].values, label=f'{group_value}')
 
     axes2[i].set_xlabel('commit id')
     axes2[i].set_ylabel(f'{column_name}')
