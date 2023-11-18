@@ -17,8 +17,8 @@ commit_id=re.search('commit (\w+)', check_output(['git', 'log', '-1', 'HEAD']).d
 
 git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().decode()
 
-#directory = '/home/sumatrad/lsvd-rbd/experiments/results'
-directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/'
+directory = '/home/sumatrad/lsvd-rbd/experiments/results'
+# directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
 result_dir = os.path.join(directory, 'results')
 graph_dir = os.path.join(result_dir, 'graphs')
@@ -29,8 +29,8 @@ fio_plot_file= os.path.join(graph_dir, 'fio_plot')
 filebench_output_file= os.path.join(graph_dir, 'filebench_output.csv')
 filebench_plot_file= os.path.join(graph_dir, 'filebench_plot')
 
-# result = subprocess.run(['bash', script_path], stdout=subprocess.PIPE, text=True)
-# print(result.stdout)
+result = subprocess.run(['bash', script_path], stdout=subprocess.PIPE, text=True)
+print(result.stdout)
 
 fio_output= open(fio_output_file, 'a+', newline='')
 filebench_output= open(filebench_output_file, 'a+', newline='')
