@@ -6,6 +6,7 @@ import csv
 from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
+import subprocess
 from subprocess import check_output
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -13,22 +14,23 @@ import pandas as pd
 print('Post commit script is running...')
 
 commit_id=re.search('commit (\w+)', check_output(['git', 'log', '-1', 'HEAD']).decode()).group(1)[-6:]
-#commit_id=commit_id[-5:]
-print(commit_id)
 
 git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().decode()
-print(git_branch)
 
 #directory = '/home/sumatrad/lsvd-rbd/experiments/results'
-directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/results'
-graph_dir = os.path.join(directory, 'graphs')
+directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/Code/lsvd-rbd/experiments/'
+script_path = os.path.join(directory, 'nightly.bash')
+result_dir = os.path.join(directory, 'results')
+graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
     os.makedirs(graph_dir)
 fio_output_file= os.path.join(graph_dir, 'fio_output.csv')
 fio_plot_file= os.path.join(graph_dir, 'fio_plot')
-print(fio_output_file)
 filebench_output_file= os.path.join(graph_dir, 'filebench_output.csv')
 filebench_plot_file= os.path.join(graph_dir, 'filebench_plot')
+
+# result = subprocess.run(['bash', script_path], stdout=subprocess.PIPE, text=True)
+# print(result.stdout)
 
 fio_output= open(fio_output_file, 'a+', newline='')
 filebench_output= open(filebench_output_file, 'a+', newline='')
@@ -44,15 +46,12 @@ if filebench_output.tell() == 0:
 
 
 keywords = ['rbd', 'lsvd', 'ramdisk']
-files = [file for file in os.listdir(directory) if any(keyword in file for keyword in keywords)]
-files.sort(key=lambda x: os.path.getctime(os.path.join(directory, x)), reverse=True)
+files = [file for file in os.listdir(result_dir) if any(keyword in file for keyword in keywords)]
+files.sort(key=lambda x: os.path.getctime(os.path.join(result_dir, x)), reverse=True)
 recent_files = files[:3]
 
-# files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-# files.sort(key=lambda x: os.path.getctime(os.path.join(directory, x)), reverse=True)
-# recent_files = files[:3]
 for file_name in recent_files:
-    file_path = os.path.join(directory, file_name)
+    file_path = os.path.join(result_dir, file_name)
     #timestamp = os.path.getctime(file_path)
     suffixes = {'k': 1e3, 'm': 1e6, 'g': 1e9}
     iops_array= [None]*4
@@ -66,7 +65,7 @@ for file_name in recent_files:
     else:
         disk_type='ramdisk'
          
-    print(file_path)
+    #print(file_path)
 
     with open(file_path, 'r') as file:
 
@@ -76,8 +75,8 @@ for file_name in recent_files:
                 match_fio = re.search("Fio \(iodepth=(\d+)\) (\w+): .* IOPS=([\d.]+[kKmMgG]?)?, BW=([\d.]+(?:[kKmMgG]i?)?B/s)?", line)
                 match_filebench = re.search("Filebench /tmp/filebench/(.*?):\d+\.\d+:.* IO Summary: (\d+) ops (\d+\.\d+) ops/s (\d+)/(\d+) rd/wr (\d+\.\d+[kKmMgG]?[Bb]/s)? (\d+\.\d+ms/op)?", line)
 
-                #print(match_fio)
-                #print(match_filebench)
+                # print(match_fio)
+                # print(match_filebench)
                 if match_fio:
                     iodepth_value = match_fio.group(1)
                     request_type = match_fio.group(2)
@@ -85,15 +84,13 @@ for file_name in recent_files:
                     
                     suffix = iops_value[-1].lower()
 
-                    # Check if the suffix is in the dictionary
                     if suffix in suffixes:
                         iops_value = float(iops_value[:-1]) * suffixes[suffix]
                     else:
-                        # No suffix, just convert to an integer
                         iops_value = float(iops_value)
                     bw_value = match_fio.group(4)
 
-                    #print("request_type: " + request_type)
+                    
                     if iodepth_value=='256':
                         if request_type=='randread':
                             iops_array[0]= iops_value
@@ -104,11 +101,6 @@ for file_name in recent_files:
                         elif request_type=='write':
                             iops_array[3]= iops_value
 
-
-                    # print("iodepth value: " + iodepth_value)
-                    # print("read value: " + request_type)
-                    # print("IOPS value: " + iops_value)
-                    # print("BW value: " + bw_value)
 
                 if match_filebench:
                     workload_name= match_filebench.group(1)
@@ -130,14 +122,6 @@ for file_name in recent_files:
                     elif workload_name=='varmail.f':
                          workload_array[6]=total_ops
                          workload_array[7]=ops_per_second
-                    
-
-                    # print("workload_name: " + workload_name)
-                    # print("total_ops: " + total_ops)
-                    # print("ops_per_second: " + ops_per_second)
-                    # print("read_count/write_count: " + read_count+"/"+write_count)
-                    # print("throughput: " + throughput)
-                    # print("latency: " + latency)
 
         
         csv_writer_fio.writerow([timestamp, commit_id, git_branch, disk_type, iops_array[0], iops_array[1], iops_array[2], iops_array[3]])
@@ -148,14 +132,13 @@ filebench_output.close()
 
 df_fio = pd.read_csv(fio_output_file)
 
-#unique_lines = df['line'].unique()
 
 fio_col=['randread IOPS', 'randwrite IOPS', 'read IOPS', 'write IOPS']
 num_subplots1 = len(fio_col)
 
 fio_group_values = df_fio['disk_type'].unique()
 
-# fig, axes = plt.subplots(num_subplots, 1, figsize=(8, 4 * num_subplots))
+# fig1, axes1 = plt.subplots(num_subplots1, 1, figsize=(8, 4 * num_subplots1))
 
 num_rows1 = (num_subplots1 + 1) // 2  
 fig1, axes1 = plt.subplots(num_rows1, 2, figsize=(12, 4 * num_rows1))
@@ -172,6 +155,9 @@ for i, column_name in enumerate(fio_col):
     axes1[i].set_ylabel(f'{column_name}')
     axes1[i].legend()
 
+plt.suptitle('Fio Results for LSVD, RBD and Ramdisk', y=1.02, fontsize=16)
+# axes1[i].title('Fio Results for LSVD, RBD and Ramdisk')
+
 
 df_filebench = pd.read_csv(filebench_output_file)
 
@@ -181,7 +167,7 @@ num_subplots2 = len(filebench_col)
 
 filebench_group_values = df_filebench['disk_type'].unique()
 
-# fig, axes = plt.subplots(num_subplots, 1, figsize=(8, 4 * num_subplots))
+# fig2, axes2 = plt.subplots(num_subplots2, 1, figsize=(8, 4 * num_subplots2))
 
 num_rows2 = (num_subplots2 + 1) // 2  
 fig2, axes2 = plt.subplots(num_rows2, 2, figsize=(12, 4 * num_rows2))
@@ -199,11 +185,15 @@ for i, column_name in enumerate(filebench_col):
     axes2[i].legend()
 
 
+plt.suptitle('Filebench Results for LSVD, RBD and Ramdisk', y=.06, fontsize=20)
+
 fig1.savefig(fio_plot_file, bbox_inches='tight')
 fig2.savefig(filebench_plot_file, bbox_inches='tight')
 
 plt.tight_layout()
-plt.show()
+#plt.show()
+
+print("Post-commit script ended")
 
 
 
