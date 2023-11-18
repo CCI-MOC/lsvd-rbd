@@ -28,9 +28,13 @@ fio_output_file= os.path.join(graph_dir, 'fio_output.csv')
 fio_plot_file= os.path.join(graph_dir, 'fio_plot')
 filebench_output_file= os.path.join(graph_dir, 'filebench_output.csv')
 filebench_plot_file= os.path.join(graph_dir, 'filebench_plot')
+run_result= os.path.join(directory, datetime.now().strftime("%Y-%m-%d") +'_output.txt')
 
-result = subprocess.run(['bash', script_path], stdout=subprocess.PIPE, text=True)
-print(result.stdout)
+with open(run_result, 'w') as file:
+    subprocess.run(['bash', script_path], stdout=file, text=True)
+
+# result = subprocess.run(['bash', script_path], stdout=subprocess.PIPE, text=True)
+# print(result.stdout)
 
 fio_output= open(fio_output_file, 'a+', newline='')
 filebench_output= open(filebench_output_file, 'a+', newline='')
