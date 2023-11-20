@@ -53,6 +53,9 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
     char *super_buf = read_object_hdr(name, false);
     auto super_h = (obj_hdr *)super_buf;
 
+    if (!super_h)
+      return std::make_pair(nullptr, -1);
+
     if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
         super_h->type != LSVD_SUPER)
         return std::make_pair((char *)NULL, -1);

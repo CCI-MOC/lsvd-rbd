@@ -84,6 +84,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     xlate =
         make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
     size = xlate->init(name, true);
+    if (size < 0)
+      return size;
 
     /* figure out cache file name, create it if necessary
      */
