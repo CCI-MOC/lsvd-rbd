@@ -24,6 +24,7 @@ LD_PRELOAD=$lsvd_dir/liblsvd.so \
     -m 1024 \
     -cdrom qemu/ubuntu2204.iso \
     -vnc :1 -serial mon:stdio \
+    -drive format=raw,file=seed.iso,cache=none,if=virtio \
     -drive format=raw,file=rbd:triple-ssd/lsvd-qemu-debug
 
 exit
