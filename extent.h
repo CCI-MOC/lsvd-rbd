@@ -674,12 +674,14 @@ template <class T, class T_in, class T_out, int load = 256> struct extmap {
     void trim(T_in base, T_in limit, std::vector<T> *del)
     {
         static T_out unused;
-        _update(base, limit, unused, true, del);
+        if (count > 0)
+            _update(base, limit, unused, true, del);
     }
     void trim(T_in base, T_in limit)
     {
         static T_out unused; // get rid of that damn "ininitialized message"
-        _update(base, limit, unused, true, nullptr);
+        if (count > 0)
+            _update(base, limit, unused, true, nullptr);
     }
     void reset(void)
     {
