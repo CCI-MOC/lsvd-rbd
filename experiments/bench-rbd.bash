@@ -41,4 +41,4 @@ configure_nvmf_transport $gw_ip bdev_rbd0
 run_client_bench $client_ip $outfile
 cleanup_nvmf
 
-rbd -p $pool_name rm imgname
+rbd -p $pool_name rm imgname || true

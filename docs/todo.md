@@ -7,6 +7,8 @@
 	- re-attach to the same local cache
 - make sure shared cache and cloned images work
 - per-commit benchmarks - sumatra
+- write-ahead log should be memory-only instead of going to nvme
+	- with UPS, failure mode we address is failure of gateway server
 
 Paper thesis:
 
@@ -23,6 +25,20 @@ Paper thesis:
 	- faster startup due to warmed cache from other machines booting?
 	- container-like sharing of base images, potential performance advantage
 - disaggregation of backend
+
+2023-12-12 talk with vincent from IBM:
+
+Hey guys, I think we should have a series of 20 minute presentations.  This is a
+good deadline 12/12 to have results on the various efforts.  Perhaps Peter and I
+giving an overview of the group vision, the larger opportunity that pulls
+together LSVD and D4N, how this ties into data center architecture/MOC/AI, and
+then a series of targeted talks on:
+
+- Performance of LSVD for block and file system benchmarks
+- LSVD re-organizing images for fast boot
+- LSVD sharing of cache state
+- D4N implementation and initial performance results
+- D4N locality integrated into k8s
 
 
 ## old todo list

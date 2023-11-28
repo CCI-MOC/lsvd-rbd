@@ -125,6 +125,7 @@ echo 0 >/proc/sys/kernel/randomize_va_space
 
 function run_filebench {
 	printf "\n\n===Filebench: workload=$1===\n\n"
+	rm -rf /mnt/fsbench/*
 	filebench -f $1 | tee /tmp/client-bench-results.txt
 
 	printf "\nRESULT: Filebench $1:"
