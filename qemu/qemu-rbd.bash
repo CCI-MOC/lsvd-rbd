@@ -24,11 +24,22 @@ LD_PRELOAD=$lsvd_dir/liblsvd.so \
     -m 1024 \
     -cdrom qemu/ubuntu2204.iso \
     -vnc :1 -serial mon:stdio \
+    -drive format=raw,file=seed.iso,cache=none,if=virtio \
     -drive format=raw,file=rbd:triple-ssd/lsvd-qemu-debug
 
 exit
 
 # This is the non-lsvd version
+
+# This is the rbd version
+qemu-img create -f raw rbd:triple-ssd/rbd-ubuntu-img 5G
+qemu-system-x86_64 \
+    -enable-kvm \
+    -m 1024 \
+    -cdrom qemu/ubuntu2204.iso \
+    -vnc :1 -serial mon:stdio \
+    -drive format=raw,file=seed.iso,cache=none,if=virtio \
+    -drive format=raw,file=rbd:triple-ssd/rbd-ubuntu-img
 
 # qemu-img create -f qcow2 local.qcow2 20G
 qemu-system-x86_64 \
@@ -36,4 +47,5 @@ qemu-system-x86_64 \
     -m 1024 \
     -cdrom qemu/ubuntu2204.iso \
     -vnc :1 -serial mon:stdio \
+    -drive format=raw,file=seed.iso,cache=none,if=virtio \
     -drive format=qcow2,file=local.qcow2

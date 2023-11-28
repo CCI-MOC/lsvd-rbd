@@ -9,7 +9,7 @@ if pool_name == '' or img_name == '':
 	print('Usage: remove_objs.py <pool_name> <image_name>')
 	exit(1)
 
-print(f'Removing all objects from pool {pool_name} for image {img_name}')
+print(f'Removing all objects from pool {pool_name} with prefix {img_name}')
 
 cluster = rados.Rados(conffile='/etc/ceph/ceph.conf')
 cluster.connect()
@@ -23,7 +23,7 @@ for obj in ioctx.list_objects():
 	num += 1
 	name = obj.key
 
-	if name.startswith('lsvd-benchmark'):
+	if name.startswith(img_name):
 		obj.remove()
 		removed += 1
 

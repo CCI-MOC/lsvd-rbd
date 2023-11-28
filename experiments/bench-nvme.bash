@@ -13,24 +13,22 @@ lsvd_dir=$(git rev-parse --show-toplevel)
 gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
 outfile=$lsvd_dir/experiments/results/$cur_time.ramdisk.txt
+dev_name=$1
 
 echo "Running gateway on $gw_ip, client on $client_ip"
+echo "Using device $dev_name"
 
 imgsize=81920000 # in kb (kib? unsure)
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
 
-# create ramdisk
-rmmod brd || true
-modprobe brd rd_size=$imgsize max_part=1 rd_nr=1
-
 kill_nvmf
 launch_gw_background
 
 # liburing issues, use aio for now
 # scripts/rpc.py bdev_uring_create /dev/ram0 bdev_uring0 $blocksize
-scripts/rpc.py bdev_aio_create /dev/ram0 bdev_uring0 $blocksize
+scripts/rpc.py bdev_aio_create $dev_name bdev_uring0 $blocksize
 
 configure_nvmf_transport $gw_ip bdev_uring0
 
