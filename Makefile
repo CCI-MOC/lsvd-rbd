@@ -45,6 +45,13 @@ liblsvd.so: $(LSVD_OBJS)
 imgtool: imgtool.o $(LSVD_OBJS) liblsvd.so
 	$(CXX) -o $@ imgtool.o $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
+DEBUG_CACHE = /mnt/nvme/lsvd-debug-cache/
+
+test-rnd: debug lsvd_rnd_test
+	mkdir -p $(DEBUG_CACHE)
+	rm -rf $(DEBUG_CACHE)/*
+	./lsvd_rnd_test --cache-dir=$(DEBUG_CACHE) --prefix=$(DEBUG_CACHE)/prefix --size=500M --seed=42
+
 thick-image: thick-image.o $(LSVD_OBJS) liblsvd.so
 	$(CXX) -o $@ thick-image.o $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
