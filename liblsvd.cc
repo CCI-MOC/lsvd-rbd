@@ -31,23 +31,21 @@
 #include <cassert>
 #include <string>
 
-#include "extent.h"
-#include "journal.h"
-#include "smartiov.h"
-
 #include "backend.h"
+#include "config.h"
+#include "extent.h"
+#include "fake_rbd.h"
+#include "image.h"
+#include "journal.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
 #include "read_cache.h"
 #include "request.h"
+#include "smartiov.h"
 #include "translate.h"
-#include "write_cache.h"
-
-#include "config.h"
-#include "fake_rbd.h"
-#include "image.h"
 #include "utils.h"
+#include "write_cache.h"
 
 extern void do_log(const char *, ...);
 extern void fp_log(const char *, ...);
@@ -62,14 +60,16 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
 extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
-backend *get_backend(lsvd_config *cfg, rados_ioctx_t io, const char *name)
+std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
+                                     const char *name)
 {
 
     if (cfg->backend == BACKEND_FILE)
         return make_file_backend(name);
     if (cfg->backend == BACKEND_RADOS)
         return make_rados_backend(io);
-    return NULL;
+
+    throw std::runtime_error("Unknown backend");
 }
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
@@ -158,7 +158,7 @@ void rbd_image::notify(rbd_completion_t c)
 
 /* for debug use
  */
-rbd_image *make_rbd_image(backend *b, translate *t, write_cache *w,
+rbd_image *make_rbd_image(sptr<backend> b, translate *t, write_cache *w,
                           read_cache *r)
 {
     auto img = new rbd_image;
@@ -199,9 +199,7 @@ int rbd_image::image_close(void)
     if (!cfg.no_gc)
         xlate->stop_gc();
     xlate->checkpoint();
-    objstore->stop();
     delete xlate;
-    delete objstore;
     close(read_fd);
     close(write_fd);
     return 0;
@@ -390,7 +388,7 @@ class rbd_aio_req : public request
     std::mutex m;
     std::condition_variable cv;
 
-    std::vector<request *> requests;
+    // std::vector<request *> requests;
 
     void notify_parent(void)
     {
@@ -493,7 +491,7 @@ class rbd_aio_req : public request
     void run_r()
     {
         __reqs++;
-        // std::vector<request*> requests;
+        std::vector<request *> requests;
 
         img->rcache->handle_read(offset, &aligned_iovs, requests);
 
@@ -730,8 +728,21 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
         return -1;
     auto objstore = get_backend(&cfg, io, NULL);
     auto rv = translate_create_image(objstore, name, size);
-    objstore->stop();
-    delete objstore;
+    return rv;
+}
+
+extern "C" int rbd_clone(rados_ioctx_t io, const char *source_img,
+                         const char *dest_img)
+{
+    lsvd_config cfg;
+    if (cfg.read() < 0) {
+        throw std::runtime_error("Failed to read config");
+        return -1;
+    }
+
+    auto objstore = get_backend(&cfg, io, NULL);
+    auto rv = translate_clone_image(objstore, source_img, dest_img);
+
     return rv;
 }
 
@@ -755,8 +766,6 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     auto wcache_file = cfg.cache_filename(uu, name, LSVD_CFG_WRITE);
     unlink(wcache_file.c_str());
     rv = translate_remove_image(objstore, name);
-    objstore->stop();
-    delete objstore;
     return rv;
 }
 

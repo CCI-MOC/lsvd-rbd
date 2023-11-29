@@ -154,10 +154,10 @@ class backend;
 
 class object_reader
 {
-    backend *objstore;
+    std::shared_ptr<backend> objstore;
 
   public:
-    object_reader(backend *be) : objstore(be) {}
+    object_reader(std::shared_ptr<backend> be) : objstore(be) {}
 
     char *read_object_hdr(const char *name, bool fast);
 

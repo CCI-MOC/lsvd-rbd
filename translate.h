@@ -11,9 +11,10 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
-struct iovec;
-class backend;
-class lsvd_config;
+#include "backend.h"
+#include "config.h"
+#include "smartiov.h"
+#include "utils.h"
 
 class translate
 {
@@ -44,13 +45,16 @@ class translate
     virtual void start_gc(void) = 0;
 };
 
-extern translate *make_translate(backend *_io, lsvd_config *cfg,
+extern translate *make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
                                  extmap::objmap *map, extmap::bufmap *bufmap,
                                  std::shared_mutex *m, std::mutex *buf_m);
 
-extern int translate_create_image(backend *objstore, const char *name,
+extern int translate_create_image(sptr<backend> objstore, const char *name,
                                   uint64_t size);
-extern int translate_remove_image(backend *objstore, const char *name);
-extern int translate_get_uuid(backend *objstore, const char *name, uuid_t &uu);
+extern int translate_clone_image(sptr<backend> objstore, const char *source,
+                                 const char *dest);
+extern int translate_remove_image(sptr<backend> objstore, const char *name);
+extern int translate_get_uuid(sptr<backend> objstore, const char *name,
+                              uuid_t &uu);
 
 #endif

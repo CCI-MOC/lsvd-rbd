@@ -49,7 +49,6 @@ class rados_backend : public backend
   public:
     rados_backend(rados_ioctx_t io_ctx);
     ~rados_backend();
-    void stop(void);
 
     int write_object(const char *name, iovec *iov, int iovcnt);
     int write_object(const char *name, char *buf, size_t len);
@@ -71,7 +70,10 @@ class rados_backend : public backend
 
 /* needed for implementation hiding
  */
-backend *make_rados_backend(rados_ioctx_t io) { return new rados_backend(io); }
+std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io)
+{
+    return std::make_unique<rados_backend>(io);
+}
 
 /* see https://docs.ceph.com/en/latest/rados/api/librados/
  * for documentation on the librados API
@@ -79,7 +81,7 @@ backend *make_rados_backend(rados_ioctx_t io) { return new rados_backend(io); }
 rados_backend::rados_backend(rados_ioctx_t io_)
 {
     io_ctx = io_;
-    if(io_ctx != nullptr)
+    if (io_ctx != nullptr)
         enable_ioctx_bypass_hack = true;
 
     int r;
@@ -91,14 +93,12 @@ rados_backend::rados_backend(rados_ioctx_t io_)
         throw("rados connect");
 }
 
-void rados_backend::stop(void)
+rados_backend::~rados_backend()
 {
     if (io_ctx != nullptr)
         rados_ioctx_destroy(io_ctx);
     rados_shutdown(cluster);
 }
-
-rados_backend::~rados_backend() {}
 
 /* if pool hasn't been initialized yet, initialize the ioctx
  * only supports one pool, exception if you try to access another one

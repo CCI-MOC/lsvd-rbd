@@ -63,7 +63,6 @@ class file_backend : public backend
   public:
     file_backend(const char *prefix);
     ~file_backend();
-    void stop(void) {}
 
     /* see backend.h
      */
@@ -329,7 +328,7 @@ request *file_backend::make_read_req(const char *name, size_t offset, char *buf,
     return new file_backend_req(OP_READ, name, &iov, 1, offset, this);
 }
 
-backend *make_file_backend(const char *prefix)
+std::unique_ptr<backend> make_file_backend(const char *prefix)
 {
-    return new file_backend(prefix);
+    return std::make_unique<file_backend>(prefix);
 }
