@@ -8,6 +8,7 @@
 
 #include <string>
 #include <sys/uio.h>
+#include <memory>
 
 #include "fake_rbd.h"
 
@@ -17,7 +18,6 @@ class backend
 {
   public:
     virtual ~backend() {}
-    virtual void stop(void) = 0;
 
     /* synchronous I/O methods, return 0 / -1 for success/error
      */
@@ -42,7 +42,7 @@ class backend
                                    size_t len) = 0;
 };
 
-extern backend *make_file_backend(const char *prefix);
-extern backend *make_rados_backend(rados_ioctx_t io);
+extern std::unique_ptr<backend> make_file_backend(const char *prefix);
+extern std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io);
 
 #endif

@@ -17,6 +17,8 @@
 #define LOGLV 1
 #endif
 
+template <typename T> using sptr = std::shared_ptr<T>;
+
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
         if (LOGLV <= 0)                                                        \
@@ -34,7 +36,7 @@
 #define log_info(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 2)                                                        \
-            fmt::print(stderr, fg(fmt::color::yellow) | fmt::emphasis::bold,     \
+            fmt::print(stderr, fg(fmt::color::yellow) | fmt::emphasis::bold,   \
                        "[INFO {}:{} {}] " MSG "\n", __FILE__, __LINE__,        \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
@@ -128,4 +130,9 @@ constexpr int64_t tdus(std::chrono::time_point<std::chrono::system_clock> start,
 {
     return std::chrono::duration_cast<std::chrono::microseconds>(end - start)
         .count();
+}
+
+template <typename T> std::shared_ptr<T> to_shared(std::unique_ptr<T> ptr)
+{
+    return std::shared_ptr<T>(std::move(ptr));
 }

@@ -63,3 +63,6 @@ sidetest/
 .idea/
 *.iso
 *.qcow2
+
+spdk/
+ceph/

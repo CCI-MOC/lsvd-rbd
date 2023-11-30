@@ -110,13 +110,16 @@ class read_cache_impl : public read_cache
     std::vector<int> written;
     sized_vector<std::vector<pending_read_request *>> pending;
 
+    // LBA -> objnum, sector_offset (on the backend)
     extmap::objmap *obj_map;
     std::shared_mutex *obj_lock;
+
+    // LBA -> pointer to in-memory (pending writes)
     extmap::bufmap *buf_map;
     std::mutex *bufmap_lock;
 
     translate *be;
-    backend *io;
+    sptr<backend> io;
     nvme *ssd;
     lsvd_config *cfg;
 
@@ -151,7 +154,8 @@ class read_cache_impl : public read_cache
   public:
     read_cache_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
                     extmap::objmap *map, extmap::bufmap *bufmap,
-                    std::shared_mutex *m, std::mutex *bufmap_m, backend *_io);
+                    std::shared_mutex *m, std::mutex *bufmap_m,
+                    sptr<backend> _io);
 
     ~read_cache_impl();
 
@@ -172,7 +176,7 @@ class read_cache_impl : public read_cache
 read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
                             lsvd_config *cfg, extmap::objmap *map,
                             extmap::bufmap *bufmap, std::shared_mutex *m,
-                            std::mutex *bufmap_m, backend *_io)
+                            std::mutex *bufmap_m, sptr<backend> _io)
 {
     return new read_cache_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m,
                                _io);
@@ -184,7 +188,7 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
                                  lsvd_config *cfg_, extmap::objmap *omap,
                                  extmap::bufmap *bmap,
                                  std::shared_mutex *maplock,
-                                 std::mutex *bmap_lock, backend *io_)
+                                 std::mutex *bmap_lock, sptr<backend> io_)
     : hit_stats(5000000), misc_threads(&m)
 {
     obj_map = omap;

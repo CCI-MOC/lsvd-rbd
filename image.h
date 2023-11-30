@@ -1,12 +1,12 @@
-/*
- * file:        image.h
- * description: the fake RBD image.
- *
- * TODO: fix up lsvd_debug.cc and move this into lsvd.cc
- */
+#pragma once
 
-#ifndef __IMAGE_H__
-#define __IMAGE_H__
+#include <queue>
+
+#include "config.h"
+#include "extent.h"
+#include "fake_rbd.h"
+#include "lsvd_types.h"
+#include "objects.h"
 
 struct event_socket {
     int socket;
@@ -59,11 +59,11 @@ struct rbd_image {
     extmap::bufmap bufmap;
     std::map<int, char *> buffers;
 
-    backend *objstore;
+    std::shared_ptr<backend> objstore;
     translate *xlate;
     write_cache *wcache;
     read_cache *rcache;
-    int read_fd; /* read cache file */
+    int read_fd;  /* read cache file */
     int write_fd; /* write cache file */
 
     std::mutex m; /* protects completions */
@@ -84,4 +84,18 @@ struct rbd_image {
     void notify(rbd_completion_t c);
 };
 
-#endif
+using ckpt_id = uint32_t;
+
+inline std::vector<ckpt_id> deserialise_checkpoint_ids(char *buf)
+{
+    auto obj = (obj_hdr *)buf;
+    auto super = (super_hdr *)(buf + 1);
+
+    assert(obj->magic == LSVD_MAGIC);
+    assert(obj->type == LSVD_SUPER);
+
+    std::vector<ckpt_id> checkpoint_ids;
+    decode_offset_len<ckpt_id>(buf, super->ckpts_offset, super->ckpts_len,
+                               checkpoint_ids);
+    return checkpoint_ids;
+}
