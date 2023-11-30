@@ -2,18 +2,20 @@
 
 set -xeuo pipefail
 
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
   exit
 fi
 
-if [ -z "${1:-}" ]
-  then echo "Please provide a pool name"
+if [[ $# -lt 2 ]]; then
+  echo "Usage: $0 <pool_name> <imgname>"
   exit
 fi
 
 # pool must already exist
 pool_name=$1
+imgname=$2
+
 cur_time=$(date +"%FT%T")
 
 lsvd_dir=$(git rev-parse --show-toplevel)
@@ -23,8 +25,8 @@ cache_dir=/mnt/nvme/lsvd-cache/
 outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
+echo "Running with image $pool_name/$imgname"
 
-imgname=lsvd-qemu-test
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash

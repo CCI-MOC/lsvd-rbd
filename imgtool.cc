@@ -1,6 +1,7 @@
 #include <argp.h>
 #include <cstdlib>
 #include <fcntl.h>
+#include <fmt/format.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -8,20 +9,30 @@
 
 #include "config.h"
 #include "fake_rbd.h"
+#include "utils.h"
 
 struct backend;
 
-extern backend *get_backend(lsvd_config *cfg, rados_ioctx_t io,
-                            const char *name);
-extern int translate_get_uuid(backend *, const char *, uuid_t &);
+extern sptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
+                                 const char *name);
+extern int translate_get_uuid(sptr<backend>, const char *, uuid_t &);
 
 const char *backend = "file";
 const char *image_name;
 const char *cache_dir;
 const char *cache_dev;
 cfg_cache_type cache_type = LSVD_CFG_READ;
-enum _op { OP_CREATE = 1, OP_DELETE = 2, OP_INFO = 3, OP_MKCACHE };
+
+enum _op {
+    OP_CREATE = 1,
+    OP_DELETE = 2,
+    OP_INFO = 3,
+    OP_MKCACHE = 4,
+    OP_CLONE = 5
+};
+
 enum _op op;
+
 size_t size = 0;
 
 static long parseint(const char *_s)
@@ -42,10 +53,12 @@ static struct argp_option options[] = {
     {"rados", 'O', 0, 0, "use RADOS"},
     {"create", 'C', 0, 0, "create image"},
     {"mkcache", 'k', "DEV", 0, "use DEV as cache"},
-    {"cache-type", 't', "R/W", 0, "R for read cache, W for write cache (default: R)"},
+    {"cache-type", 't', "R/W", 0,
+     "R for read cache, W for write cache (default: R)"},
     {"size", 'z', "SIZE", 0, "size in bytes (M/G=2^20,2^30)"},
     {"delete", 'D', 0, 0, "delete image"},
     {"info", 'I', 0, 0, "show image information"},
+    {"clone", 'c', "IMAGE", 0, "clone image"},
     {0},
 };
 
@@ -53,7 +66,7 @@ static char args_doc[] = "IMAGE";
 
 extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
-int (*make_cache) (int fd, uuid_t &uuid, int n_pages) = init_rcache;
+int (*make_cache)(int fd, uuid_t &uuid, int n_pages) = init_rcache;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -83,17 +96,18 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         if (arg[0] == 'R') {
             cache_type = LSVD_CFG_READ;
             make_cache = init_rcache;
-        }
-        else if (arg[0] == 'W'){
+        } else if (arg[0] == 'W') {
             cache_type = LSVD_CFG_WRITE;
             make_cache = init_wcache;
-        }
-        else
+        } else
             argp_usage(state);
         break;
     case 'k':
         op = OP_MKCACHE;
         cache_dev = arg;
+        break;
+    case 'c':
+        op = OP_CLONE;
         break;
     case ARGP_KEY_END:
         if (op == 0 || (op == OP_CREATE && size == 0))
@@ -128,7 +142,8 @@ void info(rados_ioctx_t io, const char *image_name)
 
 extern size_t getsize64(int fd);
 
-void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name, cfg_cache_type type)
+void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name,
+              cfg_cache_type type)
 {
     int rv, fd = open(dev_name, O_RDWR);
     if (fd < 0) {
@@ -182,4 +197,10 @@ int main(int argc, char **argv)
         info(io, image_name);
     else if (op == OP_MKCACHE)
         mk_cache(io, image_name, cache_dev, cache_type);
+    else if (op == OP_CLONE) {
+        auto src_img = image_name;
+        auto dst_img = argv[argc - 1];
+        fmt::print("cloning from {} to {}\n", src_img, dst_img);
+        rbd_clone(io, src_img, dst_img);
+    }
 }

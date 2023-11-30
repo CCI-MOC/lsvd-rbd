@@ -127,6 +127,8 @@ extern "C" CEPH_RBD_API int rbd_invalidate_cache(rbd_image_t image);
 extern "C" CEPH_RBD_API int rbd_create(rados_ioctx_t io, const char *name,
                                        uint64_t size, int *order);
 extern "C" CEPH_RBD_API int rbd_remove(rados_ioctx_t io, const char *name);
+extern "C" CEPH_RBD_API int rbd_clone(rados_ioctx_t io, const char *source_img,
+                                       const char *dest_img);
 
 typedef int (*librbd_progress_fn_t)(uint64_t offset, uint64_t total, void *ptr);
 extern "C" CEPH_RBD_API int rbd_remove_with_progress(rados_ioctx_t io,
