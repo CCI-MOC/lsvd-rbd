@@ -10,6 +10,7 @@ import subprocess
 from subprocess import check_output
 import matplotlib.pyplot as plt
 import pandas as pd
+import time
 
 ## TO USE THIS SCRIPT PLEASE COPY IT UNDER "lsvd-rbd/.git/hook" AND RENAME IT TO "post-commit" ##
 ## ENSURE THE "directory" VARIABLE IS CHANGED RESPECTIVE TO YOUR REPO ##
