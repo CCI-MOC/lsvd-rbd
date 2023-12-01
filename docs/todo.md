@@ -5,6 +5,7 @@
 - trace-driven optimization - from start to adding a print statement in init - VM boot
 - shared cache - boot multiple clones demnstrate: 1) easest - boot clone after ahving booked another one becomes warm show both miss rate and boot time, 2) boot time for a fleet of similar images 10 VMs simultaneously
 - test larger block sizes for read cache and impact on trace optimization - i.e., prefetching - especially for disk backend
+- presentation drafts by the 6th
 
 ### stretch goals
 - write-ahead log should be memory-only - want to show it with 1- malloc store, 2- versus with 1 NVME log, and 3- 2 NVME log
