@@ -1,5 +1,12 @@
-## ATC 24 todos
+## to get done week Dec 4-7 for presentation dec 12th
+- filesystem benchamrks - fix OLTP - this weekend - same parametser as eurosys Logical disk and cache both
+- working set for disk benchmark < size disk - same as eurosys
+- all above with Ceph disk backend - run both filesystem and disk bencharks
+### stretch goals
+- NVME rather than ramdisk
+- trace-driven optimization
 
+## ATC 24 todos
 - benchmark against nvme drive instead of ramdisk
 - trace-driven optimisation of VM boot image - timo
 - ycsb benchmark?
