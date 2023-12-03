@@ -44,7 +44,7 @@ struct event_socket {
     }
 };
 
-class read_cache;
+class img_reader;
 class write_cache;
 class backend;
 class translate;
@@ -62,7 +62,7 @@ struct rbd_image {
     std::shared_ptr<backend> objstore;
     translate *xlate;
     write_cache *wcache;
-    read_cache *rcache;
+    img_reader *rcache;
     int read_fd;  /* read cache file */
     int write_fd; /* write cache file */
 

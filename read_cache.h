@@ -1,5 +1,5 @@
 /*
- * file:        read_cache.h
+ * file:        img_reader.h
  * description: interface for read cache
  * author:      Peter Desnoyers, Northeastern University
  *              Copyright 2021, 2022 Peter Desnoyers
@@ -23,10 +23,10 @@ struct j_read_super;
 
 class translate;
 
-class read_cache
+class img_reader
 {
   public:
-    virtual ~read_cache(){};
+    virtual ~img_reader(){};
 
     virtual void handle_read(size_t offset, smartiov *iovs,
                              std::vector<request *> &requests) = 0;
@@ -34,7 +34,7 @@ class read_cache
     virtual void write_map(void) = 0;
 };
 
-extern read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
+extern img_reader *make_reader(uint32_t blkno, int _fd, translate *_be,
                                    lsvd_config *cfg, extmap::objmap *map,
                                    extmap::bufmap *bufmap, std::shared_mutex *m,
                                    std::mutex *bufmap_m, sptr<backend> _io);

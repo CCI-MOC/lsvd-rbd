@@ -137,7 +137,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache = make_read_cache(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
+    rcache = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
                              &bufmap_lock, objstore);
     free(jrs);
     free(jws);
@@ -159,7 +159,7 @@ void rbd_image::notify(rbd_completion_t c)
 /* for debug use
  */
 rbd_image *make_rbd_image(sptr<backend> b, translate *t, write_cache *w,
-                          read_cache *r)
+                          img_reader *r)
 {
     auto img = new rbd_image;
     img->objstore = b;

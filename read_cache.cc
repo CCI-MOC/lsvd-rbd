@@ -1,5 +1,5 @@
 /*
- * file:        read_cache.cc
+ * file:        img_reader.cc
  * description: implementation of read cache
  *              the read cache is:
  *                       * 1. indexed by obj/offset[*], not LBA
@@ -87,7 +87,7 @@ class window_ctr
 
 class pending_read_request;
 
-class read_cache_impl : public read_cache
+class reader_impl : public img_reader
 {
 
     std::mutex m;
@@ -111,11 +111,11 @@ class read_cache_impl : public read_cache
     sized_vector<std::vector<pending_read_request *>> pending;
 
     // LBA -> objnum, sector_offset (on the backend)
-    extmap::objmap *obj_map;
+    extmap::objmap *backend_objmap;
     std::shared_mutex *obj_lock;
 
     // LBA -> pointer to in-memory (pending writes)
-    extmap::bufmap *buf_map;
+    extmap::bufmap *pending_bufmap;
     std::mutex *bufmap_lock;
 
     translate *be;
@@ -152,12 +152,12 @@ class read_cache_impl : public read_cache
     char *get_cacheline_buf(int n);
 
   public:
-    read_cache_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
+    reader_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
                     extmap::objmap *map, extmap::bufmap *bufmap,
                     std::shared_mutex *m, std::mutex *bufmap_m,
                     sptr<backend> _io);
 
-    ~read_cache_impl();
+    ~reader_impl();
 
     void handle_read(size_t offset, smartiov *iovs,
                      std::vector<request *> &requests);
@@ -173,26 +173,26 @@ class read_cache_impl : public read_cache
 
 /* factory function so we can hide implementation
  */
-read_cache *make_read_cache(uint32_t blkno, int _fd, translate *_be,
+img_reader *make_reader(uint32_t blkno, int _fd, translate *_be,
                             lsvd_config *cfg, extmap::objmap *map,
                             extmap::bufmap *bufmap, std::shared_mutex *m,
                             std::mutex *bufmap_m, sptr<backend> _io)
 {
-    return new read_cache_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m,
+    return new reader_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m,
                                _io);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
-read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
+reader_impl::reader_impl(uint32_t blkno, int fd_, translate *be_,
                                  lsvd_config *cfg_, extmap::objmap *omap,
                                  extmap::bufmap *bmap,
                                  std::shared_mutex *maplock,
                                  std::mutex *bmap_lock, sptr<backend> io_)
     : hit_stats(5000000), misc_threads(&m)
 {
-    obj_map = omap;
-    buf_map = bmap;
+    backend_objmap = omap;
+    pending_bufmap = bmap;
     obj_lock = maplock;
     bufmap_lock = bmap_lock;
     be = be_;
@@ -233,10 +233,10 @@ read_cache_impl::read_cache_impl(uint32_t blkno, int fd_, translate *be_,
     map_dirty = false;
 
     misc_threads.pool.push(
-        std::thread(&read_cache_impl::evict_thread, this, &misc_threads));
+        std::thread(&reader_impl::evict_thread, this, &misc_threads));
 }
 
-read_cache_impl::~read_cache_impl()
+reader_impl::~reader_impl()
 {
     misc_threads.stop(); // before we free anything threads might touch
     delete ssd;
@@ -253,7 +253,7 @@ static std::mt19937 rng(17); // for deterministic testing
 /* evict 'n' blocks from cache, using random eviction
  * called with mutex *unlocked*
  */
-void read_cache_impl::evict(int n)
+void reader_impl::evict(int n)
 {
     std::uniform_int_distribution<int> uni(0, super->units - 1);
     for (int i = 0; i < n; i++) {
@@ -268,7 +268,7 @@ void read_cache_impl::evict(int n)
     }
 }
 
-void read_cache_impl::evict_thread(thread_pool<int> *p)
+void reader_impl::evict_thread(thread_pool<int> *p)
 {
     auto wait_time = std::chrono::milliseconds(500);
     auto t0 = std::chrono::system_clock::now();
@@ -381,7 +381,7 @@ class rcache_generic_request : public request
  */
 class pending_read_request : public rcache_generic_request
 {
-    read_cache_impl *r;
+    reader_impl *r;
     sector_t sector_in_blk;
     smartiov iovs;
     request *parent;
@@ -392,7 +392,7 @@ class pending_read_request : public rcache_generic_request
 
   public:
     sector_t base, limit;
-    pending_read_request(read_cache_impl *r_, sector_t blk_,
+    pending_read_request(reader_impl *r_, sector_t blk_,
                          sector_t sector_in_blk_, smartiov &slice)
         : iovs(slice)
     {
@@ -435,7 +435,7 @@ class pending_read_request : public rcache_generic_request
  */
 class cache_hit_request : public rcache_generic_request
 {
-    read_cache_impl *r;
+    reader_impl *r;
     smartiov iovs;
     int blk;
 
@@ -443,7 +443,7 @@ class cache_hit_request : public rcache_generic_request
     request *nvme_req;
 
   public:
-    cache_hit_request(read_cache_impl *r_, int blk_, sector_t nvme_sector,
+    cache_hit_request(reader_impl *r_, int blk_, sector_t nvme_sector,
                       smartiov &slice)
         : iovs(slice)
     {
@@ -479,7 +479,7 @@ class direct_read_req : public rcache_generic_request
 
     request *obj_req = NULL;
     request *parent = NULL;
-    read_cache_impl *r = NULL;
+    reader_impl *r = NULL;
     extmap::obj_offset oo;
 
     std::mutex m;
@@ -487,7 +487,7 @@ class direct_read_req : public rcache_generic_request
     bool release = false;
 
   public:
-    direct_read_req(read_cache_impl *r_, extmap::obj_offset oo_,
+    direct_read_req(reader_impl *r_, extmap::obj_offset oo_,
                     smartiov &slice)
         : iovs(slice)
     {
@@ -519,7 +519,7 @@ class direct_read_req : public rcache_generic_request
 
 class cache_fill_req : public rcache_generic_request
 {
-    read_cache_impl *r;
+    reader_impl *r;
     int blk = 10000000;
     sector_t sector_in_blk; // specific request
     extmap::obj_offset oo;  // block location in object
@@ -536,7 +536,7 @@ class cache_fill_req : public rcache_generic_request
 
     uint32_t crc1; // DEBUG
   public:
-    cache_fill_req(read_cache_impl *r_, int blk_, sector_t sector_in_blk_,
+    cache_fill_req(reader_impl *r_, int blk_, sector_t sector_in_blk_,
                    extmap::obj_offset obj_loc_, sector_t nvme_sector_,
                    smartiov &slice)
         : iovs(slice)
@@ -611,20 +611,20 @@ class cache_fill_req : public rcache_generic_request
     }
 };
 
-void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
+void reader_impl::handle_read(size_t offset, smartiov *iovs,
                                   std::vector<request *> &requests)
 {
-    sector_t base = offset / 512;
-    sector_t limit = base + iovs->bytes() / 512;
+    sector_t start_sector = offset / 512;
+    sector_t end_sector = start_sector + iovs->bytes() / 512;
 
     std::unique_lock lk(m);
     std::shared_lock lk2(*obj_lock);
     std::unique_lock lk3(*bufmap_lock);
 
-    auto it1 = buf_map->end();
-    if (buf_map->size() > 0)
-        it1 = buf_map->lookup(base);
-    auto it2 = obj_map->lookup(base);
+    auto bufmap_it = pending_bufmap->end();
+    if (pending_bufmap->size() > 0)
+        bufmap_it = pending_bufmap->lookup(start_sector);
+    auto backend_it = backend_objmap->lookup(start_sector);
     size_t _offset = 0;
 
     /*
@@ -638,40 +638,53 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
      *                       ^base    ^limit2       <- iter 1.2
      * map2  +----+   +----+ ...                    <- iter 1.1.*
      *
+     * - We start with a contiguous read in LBA space. This read may be
+     *   fragmented across the backend, with one extent in pending writes,
+     *   another in the backend, another unmapped, etc
+     * - We start at the beginning of the read in LBA space, and march forward,
+     *   looking for the location of the next extent in each of the maps.
+     * - The pending writes map has the highest priority
+     * - Then it goes to the backend
+     * - If it's unmapped, then we just zero the output buffer and return
      */
-    while (base < limit) {
+    while (start_sector < end_sector) {
+
+        // first we look in the pending writes map
+
         /* ugly hack because end()->vals() crashes
          */
-        sector_t base1 = limit, limit1 = limit;
+        sector_t base1 = end_sector, limit1 = end_sector;
         extmap::sector_ptr bufptr = {NULL};
-        if (it1 != buf_map->end())
-            std::tie(base1, limit1, bufptr) = it1->vals(base, limit);
+        if (bufmap_it != pending_bufmap->end())
+            std::tie(base1, limit1, bufptr) =
+                bufmap_it->vals(start_sector, end_sector);
 
-        sector_t base2 = limit, limit2 = limit;
+        sector_t base2 = end_sector, limit2 = end_sector;
         extmap::obj_offset objptr = {0, 0};
-        if (it2 != obj_map->end())
-            std::tie(base2, limit2, objptr) = it2->vals(base, limit);
+        if (backend_it != backend_objmap->end())
+            std::tie(base2, limit2, objptr) =
+                backend_it->vals(start_sector, end_sector);
 
         /* [base..base3] is unmapped - zero it out
          */
         auto base3 = std::min(base1, base2);
-        if (base3 > base) {
-            sector_t sectors = base3 - base;
+        if (base3 > start_sector) {
+            sector_t sectors = base3 - start_sector;
             iovs->zero(_offset, _offset + sectors * 512L);
-            base = base3;
+            start_sector = base3;
             _offset += sectors * 512L;
             continue;
         }
 
         /* buffer map (i.e. current batch buffer) takes priority
          */
-        if (base1 == base) {
-            sector_t sectors = limit1 - base;
+        if (base1 == start_sector) {
+            sector_t sectors = limit1 - start_sector;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             slice.copy_in(bufptr.buf);
             hit_stats.serve(sectors);
 
-            base = limit1;
+            start_sector = limit1;
             _offset += sectors * 512;
 
             /* skip any objmap extents fully obscured by this extent:
@@ -679,16 +692,16 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
              *  it2:    |----|    |----|
              *                           |------|   < but not this
              */
-            while (it2 != obj_map->end() && it2->limit() <= limit1)
-                it2++;
-            it1++;
+            while (backend_it != backend_objmap->end() && backend_it->limit() <= limit1)
+                backend_it++;
+            bufmap_it++;
             continue;
         }
 
-        assert(base2 == base);
-        assert(it2 != obj_map->end());
+        assert(base2 == start_sector);
+        assert(backend_it != backend_objmap->end());
         limit2 = std::min(limit2, base1);
-        sector_t sectors = limit2 - base;
+        sector_t sectors = limit2 - start_sector;
 
         /* objects are cached in aligned blocks of size <block_sectors>
          */
@@ -702,7 +715,7 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
         if (map.find(key) != map.end()) {
             sector_t sectors = (offset_limit - objptr.offset);
             sector_t sector_in_blk = objptr.offset % block_sectors;
-            limit2 = base + sectors;
+            limit2 = start_sector + sectors;
 
             hit_stats.serve(sectors);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
@@ -711,7 +724,7 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             if (fetching[i]) {
                 auto req =
                     new pending_read_request(this, i, sector_in_blk, slice);
-                req->base = base;
+                req->base = start_sector;
                 req->limit = limit2;
                 pending[i].push_back(req);
                 requests.push_back(req);
@@ -721,10 +734,10 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
                 auto req = new cache_hit_request(this, i, nvme_location, slice);
                 requests.push_back(req);
             }
-            _offset += (limit2 - base) * 512;
-            base = limit2;
-            if (limit2 == it2->limit())
-                it2++;
+            _offset += (limit2 - start_sector) * 512;
+            start_sector = limit2;
+            if (limit2 == backend_it->limit())
+                backend_it++;
             continue;
         }
 
@@ -744,7 +757,7 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
          * without worrying about cache block alignment
          */
         if (!use_cache) {
-            sector_t sectors = limit2 - base;
+            sector_t sectors = limit2 - start_sector;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             auto req = new direct_read_req(this, objptr, slice);
             requests.push_back(req);
@@ -753,9 +766,9 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             hit_stats.fetch(sectors);
 
             _offset += sectors * 512L;
-            base = limit2;
-            if (limit2 == it2->limit())
-                it2++;
+            start_sector = limit2;
+            if (limit2 == backend_it->limit())
+                backend_it++;
             continue;
         }
 
@@ -771,7 +784,7 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             rmap[i] = key;
 
             sector_t sectors = offset_limit - objptr.offset;
-            limit2 = base + sectors;
+            limit2 = start_sector + sectors;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             sector_t sector_in_blk = objptr.offset % block_sectors;
 
@@ -792,15 +805,15 @@ void read_cache_impl::handle_read(size_t offset, smartiov *iovs,
             hit_stats.fetch(block_sectors);
             pending_fills++;
 
-            _offset += (limit2 - base) * 512;
-            base = limit2;
-            if (limit2 == it2->limit())
-                it2++;
+            _offset += (limit2 - start_sector) * 512;
+            start_sector = limit2;
+            if (limit2 == backend_it->limit())
+                backend_it++;
         }
     }
 }
 
-void read_cache_impl::write_map(void)
+void reader_impl::write_map(void)
 {
     if (ssd->write((char *)rmap, 4096 * super->map_blocks,
                    4096L * super->map_start) < 0)

@@ -18,6 +18,7 @@
 #endif
 
 template <typename T> using sptr = std::shared_ptr<T>;
+template <typename T> using uptr = std::unique_ptr<T>;
 
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
@@ -47,6 +48,14 @@ template <typename T> using sptr = std::shared_ptr<T>;
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
                        "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
                        __func__, ##__VA_ARGS__);                               \
+    } while (0)
+
+#define UNIMPLEMENTED()                                                        \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
+                   "[ERR {}:{} {}] Unimplemented\n", __FILE__, __LINE__,       \
+                   __func__);                                                  \
+        throw std::runtime_error("Unimplemented");                             \
     } while (0)
 
 #ifndef NDEBUG
