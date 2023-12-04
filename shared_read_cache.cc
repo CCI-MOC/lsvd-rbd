@@ -37,9 +37,6 @@ class self_refcount_request : public request
   protected:
     std::atomic_int refcount = 2;
 
-    // TODO remove this; debugging double frees
-    bool released = false;
-
     self_refcount_request() {}
     virtual ~self_refcount_request() {}
 
@@ -61,13 +58,7 @@ class self_refcount_request : public request
 
   public:
     virtual void wait() override { UNIMPLEMENTED(); }
-    virtual void release() override
-    {
-        if (released)
-            throw std::runtime_error("double free");
-        released = true;
-        dec_and_free();
-    }
+    virtual void release() override { dec_and_free(); }
 };
 
 /**

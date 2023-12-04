@@ -135,6 +135,8 @@ class shared_read_cache
      * If the data is not in the cache, it will be fetched from the backend.
      * See documentation for shared_read_cache for more details on the lifecycle
      * of a request.
+     * 
+     * If data is in memory, this will fill in the iov and return NULL
      */
     request *make_read_req(std::string img_prefix, uint64_t seqnum,
                            size_t obj_offset, size_t adjust, smartiov &dest);
