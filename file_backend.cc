@@ -328,7 +328,7 @@ request *file_backend::make_read_req(const char *name, size_t offset, char *buf,
     return new file_backend_req(OP_READ, name, &iov, 1, offset, this);
 }
 
-std::unique_ptr<backend> make_file_backend(const char *prefix)
+std::shared_ptr<backend> make_file_backend(const char *prefix)
 {
-    return std::make_unique<file_backend>(prefix);
+    return std::make_shared<file_backend>(prefix);
 }

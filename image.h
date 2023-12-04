@@ -7,6 +7,7 @@
 #include "fake_rbd.h"
 #include "lsvd_types.h"
 #include "objects.h"
+#include "shared_read_cache.h"
 
 struct event_socket {
     int socket;
@@ -60,6 +61,7 @@ struct rbd_image {
     std::map<int, char *> buffers;
 
     std::shared_ptr<backend> objstore;
+    std::shared_ptr<shared_read_cache> shared_cache;
     translate *xlate;
     write_cache *wcache;
     img_reader *rcache;

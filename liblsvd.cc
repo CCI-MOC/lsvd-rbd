@@ -59,7 +59,6 @@ extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
                                      const char *name)
 {
-
     if (cfg->backend == BACKEND_FILE)
         return make_file_backend(name);
     if (cfg->backend == BACKEND_RADOS)
@@ -75,7 +74,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     objstore = get_backend(&cfg, io, name);
     // TODO figure out how to retrofit config into this thing
-    auto shared_cache = shared_read_cache::get_instance(
+    shared_cache = shared_read_cache::get_instance(
         "/mnt/nvme/lsvd/shared_read_cache", cfg.cache_size / CACHE_CHUNK_SIZE,
         objstore);
 
@@ -138,7 +137,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
     rcache = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
-                         &bufmap_lock, objstore);
+                         &bufmap_lock, objstore, shared_cache);
     free(jrs);
     free(jws);
 

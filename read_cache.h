@@ -16,6 +16,7 @@
 #include <vector>
 
 struct j_read_super;
+#include "shared_read_cache.h"
 #include "config.h"
 #include "extent.h"
 #include "smartiov.h"
@@ -35,8 +36,9 @@ class img_reader
 };
 
 extern img_reader *make_reader(uint32_t blkno, int _fd, translate *_be,
-                                   lsvd_config *cfg, extmap::objmap *map,
-                                   extmap::bufmap *bufmap, std::shared_mutex *m,
-                                   std::mutex *bufmap_m, sptr<backend> _io);
+                               lsvd_config *cfg, extmap::objmap *map,
+                               extmap::bufmap *bufmap, std::shared_mutex *m,
+                               std::mutex *bufmap_m, sptr<backend> _io,
+                               sptr<shared_read_cache> shared_cache);
 
 #endif

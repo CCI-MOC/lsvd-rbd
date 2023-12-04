@@ -28,20 +28,18 @@
 #include <zlib.h> // DEBUG
 
 #include "backend.h"
-#include "lsvd_types.h"
-
-#include "extent.h"
-#include "misc_cache.h"
-#include "smartiov.h"
-
 #include "config.h"
+#include "extent.h"
 #include "journal.h"
+#include "lsvd_types.h"
+#include "misc_cache.h"
 #include "nvme.h"
-#include "request.h"
-#include "translate.h"
-
 #include "objname.h"
 #include "read_cache.h"
+#include "request.h"
+#include "shared_read_cache.h"
+#include "smartiov.h"
+#include "translate.h"
 #include "write_cache.h"
 
 extern void do_log(const char *, ...);
@@ -151,11 +149,13 @@ class reader_impl : public img_reader
     void evict_thread(thread_pool<int> *p);
     char *get_cacheline_buf(int n);
 
+    sptr<shared_read_cache> backing_cache;
+
   public:
     reader_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg,
-                    extmap::objmap *map, extmap::bufmap *bufmap,
-                    std::shared_mutex *m, std::mutex *bufmap_m,
-                    sptr<backend> _io);
+                extmap::objmap *map, extmap::bufmap *bufmap,
+                std::shared_mutex *m, std::mutex *bufmap_m, sptr<backend> _io,
+                sptr<shared_read_cache> backing_cache);
 
     ~reader_impl();
 
@@ -174,22 +174,23 @@ class reader_impl : public img_reader
 /* factory function so we can hide implementation
  */
 img_reader *make_reader(uint32_t blkno, int _fd, translate *_be,
-                            lsvd_config *cfg, extmap::objmap *map,
-                            extmap::bufmap *bufmap, std::shared_mutex *m,
-                            std::mutex *bufmap_m, sptr<backend> _io)
+                        lsvd_config *cfg, extmap::objmap *map,
+                        extmap::bufmap *bufmap, std::shared_mutex *m,
+                        std::mutex *bufmap_m, sptr<backend> _io,
+                        sptr<shared_read_cache> backing_cache)
 {
-    return new reader_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m,
-                               _io);
+    return new reader_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m, _io,
+                           backing_cache);
 }
 
 /* constructor - allocate, read the superblock and map, start threads
  */
 reader_impl::reader_impl(uint32_t blkno, int fd_, translate *be_,
-                                 lsvd_config *cfg_, extmap::objmap *omap,
-                                 extmap::bufmap *bmap,
-                                 std::shared_mutex *maplock,
-                                 std::mutex *bmap_lock, sptr<backend> io_)
-    : hit_stats(5000000), misc_threads(&m)
+                         lsvd_config *cfg_, extmap::objmap *omap,
+                         extmap::bufmap *bmap, std::shared_mutex *maplock,
+                         std::mutex *bmap_lock, sptr<backend> io_,
+                         sptr<shared_read_cache> backing_cache)
+    : hit_stats(5000000), misc_threads(&m), backing_cache(backing_cache)
 {
     backend_objmap = omap;
     pending_bufmap = bmap;
@@ -240,6 +241,7 @@ reader_impl::~reader_impl()
 {
     misc_threads.stop(); // before we free anything threads might touch
     delete ssd;
+    free(rmap);
     free((void *)super);
 }
 
@@ -487,8 +489,7 @@ class direct_read_req : public rcache_generic_request
     bool release = false;
 
   public:
-    direct_read_req(reader_impl *r_, extmap::obj_offset oo_,
-                    smartiov &slice)
+    direct_read_req(reader_impl *r_, extmap::obj_offset oo_, smartiov &slice)
         : iovs(slice)
     {
         oo = oo_;
@@ -612,7 +613,7 @@ class cache_fill_req : public rcache_generic_request
 };
 
 void reader_impl::handle_read(size_t offset, smartiov *iovs,
-                                  std::vector<request *> &requests)
+                              std::vector<request *> &requests)
 {
     sector_t start_sector = offset / 512;
     sector_t end_sector = start_sector + iovs->bytes() / 512;
@@ -692,7 +693,8 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
              *  it2:    |----|    |----|
              *                           |------|   < but not this
              */
-            while (backend_it != backend_objmap->end() && backend_it->limit() <= limit1)
+            while (backend_it != backend_objmap->end() &&
+                   backend_it->limit() <= limit1)
                 backend_it++;
             bufmap_it++;
             continue;
@@ -712,7 +714,8 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
 
         /* if we find the data in cache, fetch it
          */
-        if (map.find(key) != map.end()) {
+        // if (map.find(key) != map.end()) {
+        if (false) { // disable in favour of shared read cache
             sector_t sectors = (offset_limit - objptr.offset);
             sector_t sector_in_blk = objptr.offset % block_sectors;
             limit2 = start_sector + sectors;
@@ -756,7 +759,8 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         /* if we bypass the cache, send the entire read to the backend
          * without worrying about cache block alignment
          */
-        if (!use_cache) {
+        // if (!use_cache) {
+        if (false) { // disable in favour of shared read cache
             sector_t sectors = limit2 - start_sector;
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             auto req = new direct_read_req(this, objptr, slice);
@@ -774,14 +778,16 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
 
         /* standard cache miss path - fetch and insert
          */
+        // Actually, we just defer to shared_read_cache here and pretend like
+        // that's the backend
         else {
-            int i = free_blocks.front();
-            free_blocks.pop();
+            // int i = free_blocks.front();
+            // free_blocks.pop();
 
-            in_use[i]++; // CACHE FILL IN_USE INCR
-            fetching[i] = true;
-            map[key] = i;
-            rmap[i] = key;
+            // in_use[i]++; // CACHE FILL IN_USE INCR
+            // fetching[i] = true;
+            // map[key] = i;
+            // rmap[i] = key;
 
             sector_t sectors = offset_limit - objptr.offset;
             limit2 = start_sector + sectors;
@@ -796,9 +802,15 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
              * - offset in cache block
              * - iovec etc.
              */
-            auto nvme_base = nvme_sector(i);
-            auto req = new cache_fill_req(this, i, sector_in_blk, key,
-                                          nvme_base, slice);
+            // auto nvme_base = nvme_sector(i);
+            // auto req = new cache_fill_req(this, i, sector_in_blk, key,
+            //                               nvme_base, slice);
+
+            // same thing to the shared read cache
+            auto prefix = be->prefix(key.obj);
+            auto req =
+                backing_cache->make_read_req(prefix, key.obj, key.offset * 512L,
+                                             sector_in_blk * 512L, slice);
             requests.push_back(req);
 
             hit_stats.serve(sectors);

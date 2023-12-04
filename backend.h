@@ -42,7 +42,7 @@ class backend
                                    size_t len) = 0;
 };
 
-extern std::unique_ptr<backend> make_file_backend(const char *prefix);
-extern std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io);
+extern std::shared_ptr<backend> make_file_backend(const char *prefix);
+extern std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io);
 
 #endif

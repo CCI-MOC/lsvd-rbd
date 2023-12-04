@@ -243,10 +243,8 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
 
             auto &entry = cache.cache_state[chunk];
             entry.status = entry_status::FILLING;
-            entry.pending_fill_data = buf;
+            // entry.pending_fill_data = buf;
 
-            // TEMPORARY HACK: disptach reads on backend done because we don't
-            // directly read from the buffer when it's there
             for (auto &req : entry.pending_reads)
                 req->on_backend_done(buf);
             entry.pending_reads.clear();
@@ -279,7 +277,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
                 req->on_backend_done(buf);
             entry.pending_reads.clear();
 
-            entry.pending_fill_data = nullptr;
+            // entry.pending_fill_data = nullptr;
             free(buf);
             entry.refcount--;
         }
@@ -303,10 +301,22 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     : cache_state(num_cache_blocks), size_in_chunks(num_cache_blocks),
       obj_backend(obj_backend)
 {
-    fd = open(cache_path.c_str(), O_RDWR | O_CREAT, 0644);
-    ftruncate(fd, CACHE_CHUNK_SIZE * num_cache_blocks);
+    debug("Using {} as the shared read cache", cache_path);
+    fd = open(cache_path.c_str(), O_RDWR | O_CREAT);
+    check_ret(fd, "failed to open cache file");
+
+    header_size_bytes = CACHE_HEADER_SIZE;
+
+    cache_filesize_bytes =
+        CACHE_CHUNK_SIZE * num_cache_blocks + CACHE_HEADER_SIZE;
+
+    debug("Cache file size: {} bytes", cache_filesize_bytes);
+    int ret = ftruncate(fd, cache_filesize_bytes);
+    check_ret(ret, "failed to truncate cache file");
+
     cache_store =
         std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));
+    cache_state = std::vector<entry_state>(num_cache_blocks);
 }
 
 shared_read_cache::~shared_read_cache()
@@ -353,6 +363,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     assert(obj_offset % CACHE_CHUNK_SIZE == 0);
     assert(adjust + dest.bytes() <= CACHE_CHUNK_SIZE);
 
+    trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
+
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
@@ -360,6 +372,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         cache_map.left.find(std::make_tuple(img_prefix, seqnum, obj_offset));
     if (r != cache_map.left.end()) {
         auto idx = r->second;
+        trace("cache hit {}", idx);
+
         auto &entry = cache_state[idx];
         assert(entry.status != entry_status::EMPTY);
 
@@ -369,8 +383,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 
         // Happy path: the entry is valid, we fetch it and return
         if (entry.status == entry_status::VALID) {
-            auto req = cache_store->make_read_request(
-                &dest, idx * CACHE_CHUNK_SIZE + adjust);
+            auto offset = get_store_offset_for_chunk(idx);
+            auto req = cache_store->make_read_request(&dest, offset + adjust);
             return new cache_hit_request(*this, idx, req);
         }
 
@@ -396,7 +410,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
 
     auto &entry = cache_state[idx];
-    entry.pending_fill_data = buf;
+    // entry.pending_fill_data = buf;
     entry.refcount++;
 
     objname obj_name(img_prefix, seqnum);
@@ -429,8 +443,14 @@ void shared_read_cache::set_chunk_status(chunk_idx chunk, entry_status status)
     cache_state[chunk].status = status;
 }
 
+size_t shared_read_cache::get_store_offset_for_chunk(chunk_idx chunk)
+{
+    return chunk * CACHE_CHUNK_SIZE + header_size_bytes;
+}
+
 request *shared_read_cache::get_fill_req(chunk_idx chunk, void *buf)
 {
+    auto offset = get_store_offset_for_chunk(chunk);
     return cache_store->make_write_request((char *)buf, CACHE_CHUNK_SIZE,
-                                           chunk * CACHE_CHUNK_SIZE);
+                                           offset);
 }

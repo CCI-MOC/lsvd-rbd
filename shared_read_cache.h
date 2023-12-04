@@ -14,6 +14,7 @@
 #include "utils.h"
 
 const size_t CACHE_CHUNK_SIZE = 64 * 1024;
+const size_t CACHE_HEADER_SIZE = 4096;
 using cache_chunk = std::array<char, CACHE_CHUNK_SIZE>;
 using chunk_idx = size_t;
 
@@ -58,18 +59,18 @@ class shared_read_cache
     };
 
     struct entry_state {
-        entry_status status;
+        entry_status status = EMPTY;
 
-        bool accessed;
+        bool accessed = false;
 
         // We use this to count how many requests refer to this chunk.
         // If non-zero, we cannot evict this chunk
-        int32_t refcount;
+        int32_t refcount = 0;
 
         // This is used when the backend request has come back and we're now
         // going to fill it into the cache. Status must be FILLING.
         // NULL at all other times
-        void *pending_fill_data;
+        // void *pending_fill_data = nullptr;
 
         // Keep track of pending reads
         std::vector<pending_read_request *> pending_reads;
@@ -82,6 +83,8 @@ class shared_read_cache
     int fd;
     uptr<nvme> cache_store;
     size_t size_in_chunks;
+    size_t header_size_bytes;
+    size_t cache_filesize_bytes;
     sptr<backend> obj_backend;
 
     // cache map
@@ -106,6 +109,7 @@ class shared_read_cache
     entry_status get_chunk_status(chunk_idx idx);
     void set_chunk_status(chunk_idx idx, entry_status status);
 
+    size_t get_store_offset_for_chunk(chunk_idx idx);
     request *get_fill_req(chunk_idx idx, void *data);
 
   public:
