@@ -712,38 +712,6 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         sector_t offset_limit = std::min(key.offset + block_sectors,
                                          (int)(objptr.offset + sectors));
 
-        /* if we find the data in cache, fetch it
-         */
-        // if (map.find(key) != map.end()) {
-        if (false) { // disable in favour of shared read cache
-            sector_t sectors = (offset_limit - objptr.offset);
-            sector_t sector_in_blk = objptr.offset % block_sectors;
-            limit2 = start_sector + sectors;
-
-            hit_stats.serve(sectors);
-            auto slice = iovs->slice(_offset, _offset + sectors * 512L);
-            int i = map[key];
-
-            if (fetching[i]) {
-                auto req =
-                    new pending_read_request(this, i, sector_in_blk, slice);
-                req->base = start_sector;
-                req->limit = limit2;
-                pending[i].push_back(req);
-                requests.push_back(req);
-            } else {
-                in_use[i]++; // CACHE HIT IN_USE INCR
-                auto nvme_location = nvme_sector(i) + sector_in_blk;
-                auto req = new cache_hit_request(this, i, nvme_location, slice);
-                requests.push_back(req);
-            }
-            _offset += (limit2 - start_sector) * 512;
-            start_sector = limit2;
-            if (limit2 == backend_it->limit())
-                backend_it++;
-            continue;
-        }
-
         /* Thrash prevention factors:
          * - fetch efficiency (user vs backend bytes)
          * - window on NVMe writes for cache fill
@@ -781,13 +749,6 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         // Actually, we just defer to shared_read_cache here and pretend like
         // that's the backend
         else {
-            // int i = free_blocks.front();
-            // free_blocks.pop();
-
-            // in_use[i]++; // CACHE FILL IN_USE INCR
-            // fetching[i] = true;
-            // map[key] = i;
-            // rmap[i] = key;
 
             sector_t sectors = offset_limit - objptr.offset;
             limit2 = start_sector + sectors;
@@ -811,7 +772,8 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
             auto req =
                 backing_cache->make_read_req(prefix, key.obj, key.offset * 512L,
                                              sector_in_blk * 512L, slice);
-            requests.push_back(req);
+            if (req != nullptr)
+                requests.push_back(req);
 
             hit_stats.serve(sectors);
             hit_stats.fetch(block_sectors);

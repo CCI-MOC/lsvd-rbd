@@ -290,9 +290,12 @@ sptr<shared_read_cache>
 shared_read_cache::get_instance(std::string cache_path, size_t num_cache_blocks,
                                 sptr<backend> obj_backend)
 {
-    // TODO make this a singleton
-    return std::make_shared<shared_read_cache>(cache_path, num_cache_blocks,
-                                               obj_backend);
+    static sptr<shared_read_cache> instance = nullptr;
+    if (instance == nullptr) {
+        instance = std::make_shared<shared_read_cache>(
+            cache_path, num_cache_blocks, obj_backend);
+    }
+    return instance;
 }
 
 shared_read_cache::shared_read_cache(std::string cache_path,
@@ -305,6 +308,8 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT);
     check_ret(fd, "failed to open cache file");
 
+    // think about persisting the cache state to disk so we can re-use it
+    // on restart instead of filling it every time
     header_size_bytes = CACHE_HEADER_SIZE;
 
     cache_filesize_bytes =
