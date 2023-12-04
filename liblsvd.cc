@@ -35,7 +35,7 @@
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
-#include "read_cache.h"
+#include "img_reader.h"
 #include "request.h"
 #include "shared_read_cache.h"
 #include "smartiov.h"
@@ -88,7 +88,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
      */
 
     /*
-     * TODO: Open 2 files. One for wcache and one for rcache
+     * TODO: Open 2 files. One for wcache and one for reader
      */
     std::string rcache_name =
         cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
@@ -136,7 +136,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
+    reader = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
                          &bufmap_lock, objstore, shared_cache);
     free(jrs);
     free(jws);
@@ -164,7 +164,7 @@ rbd_image *make_rbd_image(sptr<backend> b, translate *t, write_cache *w,
     img->objstore = b;
     img->xlate = t;
     img->wcache = w;
-    img->rcache = r;
+    img->reader = r;
     return img;
 }
 
@@ -190,8 +190,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 
 int rbd_image::image_close(void)
 {
-    rcache->write_map();
-    delete rcache;
+    delete reader;
     wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
@@ -492,7 +491,7 @@ class rbd_aio_req : public request
         __reqs++;
         std::vector<request *> requests;
 
-        img->rcache->handle_read(offset, &aligned_iovs, requests);
+        img->reader->handle_read(offset, &aligned_iovs, requests);
 
         n_req = requests.size();
         // do_log("rbd_read %ld:\n", offset/512);

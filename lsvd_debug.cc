@@ -18,7 +18,7 @@
 #include "misc_cache.h"
 #include "nvme.h"
 #include "objects.h"
-#include "read_cache.h"
+#include "img_reader.h"
 #include "request.h"
 #include "smartiov.h"
 #include "translate.h"

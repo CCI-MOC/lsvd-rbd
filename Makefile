@@ -34,7 +34,7 @@ $(BUILD_DIR)/%.o: %.cc
 	@mkdir -p $(dir $@)
 	$(CXX) -MMD -MP -o $@ -c $< $(CXXFLAGS)
 
-LSVD_DEPS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
+LSVD_DEPS = objects.o translate.o io.o img_reader.o config.o mkcache.o \
 	nvme.o write_cache.o file_backend.o shared_read_cache.o \
 	rados_backend.o lsvd_debug.o liblsvd.o
 LSVD_OBJS = $(LSVD_DEPS:%.o=$(BUILD_DIR)/%.o)

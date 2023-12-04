@@ -64,7 +64,7 @@ struct rbd_image {
     std::shared_ptr<shared_read_cache> shared_cache;
     translate *xlate;
     write_cache *wcache;
-    img_reader *rcache;
+    img_reader *reader;
     int read_fd;  /* read cache file */
     int write_fd; /* write cache file */
 

@@ -15,7 +15,6 @@
 #include <stdint.h>
 #include <vector>
 
-struct j_read_super;
 #include "shared_read_cache.h"
 #include "config.h"
 #include "extent.h"
@@ -31,8 +30,6 @@ class img_reader
 
     virtual void handle_read(size_t offset, smartiov *iovs,
                              std::vector<request *> &requests) = 0;
-
-    virtual void write_map(void) = 0;
 };
 
 extern img_reader *make_reader(uint32_t blkno, int _fd, translate *_be,

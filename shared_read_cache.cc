@@ -6,62 +6,6 @@
 #include "shared_read_cache.h"
 
 /**
- * This is a workaround for the existing codebase doing ad-hoc lifetime
- * management for requests.
- *
- * From what I understand, the original codebase has requests that delete
- * themselves on `release()`, which the parent is reponsible for calling on
- * the child.
- *
- * But sometimes you have `release()` called before you can actually free
- * everything, so you need to do a self-reference count to prevent UAFs. The
- * self refcount is done in an ad-hoc manner with all sorts of state transitions
- * and it's a mess.
- *
- * The idea with this class is that each request really starts with two
- * referees: the completion event and the parent request. So what we do is we
- * start with refcount 2, and decrement on both release() and on notify().
- *
- * This is backwards compatible with the existing request structure; in an
- * ideal world, we would pass shared_from_this shared_ptrs to both the parent
- * and the child and they would decrement the refcount when they're done,
- * but that would require rewriting the lifetime management of all requests
- * in the entire codebase. This way is a drop-in replacement that has minimal
- * impact on everything else.
- *
- * Inpsired by the old read_cache::rcache_generic_request which had the same
- * idea but is badly implemented and a pain to use
- */
-class self_refcount_request : public request
-{
-  protected:
-    std::atomic_int refcount = 2;
-
-    self_refcount_request() {}
-    virtual ~self_refcount_request() {}
-
-    void dec_and_free()
-    {
-        auto old = refcount.fetch_sub(1, std::memory_order_seq_cst);
-        if (old == 1)
-            delete this;
-    }
-
-    /**
-     * Might move this into the destructor and lift subrequests into this class
-     */
-    void free_child(request *child)
-    {
-        if (child)
-            child->release();
-    }
-
-  public:
-    virtual void wait() override { UNIMPLEMENTED(); }
-    virtual void release() override { dec_and_free(); }
-};
-
-/**
  * This is a request that is waiting on a backend request to complete.
  *
  * The trouble is that the backend request is pending at the time of request
@@ -306,9 +250,12 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     cache_filesize_bytes =
         CACHE_CHUNK_SIZE * num_cache_blocks + CACHE_HEADER_SIZE;
 
-    debug("Cache file size: {} bytes", cache_filesize_bytes);
-    int ret = ftruncate(fd, cache_filesize_bytes);
-    check_ret(ret, "failed to truncate cache file");
+    debug("Cache file size: {} bytes ({} header, {} chunks * {} per chunk)",
+          cache_filesize_bytes, header_size_bytes, num_cache_blocks,
+          CACHE_CHUNK_SIZE);
+    check_ret(ftruncate(fd, 0), "failed to clear cache file");
+    check_ret(ftruncate(fd, cache_filesize_bytes),
+              "failed to truncate cache file");
 
     cache_store =
         std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));

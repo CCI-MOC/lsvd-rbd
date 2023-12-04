@@ -1,4 +1,17 @@
-## to get done week Dec 4-7 for presentation dec 12th
+## Todos W49-1
+
+- By W49-2, run benchmarks for:
+	- SSD backend
+	- HDD backend
+	- blocksize 4K, 8K, 16K
+- By w49-3, set up VM boot for shared cache
+
+Notes on VMWare proposal:
+
+- IOPs guarantee for certain users
+
+## W48-5: to get done week Dec 4-7 for presentation dec 12th
+
 - filesystem benchamrks - fix OLTP - this weekend - same parametser as eurosys Logical disk and cache both
 - working set for disk benchmark < size disk - same as eurosys
 - all above with Ceph disk backend - run both filesystem and disk bencharks - this will require much larger read cache block size

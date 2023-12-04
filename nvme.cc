@@ -135,8 +135,8 @@ class nvme_uring : public nvme
     {
       private:
         nvme_uring *nvmu_;
-        lsvd_op op_;
         smartiov iovs_;
+        lsvd_op op_;
         size_t offset_;
 
         // other bookkeeping, copied from the aio version
