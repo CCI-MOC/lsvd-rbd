@@ -8,28 +8,23 @@
  *              LGPL-2.1-or-later
  */
 
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
-#include <unistd.h>
-
-#include <uuid/uuid.h>
-
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <shared_mutex>
-#include <thread>
-
-#include <algorithm>
-
 #include <map>
+#include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <stack>
-#include <vector>
-
-#include <cassert>
 #include <string>
+#include <thread>
+#include <unistd.h>
+#include <uuid/uuid.h>
+#include <vector>
 
 #include "backend.h"
 #include "config.h"
@@ -42,6 +37,7 @@
 #include "nvme.h"
 #include "read_cache.h"
 #include "request.h"
+#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "translate.h"
 #include "utils.h"
@@ -74,10 +70,14 @@ std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
 {
-
     if (cfg.read() < 0)
-        return -1;
+        throw std::runtime_error("Failed to read config");
+
     objstore = get_backend(&cfg, io, name);
+    // TODO figure out how to retrofit config into this thing
+    auto shared_cache = shared_read_cache::get_instance(
+        "/mnt/nvme/lsvd/shared_read_cache", cfg.cache_size / CACHE_CHUNK_SIZE,
+        objstore);
 
     /* read superblock and initialize translation layer
      */
@@ -138,7 +138,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
     rcache = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
-                             &bufmap_lock, objstore);
+                         &bufmap_lock, objstore);
     free(jrs);
     free(jws);
 

@@ -10,7 +10,10 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 class objname
 {

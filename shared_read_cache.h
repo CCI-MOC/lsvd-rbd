@@ -46,10 +46,6 @@ using chunk_key = std::tuple<std::string, uint64_t, size_t>;
 class shared_read_cache
 {
   private:
-    shared_read_cache(std::string cache_path, size_t num_cache_chunks,
-                      sptr<backend> obj_backend);
-    ~shared_read_cache();
-
     class cache_hit_request;
     class cache_miss_request;
     class pending_read_request;
@@ -85,8 +81,8 @@ class shared_read_cache
 
     int fd;
     uptr<nvme> cache_store;
-    sptr<backend> obj_backend;
     size_t size_in_chunks;
+    sptr<backend> obj_backend;
 
     // cache map
     // we map <objname, seqnum, offset> to a cache block
@@ -113,6 +109,10 @@ class shared_read_cache
     request *get_fill_req(chunk_idx idx, void *data);
 
   public:
+    shared_read_cache(std::string cache_path, size_t num_cache_chunks,
+                      sptr<backend> obj_backend);
+    ~shared_read_cache();
+
     /**
      * The shared read cache should be *shared*, so we use a singleton
      * The passed in params are only used on 1st call to construct the cache;

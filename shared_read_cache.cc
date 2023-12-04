@@ -71,6 +71,73 @@ class self_refcount_request : public request
 };
 
 /**
+ * This is a request that is waiting on a backend request to complete.
+ *
+ * The trouble is that the backend request is pending at the time of request
+ * creation* and the backend request might have completed by the time we get
+ * around to running it.
+ *
+ * For now, if we detect that the backend is done when we run(), we just
+ * directly call notify(). This *may* lead to a self-deadlock, but looks
+ * like it's fine for now
+ *
+ * TODO fix this by moving dispatch to a separate thread in this case
+ */
+class shared_read_cache::pending_read_request : public self_refcount_request
+{
+  private:
+    shared_read_cache &cache;
+    chunk_idx chunk;
+    size_t adjust;
+    smartiov dest;
+
+    request *parent = nullptr;
+
+    /**
+     * This mutex guards against the run and on_backend_done from being called
+     * at the same time.
+     */
+    std::mutex mtx;
+    bool is_backend_done = false;
+
+  public:
+    pending_read_request(shared_read_cache &cache, chunk_idx chunk,
+                         size_t adjust, smartiov dest)
+        : cache(cache), chunk(chunk), adjust(adjust), dest(dest)
+    {
+    }
+
+    void try_notify()
+    {
+        if (is_backend_done && parent != nullptr) {
+            parent->notify(this);
+            cache.dec_chunk_refcount(chunk);
+            this->dec_and_free();
+        }
+    }
+
+    virtual void run(request *parent) override
+    {
+        std::unique_lock<std::mutex> l(mtx);
+        assert(parent != nullptr);
+        assert(cache.get_chunk_status(chunk) != entry_status::VALID);
+
+        this->parent = parent;
+        try_notify();
+    }
+
+    void on_backend_done(void *buf)
+    {
+        std::unique_lock<std::mutex> l(mtx);
+        dest.copy_in((char *)buf + adjust);
+        is_backend_done = true;
+        try_notify();
+    }
+
+    virtual void notify(request *child) override { UNIMPLEMENTED(); }
+};
+
+/**
  * Simple wrapper around the direct nvme request to decrement the refcount
  * to the cache chunk when the request is fully served
  */
@@ -78,9 +145,9 @@ class shared_read_cache::cache_hit_request : public self_refcount_request
 {
   private:
     shared_read_cache &cache;
-    request *store_req;
     chunk_idx chunk;
-    request *parent;
+    request *store_req;
+    request *parent = nullptr;
 
   public:
     cache_hit_request(shared_read_cache &cache, chunk_idx idx,
@@ -221,102 +288,9 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     }
 };
 
-/**
- * This is a request that is waiting on a backend request to complete.
- *
- * The trouble is that the backend request is pending at the time of request
- * creation* and the backend request might have completed by the time we get
- * around to running it.
- *
- * For now, if we detect that the backend is done when we run(), we just
- * directly call notify(). This *may* lead to a self-deadlock, but looks
- * like it's fine for now
- *
- * TODO fix this by moving dispatch to a separate thread in this case
- */
-class shared_read_cache::pending_read_request : public self_refcount_request
-{
-  private:
-    shared_read_cache &cache;
-    chunk_idx chunk;
-    request *parent = nullptr;
-    size_t adjust;
-    smartiov dest;
-
-    /**
-     * This mutex guards against the run and on_backend_done from being called
-     * at the same time.
-     */
-    std::mutex mtx;
-    bool is_backend_done = false;
-
-  public:
-    pending_read_request(shared_read_cache &cache, chunk_idx chunk,
-                         size_t adjust, smartiov dest)
-        : cache(cache), chunk(chunk), adjust(adjust), dest(dest)
-    {
-    }
-
-    void try_notify()
-    {
-        if (is_backend_done && parent != nullptr) {
-            parent->notify(this);
-            cache.dec_chunk_refcount(chunk);
-            this->dec_and_free();
-        }
-    }
-
-    virtual void run(request *parent) override
-    {
-        std::unique_lock<std::mutex> l(mtx);
-        assert(parent != nullptr);
-        assert(cache.get_chunk_status(chunk) != entry_status::VALID);
-
-        this->parent = parent;
-        try_notify();
-    }
-
-    void on_backend_done(void *buf)
-    {
-        std::unique_lock<std::mutex> l(mtx);
-        dest.copy_in((char *)buf + adjust);
-        is_backend_done = true;
-        try_notify();
-    }
-
-    virtual void notify(request *child) override { UNIMPLEMENTED(); }
-};
-
-void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
-{
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
-    auto &entry = cache_state[chunk];
-    assert(entry.refcount > 0);
-    entry.refcount--;
-}
-
-shared_read_cache::entry_status
-shared_read_cache::get_chunk_status(chunk_idx chunk)
-{
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
-    return cache_state[chunk].status;
-}
-
-void shared_read_cache::set_chunk_status(chunk_idx chunk, entry_status status)
-{
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
-    cache_state[chunk].status = status;
-}
-
-request *shared_read_cache::get_fill_req(chunk_idx chunk, void *buf)
-{
-    return cache_store->make_write_request((char *)buf, CACHE_CHUNK_SIZE,
-                                           chunk * CACHE_CHUNK_SIZE);
-}
-
-sptr<shared_read_cache> get_instance(std::string cache_path,
-                                     size_t num_cache_blocks,
-                                     sptr<backend> obj_backend)
+sptr<shared_read_cache>
+shared_read_cache::get_instance(std::string cache_path, size_t num_cache_blocks,
+                                sptr<backend> obj_backend)
 {
     // TODO make this a singleton
     return std::make_shared<shared_read_cache>(cache_path, num_cache_blocks,
@@ -331,7 +305,8 @@ shared_read_cache::shared_read_cache(std::string cache_path,
 {
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT, 0644);
     ftruncate(fd, CACHE_CHUNK_SIZE * num_cache_blocks);
-    cache_store = std::make_unique<nvme>(fd);
+    cache_store =
+        std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));
 }
 
 shared_read_cache::~shared_read_cache()
@@ -431,4 +406,31 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);
     return req;
+}
+
+void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
+{
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    auto &entry = cache_state[chunk];
+    assert(entry.refcount > 0);
+    entry.refcount--;
+}
+
+shared_read_cache::entry_status
+shared_read_cache::get_chunk_status(chunk_idx chunk)
+{
+    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    return cache_state[chunk].status;
+}
+
+void shared_read_cache::set_chunk_status(chunk_idx chunk, entry_status status)
+{
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    cache_state[chunk].status = status;
+}
+
+request *shared_read_cache::get_fill_req(chunk_idx chunk, void *buf)
+{
+    return cache_store->make_write_request((char *)buf, CACHE_CHUNK_SIZE,
+                                           chunk * CACHE_CHUNK_SIZE);
 }
