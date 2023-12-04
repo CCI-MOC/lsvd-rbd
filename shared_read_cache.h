@@ -5,7 +5,6 @@
 #include <map>
 #include <mutex>
 #include <shared_mutex>
-#include <stddef.h>
 
 #include "backend.h"
 #include "extent.h"
@@ -17,6 +16,8 @@
 const size_t CACHE_CHUNK_SIZE = 64 * 1024;
 using cache_chunk = std::array<char, CACHE_CHUNK_SIZE>;
 using chunk_idx = size_t;
+
+using chunk_key = std::tuple<std::string, uint64_t, size_t>;
 
 /**
  * This is a cache in front of the backend. It's indexed by
@@ -45,7 +46,8 @@ using chunk_idx = size_t;
 class shared_read_cache
 {
   private:
-    shared_read_cache(size_t num_cache_chunks, sptr<backend> obj_backend);
+    shared_read_cache(std::string cache_path, size_t num_cache_chunks,
+                      sptr<backend> obj_backend);
     ~shared_read_cache();
 
     class cache_hit_request;
@@ -74,7 +76,7 @@ class shared_read_cache
         void *pending_fill_data;
 
         // Keep track of pending reads
-        std::vector<sptr<pending_read_request>> pending_reads;
+        std::vector<pending_read_request *> pending_reads;
     };
 
     std::vector<entry_state> cache_state;
@@ -90,8 +92,7 @@ class shared_read_cache
     // we map <objname, seqnum, offset> to a cache block
     // offset MUST be a multiple of CACHE_CHUNK_SIZE
     // the reverse map exists so that we can evict entries
-    boost::bimap<std::tuple<std::string, uint64_t, size_t>, chunk_idx>
-        cache_map;
+    boost::bimap<chunk_key, chunk_idx> cache_map;
 
     // clock eviction
     size_t clock_idx = 0;
@@ -108,8 +109,8 @@ class shared_read_cache
     void dec_chunk_refcount(chunk_idx idx);
     entry_status get_chunk_status(chunk_idx idx);
     void set_chunk_status(chunk_idx idx, entry_status status);
-    void dispatch_pending_reads(chunk_idx idx, void *data);
-    uptr<request> get_fill_req(chunk_idx idx, void *data);
+
+    request *get_fill_req(chunk_idx idx, void *data);
 
   public:
     /**
@@ -117,9 +118,9 @@ class shared_read_cache
      * The passed in params are only used on 1st call to construct the cache;
      * it's ignored on all subsequent calls
      */
-    sptr<shared_read_cache> get_instance(std::string cache_path,
-                                         size_t num_cache_blocks,
-                                         sptr<backend> obj_backend);
+    static sptr<shared_read_cache> get_instance(std::string cache_path,
+                                                size_t num_cache_blocks,
+                                                sptr<backend> obj_backend);
 
     /**
      * Read a single cache chunk. obj_offset MUST be cache block aligned, and
@@ -131,7 +132,6 @@ class shared_read_cache
      * See documentation for shared_read_cache for more details on the lifecycle
      * of a request.
      */
-    sptr<request> make_read_req(std::string img_prefix, uint64_t seqnum,
-                                size_t obj_offset, size_t adjust,
-                                smartiov &dest);
+    request *make_read_req(std::string img_prefix, uint64_t seqnum,
+                           size_t obj_offset, size_t adjust, smartiov &dest);
 };
