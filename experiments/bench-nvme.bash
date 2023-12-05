@@ -35,4 +35,3 @@ configure_nvmf_transport $gw_ip bdev_uring0
 run_client_bench $client_ip $outfile
 cleanup_nvmf
 
-rmmod brd
