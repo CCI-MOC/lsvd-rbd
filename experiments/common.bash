@@ -71,7 +71,7 @@ function create_lsvd_thin {
 	local size=$3
 
 	cd $lsvd_dir
-	./imgtool --delete --rados $pool/$img || true
+	# ./imgtool --delete --rados $pool/$img || true
 	./remove_objs.py $pool $img
 
 	./imgtool --create --rados --size=$size $pool/$img
