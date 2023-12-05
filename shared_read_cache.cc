@@ -393,7 +393,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 void shared_read_cache::report_cache_stats()
 {
     while (!stop_cache_stats_reporter.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5'000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10'000));
         std::shared_lock<std::shared_mutex> lock(global_cache_lock);
 
         auto frontend = rolling_sum(user_bytes);
@@ -404,10 +404,11 @@ void shared_read_cache::report_cache_stats()
         auto hits = rolling_sum(hitrate_stats);
         auto count = rolling_count(hitrate_stats);
 
-        log_info("cache stats: {}/{} hits, {} bytes read, {:.3f} read amp, "
-                 "{} total",
-                 hits, count, frontend, readamp, total_requests);
+        debug("{}/{} hits, {} bytes read, {:.3f} read amp, {} total", hits,
+              count, frontend, readamp, total_requests);
     }
+
+    debug("cache stats reporter exiting");
 }
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)

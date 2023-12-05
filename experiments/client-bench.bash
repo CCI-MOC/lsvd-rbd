@@ -86,11 +86,11 @@ run_fio randread 60 32 $fio_bs
 run_fio randread 60 64 $fio_bs
 run_fio randread 60 128 $fio_bs
 
-# printf "\n\n"
-# printf "========================================\n"
-# printf "=== Trying out different block sizes ===\n"
-# printf "========================================\n"
-# printf "\n\n"
+printf "\n\n"
+printf "========================================\n"
+printf "=== Trying out different block sizes ===\n"
+printf "========================================\n"
+printf "\n\n"
 
 run_fio read 60 64 16k
 run_fio read 60 64 64k
