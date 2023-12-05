@@ -1,10 +1,16 @@
 #pragma once
 
 #include <array>
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/framework/extractor.hpp>
+#include <boost/accumulators/statistics.hpp>
+#include <boost/accumulators/statistics/rolling_count.hpp>
+#include <boost/accumulators/statistics/rolling_sum.hpp>
 #include <boost/bimap.hpp>
 #include <map>
 #include <mutex>
 #include <shared_mutex>
+#include <thread>
 
 #include "backend.h"
 #include "extent.h"
@@ -15,10 +21,12 @@
 
 const size_t CACHE_CHUNK_SIZE = 64 * 1024;
 const size_t CACHE_HEADER_SIZE = 4096;
-using cache_chunk = std::array<char, CACHE_CHUNK_SIZE>;
 using chunk_idx = size_t;
 
 using chunk_key = std::tuple<std::string, uint64_t, size_t>;
+
+using namespace boost::accumulators;
+const size_t CACHE_STATS_WINDOW = 1'000;
 
 /**
  * This is a cache in front of the backend. It's indexed by
@@ -96,6 +104,17 @@ class shared_read_cache
     // clock eviction
     size_t clock_idx = 0;
 
+    // maintain cache hit rate statistics
+    int total_requests = 0;
+    accumulator_set<int, stats<tag::rolling_sum, tag::rolling_count>>
+        hitrate_stats;
+    accumulator_set<size_t, stats<tag::rolling_sum>> user_bytes;
+    accumulator_set<size_t, stats<tag::rolling_sum>> backend_bytes;
+
+    void report_cache_stats();
+    std::thread cache_stats_reporter;
+    std::atomic<bool> stop_cache_stats_reporter = false;
+
     /**
      * Allocate a new cache chunk, and return its index
      *
@@ -135,7 +154,7 @@ class shared_read_cache
      * If the data is not in the cache, it will be fetched from the backend.
      * See documentation for shared_read_cache for more details on the lifecycle
      * of a request.
-     * 
+     *
      * If data is in memory, this will fill in the iov and return NULL
      */
     request *make_read_req(std::string img_prefix, uint64_t seqnum,

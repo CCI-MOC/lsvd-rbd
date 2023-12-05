@@ -1,5 +1,6 @@
 #include <atomic>
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include "objname.h"
@@ -91,6 +92,8 @@ class shared_read_cache::cache_hit_request : public self_refcount_request
     {
     }
 
+    ~cache_hit_request() {}
+
     virtual void run(request *parent) override
     {
         assert(parent != nullptr);
@@ -149,6 +152,8 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
           dest(dest), subrequest(subrequest)
     {
     }
+
+    ~cache_miss_request() {}
 
     virtual void run(request *parent)
     {
@@ -237,7 +242,10 @@ shared_read_cache::shared_read_cache(std::string cache_path,
                                      size_t num_cache_blocks,
                                      sptr<backend> obj_backend)
     : cache_state(num_cache_blocks), size_in_chunks(num_cache_blocks),
-      obj_backend(obj_backend)
+      obj_backend(obj_backend),
+      hitrate_stats(tag::rolling_window::window_size = CACHE_STATS_WINDOW),
+      user_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW),
+      backend_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW)
 {
     debug("Using {} as the shared read cache", cache_path);
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT);
@@ -260,6 +268,9 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     cache_store =
         std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));
     cache_state = std::vector<entry_state>(num_cache_blocks);
+
+    cache_stats_reporter =
+        std::thread(&shared_read_cache::report_cache_stats, this);
 }
 
 shared_read_cache::~shared_read_cache()
@@ -267,6 +278,8 @@ shared_read_cache::~shared_read_cache()
     // TODO
     // flush all pending writes
     // free all buffers
+    stop_cache_stats_reporter.store(true);
+    cache_stats_reporter.join();
     close(fd);
 }
 
@@ -275,6 +288,7 @@ chunk_idx shared_read_cache::allocate_chunk()
     // assumes that lock is held by the caller
 
     // search for the first empty or evictable entry
+    int searched_entries = 0;
     while (true) {
         auto &entry = cache_state[clock_idx];
 
@@ -287,7 +301,10 @@ chunk_idx shared_read_cache::allocate_chunk()
             entry.accessed = false;
 
         clock_idx = (clock_idx + 1) % size_in_chunks;
+        searched_entries++;
     }
+
+    // trace("allocate chunk: searched {} entries", searched_entries);
 
     // evict the entry
     auto &entry = cache_state[clock_idx];
@@ -305,8 +322,10 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 {
     assert(obj_offset % CACHE_CHUNK_SIZE == 0);
     assert(adjust + dest.bytes() <= CACHE_CHUNK_SIZE);
+    total_requests++;
+    user_bytes(dest.bytes());
 
-    trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
+    // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
 
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
@@ -315,7 +334,9 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         cache_map.left.find(std::make_tuple(img_prefix, seqnum, obj_offset));
     if (r != cache_map.left.end()) {
         auto idx = r->second;
-        trace("cache hit {}", idx);
+        // trace("cache hit {}", idx);
+        backend_bytes(0);
+        hitrate_stats(1);
 
         auto &entry = cache_state[idx];
         assert(entry.status != entry_status::EMPTY);
@@ -341,6 +362,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // Backend request is pending, wait for it to complete
         if (entry.status == entry_status::FETCHING ||
             entry.status == entry_status::FILLING) {
+            trace("pending on chunk {}", idx);
             auto req = new pending_read_request(*this, idx, adjust, dest);
             entry.pending_reads.push_back(req);
             return req;
@@ -349,6 +371,9 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 
     // Cache miss path: allocate a chunk, fetch from backend, and then fill
     // the chunk in
+    backend_bytes(CACHE_CHUNK_SIZE);
+    hitrate_stats(0);
+
     auto idx = allocate_chunk();
     auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
 
@@ -363,6 +388,26 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);
     return req;
+}
+
+void shared_read_cache::report_cache_stats()
+{
+    while (!stop_cache_stats_reporter.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5'000));
+        std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+
+        auto frontend = rolling_sum(user_bytes);
+        auto backend = rolling_sum(backend_bytes);
+
+        double readamp = frontend == 0 ? 0 : (double)backend / (double)frontend;
+
+        auto hits = rolling_sum(hitrate_stats);
+        auto count = rolling_count(hitrate_stats);
+
+        log_info("cache stats: {}/{} hits, {} bytes read, {:.3f} read amp, "
+                 "{} total",
+                 hits, count, frontend, readamp, total_requests);
+    }
 }
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)

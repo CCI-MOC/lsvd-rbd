@@ -36,7 +36,7 @@ cd $lsvd_dir
 make clean
 make -j20 nosan
 
-create_lsvd_thick $pool_name $imgname $imgsize
+create_lsvd_thin $pool_name $imgname $imgsize
 
 kill_nvmf
 launch_lsvd_gw_background $cache_dir
