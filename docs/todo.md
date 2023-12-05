@@ -1,3 +1,18 @@
+## Todos W49-2
+
+- RDB and LSVD on both HDD and SSDs, all 4 configurations
+- Working set (80g) < nvme cache (500g)
+- Fio synthetic workloads, vary blocksize, io depth, workload
+- Filebench (varmail, oltp, fileserver, fileserver-fsync?), maybe YCSB
+- Shared cache VM boot times
+
+Notes on write log:
+
+- Remote malloc
+- Remote nvme
+- 2 remote nvme
+- Measure all of this with a single write workload, reads don't matter here
+
 ## Todos W49-1
 
 - By W49-2, run benchmarks for:
