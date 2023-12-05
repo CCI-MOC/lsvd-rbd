@@ -8,28 +8,23 @@
  *              LGPL-2.1-or-later
  */
 
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
-#include <unistd.h>
-
-#include <uuid/uuid.h>
-
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <shared_mutex>
-#include <thread>
-
-#include <algorithm>
-
 #include <map>
+#include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <stack>
-#include <vector>
-
-#include <cassert>
 #include <string>
+#include <thread>
+#include <unistd.h>
+#include <uuid/uuid.h>
+#include <vector>
 
 #include "backend.h"
 #include "config.h"
@@ -40,8 +35,9 @@
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
-#include "read_cache.h"
+#include "img_reader.h"
 #include "request.h"
+#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "translate.h"
 #include "utils.h"
@@ -63,7 +59,6 @@ extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
                                      const char *name)
 {
-
     if (cfg->backend == BACKEND_FILE)
         return make_file_backend(name);
     if (cfg->backend == BACKEND_RADOS)
@@ -74,10 +69,14 @@ std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
 {
-
     if (cfg.read() < 0)
-        return -1;
+        throw std::runtime_error("Failed to read config");
+
     objstore = get_backend(&cfg, io, name);
+    // TODO figure out how to retrofit config into this thing
+    shared_cache = shared_read_cache::get_instance(
+        "/mnt/nvme/lsvd/shared_read_cache", cfg.cache_size / CACHE_CHUNK_SIZE,
+        objstore);
 
     /* read superblock and initialize translation layer
      */
@@ -89,7 +88,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
      */
 
     /*
-     * TODO: Open 2 files. One for wcache and one for rcache
+     * TODO: Open 2 files. One for wcache and one for reader
      */
     std::string rcache_name =
         cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
@@ -137,8 +136,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache = make_read_cache(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
-                             &bufmap_lock, objstore);
+    reader = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
+                         &bufmap_lock, objstore, shared_cache);
     free(jrs);
     free(jws);
 
@@ -159,13 +158,13 @@ void rbd_image::notify(rbd_completion_t c)
 /* for debug use
  */
 rbd_image *make_rbd_image(sptr<backend> b, translate *t, write_cache *w,
-                          read_cache *r)
+                          img_reader *r)
 {
     auto img = new rbd_image;
     img->objstore = b;
     img->xlate = t;
     img->wcache = w;
-    img->rcache = r;
+    img->reader = r;
     return img;
 }
 
@@ -191,8 +190,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 
 int rbd_image::image_close(void)
 {
-    rcache->write_map();
-    delete rcache;
+    delete reader;
     wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
@@ -493,7 +491,7 @@ class rbd_aio_req : public request
         __reqs++;
         std::vector<request *> requests;
 
-        img->rcache->handle_read(offset, &aligned_iovs, requests);
+        img->reader->handle_read(offset, &aligned_iovs, requests);
 
         n_req = requests.size();
         // do_log("rbd_read %ld:\n", offset/512);

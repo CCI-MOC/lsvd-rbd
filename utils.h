@@ -1,11 +1,13 @@
 #pragma once
 #include <cassert>
 #include <chrono>
+#include <errno.h>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <iostream>
+#include <signal.h>
 #include <source_location>
 #include <span>
 #include <sstream>
@@ -14,10 +16,11 @@
 #include <vector>
 
 #ifndef LOGLV
-#define LOGLV 1
+#define LOGLV 0
 #endif
 
 template <typename T> using sptr = std::shared_ptr<T>;
+template <typename T> using uptr = std::unique_ptr<T>;
 
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
@@ -29,14 +32,16 @@ template <typename T> using sptr = std::shared_ptr<T>;
 #define debug(MSG, ...)                                                        \
     do {                                                                       \
         if (LOGLV <= 1)                                                        \
-            fmt::print(stderr, "[DBG {}:{} {}] " MSG "\n", __FILE__, __LINE__, \
+            fmt::print(stderr, fg(fmt::color::dark_violet),                    \
+                       "[DBG {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
 #define log_info(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 2)                                                        \
-            fmt::print(stderr, fg(fmt::color::yellow) | fmt::emphasis::bold,   \
+            fmt::print(stderr,                                                 \
+                       fg(fmt::color::dark_cyan) | fmt::emphasis::bold,        \
                        "[INFO {}:{} {}] " MSG "\n", __FILE__, __LINE__,        \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
@@ -47,6 +52,35 @@ template <typename T> using sptr = std::shared_ptr<T>;
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
                        "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
                        __func__, ##__VA_ARGS__);                               \
+    } while (0)
+
+#define trap_to_debugger()                                                     \
+    do {                                                                       \
+        raise(SIGTRAP);                                                        \
+    } while (0)
+
+/**
+ * Check return values of libstdc functions. If it's -1, print the error and
+ * throw an exception
+ */
+#define check_ret(ret, MSG, ...)                                               \
+    do {                                                                       \
+        if (ret == -1) {                                                       \
+            auto en = errno;                                                   \
+            auto s = fmt::format("[ERR {}:{} {} | errno {}]: {}; " MSG,        \
+                                 __FILE__, __LINE__, __func__, en,             \
+                                 strerror(en), ##__VA_ARGS__);                 \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            throw std::runtime_error(MSG);                                     \
+        }                                                                      \
+    } while (0)
+
+#define UNIMPLEMENTED()                                                        \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
+                   "[ERR {}:{} {}] Unimplemented\n", __FILE__, __LINE__,       \
+                   __func__);                                                  \
+        throw std::runtime_error("Unimplemented");                             \
     } while (0)
 
 #ifndef NDEBUG

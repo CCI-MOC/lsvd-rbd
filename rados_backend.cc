@@ -70,9 +70,9 @@ class rados_backend : public backend
 
 /* needed for implementation hiding
  */
-std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io)
+std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
 {
-    return std::make_unique<rados_backend>(io);
+    return std::make_shared<rados_backend>(io);
 }
 
 /* see https://docs.ceph.com/en/latest/rados/api/librados/

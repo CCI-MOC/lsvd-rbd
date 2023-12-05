@@ -33,7 +33,7 @@ qemu-system-x86_64 \
 	-enable-kvm \
 	-m 1024 \
 	-vnc :1 -serial mon:stdio \
-	-hda $dev_name \
+	-hda $dev_name
 ```
 
 For nographic, extract the kernel from the image and use:

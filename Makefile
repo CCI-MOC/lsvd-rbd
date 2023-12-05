@@ -34,10 +34,12 @@ $(BUILD_DIR)/%.o: %.cc
 	@mkdir -p $(dir $@)
 	$(CXX) -MMD -MP -o $@ -c $< $(CXXFLAGS)
 
-LSVD_DEPS = objects.o translate.o io.o read_cache.o config.o mkcache.o \
-	nvme.o write_cache.o file_backend.o \
+LSVD_DEPS = objects.o translate.o io.o img_reader.o config.o mkcache.o \
+	nvme.o write_cache.o file_backend.o shared_read_cache.o \
 	rados_backend.o lsvd_debug.o liblsvd.o
 LSVD_OBJS = $(LSVD_DEPS:%.o=$(BUILD_DIR)/%.o)
+
+include $(wildcard $(BUILD_DIR)/*.d)
 
 liblsvd.so: $(LSVD_OBJS)
 	$(CXX) $(SOFLAGS) -o $@ $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
@@ -51,6 +53,11 @@ test-rnd: debug lsvd_rnd_test
 	mkdir -p $(DEBUG_CACHE)
 	rm -rf $(DEBUG_CACHE)/*
 	./lsvd_rnd_test --cache-dir=$(DEBUG_CACHE) --prefix=$(DEBUG_CACHE)/prefix --size=500M --seed=42
+
+debug-rnd: debug lsvd_rnd_test
+	mkdir -p $(DEBUG_CACHE)
+	rm -rf $(DEBUG_CACHE)/*
+	gdb --args ./lsvd_rnd_test --cache-dir=$(DEBUG_CACHE) --prefix=$(DEBUG_CACHE)/prefix --size=500M --seed=42
 
 thick-image: thick-image.o $(LSVD_OBJS) liblsvd.so
 	$(CXX) -o $@ thick-image.o $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
