@@ -38,12 +38,13 @@ class nvme_uring : public nvme
     std::mutex uring_mtx;
     std::thread uring_cqe_worker;
 
+    const char *name;
     std::atomic_bool cqe_worker_should_continue = true;
 
   public:
     int fd;
 
-    nvme_uring(int fd_, const char *name_)
+    nvme_uring(int fd_, const char *name_) : name(name_)
     {
         fd = fd_;
         auto ioret = io_uring_queue_init(256, &ring, 0);
@@ -107,6 +108,10 @@ class nvme_uring : public nvme
 
     void uring_completion_worker()
     {
+        auto thread_name =
+            fmt::format("nvme_uring_worker, fd={}, {}", fd, name);
+        pthread_setname_np(pthread_self(), thread_name.c_str());
+
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
         while (cqe_worker_should_continue.load(std::memory_order_seq_cst)) {
             io_uring_cqe *cqe;

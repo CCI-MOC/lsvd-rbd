@@ -230,12 +230,18 @@ sptr<shared_read_cache>
 shared_read_cache::get_instance(std::string cache_path, size_t num_cache_blocks,
                                 sptr<backend> obj_backend)
 {
-    static sptr<shared_read_cache> instance = nullptr;
-    if (instance == nullptr) {
-        instance = std::make_shared<shared_read_cache>(
-            cache_path, num_cache_blocks, obj_backend);
-    }
-    return instance;
+    // If the last image is closed, clean up the cache as well. Don't keep the
+    // cache around forever
+    auto static singleton = std::weak_ptr<shared_read_cache>();
+
+    auto instance = singleton.lock();
+    if (sptr<shared_read_cache> ret = singleton.lock())
+        return ret;
+
+    auto new_instance = std::make_shared<shared_read_cache>(
+        cache_path, num_cache_blocks, obj_backend);
+    singleton = new_instance;
+    return new_instance;
 }
 
 shared_read_cache::shared_read_cache(std::string cache_path,
@@ -400,7 +406,6 @@ void shared_read_cache::report_cache_stats()
 
         auto frontend = rolling_sum(user_bytes);
         auto backend = rolling_sum(backend_bytes);
-
         double readamp = frontend == 0 ? 0 : (double)backend / (double)frontend;
 
         auto hits = rolling_sum(hitrate_stats);
@@ -411,6 +416,27 @@ void shared_read_cache::report_cache_stats()
     }
 
     debug("cache stats reporter exiting");
+}
+
+bool shared_read_cache::should_bypass_cache()
+{
+    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+
+    auto frontend = rolling_sum(user_bytes);
+    auto backend = rolling_sum(backend_bytes);
+    double readamp = frontend == 0 ? 0 : (double)backend / (double)frontend;
+
+    if (readamp > 2)
+        return true;
+}
+
+void shared_read_cache::served_bypass_request(size_t bytes)
+{
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    total_requests++;
+    hitrate_stats(0);
+    user_bytes(bytes);
+    backend_bytes(bytes);
 }
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)

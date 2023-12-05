@@ -250,9 +250,9 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         /* if we bypass the cache, send the entire read to the backend
          * without worrying about cache block alignment
          */
-        // if (!use_cache) {
-        if (false) { // disable in favour of shared read cache
+        if (backing_cache->should_bypass_cache()) {
             sector_t sectors = limit2 - start_sector;
+            backing_cache->served_bypass_request(sectors * 512L);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             auto req = new direct_read_req(this, objptr, slice);
             requests.push_back(req);

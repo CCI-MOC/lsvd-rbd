@@ -1080,6 +1080,7 @@ struct _extent {
 void translate_impl::do_gc(bool *running)
 {
     gc_cycles++;
+    debug("Start GC cycle {}", gc_cycles);
     int max_obj = seq.load();
 
     std::shared_lock obj_r_lock(*map_lock);
@@ -1331,6 +1332,7 @@ void translate_impl::stop_gc(void)
 
 void translate_impl::gc_thread(thread_pool<int> *p)
 {
+    debug("starting gc thread");
     auto interval = std::chrono::milliseconds(100);
     // sector_t trigger = 128 * 1024 * 2; // 128 MB
     const char *name = "gc_thread";

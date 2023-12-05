@@ -136,6 +136,11 @@ class shared_read_cache
                       sptr<backend> obj_backend);
     ~shared_read_cache();
 
+    // because the part that does the request slicing is not here, we need to
+    // let the upper layers hint to us that there was a bypassed request
+    bool should_bypass_cache();
+    void served_bypass_request(size_t bytes);
+
     /**
      * The shared read cache should be *shared*, so we use a singleton
      * The passed in params are only used on 1st call to construct the cache;
