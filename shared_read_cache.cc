@@ -248,7 +248,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
       backend_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW)
 {
     debug("Using {} as the shared read cache", cache_path);
-    fd = open(cache_path.c_str(), O_RDWR | O_CREAT);
+    fd = open(cache_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
     check_ret(fd, "failed to open cache file");
 
     // think about persisting the cache state to disk so we can re-use it
@@ -392,6 +392,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 
 void shared_read_cache::report_cache_stats()
 {
+    pthread_setname_np(pthread_self(), "cache_stats_reporter");
+
     while (!stop_cache_stats_reporter.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10'000));
         std::shared_lock<std::shared_mutex> lock(global_cache_lock);
