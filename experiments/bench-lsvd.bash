@@ -20,12 +20,12 @@ lsvd_dir=$(git rev-parse --show-toplevel)
 gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
 cache_dir=/mnt/nvme/lsvd-cache/
-outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.txt
+outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.$pool_name.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-benchmark
-imgsize=85g
+imgsize=80g
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
@@ -44,4 +44,5 @@ configure_nvmf_rbd $pool_name $imgname $blocksize bdev_lsvd0
 configure_nvmf_transport $gw_ip bdev_lsvd0
 
 run_client_bench $client_ip $outfile
+cleanup_nvmf_rbd bdev_lsvd0
 cleanup_nvmf

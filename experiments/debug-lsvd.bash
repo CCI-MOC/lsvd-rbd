@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -xeuo pipefail
 
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
@@ -39,7 +39,11 @@ make -j20 nosan
 create_lsvd_thin $pool_name $imgname $imgsize
 
 kill_nvmf
+
+trap "cleanup_nvmf_rbd bdev_lsvd0; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
+export LSVD_NO_GC=1
 launch_lsvd_gw_background $cache_dir
+
 configure_nvmf_rbd $pool_name $imgname $blocksize bdev_lsvd0
 configure_nvmf_transport $gw_ip bdev_lsvd0
 

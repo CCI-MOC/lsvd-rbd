@@ -54,10 +54,16 @@ function launch_gw_background {
 	sleep 5
 }
 
+function cleanup_nvmf_rbd {
+	local bdev_name=$1
+
+	cd $lsvd_dir/spdk
+	scripts/rpc.py bdev_rbd_delete $bdev_name
+	scripts/rpc.py bdev_rbd_unregister_cluster rbd_cluster
+}
+
 function cleanup_nvmf {
 	cd $lsvd_dir/spdk
-	# scripts/rpc.py bdev_rbd_delete Ceph0
-	# scripts/rpc.py bdev_rbd_unregister_cluster rbd_cluster
 	scripts/rpc.py spdk_kill_instance SIGTERM
 }
 
