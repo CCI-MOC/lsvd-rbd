@@ -7,7 +7,6 @@
  *              LGPL-2.1-or-later
  */
 
-#include <libaio.h>
 #include <signal.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -131,7 +130,7 @@ class nvme_uring : public nvme
     }
 
   private:
-    class nvme_uring_request : public request
+    class nvme_uring_request : public self_refcount_request
     {
       private:
         nvme_uring *nvmu_;
@@ -141,10 +140,6 @@ class nvme_uring : public nvme
 
         // other bookkeeping, copied from the aio version
         request *parent_;
-        bool released_ = false;
-        bool complete_ = false;
-        std::mutex completion_mtx;
-        std::condition_variable cv;
 
       public:
         nvme_uring_request(smartiov *iovs, size_t offset, lsvd_op op,
@@ -160,8 +155,11 @@ class nvme_uring : public nvme
         {
         }
 
+        ~nvme_uring_request() {}
+
         void run(request *parent)
         {
+            assert(parent != NULL);
             parent_ = parent;
 
             {
@@ -186,24 +184,10 @@ class nvme_uring : public nvme
 
         void on_complete(int result)
         {
-            // debug trap, to be removed
-            // if(op_ == OP_READ)
-            //     raise(SIGTRAP);
-
-            if (parent_)
-                parent_->notify(this);
-
-            // if op was successful this should always be true
             assert((size_t)result == iovs_.bytes());
 
-            // directly copied from the aio version
-            std::unique_lock lk(completion_mtx);
-            complete_ = true;
-            cv.notify_all();
-            if (released_) {
-                lk.unlock();
-                delete this;
-            }
+            parent_->notify(this);
+            dec_and_free();
         }
 
         void on_fail(int errnum)
@@ -213,30 +197,7 @@ class nvme_uring : public nvme
             return;
         }
 
-        void notify(request *child)
-        {
-            // no-op; the cqe worker calls on_complete directly
-            return;
-        }
-
-        void release()
-        {
-            // directly copied from the aio version
-            std::unique_lock lk(completion_mtx);
-            released_ = true;
-            if (complete_) { // TODO: atomic swap?
-                lk.unlock();
-                delete this;
-            }
-        }
-
-        void wait()
-        {
-            // directly copied from the aio version
-            std::unique_lock lk(completion_mtx);
-            while (!complete_)
-                cv.wait(lk);
-        }
+        void notify(request *child) { UNIMPLEMENTED(); }
     };
 };
 
