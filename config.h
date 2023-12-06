@@ -36,7 +36,7 @@ class lsvd_config
     int gc_threshold = 60;               // GC threshold, percent
     int gc_window = 4;			 // max GC writes outstanding
     int fetch_window = 12;               // read cache fetches
-    int fetch_ratio = 67;                // anti-thrash ratio, percent
+    int fetch_ratio = 67;                // anti-thrash served:backend ratio
     int no_gc = 0;			 // turn off GC
 
     lsvd_config() {}
