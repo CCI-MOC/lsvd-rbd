@@ -428,6 +428,8 @@ bool shared_read_cache::should_bypass_cache()
 
     if (readamp > 2)
         return true;
+
+    return false;
 }
 
 void shared_read_cache::served_bypass_request(size_t bytes)
