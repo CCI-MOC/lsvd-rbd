@@ -2,6 +2,8 @@
 
 ./bench-rbd.bash triple-ssd
 ./bench-lsvd.bash triple-ssd
-./bench-ramdisk.bash
+./bench-rbd.bash triple-hdd
+./bench-lsvd.bash triple-hdd
+./bench-nvme.bash /dev/nvme0n1
 
-# something about parse-results.bash
+
