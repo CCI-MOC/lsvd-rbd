@@ -19,7 +19,7 @@ cur_time=$(date +"%FT%T")
 lsvd_dir=$(git rev-parse --show-toplevel)
 gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
-outfile=$lsvd_dir/experiments/results/$cur_time.rbd.txt
+outfile=$lsvd_dir/experiments/results/$cur_time.$pool_name.rbd.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
