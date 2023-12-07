@@ -27,7 +27,7 @@ class lsvd_config
     int wcache_chunk = 2 * 1024 * 1024; // bytes
     std::string rcache_dir = "/tmp";
     std::string wcache_dir = "/tmp";
-    int xlate_window = 20;
+    int xlate_window = 8;
     int hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
     long cache_size = 500 * 1024 * 1024; // in bytes
