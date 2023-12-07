@@ -14,7 +14,7 @@ print(f'Removing all objects from pool {pool_name} with prefix {img_name}')
 cluster = rados.Rados(conffile='/etc/ceph/ceph.conf')
 cluster.connect()
 
-ioctx = cluster.open_ioctx('triple-ssd')
+ioctx = cluster.open_ioctx(pool_name)
 
 num = 0
 removed = 0
