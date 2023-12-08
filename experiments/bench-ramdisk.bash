@@ -28,7 +28,7 @@ modprobe brd rd_size=$imgsize max_part=1 rd_nr=1
 kill_nvmf
 launch_gw_background
 
-configure_nvmf_common
+configure_nvmf_common $gw_ip
 
 # liburing issues, use aio for now
 # scripts/rpc.py bdev_uring_create /dev/ram0 bdev_uring0 $blocksize

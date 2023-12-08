@@ -26,7 +26,7 @@ source $lsvd_dir/experiments/common.bash
 kill_nvmf
 launch_gw_background
 
-configure_nvmf_common
+configure_nvmf_common $gw_ip
 
 # liburing issues, use aio for now
 # scripts/rpc.py bdev_uring_create /dev/ram0 bdev_uring0 $blocksize

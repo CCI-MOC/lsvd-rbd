@@ -12,11 +12,12 @@ function kill_nvmf {
 }
 
 function configure_nvmf_common {
+	local gateway_ip=$1
 	cd $lsvd_dir/spdk
 	scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
 	scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 	scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
-	scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 127.0.0.1 -s 9922
+	scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 9922
 }
 
 function add_rbd_img {

@@ -43,7 +43,7 @@ kill_nvmf
 
 trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 launch_lsvd_gw_background $cache_dir
-configure_nvmf_common
+configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
 run_client_bench $client_ip $outfile
