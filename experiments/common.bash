@@ -41,7 +41,8 @@ function launch_lsvd_gw_background {
 	export LSVD_RCACHE_DIR=$cache_parent_dir/read/
 	export LSVD_WCACHE_DIR=$cache_parent_dir/write/
 	export LSVD_GC_THRESHOLD=40
-	export LSVD_CACHE_SIZE=257698037760 # 240GiB
+	#export LSVD_CACHE_SIZE=257698037760 # 240GiB
+	export LSVD_CACHE_SIZE=21474836480 # 20GiB
 	#export LSVD_CACHE_SIZE=5368709120 # 5GiB
 	LD_PRELOAD=$lsvd_dir/liblsvd.so ./build/bin/nvmf_tgt &
 
