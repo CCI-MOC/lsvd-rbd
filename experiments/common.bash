@@ -31,14 +31,16 @@ function add_rbd_img {
 
 function launch_lsvd_gw_background {
 	local cache_parent_dir=$1
-	local cache_size=${2:-5368709120} # 5GiB
+	# local cache_size=${2:-5368709120} # 5GiB
 
 	cd $lsvd_dir/spdk
 	mkdir -p $cache_parent_dir/{read,write}
 	export LSVD_RCACHE_DIR=$cache_parent_dir/read/
 	export LSVD_WCACHE_DIR=$cache_parent_dir/write/
 	export LSVD_GC_THRESHOLD=40
-	export LSVD_CACHE_SIZE=$cache_size
+	#export LSVD_CACHE_SIZE=257698037760 # 240GiB
+	export LSVD_CACHE_SIZE=21474836480 # 20GiB
+	#export LSVD_CACHE_SIZE=5368709120 # 5GiB
 	LD_PRELOAD=$lsvd_dir/liblsvd.so ./build/bin/nvmf_tgt &
 
 	sleep 5
@@ -104,7 +106,8 @@ function run_client_bench {
 	cd $lsvd_dir/experiments
 	ssh $client_ip 'mkdir -p /tmp/filebench; rm -rf /tmp/filebench/*'
 	scp ./filebench-workloads/*.f root@$client_ip:/tmp/filebench/
-	ssh $client_ip "bash -s gw_ip=$gw_ip" < $benchscript 2>&1 | tee -a $outfile
+	ssh $client_ip "bash -s gw_ip=$gw_ip" < client-bench.bash 2>&1 | tee -a $outfile
+	#ssh $client_ip "bash -s gw_ip=$gw_ip" < client-bench-abbrev.bash 2>&1 | tee -a $outfile
 
 	perl -lane 'print if s/^RESULT: //' $outfile | tee -a $outfile
 }
