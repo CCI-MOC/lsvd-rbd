@@ -164,6 +164,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
         return -1;
     }
     *image = __lsvd_dbg_img = (void *)img;
+    log_info("opened image: {}, size {}", name, img->size);
     return 0;
 }
 
@@ -184,6 +185,7 @@ int rbd_image::image_close(void)
 extern "C" int rbd_close(rbd_image_t image)
 {
     rbd_image *img = (rbd_image *)image;
+    log_info("closed image");
     img->image_close();
     delete img;
 
