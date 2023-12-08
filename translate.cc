@@ -556,9 +556,17 @@ void translate_impl::make_obj_hdr(char *buf, uint32_t _seq,
 ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
                                int iovcnt)
 {
+
     smartiov siov(iov, iovcnt);
     size_t bytes = siov.bytes();
     sector_t base = offset / 512, limit = (offset + bytes) / 512;
+
+    static std::atomic_int counter = 0;
+    static std::atomic_size_t user_write_bytes = 0;
+    counter++;
+    user_write_bytes += bytes;
+    if(counter % 10'000 == 0)
+        trace("{} write reqs, {} bytes total", counter, user_write_bytes);
 
     std::unique_lock lk(m);
     if (!current->room(bytes)) {
@@ -1080,7 +1088,7 @@ struct _extent {
 void translate_impl::do_gc(bool *running)
 {
     gc_cycles++;
-    debug("Start GC cycle {}", gc_cycles);
+    trace("Start GC cycle {}", gc_cycles);
     int max_obj = seq.load();
 
     std::shared_lock obj_r_lock(*map_lock);

@@ -64,9 +64,8 @@ static struct argp_option options[] = {
 
 static char args_doc[] = "IMAGE";
 
-extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
-int (*make_cache)(int fd, uuid_t &uuid, int n_pages) = init_rcache;
+int (*make_cache)(int fd, uuid_t &uuid, int n_pages) = init_wcache;
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -95,7 +94,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 't':
         if (arg[0] == 'R') {
             cache_type = LSVD_CFG_READ;
-            make_cache = init_rcache;
+            log_error("read cache no longer supported");
+            exit(1);
         } else if (arg[0] == 'W') {
             cache_type = LSVD_CFG_WRITE;
             make_cache = init_wcache;

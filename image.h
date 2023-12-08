@@ -65,7 +65,6 @@ struct rbd_image {
     translate *xlate;
     write_cache *wcache;
     img_reader *reader;
-    int read_fd;  /* read cache file */
     int write_fd; /* write cache file */
 
     std::mutex m; /* protects completions */
