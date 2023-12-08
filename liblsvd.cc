@@ -31,11 +31,11 @@
 #include "extent.h"
 #include "fake_rbd.h"
 #include "image.h"
+#include "img_reader.h"
 #include "journal.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
-#include "img_reader.h"
 #include "request.h"
 #include "shared_read_cache.h"
 #include "smartiov.h"
@@ -73,10 +73,9 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw std::runtime_error("Failed to read config");
 
     objstore = get_backend(&cfg, io, name);
-    // TODO figure out how to retrofit config into this thing
+    auto shared_cache_path = cfg.shared_read_cache_path;
     shared_cache = shared_read_cache::get_instance(
-        "/mnt/nvme/lsvd/shared_read_cache", cfg.cache_size / CACHE_CHUNK_SIZE,
-        objstore);
+        shared_cache_path, cfg.cache_size / CACHE_CHUNK_SIZE, objstore);
 
     /* read superblock and initialize translation layer
      */
