@@ -12,7 +12,7 @@ done
 
 printf "===Starting client benchmark\n\n"
 
-trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM EXIT
+trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM SIGHUP EXIT
 
 # if [ "$EUID" -ne 0 ]
 #   then echo "Please run as root"
@@ -132,6 +132,8 @@ function run_filebench {
 	perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
 }
 
+# shorten runtime
+perl -pi -e 's/run 300/run 180/' /tmp/filebench/*.f
 for workload in /tmp/filebench/*.f; do
 	run_filebench $workload
 done
