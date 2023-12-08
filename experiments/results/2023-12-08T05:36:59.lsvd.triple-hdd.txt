@@ -1,0 +1,472 @@
++ for pair in $*
++ '[' 10.1.0.5 '!=' gw_ip=10.1.0.5 ']'
++ eval gw_ip=10.1.0.5
+++ gw_ip=10.1.0.5
+===Starting client benchmark
+
++ printf '===Starting client benchmark\n\n'
++ trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM EXIT
++ modprobe nvme-fabrics
++ gw_ip=10.1.0.5
++ nvme discover -t tcp -a 10.1.0.5 -s 9922
+
+Discovery Log Number of Records 1, Generation counter 1
+=====Discovery Log Entry 0======
+trtype:  tcp
+adrfam:  ipv4
+subtype: nvme subsystem
+treq:    not required
+portid:  0
+trsvcid: 9922
+subnqn:  nqn.2016-06.io.spdk:cnode1
+traddr:  10.1.0.5
+sectype: none
++ nvme connect -t tcp --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+device: nvme2
++ sleep 5
++ nvme list
+Node                  SN                   Model                                    Namespace Usage                      Format           FW Rev  
+--------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+/dev/nvme0n1          PHM27522000B480BGN   INTEL SSDPE21D480GA                      1         480.10  GB / 480.10  GB    512   B +  0 B   E2010414
+/dev/nvme1n2          SPDK00000000000001   SPDK_Controller1                         1          85.90  GB /  85.90  GB      4 KiB +  0 B   23.09   
+++ nvme list
+++ perl -lane 'print @F[0] if /SPDK/'
+Using device /dev/nvme1n2
++ dev_name=/dev/nvme1n2
++ printf 'Using device /dev/nvme1n2\n'
++ num_fio_processes=1
++ fio_size=20GB
++ fio_bs=4k
+
+
+===Fio: workload=randwrite, time=60, iodepth=256, bs=4k===
+
++ run_fio randwrite 60 256 4k
++ printf '\n\n===Fio: workload=randwrite, time=60, iodepth=256, bs=4k===\n\n'
++ fio --name=fio-randwrite --rw=randwrite --filename=/dev/nvme1n2 --size=20GB --direct=1 --bs=4k --ioengine=io_uring --iodepth=256 --runtime=60 --time_based --numjobs=1 --group_reporting --randrepeat=0 --eta-newline=1
++ tee /tmp/client-bench-results.txt
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=63716: Fri Dec  8 05:47:24 2023
+  write: IOPS=48.1k, BW=188MiB/s (197MB/s)(11.0GiB/60003msec); 0 zone resets
+    slat (usec): min=4, max=52733, avg=18.55, stdev=80.79
+    clat (usec): min=2215, max=59810, avg=5297.81, stdev=1180.18
+     lat (usec): min=2222, max=59816, avg=5316.59, stdev=1182.29
+    clat percentiles (usec):
+     |  1.00th=[ 4228],  5.00th=[ 4555], 10.00th=[ 4686], 20.00th=[ 4817],
+     | 30.00th=[ 4883], 40.00th=[ 5014], 50.00th=[ 5080], 60.00th=[ 5211],
+     | 70.00th=[ 5407], 80.00th=[ 5669], 90.00th=[ 6128], 95.00th=[ 6587],
+     | 99.00th=[ 7701], 99.50th=[ 8455], 99.90th=[18482], 99.95th=[30540],
+     | 99.99th=[46400]
+   bw (  KiB/s): min=156688, max=203704, per=100.00%, avg=192563.43, stdev=8503.76, samples=119
+   iops        : min=39172, max=50926, avg=48140.86, stdev=2126.01, samples=119
+  lat (msec)   : 4=0.29%, 10=99.50%, 20=0.12%, 50=0.08%, 100=0.01%
+  cpu          : usr=14.65%, sys=38.71%, ctx=208551, majf=0, minf=9
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2888146,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=188MiB/s (197MB/s), 188MiB/s-188MiB/s (197MB/s-197MB/s), io=11.0GiB (11.8GB), run=60003-60003msec
+
+Disk stats (read/write):
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) randwrite:+ printf '\nRESULT: Fio (iodepth=256) randwrite:'
++ perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+  write: IOPS=48.1k, BW=188MiB/s (197MB/s)(11.0GiB/60003msec); 0 zone resets
++ sleep 5
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=4k===
+
++ run_fio randread 60 256 4k
++ printf '\n\n===Fio: workload=randread, time=60, iodepth=256, bs=4k===\n\n'
++ fio --name=fio-randread --rw=randread --filename=/dev/nvme1n2 --size=20GB --direct=1 --bs=4k --ioengine=io_uring --iodepth=256 --runtime=60 --time_based --numjobs=1 --group_reporting --randrepeat=0 --eta-newline=1
++ tee /tmp/client-bench-results.txt
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=63768: Fri Dec  8 05:48:29 2023
+  read: IOPS=5075, BW=19.8MiB/s (20.8MB/s)(1195MiB/60257msec)
+    slat (usec): min=4, max=12067, avg=192.35, stdev=290.61
+    clat (usec): min=114, max=1201.3k, avg=50235.93, stdev=73394.01
+     lat (usec): min=122, max=1201.3k, avg=50428.80, stdev=73395.58
+    clat percentiles (msec):
+     |  1.00th=[   10],  5.00th=[   21], 10.00th=[   24], 20.00th=[   28],
+     | 30.00th=[   31], 40.00th=[   33], 50.00th=[   35], 60.00th=[   39],
+     | 70.00th=[   42], 80.00th=[   50], 90.00th=[   71], 95.00th=[  113],
+     | 99.00th=[  414], 99.50th=[  625], 99.90th=[  911], 99.95th=[  986],
+     | 99.99th=[ 1099]
+   bw (  KiB/s): min=16872, max=25024, per=100.00%, avg=20370.47, stdev=1728.68, samples=120
+   iops        : min= 4218, max= 6256, avg=5092.63, stdev=432.16, samples=120
+  lat (usec)   : 250=0.01%, 500=0.01%, 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.05%, 4=0.16%, 10=0.81%, 20=3.48%, 50=76.28%
+  lat (msec)   : 100=13.39%, 250=3.91%, 500=1.13%, 750=0.49%, 1000=0.23%
+  lat (msec)   : 2000=0.04%
+  cpu          : usr=3.20%, sys=9.29%, ctx=207799, majf=0, minf=267
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=305813,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=19.8MiB/s (20.8MB/s), 19.8MiB/s-19.8MiB/s (20.8MB/s-20.8MB/s), io=1195MiB (1253MB), run=60257-60257msec
+
+Disk stats (read/write):
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) randread:+ printf '\nRESULT: Fio (iodepth=256) randread:'
++ perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+  read: IOPS=5075, BW=19.8MiB/s (20.8MB/s)(1195MiB/60257msec)
++ sleep 5
+
+
+===Fio: workload=write, time=60, iodepth=256, bs=4k===
+
++ run_fio write 60 256 4k
++ printf '\n\n===Fio: workload=write, time=60, iodepth=256, bs=4k===\n\n'
++ fio --name=fio-write --rw=write --filename=/dev/nvme1n2 --size=20GB --direct=1 --bs=4k --ioengine=io_uring --iodepth=256 --runtime=60 --time_based --numjobs=1 --group_reporting --randrepeat=0 --eta-newline=1
++ tee /tmp/client-bench-results.txt
+fio-write: (g=0): rw=write, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=63814: Fri Dec  8 05:49:35 2023
+  write: IOPS=46.1k, BW=180MiB/s (189MB/s)(10.5GiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=652626, avg=19.69, stdev=1010.06
+    clat (usec): min=564, max=661209, avg=5532.86, stdev=16178.34
+     lat (usec): min=717, max=661214, avg=5552.80, stdev=16210.19
+    clat percentiles (msec):
+     |  1.00th=[    5],  5.00th=[    5], 10.00th=[    5], 20.00th=[    5],
+     | 30.00th=[    5], 40.00th=[    5], 50.00th=[    5], 60.00th=[    6],
+     | 70.00th=[    6], 80.00th=[    6], 90.00th=[    6], 95.00th=[    6],
+     | 99.00th=[    7], 99.50th=[    8], 99.90th=[   80], 99.95th=[  498],
+     | 99.99th=[  659]
+   bw (  KiB/s): min= 4728, max=215352, per=99.95%, avg=184273.41, stdev=49501.02, samples=119
+   iops        : min= 1182, max=53838, avg=46068.32, stdev=12375.24, samples=119
+  lat (usec)   : 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=0.57%, 10=99.14%, 20=0.15%, 50=0.03%
+  lat (msec)   : 100=0.02%, 500=0.05%, 750=0.05%
+  cpu          : usr=13.43%, sys=37.38%, ctx=191101, majf=0, minf=1683
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2765400,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=180MiB/s (189MB/s), 180MiB/s-180MiB/s (189MB/s-189MB/s), io=10.5GiB (11.3GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) write:+ printf '\nRESULT: Fio (iodepth=256) write:'
++ perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+  write: IOPS=46.1k, BW=180MiB/s (189MB/s)(10.5GiB/60001msec); 0 zone resets
++ sleep 5
+
+
+===Fio: workload=read, time=60, iodepth=256, bs=4k===
+
++ run_fio read 60 256 4k
++ printf '\n\n===Fio: workload=read, time=60, iodepth=256, bs=4k===\n\n'
++ fio --name=fio-read --rw=read --filename=/dev/nvme1n2 --size=20GB --direct=1 --bs=4k --ioengine=io_uring --iodepth=256 --runtime=60 --time_based --numjobs=1 --group_reporting --randrepeat=0 --eta-newline=1
++ tee /tmp/client-bench-results.txt
+fio-read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=63870: Fri Dec  8 05:50:40 2023
+  read: IOPS=8681, BW=33.9MiB/s (35.6MB/s)(2035MiB/60014msec)
+    slat (usec): min=4, max=118215, avg=111.80, stdev=289.54
+    clat (msec): min=4, max=151, avg=29.37, stdev= 5.31
+     lat (msec): min=4, max=151, avg=29.49, stdev= 5.33
+    clat percentiles (msec):
+     |  1.00th=[   19],  5.00th=[   24], 10.00th=[   25], 20.00th=[   26],
+     | 30.00th=[   27], 40.00th=[   28], 50.00th=[   29], 60.00th=[   30],
+     | 70.00th=[   32], 80.00th=[   33], 90.00th=[   36], 95.00th=[   38],
+     | 99.00th=[   44], 99.50th=[   46], 99.90th=[   53], 99.95th=[   61],
+     | 99.99th=[  150]
+   bw (  KiB/s): min=29632, max=40368, per=99.95%, avg=34706.40, stdev=2308.57, samples=119
+   iops        : min= 7408, max=10092, avg=8676.58, stdev=577.15, samples=119
+  lat (msec)   : 10=0.02%, 20=1.23%, 50=98.59%, 100=0.12%, 250=0.05%
+  cpu          : usr=4.61%, sys=14.44%, ctx=478162, majf=0, minf=267
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=520991,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=33.9MiB/s (35.6MB/s), 33.9MiB/s-33.9MiB/s (35.6MB/s-35.6MB/s), io=2035MiB (2134MB), run=60014-60014msec
+
+Disk stats (read/write):
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) read:+ printf '\nRESULT: Fio (iodepth=256) read:'
++ perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+  read: IOPS=8681, BW=33.9MiB/s (35.6MB/s)(2035MiB/60014msec)
++ sleep 5
++ dd if=/dev/zero of=/dev/nvme1n2 bs=1M count=100
+100+0 records in
+100+0 records out
+104857600 bytes (105 MB, 100 MiB) copied, 0.379495 s, 276 MB/s
++ umount /mnt/fsbench
+umount: /mnt/fsbench: target is busy.
+
+==== Creating filesystem ====
++ true
++ printf '\n==== Creating filesystem ====\n'
++ mkfs.ext4 -E nodiscard /dev/nvme1n2
+mke2fs 1.46.5 (30-Dec-2021)
+Creating filesystem with 20971520 4k blocks and 5242880 inodes
+Filesystem UUID: fbab7739-235d-4e4d-80e3-4f80cf8fb255
+Superblock backups stored on blocks: 
+	32768, 98304, 163840, 229376, 294912, 819200, 884736, 1605632, 2654208, 
+	4096000, 7962624, 11239424, 20480000
+
+Allocating group tables:   0/640       done                            
+Writing inode tables:   0/640       done                            
+Creating journal (131072 blocks): done
+Writing superblocks and filesystem accounting information:   0/640 50/640       done
+
++ mkdir -p /mnt/fsbench
++ mount /dev/nvme1n2 /mnt/fsbench
++ rm -rf /mnt/fsbench/lost+found
+
+
+=========================================
++ printf '\n\n'
++ printf '=========================================\n'
+=== Running filebench workloads       ===
++ printf '=== Running filebench workloads       ===\n'
+=========================================
++ printf '=========================================\n'
+
+
++ printf '\n\n'
++ echo 0
++ perl -pi -e 's/run 300/run 60/' /tmp/filebench/fileserver.f /tmp/filebench/fileserver-fsync.f /tmp/filebench/oltp.f /tmp/filebench/randomwrite.f /tmp/filebench/varmail.f
+
+
+===Filebench: workload=/tmp/filebench/fileserver.f===
+
++ for workload in /tmp/filebench/*.f
++ run_filebench /tmp/filebench/fileserver.f
++ printf '\n\n===Filebench: workload=/tmp/filebench/fileserver.f===\n\n'
++ rm -rf '/mnt/fsbench/*'
++ filebench -f /tmp/filebench/fileserver.f
++ tee /tmp/client-bench-results.txt
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: File-server Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.209: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.209: Removing bigfileset tree (if exists)
+0.212: Pre-allocating directories in bigfileset tree
+0.629: Pre-allocating files in bigfileset tree
+49.045: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+49.045: Population and pre-allocation of filesets completed
+49.045: Starting 1 filereader instances
+50.053: Running...
+110.061: Run took 60 seconds...
+110.066: Per-Operation Breakdown
+statfile1            259444ops     4324ops/s   0.0mb/s    0.012ms/op [0.004ms - 6.133ms]
+deletefile1          259436ops     4324ops/s   0.0mb/s    0.166ms/op [0.032ms - 311.533ms]
+closefile3           259444ops     4324ops/s   0.0mb/s    0.005ms/op [0.001ms - 1.955ms]
+readfile1            259444ops     4324ops/s 555.8mb/s    0.108ms/op [0.005ms - 269.396ms]
+openfile2            259445ops     4324ops/s   0.0mb/s    0.078ms/op [0.006ms - 200.309ms]
+closefile2           259445ops     4324ops/s   0.0mb/s    0.005ms/op [0.001ms - 3.012ms]
+appendfilerand1      259445ops     4324ops/s  33.8mb/s    0.663ms/op [0.008ms - 428.449ms]
+openfile1            259447ops     4324ops/s   0.0mb/s    0.081ms/op [0.008ms - 205.446ms]
+closefile1           259447ops     4324ops/s   0.0mb/s    0.006ms/op [0.001ms - 2.362ms]
+wrtfile1             259450ops     4324ops/s 539.5mb/s    9.018ms/op [0.013ms - 433.711ms]
+createfile1          259491ops     4324ops/s   0.0mb/s    0.346ms/op [0.025ms - 957.962ms]
+110.066: IO Summary: 2853938 ops 47561.220 ops/s 4324/8647 rd/wr 1129.1mb/s 0.953ms/op
+110.066: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver.f:+ printf '\nRESULT: Filebench /tmp/filebench/fileserver.f:'
++ perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+110.066: IO Summary: 2853938 ops 47561.220 ops/s 4324/8647 rd/wr 1129.1mb/s 0.953ms/op
+
+
+===Filebench: workload=/tmp/filebench/fileserver-fsync.f===
+
++ for workload in /tmp/filebench/*.f
++ run_filebench /tmp/filebench/fileserver-fsync.f
++ printf '\n\n===Filebench: workload=/tmp/filebench/fileserver-fsync.f===\n\n'
++ rm -rf /mnt/fsbench/bigfileset
++ filebench -f /tmp/filebench/fileserver-fsync.f
++ tee /tmp/client-bench-results.txt
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: File-server Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.236: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.236: Removing bigfileset tree (if exists)
+0.239: Pre-allocating directories in bigfileset tree
+0.650: Pre-allocating files in bigfileset tree
+42.169: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+42.169: Population and pre-allocation of filesets completed
+42.169: Starting 1 filereader instances
+43.177: Running...
+103.184: Run took 60 seconds...
+103.189: Per-Operation Breakdown
+statfile1            100554ops     1676ops/s   0.0mb/s    0.011ms/op [0.003ms - 1.111ms]
+deletefile1          100554ops     1676ops/s   0.0mb/s    2.362ms/op [0.039ms - 427.114ms]
+closefile3           100554ops     1676ops/s   0.0mb/s    0.005ms/op [0.001ms - 0.414ms]
+readfile1            100554ops     1676ops/s 212.0mb/s    2.569ms/op [0.006ms - 329.569ms]
+openfile2            100554ops     1676ops/s   0.0mb/s    0.076ms/op [0.008ms - 3.292ms]
+closefile2           100554ops     1676ops/s   0.0mb/s    0.014ms/op [0.001ms - 1.949ms]
+fsyncfile2           100572ops     1676ops/s   0.0mb/s   20.643ms/op [0.276ms - 452.135ms]
+appendfilerand1      100604ops     1677ops/s  13.1mb/s    0.644ms/op [0.010ms - 324.897ms]
+openfile1            100604ops     1677ops/s   0.0mb/s    0.045ms/op [0.008ms - 2.708ms]
+closefile1           100604ops     1677ops/s   0.0mb/s    0.005ms/op [0.001ms - 1.852ms]
+wrtfile1             100604ops     1677ops/s 209.0mb/s    1.385ms/op [0.016ms - 333.976ms]
+createfile1          100604ops     1677ops/s   0.0mb/s    1.354ms/op [0.032ms - 96.393ms]
+103.189: IO Summary: 1206916 ops 20113.526 ops/s 1676/3353 rd/wr 434.1mb/s 2.426ms/op
+103.189: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver-fsync.f:+ printf '\nRESULT: Filebench /tmp/filebench/fileserver-fsync.f:'
++ perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+103.189: IO Summary: 1206916 ops 20113.526 ops/s 1676/3353 rd/wr 434.1mb/s 2.426ms/op
+
+
+===Filebench: workload=/tmp/filebench/oltp.f===
+
++ for workload in /tmp/filebench/*.f
++ run_filebench /tmp/filebench/oltp.f
++ printf '\n\n===Filebench: workload=/tmp/filebench/oltp.f===\n\n'
++ rm -rf /mnt/fsbench/bigfileset
++ filebench -f /tmp/filebench/oltp.f
++ tee /tmp/client-bench-results.txt
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: OLTP Version 3.0  personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.003: logfile populated: 1 files, avg. dir. width = 1024, avg. dir. depth = 0.0, 0 leafdirs, 100.000MB total size
+0.003: Removing logfile tree (if exists)
+0.005: Pre-allocating directories in logfile tree
+0.005: Pre-allocating files in logfile tree
+0.115: datafiles populated: 250 files, avg. dir. width = 1024, avg. dir. depth = 0.8, 0 leafdirs, 25000.000MB total size
+0.115: Removing datafiles tree (if exists)
+0.118: Pre-allocating directories in datafiles tree
+0.118: Pre-allocating files in datafiles tree
+54.597: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+54.597: Population and pre-allocation of filesets completed
+54.597: Starting 200 shadow instances
+54.727: Starting 10 dbwr instances
+54.732: Starting 1 lgwr instances
+55.736: Running...
+115.753: Run took 60 seconds...
+115.771: Per-Operation Breakdown
+random-rate          0ops        0ops/s   0.0mb/s    0.000ms/op [0.000ms - 0.000ms]
+shadow-post-dbwr     498000ops     8298ops/s   0.0mb/s   22.999ms/op [0.019ms - 522.941ms]
+shadow-post-lg       498200ops     8301ops/s   0.0mb/s    0.059ms/op [0.002ms - 52.035ms]
+shadowhog            498200ops     8301ops/s   0.0mb/s    0.291ms/op [0.093ms - 108.206ms]
+shadowread           523800ops     8728ops/s  16.2mb/s    0.609ms/op [0.001ms - 230.744ms]
+dbwr-aiowait         4952ops       83ops/s   0.0mb/s    1.156ms/op [0.005ms - 15.925ms]
+dbwr-block           4962ops       83ops/s   0.0mb/s    2.911ms/op [0.004ms - 59.628ms]
+dbwr-hog             4962ops       83ops/s   0.0mb/s    0.013ms/op [0.004ms - 7.243ms]
+dbwrite-a            497480ops     8289ops/s  16.1mb/s    0.006ms/op [0.001ms - 75.208ms]
+lg-block             155ops        3ops/s   0.0mb/s  386.195ms/op [35.475ms - 963.352ms]
+lg-aiowait           156ops        3ops/s   0.0mb/s    0.001ms/op [0.001ms - 0.014ms]
+lg-write             157ops        3ops/s   0.6mb/s    0.010ms/op [0.001ms - 0.113ms]
+115.771: IO Summary: 1026545 ops 17104.660 ops/s 8728/8292 rd/wr  33.0mb/s 0.319ms/op
+115.771: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/oltp.f:+ printf '\nRESULT: Filebench /tmp/filebench/oltp.f:'
++ perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+115.771: IO Summary: 1026545 ops 17104.660 ops/s 8728/8292 rd/wr  33.0mb/s 0.319ms/op
++ for workload in /tmp/filebench/*.f
++ run_filebench /tmp/filebench/randomwrite.f
+
+
+===Filebench: workload=/tmp/filebench/randomwrite.f===
+
++ printf '\n\n===Filebench: workload=/tmp/filebench/randomwrite.f===\n\n'
++ rm -rf /mnt/fsbench/datafiles /mnt/fsbench/logfile
++ filebench -f /tmp/filebench/randomwrite.f
++ tee /tmp/client-bench-results.txt
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.002: Random Write Version 3.0 personality successfully loaded
+0.002: Populating and pre-allocating filesets
+0.002: Removing largefile1 tree (if exists)
+0.005: Pre-allocating directories in largefile1 tree
+0.005: Pre-allocating files in largefile1 tree
+0.900: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+0.900: Population and pre-allocation of filesets completed
+0.901: Starting 1 rand-write instances
+1.903: Running...
+1.909: write failed, offset 547979264 io buffer 140737084729344: Invalid argument
+1.909: rand-thread-1: flowop rand-write1-1 failed
+2.903: Run took 1 seconds...
+2.903: Shutting down processes
+2.903: NO VALID RESULTS! Filebench run terminated prematurely around line 46
+
+RESULT: Filebench /tmp/filebench/randomwrite.f:+ printf '\nRESULT: Filebench /tmp/filebench/randomwrite.f:'
++ perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+
+
+===Filebench: workload=/tmp/filebench/varmail.f===
+
++ for workload in /tmp/filebench/*.f
++ run_filebench /tmp/filebench/varmail.f
++ printf '\n\n===Filebench: workload=/tmp/filebench/varmail.f===\n\n'
++ rm -rf /mnt/fsbench/largefile1
++ filebench -f /tmp/filebench/varmail.f
++ tee /tmp/client-bench-results.txt
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: Varmail Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.958: bigfileset populated: 900000 files, avg. dir. width = 1000000, avg. dir. depth = 1.0, 0 leafdirs, 28154.289MB total size
+0.959: Removing bigfileset tree (if exists)
+0.961: Pre-allocating directories in bigfileset tree
+0.962: Pre-allocating files in bigfileset tree
+77.647: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+77.647: Population and pre-allocation of filesets completed
+77.647: Starting 1 filereader instances
+78.655: Running...
+138.661: Run took 60 seconds...
+138.661: Per-Operation Breakdown
+closefile4           73044ops     1217ops/s   0.0mb/s    0.004ms/op [0.001ms - 0.415ms]
+readfile4            73044ops     1217ops/s  32.3mb/s    1.029ms/op [0.008ms - 241.167ms]
+openfile4            73044ops     1217ops/s   0.0mb/s    0.024ms/op [0.006ms - 1.831ms]
+closefile3           73044ops     1217ops/s   0.0mb/s    0.006ms/op [0.001ms - 1.887ms]
+fsyncfile3           73045ops     1217ops/s   0.0mb/s    4.117ms/op [0.569ms - 255.374ms]
+appendfilerand3      73050ops     1217ops/s   9.5mb/s    0.102ms/op [0.001ms - 239.671ms]
+readfile3            73050ops     1217ops/s  32.6mb/s    1.028ms/op [0.009ms - 240.959ms]
+openfile3            73050ops     1217ops/s   0.0mb/s    0.023ms/op [0.006ms - 1.279ms]
+closefile2           73050ops     1217ops/s   0.0mb/s    0.007ms/op [0.002ms - 1.006ms]
+fsyncfile2           73051ops     1217ops/s   0.0mb/s    4.352ms/op [0.896ms - 255.483ms]
+appendfilerand2      73057ops     1218ops/s   9.5mb/s    0.321ms/op [0.015ms - 155.800ms]
+createfile2          73057ops     1218ops/s   0.0mb/s    0.968ms/op [0.039ms - 156.463ms]
+deletefile1          73057ops     1218ops/s   0.0mb/s    1.019ms/op [0.039ms - 220.738ms]
+138.661: IO Summary: 949643 ops 15826.131 ops/s 2435/2435 rd/wr  83.9mb/s 1.000ms/op
+138.661: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/varmail.f:+ printf '\nRESULT: Filebench /tmp/filebench/varmail.f:'
++ perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+138.661: IO Summary: 949643 ops 15826.131 ops/s 2435/2435 rd/wr  83.9mb/s 1.000ms/op
++ umount /mnt/fsbench
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode1
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 1 controller(s)
++ exit
+Fio (iodepth=256) randwrite:+ printf '\nRESULT: Fio (iodepth=256) randwrite:'
+Fio (iodepth=256) randread:+ printf '\nRESULT: Fio (iodepth=256) randread:'
+Fio (iodepth=256) write:+ printf '\nRESULT: Fio (iodepth=256) write:'
+Fio (iodepth=256) read:+ printf '\nRESULT: Fio (iodepth=256) read:'
+Filebench /tmp/filebench/fileserver.f:+ printf '\nRESULT: Filebench /tmp/filebench/fileserver.f:'
+Filebench /tmp/filebench/fileserver-fsync.f:+ printf '\nRESULT: Filebench /tmp/filebench/fileserver-fsync.f:'
+Filebench /tmp/filebench/oltp.f:+ printf '\nRESULT: Filebench /tmp/filebench/oltp.f:'
+Filebench /tmp/filebench/randomwrite.f:+ printf '\nRESULT: Filebench /tmp/filebench/randomwrite.f:'
+Filebench /tmp/filebench/varmail.f:+ printf '\nRESULT: Filebench /tmp/filebench/varmail.f:'
