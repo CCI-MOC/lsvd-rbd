@@ -25,6 +25,7 @@ class lsvd_config
     int batch_size = 8 * 1024 * 1024;   // in bytes
     int wcache_batch = 8;               // requests
     int wcache_chunk = 2 * 1024 * 1024; // bytes
+    std::string shared_read_cache_path = "/mnt/nvme/lsvd/shared_read_cache";
     std::string rcache_dir = "/tmp";
     std::string wcache_dir = "/tmp";
     int xlate_window = 8;

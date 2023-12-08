@@ -11,30 +11,27 @@ function kill_nvmf {
 	sleep 5
 }
 
-function configure_nvmf_rbd {
-	local pool_name=$1
-	local imgname=$2
-	local blocksize=$3
-	local bdev_name=$4
-
+function configure_nvmf_common {
+	local gateway_ip=$1
 	cd $lsvd_dir/spdk
 	scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
-	scripts/rpc.py bdev_rbd_create $pool_name $imgname $blocksize -c rbd_cluster -b $bdev_name
+	scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
+	scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
+	scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 9922
 }
 
-function configure_nvmf_transport {
-	local gateway_ip=$1
-	local bdev_name=$2
-
-	cd $lsvd_dir/spdk
-	scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
-	scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $bdev_name
-	scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
-	scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 9922
+function add_rbd_img {
+  cd $lsvd_dir/spdk
+  local pool=$1
+  local img=$2
+  local bdev="bdev_$img"
+  scripts/rpc.py bdev_rbd_create $pool $img 4096 -c rbd_cluster -b $bdev
+  scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $bdev
 }
 
 function launch_lsvd_gw_background {
 	local cache_parent_dir=$1
+	# local cache_size=${2:-5368709120} # 5GiB
 
 	cd $lsvd_dir/spdk
 	mkdir -p $cache_parent_dir/{read,write}
@@ -104,6 +101,7 @@ function create_lsvd_thick {
 function run_client_bench {
 	local client_ip=$1
 	local outfile=$2
+	local benchscript=${3:-client-bench.bash}
 
 	cd $lsvd_dir/experiments
 	ssh $client_ip 'mkdir -p /tmp/filebench; rm -rf /tmp/filebench/*'

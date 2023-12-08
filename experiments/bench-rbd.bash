@@ -35,8 +35,8 @@ rbd -p $pool_name create --size $imgsize --thick-provision $imgname
 
 kill_nvmf
 launch_gw_background
-configure_nvmf_rbd $pool_name $imgname $blocksize bdev_rbd0
-configure_nvmf_transport $gw_ip bdev_rbd0
+configure_nvmf_common $gw_ip
+add_rbd_img $pool_name $imgname
 
 run_client_bench $client_ip $outfile
 cleanup_nvmf

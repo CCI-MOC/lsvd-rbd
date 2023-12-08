@@ -36,13 +36,14 @@ cd $lsvd_dir
 make clean
 make -j20 release
 
-create_lsvd_thick $pool_name $imgname $imgsize
+# create_lsvd_thick $pool_name $imgname $imgsize
+create_lsvd_thin $pool_name $imgname $imgsize
 
 kill_nvmf
+
+trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 launch_lsvd_gw_background $cache_dir
-configure_nvmf_rbd $pool_name $imgname $blocksize bdev_lsvd0
-configure_nvmf_transport $gw_ip bdev_lsvd0
+configure_nvmf_common $gw_ip
+add_rbd_img $pool_name $imgname
 
 run_client_bench $client_ip $outfile
-cleanup_nvmf_rbd bdev_lsvd0
-cleanup_nvmf

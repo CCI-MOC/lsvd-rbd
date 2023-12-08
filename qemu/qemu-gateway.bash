@@ -42,7 +42,7 @@ rados -p $pool_name stat $imgname
 
 kill_nvmf
 launch_lsvd_gw_background $cache_dir
-configure_nvmf_rbd $pool_name $imgname $blocksize bdev_lsvd0
-configure_nvmf_transport $gw_ip bdev_lsvd0
+configure_nvmf_common
+add_rbd_img $pool_name $imgname
 
 wait
