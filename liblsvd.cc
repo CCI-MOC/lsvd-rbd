@@ -107,11 +107,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     check_ret(pread(write_fd, (char *)jws, 4096, 0) < 0,
               "Can't read wcache superblock");
-
-    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER) {
-        log_error("bad magic/type in write cache superblock\n");
-        return -1;
-    }
+    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
+        throw std::runtime_error("bad magic/type in write cache superblock\n");
     if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
         throw std::runtime_error("object and cache UUIDs don't match");
 
