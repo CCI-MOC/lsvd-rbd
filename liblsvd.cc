@@ -90,22 +90,25 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
      */
     std::string wcache_name =
         cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
+
     if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
+        log_info("Creating write cache file {}", wcache_name);
         int cache_pages = cfg.cache_size / 4096;
+
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (fd < 0)
-            return fd;
+        check_ret(fd, "Can't open wcache file");
+
         if (init_wcache(fd, xlate->uuid, cache_pages) < 0)
             return -1;
         close(fd);
     }
 
-    if (write_fd < 0)
-        return -1;
+    write_fd = open(wcache_name.c_str(), O_RDWR);
+    check_ret(write_fd, "Can't open wcache file");
 
     j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
 
-    check_ret(pread(write_fd, (char *)jws, 4096, 0) < 0,
+    check_ret(pread(write_fd, (char *)jws, 4096, 0),
               "Can't read wcache superblock");
     if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
         throw std::runtime_error("bad magic/type in write cache superblock\n");
