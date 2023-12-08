@@ -53,7 +53,6 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
  * don't break them out into a .h
  */
 
-extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
 std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
@@ -90,20 +89,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     /*
      * TODO: Open 2 files. One for wcache and one for reader
      */
-    std::string rcache_name =
-        cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
     std::string wcache_name =
         cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
-    if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
-        int cache_pages = cfg.cache_size / 4096;
-        int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (fd < 0)
-            return fd;
-        if (init_rcache(fd, xlate->uuid, cache_pages) < 0)
-            return -1;
-        close(fd);
-    }
-
     if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
         int cache_pages = cfg.cache_size / 4096;
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
@@ -114,16 +101,10 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         close(fd);
     }
 
-    read_fd = open(rcache_name.c_str(), O_RDWR);
-    if (read_fd < 0)
-        return -1;
-    write_fd = open(wcache_name.c_str(), O_RDWR);
     if (write_fd < 0)
         return -1;
 
     j_read_super *jrs = (j_read_super *)aligned_alloc(512, 4096);
-    if (pread(read_fd, (char *)jrs, 4096, 0) < 0)
-        return -1;
     if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
         return -1;
     j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
@@ -136,7 +117,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    reader = make_reader(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
+    reader = make_reader(0, xlate, &cfg, &map, &bufmap, &map_lock,
                          &bufmap_lock, objstore, shared_cache);
     free(jrs);
     free(jws);
@@ -198,7 +179,6 @@ int rbd_image::image_close(void)
         xlate->stop_gc();
     xlate->checkpoint();
     delete xlate;
-    close(read_fd);
     close(write_fd);
     return 0;
 }

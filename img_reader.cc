@@ -61,7 +61,7 @@ class reader_impl : public img_reader
     friend class direct_read_req;
 
   public:
-    reader_impl(uint32_t blkno, int fd_, translate *be_, lsvd_config *cfg_,
+    reader_impl(uint32_t blkno, translate *be_, lsvd_config *cfg_,
                 extmap::objmap *omap, extmap::bufmap *bmap,
                 std::shared_mutex *maplock, std::mutex *bmap_lock,
                 sptr<backend> io_, sptr<shared_read_cache> backing_cache)
@@ -84,13 +84,13 @@ class reader_impl : public img_reader
 
 /* factory function so we can hide implementation
  */
-img_reader *make_reader(uint32_t blkno, int _fd, translate *_be,
+img_reader *make_reader(uint32_t blkno, translate *_be,
                         lsvd_config *cfg, extmap::objmap *map,
                         extmap::bufmap *bufmap, std::shared_mutex *m,
                         std::mutex *bufmap_m, sptr<backend> _io,
                         sptr<shared_read_cache> backing_cache)
 {
-    return new reader_impl(blkno, _fd, _be, cfg, map, bufmap, m, bufmap_m, _io,
+    return new reader_impl(blkno, _be, cfg, map, bufmap, m, bufmap_m, _io,
                            backing_cache);
 }
 
@@ -251,7 +251,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
          * without worrying about cache block alignment
          */
         // if (backing_cache->should_bypass_cache()) {
-        if (false) {
+        if (true) {
             sector_t sectors = limit2 - start_sector;
             backing_cache->served_bypass_request(sectors * 512L);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
