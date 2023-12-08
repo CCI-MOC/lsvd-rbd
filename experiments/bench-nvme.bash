@@ -26,11 +26,12 @@ source $lsvd_dir/experiments/common.bash
 kill_nvmf
 launch_gw_background
 
+configure_nvmf_common
+
 # liburing issues, use aio for now
 # scripts/rpc.py bdev_uring_create /dev/ram0 bdev_uring0 $blocksize
 scripts/rpc.py bdev_aio_create $dev_name bdev_uring0 $blocksize
-
-configure_nvmf_transport $gw_ip bdev_uring0
+scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 bdev_uring0
 
 run_client_bench $client_ip $outfile
 cleanup_nvmf
