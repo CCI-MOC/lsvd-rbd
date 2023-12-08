@@ -103,22 +103,21 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     if (write_fd < 0)
         return -1;
 
-    j_read_super *jrs = (j_read_super *)aligned_alloc(512, 4096);
-    if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
-        return -1;
     j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
+
     if (pread(write_fd, (char *)jws, 4096, 0) < 0)
         return -1;
-    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
+
+    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER) {
+        log_error("bad magic/type in write cache superblock\n");
         return -1;
-    if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0 ||
-        memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
-        throw("object and cache UUIDs don't match");
+    }
+    if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
+        throw std::runtime_error("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    reader = make_reader(0, xlate, &cfg, &map, &bufmap, &map_lock,
-                         &bufmap_lock, objstore, shared_cache);
-    free(jrs);
+    reader = make_reader(0, xlate, &cfg, &map, &bufmap, &map_lock, &bufmap_lock,
+                         objstore, shared_cache);
     free(jws);
 
     if (!cfg.no_gc)
