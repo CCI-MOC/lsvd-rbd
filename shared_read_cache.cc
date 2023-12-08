@@ -264,12 +264,12 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     cache_filesize_bytes =
         CACHE_CHUNK_SIZE * num_cache_blocks + CACHE_HEADER_SIZE;
 
+    auto ret = ftruncate(fd, cache_filesize_bytes);
+    check_ret(ret, "failed to truncate cache file");
+
     debug("Cache file size: {} bytes ({} header, {} chunks * {} per chunk)",
           cache_filesize_bytes, header_size_bytes, num_cache_blocks,
           CACHE_CHUNK_SIZE);
-    check_ret(ftruncate(fd, 0), "failed to clear cache file");
-    check_ret(ftruncate(fd, cache_filesize_bytes),
-              "failed to truncate cache file");
 
     cache_store =
         std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));
