@@ -93,7 +93,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
         log_info("Creating write cache file {}", wcache_name);
-        int cache_pages = cfg.cache_size / 4096;
+        int cache_pages = cfg.wlog_size / 4096;
 
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
         check_ret(fd, "Can't open wcache file");
