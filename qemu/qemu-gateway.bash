@@ -34,7 +34,7 @@ source $lsvd_dir/experiments/common.bash
 # Build LSVD
 echo '===Building LSVD...'
 cd $lsvd_dir
-make clean
+# make clean
 make -j20 release
 
 # make sure image exists
@@ -42,7 +42,7 @@ rados -p $pool_name stat $imgname
 
 kill_nvmf
 launch_lsvd_gw_background $cache_dir
-configure_nvmf_common
+configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
-wait
+# wait

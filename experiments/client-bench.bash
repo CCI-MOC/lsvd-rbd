@@ -62,7 +62,7 @@ function run_fio {
 	printf "\nRESULT: Fio (iodepth=$3) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
-	sleep 15
+	sleep 2
 }
 
 run_fio randread 60 256 $fio_bs

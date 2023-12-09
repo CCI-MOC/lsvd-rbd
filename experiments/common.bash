@@ -8,7 +8,7 @@ function kill_nvmf {
 	scripts/rpc.py spdk_kill_instance SIGKILL >/dev/null || true
 	pkill -f nvmf_tgt || true
 	pkill -f reactor_0 || true
-	sleep 5
+	sleep 2
 }
 
 function configure_nvmf_common {
