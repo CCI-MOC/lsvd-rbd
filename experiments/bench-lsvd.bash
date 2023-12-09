@@ -19,7 +19,8 @@ cur_time=$(date +"%FT%T")
 lsvd_dir=$(git rev-parse --show-toplevel)
 gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
-cache_dir=/mnt/nvme/lsvd-cache/
+rcache=/mnt/nvme/
+wlog=/mnt/nvme-remote/
 outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.$pool_name.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
@@ -42,7 +43,7 @@ create_lsvd_thin $pool_name $imgname $imgsize
 kill_nvmf
 
 trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
-launch_lsvd_gw_background $cache_dir
+launch_lsvd_gw_background $rcache $wlog $((240 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
