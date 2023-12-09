@@ -43,7 +43,7 @@ create_lsvd_thin $pool_name $imgname $imgsize
 kill_nvmf
 
 trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
-launch_lsvd_gw_background $rcache $wlog $((240 * 1024 * 1024 * 1024))
+launch_lsvd_gw_background $rcache $wlog $((20 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
