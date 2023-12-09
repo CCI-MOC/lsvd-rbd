@@ -565,8 +565,9 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
     static std::atomic_size_t user_write_bytes = 0;
     counter++;
     user_write_bytes += bytes;
-    if(counter % 10'000 == 0)
-        trace("{} write reqs, {} bytes total", counter, user_write_bytes);
+    if (counter % 10'000 == 0)
+        trace("{} write reqs, {} MiB total", counter,
+              user_write_bytes / 1024 / 1024);
 
     std::unique_lock lk(m);
     if (!current->room(bytes)) {

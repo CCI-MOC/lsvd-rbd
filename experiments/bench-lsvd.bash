@@ -2,11 +2,6 @@
 
 set -xeuo pipefail
 
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
-fi
-
 if [ -z "${1:-}" ]
   then echo "Please provide a pool name"
   exit

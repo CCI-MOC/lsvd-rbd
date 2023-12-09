@@ -2,6 +2,11 @@
 
 set -xeuo pipefail
 
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
+  exit
+fi
+
 function kill_nvmf {
 	cd $lsvd_dir/spdk
 	scripts/rpc.py spdk_kill_instance SIGTERM >/dev/null || true
@@ -33,15 +38,18 @@ function launch_lsvd_gw_background {
 	local rcache_root=$1
 	local wlog_root=$2
 	local cache_size=${3:-5368709120} # 5GiB
+	
+	# allucate hugepages for spdk
+	echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 
 	cd $lsvd_dir/spdk
-	mkdir -p $rcache_root/lsvd-read/
+	mkdir -p $rcache_root/lsvd-read/ $wlog_root/lsvd-write/
 	export LSVD_RCACHE_DIR=$rcache_root/lsvd-read/
-	mkdir -p $wlog_root/lsvd-write/
 	export LSVD_WCACHE_DIR=$wlog_root/lsvd-write/
 	export LSVD_GC_THRESHOLD=40
 	export LSVD_CACHE_SIZE=$cache_size
-	LD_PRELOAD=$lsvd_dir/liblsvd.so ./build/bin/nvmf_tgt &
+	# LD_PRELOAD="/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so $lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
+	LD_PRELOAD="$lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
 
 	sleep 5
 }

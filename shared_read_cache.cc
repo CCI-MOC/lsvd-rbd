@@ -401,18 +401,19 @@ void shared_read_cache::report_cache_stats()
     pthread_setname_np(pthread_self(), "cache_stats_reporter");
 
     while (!stop_cache_stats_reporter.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10'000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
         std::shared_lock<std::shared_mutex> lock(global_cache_lock);
 
         auto frontend = rolling_sum(user_bytes);
         auto backend = rolling_sum(backend_bytes);
-        double readamp = frontend == 0 ? 0 : (double)backend / (double)frontend;
+        double readamp =
+            frontend == 0 ? -1 : (double)backend / (double)frontend;
 
         auto hits = rolling_sum(hitrate_stats);
         auto count = rolling_count(hitrate_stats);
 
-        debug("{}/{} hits, {} bytes read, {:.3f} read amp, {} total", hits,
-              count, frontend, readamp, total_requests);
+        debug("{}/{} hits, {} MiB read, {:.3f} read amp, {} total", hits, count,
+              frontend / 1024 / 1024, readamp, total_requests);
     }
 
     debug("cache stats reporter exiting");
