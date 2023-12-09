@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -xeuo pipefail
 
 for pair in $*; do
 	if [ ${pair#*=} != $pair ]; then
@@ -23,7 +23,7 @@ modprobe nvme-fabrics
 
 gw_ip=${gw_ip:-10.1.0.5}
 # see that it's there
-nvme discover -t tcp -a $gw_ip -s 9922
+# nvme discover -t tcp -a $gw_ip -s 9922
 nvme connect -t tcp --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
 sleep 5
 
@@ -56,11 +56,14 @@ function run_fio {
 		--time_based \
 		--numjobs=$num_fio_processes \
 		--group_reporting \
-		--randrepeat=0 \
+		--randseed=42 \
+		--output-format=normal,terse \
 		--eta-newline=1 | tee /tmp/client-bench-results.txt
 
+	set +x
 	printf "\nRESULT: Fio (iodepth=$3) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+	set -x
 
 	sleep 2
 }
@@ -128,8 +131,10 @@ function run_filebench {
 	rm -rf /mnt/fsbench/*
 	filebench -f $1 | tee /tmp/client-bench-results.txt
 
+	set +x
 	printf "\nRESULT: Filebench $1:"
 	perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
+	set -x
 }
 
 # shorten runtime

@@ -80,17 +80,18 @@ std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
  */
 rados_backend::rados_backend(rados_ioctx_t io_)
 {
+    memset(pool, 0, sizeof(pool));
     io_ctx = io_;
     if (io_ctx != nullptr)
         enable_ioctx_bypass_hack = true;
 
     int r;
     if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
-        throw("rados create");
+        throw std::runtime_error("rados create");
     if ((r = rados_conf_read_file(cluster, NULL)) < 0)
-        throw("rados conf");
+        throw std::runtime_error("rados conf");
     if ((r = rados_connect(cluster)) < 0)
-        throw("rados connect");
+        throw std::runtime_error("rados connect");
 }
 
 rados_backend::~rados_backend()
@@ -270,9 +271,9 @@ class rados_be_request : public request
     static void rados_be_notify(rados_completion_t c, void *ptr)
     {
         auto req = (rados_be_request *)ptr;
-        // TODO - check return value
-        // int rv = rados_aio_get_return_value(c);
-        // assert(rv >= 0);
+        int rv = rados_aio_get_return_value(c);
+        if (rv < 0)
+            log_error("rados aio failed: {}", rv);
         req->notify(NULL);
     }
 

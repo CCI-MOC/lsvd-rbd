@@ -16,7 +16,7 @@
 #include <vector>
 
 #ifndef LOGLV
-#define LOGLV 0
+#define LOGLV 1
 #endif
 
 template <typename T> using sptr = std::shared_ptr<T>;
