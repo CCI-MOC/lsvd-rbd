@@ -11,7 +11,7 @@ BUILD_DIR = build
 CFLAGS = -ggdb3 -Wall $(OPT)
 CXXFLAGS = -std=c++17 -ggdb3 -Wall $(OPT) -fno-omit-frame-pointer -fPIC
 LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a
-LDFLAGS += -fuse-ld=mold -Wl,-rpath=/usr/lib/liburing.so.2.5
+LDFLAGS += -fuse-ld=mold
 SOFLAGS = -shared -fPIC
 
 debug: CXXFLAGS += -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
