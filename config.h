@@ -32,6 +32,7 @@ class lsvd_config
     int hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
     long cache_size = 500 * 1024 * 1024; // in bytes
+    long wlog_size = 500 * 1024 * 1024; // in bytes
     int ckpt_interval = 500;             // objects
     int flush_msec = 2000;               // flush timeout
     int gc_threshold = 60;               // GC threshold, percent

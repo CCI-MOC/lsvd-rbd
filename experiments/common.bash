@@ -30,13 +30,15 @@ function add_rbd_img {
 }
 
 function launch_lsvd_gw_background {
-	local cache_parent_dir=$1
-	local cache_size=${2:-5368709120} # 5GiB
+	local rcache_root=$1
+	local wlog_root=$2
+	local cache_size=${3:-5368709120} # 5GiB
 
 	cd $lsvd_dir/spdk
-	mkdir -p $cache_parent_dir/{read,write}
-	export LSVD_RCACHE_DIR=$cache_parent_dir/read/
-	export LSVD_WCACHE_DIR=$cache_parent_dir/write/
+	mkdir -p $rcache_root/lsvd-read/
+	export LSVD_RCACHE_DIR=$rcache_root/lsvd-read/
+	mkdir -p $wlog_root/lsvd-write/
+	export LSVD_WCACHE_DIR=$wlog_root/lsvd-write/
 	export LSVD_GC_THRESHOLD=40
 	export LSVD_CACHE_SIZE=$cache_size
 	LD_PRELOAD=$lsvd_dir/liblsvd.so ./build/bin/nvmf_tgt &

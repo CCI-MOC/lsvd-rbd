@@ -21,8 +21,9 @@ cur_time=$(date +"%FT%T")
 lsvd_dir=$(git rev-parse --show-toplevel)
 gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
-cache_dir=/mnt/nvme/lsvd-cache/
 outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.multimg.txt
+rcache=/mnt/nvme/
+wlog=/mnt/nvme-remote/
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 echo "Running with image $pool_name/$imgname"
@@ -42,7 +43,7 @@ rados -p $pool_name stat $imgname
 
 kill_nvmf
 export LSVD_NO_GC=1
-launch_lsvd_gw_background $cache_dir
+launch_lsvd_gw_background $rcache $wlog $((5 * 1024 * 1024 * 1024))
 
 exit
 
