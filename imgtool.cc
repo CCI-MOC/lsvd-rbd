@@ -10,6 +10,7 @@
 #include "backend.h"
 #include "config.h"
 #include "fake_rbd.h"
+#include "image.h"
 #include "lsvd_types.h"
 #include "objects.h"
 #include "translate.h"
@@ -148,6 +149,7 @@ void info(rados_ioctx_t io, const char *image_name)
     if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
         throw std::runtime_error("corrupt superblock");
 
+
     char uuid_str[64];
     uuid_unparse_lower(base_hdr->vol_uuid, uuid_str);
     fmt::print("UUID: {}\n", uuid_str);
@@ -156,6 +158,21 @@ void info(rados_ioctx_t io, const char *image_name)
                (double)base_super->vol_size * 512. / 1024. / 1024. / 1024.);
     fmt::print("Checkpoints: {}\n", base_super->ckpts_len / 4.);
     fmt::print("Snapshots: {}\n", base_super->snaps_len / 4.);
+    fmt::print("Is a clone: {}\n", base_super->clones_len == 0 ? "no" : "yes");
+
+    // parse clones
+    if (base_super->clones_len == 0)
+        return;
+
+    uint32_t consumed = 0;
+    while (consumed < base_super->clones_len) {
+        auto ci =
+            (clone_info *)(base_buf + base_super->clones_offset + consumed);
+        auto objname = (char *)(ci + 1);
+        auto upto_seq = ci->last_seq;
+        fmt::print("Base: {}, upto seq {}\n", objname, upto_seq);
+        consumed += sizeof(clone_info) + strlen(objname) + 1;
+    }
 }
 
 extern size_t getsize64(int fd);
