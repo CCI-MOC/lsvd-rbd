@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -xeuo pipefail
+set -euo pipefail
 
 for pair in $*; do
 	if [ ${pair#*=} != $pair ]; then
@@ -60,10 +60,8 @@ function run_fio {
 		--output-format=normal,terse \
 		--eta-newline=1 | tee /tmp/client-bench-results.txt
 
-	set +x
 	printf "\nRESULT: Fio (iodepth=$3) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
-	set -x
 
 	sleep 2
 }
