@@ -55,17 +55,6 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
 
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
-std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
-                                     const char *name)
-{
-    if (cfg->backend == BACKEND_FILE)
-        return make_file_backend(name);
-    if (cfg->backend == BACKEND_RADOS)
-        return make_rados_backend(io);
-
-    throw std::runtime_error("Unknown backend");
-}
-
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
 {
     if (cfg.read() < 0)
@@ -81,6 +70,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     xlate =
         make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
     size = xlate->init(name, true);
+    check_cond(size < 0, "Failed to initialize translation layer err={}", size);
 
     /* figure out cache file name, create it if necessary
      */
@@ -96,7 +86,7 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         int cache_pages = cfg.wlog_size / 4096;
 
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        check_ret(fd, "Can't open wcache file");
+        check_ret_errno(fd, "Can't open wcache file");
 
         if (init_wcache(fd, xlate->uuid, cache_pages) < 0)
             return -1;
@@ -104,12 +94,12 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
     }
 
     write_fd = open(wcache_name.c_str(), O_RDWR);
-    check_ret(write_fd, "Can't open wcache file");
+    check_ret_errno(write_fd, "Can't open wcache file");
 
     j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
 
-    check_ret(pread(write_fd, (char *)jws, 4096, 0),
-              "Can't read wcache superblock");
+    check_ret_errno(pread(write_fd, (char *)jws, 4096, 0),
+                    "Can't read wcache superblock");
     if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
         throw std::runtime_error("bad magic/type in write cache superblock\n");
     if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
@@ -160,6 +150,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 {
     auto img = new rbd_image;
     if (img->image_open(io, name) < 0) {
+        log_error("Failed to open image {}", name);
         delete img;
         return -1;
     }
@@ -185,7 +176,7 @@ int rbd_image::image_close(void)
 extern "C" int rbd_close(rbd_image_t image)
 {
     rbd_image *img = (rbd_image *)image;
-    log_info("closed image");
+    log_info("closing image");
     img->image_close();
     delete img;
 

@@ -273,7 +273,10 @@ class rados_be_request : public request
         auto req = (rados_be_request *)ptr;
         int rv = rados_aio_get_return_value(c);
         if (rv < 0)
-            log_error("rados aio failed: {}", rv);
+            log_error(
+                "rados req failed: err={}, type={}, name={}, offset={}, len={}",
+                rv, req->op == OP_READ ? "read" : "write", req->oid,
+                req->offset, req->client_len);
         req->notify(NULL);
     }
 
@@ -293,11 +296,12 @@ class rados_be_request : public request
                 if (op == OP_WRITE)
                     _iovs.copy_out(buf);
             }
+            client_len = _iovs.bytes();
 
             if (op == OP_READ)
-                rados_aio_read(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
+                rados_aio_read(io_ctx, oid, c, _buf, client_len, offset);
             else
-                rados_aio_write_full(io_ctx, oid, c, _buf, _iovs.bytes());
+                rados_aio_write_full(io_ctx, oid, c, _buf, client_len);
         } else {
             if (op == OP_READ)
                 rados_aio_read(io_ctx, oid, c, client_buf, client_len, offset);

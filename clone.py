@@ -6,10 +6,7 @@ import os
 import re
 import argparse
 import uuid
-try:
-    import rados
-except:
-    pass
+import rados
 
 
 def read_obj(name):
@@ -49,22 +46,31 @@ def write_obj(name, data):
 
 
 def mk_clone(old, new, uu):
+    print(f"Cloning from {old} to {new}")
+
     obj = read_obj(old)
     o2 = lsvd.sizeof_hdr
     h = lsvd.hdr.from_buffer(bytearray(obj[0:o2]))
 
     o3 = o2+lsvd.sizeof_super_hdr
     sh = lsvd.super_hdr.from_buffer(bytearray(obj[o2:o3]))
+    print(f"Base volume size: {sh.vol_size * 512} bytes")
+    print(f"Number of checkpoints: {sh.ckpts_len // 4}")
+
+    if (sh.ckpts_len == 0):
+        raise RuntimeError("No checkpoints found")
 
     # find the last checkpoint
     _ckpts = obj[sh.ckpts_offset:sh.ckpts_offset+sh.ckpts_len]
     ckpts = (ctypes.c_int * (len(_ckpts)//4)).from_buffer(bytearray(_ckpts))
     seq = ckpts[-1]
 
+    print(f"Cloning last checkpoint: {seq}")
+
     # read it, and create a new one
     ckpt_name = "%s.%08x" % (old, seq)
     ckpt_obj = read_obj(ckpt_name)
-    print("ckpt len", len(ckpt_obj))
+    print(f"Checkpoint {ckpt_name} len {len(ckpt_obj)}")
     c_h = lsvd.hdr.from_buffer(bytearray(ckpt_obj))
     c_ch = lsvd.ckpt_hdr.from_buffer(bytearray(ckpt_obj[lsvd.sizeof_hdr:]))
 
@@ -107,7 +113,7 @@ def mk_clone(old, new, uu):
     # most recent checkpoint in the base, but omitting the object map.
 
     b_old = bytes(old, 'utf-8')
-    c = lsvd.clone_info(last_num=seq, name_len=len(b_old))
+    c = lsvd.clone_info(last_seq=seq, name_len=len(b_old))
     c.vol_uuid[:] = h.vol_uuid[:]
     sizeof_clone = lsvd.sizeof_clone_info + len(b_old) + 1
     offset_ckpt = lsvd.sizeof_hdr+lsvd.sizeof_super_hdr

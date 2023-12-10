@@ -14,7 +14,6 @@ imgsize=80g
 lsvd_dir=$(git rev-parse --show-toplevel)
 source $lsvd_dir/.env
 source $lsvd_dir/experiments/common.bash
-truncate -s 0 $outfile
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 

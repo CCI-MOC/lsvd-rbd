@@ -255,7 +255,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
 {
     debug("Using {} as the shared read cache", cache_path);
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
-    check_ret(fd, "failed to open cache file");
+    check_ret_errno(fd, "failed to open cache file");
 
     // think about persisting the cache state to disk so we can re-use it
     // on restart instead of filling it every time
@@ -265,7 +265,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
         CACHE_CHUNK_SIZE * num_cache_blocks + CACHE_HEADER_SIZE;
 
     auto ret = ftruncate(fd, cache_filesize_bytes);
-    check_ret(ret, "failed to truncate cache file");
+    check_ret_errno(ret, "failed to truncate cache file");
 
     debug("Cache file size: {} bytes ({} header, {} chunks * {} per chunk)",
           cache_filesize_bytes, header_size_bytes, num_cache_blocks,
