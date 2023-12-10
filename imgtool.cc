@@ -7,15 +7,13 @@
 #include <string>
 #include <uuid/uuid.h>
 
+#include "backend.h"
 #include "config.h"
 #include "fake_rbd.h"
+#include "lsvd_types.h"
+#include "objects.h"
+#include "translate.h"
 #include "utils.h"
-
-struct backend;
-
-extern sptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
-                                 const char *name);
-extern int translate_get_uuid(sptr<backend>, const char *, uuid_t &);
 
 const char *backend = "file";
 const char *image_name;
@@ -49,17 +47,17 @@ static long parseint(const char *_s)
 }
 
 static struct argp_option options[] = {
-    {"cache-dir", 'd', "DIR", 0, "cache directory"},
-    {"rados", 'O', 0, 0, "use RADOS"},
-    {"create", 'C', 0, 0, "create image"},
-    {"mkcache", 'k', "DEV", 0, "use DEV as cache"},
+    {"cache-dir", 'd', "DIR", 0, "cache directory", 0},
+    {"rados", 'O', 0, 0, "use RADOS", 0},
+    {"create", 'C', 0, 0, "create image", 0},
+    {"mkcache", 'k', "DEV", 0, "use DEV as cache", 0},
     {"cache-type", 't', "R/W", 0,
-     "R for read cache, W for write cache (default: R)"},
-    {"size", 'z', "SIZE", 0, "size in bytes (M/G=2^20,2^30)"},
-    {"delete", 'D', 0, 0, "delete image"},
-    {"info", 'I', 0, 0, "show image information"},
-    {"clone", 'c', "IMAGE", 0, "clone image"},
-    {0},
+     "R for read cache, W for write cache (default: R)", 0},
+    {"size", 'z', "SIZE", 0, "size in bytes (M/G=2^20,2^30)", 0},
+    {"delete", 'D', 0, 0, "delete image", 0},
+    {"info", 'I', 0, 0, "show image information", 0},
+    {"clone", 'c', "IMAGE", 0, "clone image", 0},
+    {0, 0, 0, 0, 0, 0},
 };
 
 static char args_doc[] = "IMAGE";
@@ -117,7 +115,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     return 0;
 }
 
-static struct argp argp = {options, parse_opt, NULL, args_doc};
+static struct argp argp = {options, parse_opt, NULL, args_doc, 0, 0, 0};
 
 void info(rados_ioctx_t io, const char *image_name)
 {
@@ -138,6 +136,26 @@ void info(rados_ioctx_t io, const char *image_name)
     printf("image: %s\n", image_name);
     printf("read cache: %s\n", rcache_file.c_str());
     printf("write cache: %s\n", wcache_file.c_str());
+
+    char base_buf[4096];
+    rv = objstore->read_object(image_name, base_buf, sizeof(base_buf), 0);
+    if (rv < 0)
+        throw std::runtime_error("failed to read superblock");
+
+    auto base_hdr = (obj_hdr *)base_buf;
+    auto base_super = (super_hdr *)(base_hdr + 1);
+
+    if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
+        throw std::runtime_error("corrupt superblock");
+
+    char uuid_str[64];
+    uuid_unparse_lower(base_hdr->vol_uuid, uuid_str);
+    fmt::print("UUID: {}\n", uuid_str);
+    fmt::print("Size: {} bytes", base_super->vol_size * 512);
+    fmt::print(" / {} GiB\n",
+               (double)base_super->vol_size * 512. / 1024. / 1024. / 1024.);
+    fmt::print("Checkpoints: {}\n", base_super->ckpts_len / 4.);
+    fmt::print("Snapshots: {}\n", base_super->snaps_len / 4.);
 }
 
 extern size_t getsize64(int fd);
