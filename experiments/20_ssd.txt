@@ -1,0 +1,878 @@
+Running gateway on 10.1.0.5, client on 10.1.0.6
+===Building LSVD...
+g++-12 -MMD -MP -o build/objects.o -c objects.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/translate.o -c translate.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/io.o -c io.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/img_reader.o -c img_reader.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/config.o -c config.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/mkcache.o -c mkcache.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/nvme.o -c nvme.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/write_cache.o -c write_cache.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/file_backend.o -c file_backend.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/shared_read_cache.o -c shared_read_cache.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3   -c -o imgtool.o imgtool.cc
+g++-12 -MMD -MP -o build/rados_backend.o -c rados_backend.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -MMD -MP -o build/lsvd_debug.o -c lsvd_debug.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3   -c -o thick-image.o thick-image.cc
+g++-12 -MMD -MP -o build/liblsvd.o -c liblsvd.cc -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3
+g++-12 -shared -fPIC -o liblsvd.so build/objects.o build/translate.o build/io.o build/img_reader.o build/config.o build/mkcache.o build/nvme.o build/write_cache.o build/file_backend.o build/shared_read_cache.o build/rados_backend.o build/lsvd_debug.o build/liblsvd.o -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3 -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a -fuse-ld=mold
+g++-12 -o imgtool imgtool.o build/objects.o build/translate.o build/io.o build/img_reader.o build/config.o build/mkcache.o build/nvme.o build/write_cache.o build/file_backend.o build/shared_read_cache.o build/rados_backend.o build/lsvd_debug.o build/liblsvd.o -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3 -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a -fuse-ld=mold
+g++-12 -o thick-image thick-image.o build/objects.o build/translate.o build/io.o build/img_reader.o build/config.o build/mkcache.o build/nvme.o build/write_cache.o build/file_backend.o build/shared_read_cache.o build/rados_backend.o build/lsvd_debug.o build/liblsvd.o -std=c++17 -ggdb3 -Wall  -fno-omit-frame-pointer -fPIC -O3 -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -l:liburing.a -fuse-ld=mold
+Removing all objects from pool triple-ssd with prefix lsvd-benchmark
+++++++++++++++++++++++++++++
+Removed 1/28773 objects
+triple-ssd/lsvd-benchmark mtime 2023-12-09T18:54:43.000000+0000, size 4096
+rbd_cluster
+bdev_lsvd-benchmark
+===Starting client benchmark
+
+
+Discovery Log Number of Records 1, Generation counter 1
+=====Discovery Log Entry 0======
+trtype:  tcp
+adrfam:  ipv4
+subtype: nvme subsystem
+treq:    not required
+portid:  0
+trsvcid: 9922
+subnqn:  nqn.2016-06.io.spdk:cnode1
+traddr:  10.1.0.5
+sectype: none
+device: nvme1
+Node                  SN                   Model                                    Namespace Usage                      Format           FW Rev  
+--------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+/dev/nvme0n1          PHM27522000B480BGN   INTEL SSDPE21D480GA                      1         480.10  GB / 480.10  GB    512   B +  0 B   E2010414
+/dev/nvme1n1          SPDK00000000000001   SPDK_Controller1                         1          85.90  GB /  85.90  GB      4 KiB +  0 B   23.09   
+Using device /dev/nvme1n1
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=113665: Sat Dec  9 18:56:01 2023
+  read: IOPS=116k, BW=453MiB/s (475MB/s)(26.5GiB/60001msec)
+    slat (usec): min=3, max=2677, avg= 6.80, stdev= 5.60
+    clat (usec): min=186, max=7051, avg=2201.25, stdev=106.30
+     lat (usec): min=203, max=7057, avg=2208.26, stdev=106.58
+    clat percentiles (usec):
+     |  1.00th=[ 2114],  5.00th=[ 2147], 10.00th=[ 2147], 20.00th=[ 2147],
+     | 30.00th=[ 2180], 40.00th=[ 2180], 50.00th=[ 2180], 60.00th=[ 2180],
+     | 70.00th=[ 2212], 80.00th=[ 2212], 90.00th=[ 2245], 95.00th=[ 2245],
+     | 99.00th=[ 2704], 99.50th=[ 3032], 99.90th=[ 3228], 99.95th=[ 3261],
+     | 99.99th=[ 3523]
+   bw (  KiB/s): min=425080, max=467424, per=100.00%, avg=463582.39, stdev=6994.89, samples=119
+   iops        : min=106270, max=116856, avg=115895.73, stdev=1748.78, samples=119
+  lat (usec)   : 250=0.01%, 500=0.01%, 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=99.99%, 10=0.01%
+  cpu          : usr=25.27%, sys=74.66%, ctx=2648, majf=0, minf=264
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=6951265,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=453MiB/s (475MB/s), 453MiB/s-453MiB/s (475MB/s-475MB/s), io=26.5GiB (28.5GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) randread:  read: IOPS=116k, BW=453MiB/s (475MB/s)(26.5GiB/60001msec)
+
+
+===Fio: workload=randwrite, time=60, iodepth=256, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=113719: Sat Dec  9 18:57:03 2023
+  write: IOPS=42.2k, BW=165MiB/s (173MB/s)(9888MiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=438985, avg=21.19, stdev=609.25
+    clat (usec): min=601, max=447257, avg=6044.30, stdev=9753.51
+     lat (usec): min=611, max=447275, avg=6065.78, stdev=9772.64
+    clat percentiles (msec):
+     |  1.00th=[    5],  5.00th=[    5], 10.00th=[    5], 20.00th=[    5],
+     | 30.00th=[    5], 40.00th=[    6], 50.00th=[    6], 60.00th=[    6],
+     | 70.00th=[    6], 80.00th=[    6], 90.00th=[    7], 95.00th=[    7],
+     | 99.00th=[   12], 99.50th=[   64], 99.90th=[  127], 99.95th=[  222],
+     | 99.99th=[  443]
+   bw (  KiB/s): min=32064, max=204288, per=100.00%, avg=169478.05, stdev=46843.38, samples=119
+   iops        : min= 8016, max=51072, avg=42369.51, stdev=11710.85, samples=119
+  lat (usec)   : 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=0.25%, 10=98.66%, 20=0.20%, 50=0.27%
+  lat (msec)   : 100=0.22%, 250=0.38%, 500=0.02%
+  cpu          : usr=13.61%, sys=39.72%, ctx=182290, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2531372,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=165MiB/s (173MB/s), 165MiB/s-165MiB/s (173MB/s-173MB/s), io=9888MiB (10.4GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) randwrite:  write: IOPS=42.2k, BW=165MiB/s (173MB/s)(9888MiB/60001msec); 0 zone resets
+
+
+===Fio: workload=read, time=60, iodepth=256, bs=4k===
+
+fio-read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=113769: Sat Dec  9 18:58:06 2023
+  read: IOPS=99.0k, BW=387MiB/s (406MB/s)(22.7GiB/60001msec)
+    slat (usec): min=3, max=656, avg= 8.32, stdev=11.47
+    clat (usec): min=904, max=11841, avg=2574.86, stdev=561.75
+     lat (usec): min=911, max=11846, avg=2583.42, stdev=563.02
+    clat percentiles (usec):
+     |  1.00th=[ 1958],  5.00th=[ 2040], 10.00th=[ 2114], 20.00th=[ 2180],
+     | 30.00th=[ 2245], 40.00th=[ 2311], 50.00th=[ 2409], 60.00th=[ 2507],
+     | 70.00th=[ 2638], 80.00th=[ 2900], 90.00th=[ 3294], 95.00th=[ 3621],
+     | 99.00th=[ 4686], 99.50th=[ 5473], 99.90th=[ 6456], 99.95th=[ 7308],
+     | 99.99th=[ 7635]
+   bw (  KiB/s): min=259304, max=441944, per=100.00%, avg=396367.19, stdev=44069.77, samples=119
+   iops        : min=64826, max=110486, avg=99091.83, stdev=11017.48, samples=119
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=2.55%, 4=95.08%, 10=2.38%, 20=0.01%
+  cpu          : usr=21.84%, sys=70.70%, ctx=69706, majf=0, minf=266
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=5942584,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=387MiB/s (406MB/s), 387MiB/s-387MiB/s (406MB/s-406MB/s), io=22.7GiB (24.3GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) read:  read: IOPS=99.0k, BW=387MiB/s (406MB/s)(22.7GiB/60001msec)
+
+
+===Fio: workload=write, time=60, iodepth=256, bs=4k===
+
+fio-write: (g=0): rw=write, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=113817: Sat Dec  9 18:59:08 2023
+  write: IOPS=47.0k, BW=184MiB/s (193MB/s)(10.8GiB/60002msec); 0 zone resets
+    slat (usec): min=4, max=1061.1k, avg=19.27, stdev=832.84
+    clat (usec): min=1640, max=1067.9k, avg=5425.55, stdev=13323.33
+     lat (usec): min=1646, max=1067.9k, avg=5445.08, stdev=13349.59
+    clat percentiles (msec):
+     |  1.00th=[    5],  5.00th=[    5], 10.00th=[    5], 20.00th=[    5],
+     | 30.00th=[    5], 40.00th=[    5], 50.00th=[    5], 60.00th=[    5],
+     | 70.00th=[    5], 80.00th=[    6], 90.00th=[    6], 95.00th=[    6],
+     | 99.00th=[    9], 99.50th=[   29], 99.90th=[  105], 99.95th=[  113],
+     | 99.99th=[  634]
+   bw (  KiB/s): min=16128, max=218584, per=100.00%, avg=189476.61, stdev=44128.75, samples=118
+   iops        : min= 4032, max=54646, avg=47369.19, stdev=11032.19, samples=118
+  lat (msec)   : 2=0.01%, 4=0.64%, 10=98.50%, 20=0.24%, 50=0.26%
+  lat (msec)   : 100=0.20%, 250=0.13%, 500=0.01%, 750=0.01%, 2000=0.01%
+  cpu          : usr=13.26%, sys=39.84%, ctx=209723, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2820146,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=184MiB/s (193MB/s), 184MiB/s-184MiB/s (193MB/s-193MB/s), io=10.8GiB (11.6GB), run=60002-60002msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256) write:  write: IOPS=47.0k, BW=184MiB/s (193MB/s)(10.8GiB/60002msec); 0 zone resets
+
+
+=========================================
+=== Trying out different queue depths ===
+=========================================
+
+
+
+
+===Fio: workload=randwrite, time=60, iodepth=1, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=1
+fio-3.28
+Starting 1 process
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=113872: Sat Dec  9 19:00:10 2023
+  write: IOPS=6746, BW=26.4MiB/s (27.6MB/s)(1581MiB/60001msec); 0 zone resets
+    slat (usec): min=6, max=395, avg=11.43, stdev= 4.99
+    clat (nsec): min=945, max=2185.4k, avg=133471.14, stdev=55543.24
+     lat (usec): min=103, max=2198, avg=145.21, stdev=56.44
+    clat percentiles (usec):
+     |  1.00th=[  108],  5.00th=[  111], 10.00th=[  112], 20.00th=[  114],
+     | 30.00th=[  116], 40.00th=[  123], 50.00th=[  124], 60.00th=[  125],
+     | 70.00th=[  127], 80.00th=[  129], 90.00th=[  141], 95.00th=[  241],
+     | 99.00th=[  355], 99.50th=[  392], 99.90th=[  586], 99.95th=[ 1012],
+     | 99.99th=[ 1598]
+   bw (  KiB/s): min=25576, max=28880, per=100.00%, avg=27008.34, stdev=881.32, samples=119
+   iops        : min= 6394, max= 7220, avg=6752.08, stdev=220.33, samples=119
+  lat (nsec)   : 1000=0.01%
+  lat (usec)   : 10=0.01%, 100=0.32%, 250=95.11%, 500=4.37%, 750=0.14%
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=0.05%, 4=0.01%
+  cpu          : usr=5.21%, sys=11.86%, ctx=404829, majf=0, minf=11
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=0,404825,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+  WRITE: bw=26.4MiB/s (27.6MB/s), 26.4MiB/s-26.4MiB/s (27.6MB/s-27.6MB/s), io=1581MiB (1658MB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=1) randwrite:  write: IOPS=6746, BW=26.4MiB/s (27.6MB/s)(1581MiB/60001msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=32, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=32
+fio-3.28
+Starting 1 process
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=113927: Sat Dec  9 19:01:13 2023
+  write: IOPS=42.7k, BW=167MiB/s (175MB/s)(9.78GiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=514, avg= 8.10, stdev= 5.61
+    clat (usec): min=199, max=707990, avg=738.57, stdev=4362.75
+     lat (usec): min=205, max=707996, avg=746.91, stdev=4362.71
+    clat percentiles (usec):
+     |  1.00th=[   347],  5.00th=[   420], 10.00th=[   453], 20.00th=[   502],
+     | 30.00th=[   545], 40.00th=[   586], 50.00th=[   619], 60.00th=[   660],
+     | 70.00th=[   693], 80.00th=[   734], 90.00th=[   807], 95.00th=[   889],
+     | 99.00th=[  1827], 99.50th=[  2212], 99.90th=[ 14222], 99.95th=[ 90702],
+     | 99.99th=[116917]
+   bw (  KiB/s): min=32696, max=205304, per=100.00%, avg=172431.53, stdev=46477.81, samples=118
+   iops        : min= 8174, max=51326, avg=43107.90, stdev=11619.46, samples=118
+  lat (usec)   : 250=0.06%, 500=19.28%, 750=63.07%, 1000=14.59%
+  lat (msec)   : 2=2.26%, 4=0.61%, 10=0.03%, 20=0.01%, 50=0.03%
+  lat (msec)   : 100=0.02%, 250=0.04%, 500=0.01%, 750=0.01%
+  cpu          : usr=13.43%, sys=37.06%, ctx=216777, majf=0, minf=12
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=100.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.1%, 64=0.0%, >=64=0.0%
+     issued rwts: total=0,2564405,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=32
+
+Run status group 0 (all jobs):
+  WRITE: bw=167MiB/s (175MB/s), 167MiB/s-167MiB/s (175MB/s-175MB/s), io=9.78GiB (10.5GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=32) randwrite:  write: IOPS=42.7k, BW=167MiB/s (175MB/s)(9.78GiB/60001msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=64, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=113980: Sat Dec  9 19:02:15 2023
+  write: IOPS=41.2k, BW=161MiB/s (169MB/s)(9679MiB/60145msec); 0 zone resets
+    slat (usec): min=4, max=585, avg= 7.46, stdev= 5.23
+    clat (usec): min=416, max=2579.2k, avg=1544.16, stdev=14446.85
+     lat (usec): min=426, max=2579.2k, avg=1551.83, stdev=14446.85
+    clat percentiles (usec):
+     |  1.00th=[   660],  5.00th=[   922], 10.00th=[  1045], 20.00th=[  1139],
+     | 30.00th=[  1188], 40.00th=[  1237], 50.00th=[  1303], 60.00th=[  1352],
+     | 70.00th=[  1434], 80.00th=[  1532], 90.00th=[  1696], 95.00th=[  1942],
+     | 99.00th=[  2966], 99.50th=[  3359], 99.90th=[ 15139], 99.95th=[ 96994],
+     | 99.99th=[265290]
+   bw (  KiB/s): min= 3392, max=204496, per=100.00%, avg=173873.47, stdev=39406.11, samples=114
+   iops        : min=  848, max=51124, avg=43468.37, stdev=9851.59, samples=114
+  lat (usec)   : 500=0.23%, 750=1.34%, 1000=6.19%
+  lat (msec)   : 2=87.71%, 4=4.31%, 10=0.11%, 20=0.02%, 50=0.01%
+  lat (msec)   : 100=0.04%, 250=0.03%, 500=0.01%, 750=0.01%, 1000=0.01%
+  lat (msec)   : >=2000=0.01%
+  cpu          : usr=12.34%, sys=33.36%, ctx=213523, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=0,2477762,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+  WRITE: bw=161MiB/s (169MB/s), 161MiB/s-161MiB/s (169MB/s-169MB/s), io=9679MiB (10.1GB), run=60145-60145msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64) randwrite:  write: IOPS=41.2k, BW=161MiB/s (169MB/s)(9679MiB/60145msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=128, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+fio-3.28
+Starting 1 process
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=114033: Sat Dec  9 19:03:18 2023
+  write: IOPS=41.8k, BW=163MiB/s (171MB/s)(9849MiB/60316msec); 0 zone resets
+    slat (usec): min=4, max=1181.7k, avg=21.31, stdev=1100.21
+    clat (usec): min=389, max=1186.1k, avg=3038.43, stdev=12405.17
+     lat (usec): min=396, max=1186.1k, avg=3060.02, stdev=12453.88
+    clat percentiles (usec):
+     |  1.00th=[   1631],  5.00th=[   2089], 10.00th=[   2245],
+     | 20.00th=[   2343], 30.00th=[   2409], 40.00th=[   2442],
+     | 50.00th=[   2540], 60.00th=[   2638], 70.00th=[   2802],
+     | 80.00th=[   2966], 90.00th=[   3326], 95.00th=[   3884],
+     | 99.00th=[   5145], 99.50th=[  12649], 99.90th=[  96994],
+     | 99.95th=[ 108528], 99.99th=[1052771]
+   bw (  KiB/s): min=32424, max=204592, per=100.00%, avg=170930.03, stdev=38303.50, samples=118
+   iops        : min= 8106, max=51148, avg=42732.53, stdev=9575.89, samples=118
+  lat (usec)   : 500=0.01%, 750=0.01%, 1000=0.04%
+  lat (msec)   : 2=3.66%, 4=92.06%, 10=3.66%, 20=0.24%, 50=0.14%
+  lat (msec)   : 100=0.11%, 250=0.07%, 500=0.01%, 2000=0.01%
+  cpu          : usr=13.95%, sys=40.23%, ctx=178994, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2521348,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=128
+
+Run status group 0 (all jobs):
+  WRITE: bw=163MiB/s (171MB/s), 163MiB/s-163MiB/s (171MB/s-171MB/s), io=9849MiB (10.3GB), run=60316-60316msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=128) randwrite:  write: IOPS=41.8k, BW=163MiB/s (171MB/s)(9849MiB/60316msec); 0 zone resets
+
+
+===Fio: workload=randread, time=60, iodepth=1, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=1
+fio-3.28
+Starting 1 process
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=114083: Sat Dec  9 19:04:20 2023
+  read: IOPS=1236, BW=4945KiB/s (5064kB/s)(290MiB/60001msec)
+    slat (usec): min=6, max=394, avg=15.51, stdev= 8.62
+    clat (usec): min=70, max=210692, avg=788.18, stdev=1554.01
+     lat (usec): min=77, max=210702, avg=804.10, stdev=1554.06
+    clat percentiles (usec):
+     |  1.00th=[   77],  5.00th=[   80], 10.00th=[   84], 20.00th=[   94],
+     | 30.00th=[  104], 40.00th=[  122], 50.00th=[  441], 60.00th=[ 1139],
+     | 70.00th=[ 1270], 80.00th=[ 1385], 90.00th=[ 1532], 95.00th=[ 1647],
+     | 99.00th=[ 2147], 99.50th=[ 2343], 99.90th=[23462], 99.95th=[27132],
+     | 99.99th=[30802]
+   bw (  KiB/s): min= 3208, max= 5960, per=100.00%, avg=4945.61, stdev=419.24, samples=119
+   iops        : min=  802, max= 1490, avg=1236.40, stdev=104.81, samples=119
+  lat (usec)   : 100=26.97%, 250=22.05%, 500=1.50%, 750=0.11%, 1000=1.19%
+  lat (msec)   : 2=46.62%, 4=1.22%, 10=0.07%, 20=0.12%, 50=0.15%
+  lat (msec)   : 250=0.01%
+  cpu          : usr=1.36%, sys=4.16%, ctx=74177, majf=0, minf=12
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=74175,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+   READ: bw=4945KiB/s (5064kB/s), 4945KiB/s-4945KiB/s (5064kB/s-5064kB/s), io=290MiB (304MB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=1) randread:  read: IOPS=1236, BW=4945KiB/s (5064kB/s)(290MiB/60001msec)
+
+
+===Fio: workload=randread, time=60, iodepth=32, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=32
+fio-3.28
+Starting 1 process
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=114129: Sat Dec  9 19:05:23 2023
+  read: IOPS=44.7k, BW=175MiB/s (183MB/s)(10.2GiB/60002msec)
+    slat (usec): min=4, max=616, avg= 8.19, stdev= 5.23
+    clat (usec): min=70, max=104618, avg=705.59, stdev=471.19
+     lat (usec): min=77, max=104626, avg=714.00, stdev=471.23
+    clat percentiles (usec):
+     |  1.00th=[  184],  5.00th=[  235], 10.00th=[  265], 20.00th=[  314],
+     | 30.00th=[  359], 40.00th=[  416], 50.00th=[  603], 60.00th=[  922],
+     | 70.00th=[ 1004], 80.00th=[ 1090], 90.00th=[ 1205], 95.00th=[ 1287],
+     | 99.00th=[ 1500], 99.50th=[ 1598], 99.90th=[ 1860], 99.95th=[ 2057],
+     | 99.99th=[ 6783]
+   bw (  KiB/s): min=144848, max=188512, per=100.00%, avg=178949.78, stdev=4965.34, samples=119
+   iops        : min=36212, max=47128, avg=44737.41, stdev=1241.30, samples=119
+  lat (usec)   : 100=0.01%, 250=7.34%, 500=40.14%, 750=3.53%, 1000=18.29%
+  lat (msec)   : 2=30.63%, 4=0.04%, 10=0.01%, 20=0.01%, 50=0.01%
+  lat (msec)   : 100=0.01%, 250=0.01%
+  cpu          : usr=14.31%, sys=38.60%, ctx=354648, majf=0, minf=43
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=100.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.1%, 64=0.0%, >=64=0.0%
+     issued rwts: total=2682264,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=32
+
+Run status group 0 (all jobs):
+   READ: bw=175MiB/s (183MB/s), 175MiB/s-175MiB/s (183MB/s-183MB/s), io=10.2GiB (11.0GB), run=60002-60002msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=32) randread:  read: IOPS=44.7k, BW=175MiB/s (183MB/s)(10.2GiB/60002msec)
+
+
+===Fio: workload=randread, time=60, iodepth=64, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=114178: Sat Dec  9 19:06:25 2023
+  read: IOPS=54.4k, BW=212MiB/s (223MB/s)(12.4GiB/60001msec)
+    slat (usec): min=4, max=572, avg= 8.08, stdev= 6.12
+    clat (usec): min=85, max=29724, avg=1167.23, stdev=426.92
+     lat (usec): min=95, max=29734, avg=1175.54, stdev=426.89
+    clat percentiles (usec):
+     |  1.00th=[  400],  5.00th=[  562], 10.00th=[  652], 20.00th=[  766],
+     | 30.00th=[  865], 40.00th=[  955], 50.00th=[ 1123], 60.00th=[ 1336],
+     | 70.00th=[ 1450], 80.00th=[ 1565], 90.00th=[ 1713], 95.00th=[ 1827],
+     | 99.00th=[ 2114], 99.50th=[ 2212], 99.90th=[ 2540], 99.95th=[ 2769],
+     | 99.99th=[ 4555]
+   bw (  KiB/s): min=194688, max=228680, per=100.00%, avg=217590.32, stdev=5379.60, samples=119
+   iops        : min=48672, max=57170, avg=54397.60, stdev=1344.88, samples=119
+  lat (usec)   : 100=0.01%, 250=0.01%, 500=2.96%, 750=15.34%, 1000=25.73%
+  lat (msec)   : 2=54.13%, 4=1.83%, 10=0.01%, 20=0.01%, 50=0.01%
+  cpu          : usr=14.44%, sys=45.27%, ctx=192663, majf=0, minf=74
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=3262031,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=212MiB/s (223MB/s), 212MiB/s-212MiB/s (223MB/s-223MB/s), io=12.4GiB (13.4GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64) randread:  read: IOPS=54.4k, BW=212MiB/s (223MB/s)(12.4GiB/60001msec)
+
+
+===Fio: workload=randread, time=60, iodepth=128, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+fio-3.28
+Starting 1 process
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=114225: Sat Dec  9 19:07:27 2023
+  read: IOPS=56.7k, BW=221MiB/s (232MB/s)(13.0GiB/60002msec)
+    slat (usec): min=4, max=2055, avg=15.48, stdev=46.70
+    clat (usec): min=79, max=42599, avg=2240.99, stdev=622.87
+     lat (usec): min=115, max=42626, avg=2256.72, stdev=622.54
+    clat percentiles (usec):
+     |  1.00th=[ 1045],  5.00th=[ 1483], 10.00th=[ 1647], 20.00th=[ 1811],
+     | 30.00th=[ 1926], 40.00th=[ 2040], 50.00th=[ 2180], 60.00th=[ 2376],
+     | 70.00th=[ 2540], 80.00th=[ 2704], 90.00th=[ 2900], 95.00th=[ 3064],
+     | 99.00th=[ 3425], 99.50th=[ 3589], 99.90th=[ 4424], 99.95th=[ 6259],
+     | 99.99th=[22938]
+   bw (  KiB/s): min=202376, max=237432, per=100.00%, avg=226800.74, stdev=5832.70, samples=119
+   iops        : min=50594, max=59358, avg=56700.20, stdev=1458.19, samples=119
+  lat (usec)   : 100=0.01%, 250=0.02%, 500=0.09%, 750=0.03%, 1000=0.63%
+  lat (msec)   : 2=35.90%, 4=63.14%, 10=0.15%, 20=0.02%, 50=0.01%
+  cpu          : usr=15.08%, sys=46.93%, ctx=146891, majf=0, minf=138
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=3400825,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=128
+
+Run status group 0 (all jobs):
+   READ: bw=221MiB/s (232MB/s), 221MiB/s-221MiB/s (232MB/s-232MB/s), io=13.0GiB (13.9GB), run=60002-60002msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=128) randread:  read: IOPS=56.7k, BW=221MiB/s (232MB/s)(13.0GiB/60002msec)
+
+
+========================================
+=== Trying out different block sizes ===
+========================================
+
+
+
+
+===Fio: workload=read, time=60, iodepth=64, bs=16k===
+
+fio-read: (g=0): rw=read, bs=(R) 16.0KiB-16.0KiB, (W) 16.0KiB-16.0KiB, (T) 16.0KiB-16.0KiB, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=114271: Sat Dec  9 19:08:30 2023
+  read: IOPS=3393, BW=53.0MiB/s (55.6MB/s)(3182MiB/60021msec)
+    slat (usec): min=4, max=398, avg=15.14, stdev= 8.37
+    clat (usec): min=640, max=40353, avg=18840.68, stdev=6015.52
+     lat (usec): min=660, max=40379, avg=18856.18, stdev=6016.53
+    clat percentiles (usec):
+     |  1.00th=[ 1188],  5.00th=[ 3916], 10.00th=[ 8455], 20.00th=[15401],
+     | 30.00th=[19268], 40.00th=[20317], 50.00th=[20841], 60.00th=[21365],
+     | 70.00th=[21890], 80.00th=[22676], 90.00th=[23725], 95.00th=[24773],
+     | 99.00th=[26608], 99.50th=[27132], 99.90th=[28967], 99.95th=[30802],
+     | 99.99th=[34866]
+   bw (  KiB/s): min=49440, max=64448, per=100.00%, avg=54332.77, stdev=3092.43, samples=119
+   iops        : min= 3090, max= 4028, avg=3395.82, stdev=193.26, samples=119
+  lat (usec)   : 750=0.01%, 1000=0.21%
+  lat (msec)   : 2=2.71%, 4=2.16%, 10=6.73%, 20=24.39%, 50=63.79%
+  cpu          : usr=3.04%, sys=10.06%, ctx=174410, majf=0, minf=266
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=203676,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=53.0MiB/s (55.6MB/s), 53.0MiB/s-53.0MiB/s (55.6MB/s-55.6MB/s), io=3182MiB (3337MB), run=60021-60021msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64) read:  read: IOPS=3393, BW=53.0MiB/s (55.6MB/s)(3182MiB/60021msec)
+
+
+===Fio: workload=read, time=60, iodepth=64, bs=64k===
+
+fio-read: (g=0): rw=read, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=114318: Sat Dec  9 19:09:32 2023
+  read: IOPS=1811, BW=113MiB/s (119MB/s)(6797MiB/60045msec)
+    slat (usec): min=6, max=424, avg=20.39, stdev= 9.56
+    clat (usec): min=1265, max=92598, avg=35308.16, stdev=19270.47
+     lat (usec): min=1287, max=92612, avg=35329.01, stdev=19270.53
+    clat percentiles (usec):
+     |  1.00th=[ 2343],  5.00th=[ 5145], 10.00th=[ 8586], 20.00th=[15533],
+     | 30.00th=[22414], 40.00th=[29230], 50.00th=[35390], 60.00th=[41681],
+     | 70.00th=[47973], 80.00th=[54264], 90.00th=[61604], 95.00th=[65799],
+     | 99.00th=[71828], 99.50th=[73925], 99.90th=[78119], 99.95th=[83362],
+     | 99.99th=[89654]
+   bw (  KiB/s): min=93440, max=134144, per=100.00%, avg=115938.13, stdev=5998.89, samples=120
+   iops        : min= 1460, max= 2096, avg=1811.53, stdev=93.73, samples=120
+  lat (msec)   : 2=0.47%, 4=2.95%, 10=8.60%, 20=14.56%, 50=46.81%
+  lat (msec)   : 100=26.62%
+  cpu          : usr=2.10%, sys=7.06%, ctx=93295, majf=0, minf=1035
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=99.9%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=108755,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=113MiB/s (119MB/s), 113MiB/s-113MiB/s (119MB/s-119MB/s), io=6797MiB (7127MB), run=60045-60045msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64) read:  read: IOPS=1811, BW=113MiB/s (119MB/s)(6797MiB/60045msec)
+
+
+===Fio: workload=write, time=60, iodepth=64, bs=16k===
+
+fio-write: (g=0): rw=write, bs=(R) 16.0KiB-16.0KiB, (W) 16.0KiB-16.0KiB, (T) 16.0KiB-16.0KiB, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=114402: Sat Dec  9 19:10:34 2023
+  write: IOPS=11.9k, BW=185MiB/s (194MB/s)(10.9GiB/60004msec); 0 zone resets
+    slat (usec): min=4, max=481, avg= 9.73, stdev= 6.69
+    clat (usec): min=481, max=1290.9k, avg=5385.43, stdev=33713.92
+     lat (usec): min=504, max=1290.9k, avg=5395.42, stdev=33713.93
+    clat percentiles (msec):
+     |  1.00th=[    3],  5.00th=[    3], 10.00th=[    3], 20.00th=[    3],
+     | 30.00th=[    3], 40.00th=[    3], 50.00th=[    4], 60.00th=[    4],
+     | 70.00th=[    4], 80.00th=[    4], 90.00th=[    4], 95.00th=[    5],
+     | 99.00th=[   43], 99.50th=[  105], 99.90th=[  405], 99.95th=[  995],
+     | 99.99th=[ 1267]
+   bw (  KiB/s): min=21600, max=380768, per=100.00%, avg=210833.35, stdev=98192.16, samples=107
+   iops        : min= 1350, max=23798, avg=13177.08, stdev=6137.01, samples=107
+  lat (usec)   : 500=0.01%, 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.27%, 4=92.65%, 10=4.62%, 20=0.94%, 50=0.54%
+  lat (msec)   : 100=0.40%, 250=0.37%, 500=0.09%, 750=0.02%, 1000=0.03%
+  lat (msec)   : 2000=0.04%
+  cpu          : usr=5.25%, sys=14.66%, ctx=190172, majf=0, minf=12
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=0,711503,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+  WRITE: bw=185MiB/s (194MB/s), 185MiB/s-185MiB/s (194MB/s-194MB/s), io=10.9GiB (11.7GB), run=60004-60004msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64) write:  write: IOPS=11.9k, BW=185MiB/s (194MB/s)(10.9GiB/60004msec); 0 zone resets
+
+
+===Fio: workload=write, time=60, iodepth=64, bs=64k===
+
+fio-write: (g=0): rw=write, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=114456: Sat Dec  9 19:11:37 2023
+  write: IOPS=3124, BW=195MiB/s (205MB/s)(11.4GiB/60009msec); 0 zone resets
+    slat (usec): min=6, max=431, avg=16.63, stdev= 9.27
+    clat (usec): min=702, max=673288, avg=20466.01, stdev=38321.71
+     lat (usec): min=728, max=673304, avg=20482.98, stdev=38321.69
+    clat percentiles (msec):
+     |  1.00th=[    8],  5.00th=[    9], 10.00th=[    9], 20.00th=[    9],
+     | 30.00th=[   10], 40.00th=[   10], 50.00th=[   11], 60.00th=[   11],
+     | 70.00th=[   12], 80.00th=[   15], 90.00th=[   46], 95.00th=[   77],
+     | 99.00th=[  130], 99.50th=[  264], 99.90th=[  550], 99.95th=[  575],
+     | 99.99th=[  625]
+   bw (  KiB/s): min=13312, max=409728, per=99.57%, avg=199084.10, stdev=99311.89, samples=119
+   iops        : min=  208, max= 6402, avg=3110.69, stdev=1551.75, samples=119
+  lat (usec)   : 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.09%, 4=0.18%, 10=48.66%, 20=33.87%, 50=8.19%
+  lat (msec)   : 100=5.65%, 250=2.81%, 500=0.41%, 750=0.14%
+  cpu          : usr=3.04%, sys=7.29%, ctx=154390, majf=0, minf=12
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=0,187470,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+  WRITE: bw=195MiB/s (205MB/s), 195MiB/s-195MiB/s (205MB/s-205MB/s), io=11.4GiB (12.3GB), run=60009-60009msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64) write:  write: IOPS=3124, BW=195MiB/s (205MB/s)(11.4GiB/60009msec); 0 zone resets
+100+0 records in
+100+0 records out
+104857600 bytes (105 MB, 100 MiB) copied, 0.348196 s, 301 MB/s
+umount: /mnt/fsbench: not mounted.
+
+==== Creating filesystem ====
+mke2fs 1.46.5 (30-Dec-2021)
+Creating filesystem with 20971520 4k blocks and 5242880 inodes
+Filesystem UUID: 80d93faa-3b92-4b56-b06b-4ffc3163ec3a
+Superblock backups stored on blocks: 
+	32768, 98304, 163840, 229376, 294912, 819200, 884736, 1605632, 2654208, 
+	4096000, 7962624, 11239424, 20480000
+
+Allocating group tables:   0/640       done                            
+Writing inode tables:   0/640       done                            
+Creating journal (131072 blocks): done
+Writing superblocks and filesystem accounting information:   0/640       done
+
+
+
+=========================================
+=== Running filebench workloads       ===
+=========================================
+
+
+
+
+===Filebench: workload=/tmp/filebench/fileserver.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.002: File-server Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.206: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.206: Removing bigfileset tree (if exists)
+0.208: Pre-allocating directories in bigfileset tree
+0.615: Pre-allocating files in bigfileset tree
+74.720: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+74.720: Population and pre-allocation of filesets completed
+74.721: Starting 1 filereader instances
+75.727: Running...
+255.746: Run took 180 seconds...
+255.754: Per-Operation Breakdown
+statfile1            368567ops     2047ops/s   0.0mb/s    0.010ms/op [0.003ms - 10.226ms]
+deletefile1          368564ops     2047ops/s   0.0mb/s    0.504ms/op [0.030ms - 2262.421ms]
+closefile3           368567ops     2047ops/s   0.0mb/s    0.004ms/op [0.001ms - 2.614ms]
+readfile1            368567ops     2047ops/s 264.2mb/s    0.190ms/op [0.004ms - 3365.576ms]
+openfile2            368567ops     2047ops/s   0.0mb/s    0.047ms/op [0.005ms - 34.795ms]
+closefile2           368567ops     2047ops/s   0.0mb/s    0.004ms/op [0.001ms - 2.639ms]
+appendfilerand1      368568ops     2047ops/s  16.0mb/s    1.557ms/op [0.001ms - 3416.631ms]
+openfile1            368571ops     2047ops/s   0.0mb/s    0.052ms/op [0.007ms - 19.253ms]
+closefile1           368571ops     2047ops/s   0.0mb/s    0.006ms/op [0.001ms - 25.387ms]
+wrtfile1             368576ops     2047ops/s 256.2mb/s   20.923ms/op [0.013ms - 3683.352ms]
+createfile1          368617ops     2048ops/s   0.0mb/s    0.486ms/op [0.024ms - 2039.881ms]
+255.754: IO Summary: 4054302 ops 22521.784 ops/s 2047/4095 rd/wr 536.4mb/s 2.162ms/op
+255.754: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver.f:255.754: IO Summary: 4054302 ops 22521.784 ops/s 2047/4095 rd/wr 536.4mb/s 2.162ms/op
+
+
+===Filebench: workload=/tmp/filebench/fileserver-fsync.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: File-server Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.207: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.207: Removing bigfileset tree (if exists)
+0.210: Pre-allocating directories in bigfileset tree
+0.712: Pre-allocating files in bigfileset tree
+69.232: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+69.232: Population and pre-allocation of filesets completed
+69.232: Starting 1 filereader instances
+70.242: Running...
+250.260: Run took 180 seconds...
+250.267: Per-Operation Breakdown
+statfile1            181571ops     1009ops/s   0.0mb/s    0.010ms/op [0.003ms - 1.494ms]
+deletefile1          181571ops     1009ops/s   0.0mb/s    4.911ms/op [0.037ms - 4444.532ms]
+closefile3           181572ops     1009ops/s   0.0mb/s    0.004ms/op [0.001ms - 1.162ms]
+readfile1            181572ops     1009ops/s 128.6mb/s    4.294ms/op [0.006ms - 1101.879ms]
+openfile2            181572ops     1009ops/s   0.0mb/s    0.066ms/op [0.008ms - 4.858ms]
+closefile2           181572ops     1009ops/s   0.0mb/s    0.013ms/op [0.001ms - 1.620ms]
+fsyncfile2           181572ops     1009ops/s   0.0mb/s   34.467ms/op [0.483ms - 4462.875ms]
+appendfilerand1      181615ops     1009ops/s   7.9mb/s    1.047ms/op [0.008ms - 1567.068ms]
+openfile1            181615ops     1009ops/s   0.0mb/s    0.039ms/op [0.008ms - 2.390ms]
+closefile1           181615ops     1009ops/s   0.0mb/s    0.004ms/op [0.001ms - 0.443ms]
+wrtfile1             181615ops     1009ops/s 125.9mb/s    2.033ms/op [0.014ms - 672.574ms]
+createfile1          181615ops     1009ops/s   0.0mb/s    2.091ms/op [0.030ms - 672.024ms]
+250.267: IO Summary: 2179077 ops 12104.907 ops/s 1009/2018 rd/wr 262.3mb/s 4.081ms/op
+250.267: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver-fsync.f:250.267: IO Summary: 2179077 ops 12104.907 ops/s 1009/2018 rd/wr 262.3mb/s 4.081ms/op
+
+
+===Filebench: workload=/tmp/filebench/oltp.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: OLTP Version 3.0  personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.003: logfile populated: 1 files, avg. dir. width = 1024, avg. dir. depth = 0.0, 0 leafdirs, 100.000MB total size
+0.003: Removing logfile tree (if exists)
+0.006: Pre-allocating directories in logfile tree
+0.006: Pre-allocating files in logfile tree
+0.155: datafiles populated: 250 files, avg. dir. width = 1024, avg. dir. depth = 0.8, 0 leafdirs, 25000.000MB total size
+0.155: Removing datafiles tree (if exists)
+0.158: Pre-allocating directories in datafiles tree
+0.159: Pre-allocating files in datafiles tree
+102.071: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+102.071: Population and pre-allocation of filesets completed
+102.071: Starting 200 shadow instances
+102.198: Starting 10 dbwr instances
+102.203: Starting 1 lgwr instances
+103.206: Running...
+283.243: Run took 180 seconds...
+283.258: Per-Operation Breakdown
+random-rate          0ops        0ops/s   0.0mb/s    0.000ms/op [0.000ms - 0.000ms]
+shadow-post-dbwr     1513000ops     8404ops/s   0.0mb/s   22.633ms/op [0.016ms - 10285.153ms]
+shadow-post-lg       1513200ops     8405ops/s   0.0mb/s    0.044ms/op [0.001ms - 76.028ms]
+shadowhog            1513200ops     8405ops/s   0.0mb/s    0.238ms/op [0.078ms - 104.197ms]
+shadowread           1538800ops     8547ops/s  16.4mb/s    0.801ms/op [0.001ms - 318.971ms]
+dbwr-aiowait         15111ops       84ops/s   0.0mb/s    1.423ms/op [0.004ms - 20.534ms]
+dbwr-block           15120ops       84ops/s   0.0mb/s    3.303ms/op [0.003ms - 163.516ms]
+dbwr-hog             15121ops       84ops/s   0.0mb/s    0.010ms/op [0.004ms - 10.872ms]
+dbwrite-a            1513380ops     8406ops/s  16.4mb/s    0.004ms/op [0.001ms - 63.507ms]
+lg-block             472ops        3ops/s   0.0mb/s  381.033ms/op [29.254ms - 10378.481ms]
+lg-aiowait           473ops        3ops/s   0.0mb/s    0.001ms/op [0.001ms - 0.033ms]
+lg-write             474ops        3ops/s   0.7mb/s    0.015ms/op [0.001ms - 0.131ms]
+283.258: IO Summary: 3068238 ops 17042.437 ops/s 8547/8409 rd/wr  33.5mb/s 0.411ms/op
+283.258: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/oltp.f:283.258: IO Summary: 3068238 ops 17042.437 ops/s 8547/8409 rd/wr  33.5mb/s 0.411ms/op
+
+
+===Filebench: workload=/tmp/filebench/randomwrite.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.002: Random Write Version 3.0 personality successfully loaded
+0.002: Populating and pre-allocating filesets
+0.002: Removing largefile1 tree (if exists)
+0.005: Pre-allocating directories in largefile1 tree
+0.005: Pre-allocating files in largefile1 tree
+1.139: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+1.139: Population and pre-allocation of filesets completed
+1.139: Starting 1 rand-write instances
+2.142: Running...
+2.148: write failed, offset 547979264 io buffer 140737084729344: Invalid argument
+2.148: rand-thread-1: flowop rand-write1-1 failed
+3.142: Run took 1 seconds...
+3.142: Shutting down processes
+3.142: NO VALID RESULTS! Filebench run terminated prematurely around line 46
+
+RESULT: Filebench /tmp/filebench/randomwrite.f:
+
+===Filebench: workload=/tmp/filebench/varmail.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: Varmail Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.948: bigfileset populated: 900000 files, avg. dir. width = 1000000, avg. dir. depth = 1.0, 0 leafdirs, 28154.289MB total size
+0.948: Removing bigfileset tree (if exists)
+0.951: Pre-allocating directories in bigfileset tree
+0.951: Pre-allocating files in bigfileset tree
+119.005: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+119.005: Population and pre-allocation of filesets completed
+119.005: Starting 1 filereader instances
+120.015: Running...
+300.031: Run took 180 seconds...
+300.032: Per-Operation Breakdown
+closefile4           124910ops      694ops/s   0.0mb/s    0.003ms/op [0.001ms - 0.401ms]
+readfile4            124910ops      694ops/s  18.5mb/s    1.805ms/op [0.008ms - 1938.449ms]
+openfile4            124910ops      694ops/s   0.0mb/s    0.022ms/op [0.005ms - 3.295ms]
+closefile3           124910ops      694ops/s   0.0mb/s    0.006ms/op [0.001ms - 1.408ms]
+fsyncfile3           124910ops      694ops/s   0.0mb/s    7.786ms/op [0.474ms - 2421.062ms]
+appendfilerand3      124918ops      694ops/s   5.4mb/s    0.096ms/op [0.007ms - 713.601ms]
+readfile3            124918ops      694ops/s  18.5mb/s    1.841ms/op [0.008ms - 1938.413ms]
+openfile3            124918ops      694ops/s   0.0mb/s    0.021ms/op [0.005ms - 3.339ms]
+closefile2           124918ops      694ops/s   0.0mb/s    0.006ms/op [0.001ms - 1.103ms]
+fsyncfile2           124918ops      694ops/s   0.0mb/s    7.960ms/op [0.827ms - 2416.448ms]
+appendfilerand2      124925ops      694ops/s   5.4mb/s    0.447ms/op [0.015ms - 1934.242ms]
+createfile2          124926ops      694ops/s   0.0mb/s    1.374ms/op [0.037ms - 2409.761ms]
+deletefile1          124925ops      694ops/s   0.0mb/s    1.555ms/op [0.042ms - 2409.743ms]
+300.032: IO Summary: 1623916 ops 9020.965 ops/s 1388/1388 rd/wr  47.8mb/s 1.763ms/op
+300.032: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/varmail.f:300.032: IO Summary: 1623916 ops 9020.965 ops/s 1388/1388 rd/wr  47.8mb/s 1.763ms/op
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 1 controller(s)
+Fio (iodepth=256) randread:  read: IOPS=116k, BW=453MiB/s (475MB/s)(26.5GiB/60001msec)
+Fio (iodepth=256) randwrite:  write: IOPS=42.2k, BW=165MiB/s (173MB/s)(9888MiB/60001msec); 0 zone resets
+Fio (iodepth=256) read:  read: IOPS=99.0k, BW=387MiB/s (406MB/s)(22.7GiB/60001msec)
+Fio (iodepth=256) write:  write: IOPS=47.0k, BW=184MiB/s (193MB/s)(10.8GiB/60002msec); 0 zone resets
+Fio (iodepth=1) randwrite:  write: IOPS=6746, BW=26.4MiB/s (27.6MB/s)(1581MiB/60001msec); 0 zone resets
+Fio (iodepth=32) randwrite:  write: IOPS=42.7k, BW=167MiB/s (175MB/s)(9.78GiB/60001msec); 0 zone resets
+Fio (iodepth=64) randwrite:  write: IOPS=41.2k, BW=161MiB/s (169MB/s)(9679MiB/60145msec); 0 zone resets
+Fio (iodepth=128) randwrite:  write: IOPS=41.8k, BW=163MiB/s (171MB/s)(9849MiB/60316msec); 0 zone resets
+Fio (iodepth=1) randread:  read: IOPS=1236, BW=4945KiB/s (5064kB/s)(290MiB/60001msec)
+Fio (iodepth=32) randread:  read: IOPS=44.7k, BW=175MiB/s (183MB/s)(10.2GiB/60002msec)
+Fio (iodepth=64) randread:  read: IOPS=54.4k, BW=212MiB/s (223MB/s)(12.4GiB/60001msec)
+Fio (iodepth=128) randread:  read: IOPS=56.7k, BW=221MiB/s (232MB/s)(13.0GiB/60002msec)
+Fio (iodepth=64) read:  read: IOPS=3393, BW=53.0MiB/s (55.6MB/s)(3182MiB/60021msec)
+Fio (iodepth=64) read:  read: IOPS=1811, BW=113MiB/s (119MB/s)(6797MiB/60045msec)
+Fio (iodepth=64) write:  write: IOPS=11.9k, BW=185MiB/s (194MB/s)(10.9GiB/60004msec); 0 zone resets
+Fio (iodepth=64) write:  write: IOPS=3124, BW=195MiB/s (205MB/s)(11.4GiB/60009msec); 0 zone resets
+Filebench /tmp/filebench/fileserver.f:255.754: IO Summary: 4054302 ops 22521.784 ops/s 2047/4095 rd/wr 536.4mb/s 2.162ms/op
+Filebench /tmp/filebench/fileserver-fsync.f:250.267: IO Summary: 2179077 ops 12104.907 ops/s 1009/2018 rd/wr 262.3mb/s 4.081ms/op
+Filebench /tmp/filebench/oltp.f:283.258: IO Summary: 3068238 ops 17042.437 ops/s 8547/8409 rd/wr  33.5mb/s 0.411ms/op
+Filebench /tmp/filebench/randomwrite.f:
+Filebench /tmp/filebench/varmail.f:300.032: IO Summary: 1623916 ops 9020.965 ops/s 1388/1388 rd/wr  47.8mb/s 1.763ms/op
+Connection closed with partial response:
+
+
