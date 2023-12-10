@@ -26,7 +26,7 @@ using chunk_idx = size_t;
 using chunk_key = std::tuple<std::string, uint64_t, size_t>;
 
 using namespace boost::accumulators;
-const size_t CACHE_STATS_WINDOW = 1'000;
+const size_t CACHE_STATS_WINDOW = 10'000;
 
 /**
  * This is a cache in front of the backend. It's indexed by
