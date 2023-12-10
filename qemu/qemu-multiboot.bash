@@ -16,7 +16,7 @@ source $lsvd_dir/.env
 source $lsvd_dir/experiments/common.bash
 
 echo "Running gateway on $gw_ip, client on $client_ip"
-echo "Running with image $pool_name/$imgname as the base"
+echo "Running with image $pool_name/$basename as the base"
 
 cd $lsvd_dir
 # make clean
@@ -25,9 +25,9 @@ make -j20 release
 # make sure image exists
 rados -p $pool_name stat $basename
 
-python3 clone.py $pool_name/$basename $pool_name/clonetest-1
-python3 clone.py $pool_name/$basename $pool_name/clonetest-2
-python3 clone.py $pool_name/$basename $pool_name/clonetest-3
+python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-1
+python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-2
+python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-3
 
 kill_nvmf
 export LSVD_NO_GC=1
