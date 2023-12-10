@@ -57,6 +57,8 @@ extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
 {
+    this->image_name = name;
+
     if (cfg.read() < 0)
         throw std::runtime_error("Failed to read config");
 
@@ -155,7 +157,7 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
         return -1;
     }
     *image = __lsvd_dbg_img = (void *)img;
-    log_info("opened image: {}, size {}", name, img->size);
+    log_info("Opened image: {}, size {}", name, img->size);
     return 0;
 }
 
@@ -176,7 +178,7 @@ int rbd_image::image_close(void)
 extern "C" int rbd_close(rbd_image_t image)
 {
     rbd_image *img = (rbd_image *)image;
-    log_info("closing image");
+    log_info("Closing image {}", img->image_name);
     img->image_close();
     delete img;
 

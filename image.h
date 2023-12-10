@@ -51,6 +51,8 @@ class backend;
 class translate;
 
 struct rbd_image {
+    std::string image_name;
+
     lsvd_config cfg;
     ssize_t size; // bytes
 
