@@ -49,7 +49,7 @@ function launch_lsvd_gw_background {
 	export LSVD_GC_THRESHOLD=40
 	export LSVD_CACHE_SIZE=$cache_size
 	# LD_PRELOAD="/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so $lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
-	LD_PRELOAD="$lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
+	LD_PRELOAD="$lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt -m '[0,1,2,3]' &
 
 	sleep 5
 }

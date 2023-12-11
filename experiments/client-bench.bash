@@ -160,10 +160,8 @@ function run_filebench {
 	rm -rf /mnt/fsbench/*
 	filebench -f $1 | tee /tmp/client-bench-results.txt
 
-	set +x
 	printf "\nRESULT: Filebench $1:"
 	perl -lane 'print if /IO Summary/' /tmp/client-bench-results.txt
-	set -x
 }
 
 # shorten runtime

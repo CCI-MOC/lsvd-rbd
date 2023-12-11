@@ -38,9 +38,10 @@ create_lsvd_thick $pool_name $imgname $imgsize
 
 kill_nvmf
 
-trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
+fstrim /mnt/nvme
 launch_lsvd_gw_background $rcache $wlog $((240 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
+trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 
 run_client_bench $client_ip $outfile client-bench.bash "read_entire_img=1"
