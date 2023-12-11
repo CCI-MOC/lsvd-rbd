@@ -43,4 +43,4 @@ launch_lsvd_gw_background $rcache $wlog $((240 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
-run_client_bench $client_ip $outfile
+run_client_bench $client_ip $outfile client-bench.bash "read_entire_img=1"

@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
   exit
 fi
 
 # designed to run nightly; we don't care if one of them fails
-set +e
+# set -euo pipefail
 
 all_out=./experiment-results.txt
+echo "\n\n\Benchmark script raw output will be written to $all_out" | tee -a $all_out
 
 ./bench-lsvd.bash rssd2 |& tee -a $all_out
 ./bench-lsvd.bash triple-hdd |& tee -a $all_out

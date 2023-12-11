@@ -110,11 +110,12 @@ function run_client_bench {
 	local client_ip=$1
 	local outfile=$2
 	local benchscript=${3:-client-bench.bash}
+	local additional_args=${4:-""}
 
 	cd $lsvd_dir/experiments
 	ssh $client_ip 'mkdir -p /tmp/filebench; rm -rf /tmp/filebench/*'
 	scp ./filebench-workloads/*.f root@$client_ip:/tmp/filebench/
-	ssh $client_ip "bash -s gw_ip=$gw_ip" < $benchscript 2>&1 | tee -a $outfile
+	ssh $client_ip "bash -s gw_ip=$gw_ip $additional_args" < $benchscript 2>&1 | tee -a $outfile
 
 	perl -lane 'print if s/^RESULT: //' $outfile | tee -a $outfile
 }

@@ -39,12 +39,20 @@ num_fio_processes=1
 fio_size="80GB"
 fio_bs=${blksize:-4k}
 
-# warm the cache by reading in the entire image
+read_entire_img=${read_entire_img:-0}
+
 # BUG: limit to slightly under 80GiB, lsvd doesn't like the last few sectors
 # don't thick provision here, since other workloads won't use this at all
-# TODO move this into just the lsvd benchmark script
 # dd if=/dev/zero of=$dev_name bs=1048576 count=81910 status=progress
-dd if=$dev_name of=/dev/null bs=1048576 count=81910 status=progress
+
+# warm the cache by reading in the entire image
+# TODO this is a temporary workaround; figure out a better way to warm the cache
+# for fio later
+if [[ $read_entire_img -eq 1 ]]; then
+	printf "\n\n===Reading entire image to warm cache===\n\n"
+	# dd if=$dev_name of=/dev/null bs=1048576 status=progress
+	dd if=$dev_name of=/dev/null bs=1048576 count=81910 status=progress
+fi
 
 # fio
 
