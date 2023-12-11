@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/framework/extractor.hpp>
 #include <boost/accumulators/statistics.hpp>
@@ -69,11 +70,11 @@ class shared_read_cache
     struct entry_state {
         entry_status status = EMPTY;
 
-        bool accessed = false;
+        std::atomic_bool accessed = false;
 
         // We use this to count how many requests refer to this chunk.
         // If non-zero, we cannot evict this chunk
-        int32_t refcount = 0;
+        std::atomic_int32_t refcount = 0;
 
         // This is used when the backend request has come back and we're now
         // going to fill it into the cache. Status must be FILLING.
@@ -87,6 +88,7 @@ class shared_read_cache
     std::vector<entry_state> cache_state;
 
     std::shared_mutex global_cache_lock;
+    std::mutex cache_stats_lock;
 
     int fd;
     uptr<nvme> cache_store;
@@ -105,7 +107,7 @@ class shared_read_cache
     size_t clock_idx = 0;
 
     // maintain cache hit rate statistics
-    int total_requests = 0;
+    std::atomic_int total_requests = 0;
     accumulator_set<int, stats<tag::rolling_sum, tag::rolling_count>>
         hitrate_stats;
     accumulator_set<size_t, stats<tag::rolling_sum>> user_bytes;

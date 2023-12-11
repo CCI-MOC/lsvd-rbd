@@ -326,14 +326,15 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
                                           uint64_t seqnum, size_t obj_offset,
                                           size_t adjust, smartiov &dest)
 {
+    auto req_size = dest.bytes();
+
     assert(obj_offset % CACHE_CHUNK_SIZE == 0);
-    assert(adjust + dest.bytes() <= CACHE_CHUNK_SIZE);
-    total_requests++;
-    user_bytes(dest.bytes());
+    assert(adjust + req_size <= CACHE_CHUNK_SIZE);
 
     // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
+    total_requests++;
 
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
     auto r =
@@ -341,8 +342,12 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     if (r != cache_map.left.end()) {
         auto idx = r->second;
         // trace("cache hit {}", idx);
-        backend_bytes(0);
-        hitrate_stats(1);
+        {
+            std::lock_guard guard(cache_stats_lock);
+            user_bytes(req_size);
+            backend_bytes(0);
+            hitrate_stats(1);
+        }
 
         auto &entry = cache_state[idx];
         assert(entry.status != entry_status::EMPTY);
@@ -375,10 +380,21 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         }
     }
 
+    lock.unlock();
+
     // Cache miss path: allocate a chunk, fetch from backend, and then fill
     // the chunk in
-    backend_bytes(CACHE_CHUNK_SIZE);
-    hitrate_stats(0);
+    {
+        std::lock_guard guard(cache_stats_lock);
+        user_bytes(req_size);
+        backend_bytes(CACHE_CHUNK_SIZE);
+        hitrate_stats(0);
+    }
+
+    // upgrade to write lock
+    // TODO verify safety? the only person to read the abit is the allocator,
+    // and it is protected by an exclusive lock, so it should be fine
+    std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
     auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
@@ -402,7 +418,7 @@ void shared_read_cache::report_cache_stats()
 
     while (!stop_cache_stats_reporter.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
-        std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+        std::lock_guard lock(cache_stats_lock);
 
         auto frontend = rolling_sum(user_bytes);
         auto backend = rolling_sum(backend_bytes);
@@ -421,7 +437,7 @@ void shared_read_cache::report_cache_stats()
 
 bool shared_read_cache::should_bypass_cache()
 {
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    std::lock_guard lock(cache_stats_lock);
 
     auto frontend = rolling_sum(user_bytes);
     auto backend = rolling_sum(backend_bytes);
@@ -435,7 +451,7 @@ bool shared_read_cache::should_bypass_cache()
 
 void shared_read_cache::served_bypass_request(size_t bytes)
 {
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::lock_guard lock(cache_stats_lock);
     total_requests++;
     hitrate_stats(0);
     user_bytes(bytes);
@@ -444,7 +460,7 @@ void shared_read_cache::served_bypass_request(size_t bytes)
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 {
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
     auto &entry = cache_state[chunk];
     assert(entry.refcount > 0);
     entry.refcount--;
