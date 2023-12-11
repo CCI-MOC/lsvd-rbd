@@ -9,10 +9,18 @@ fi
 # set -euo pipefail
 
 all_out=./experiment-results.txt
-echo "\n\n\Benchmark script raw output will be written to $all_out" | tee -a $all_out
+printf "\n\n\nBenchmark script raw output will be written to $all_out" | tee -a $all_out
 
+export lsvd_cache_size=$((240 * 1024 * 1024 * 1024))
 ./bench-lsvd.bash rssd2 |& tee -a $all_out
+export lsvd_cache_size=$((240 * 1024 * 1024 * 1024))
 ./bench-lsvd.bash triple-hdd |& tee -a $all_out
+
+export lsvd_cache_size=$((20 * 1024 * 1024 * 1024))
+./bench-lsvd.bash rssd2 |& tee -a $all_out
+export lsvd_cache_size=$((20 * 1024 * 1024 * 1024))
+./bench-lsvd.bash triple-hdd |& tee -a $all_out
+
 ./bench-rbd.bash rssd2 |& tee -a $all_out
 ./bench-rbd.bash triple-hdd |& tee -a $all_out
 ./bench-ramdisk.bash |& tee -a $all_out
