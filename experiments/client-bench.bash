@@ -73,10 +73,10 @@ function run_fio {
 run_fio randread 60 256 $fio_bs
 run_fio randread 60 256 $fio_bs
 
-run_fio randwrite 60 256 $fio_bs
+run_fio read 60 256 $fio_bs
+run_fio read 60 256 $fio_bs
 
-run_fio read 60 256 $fio_bs
-run_fio read 60 256 $fio_bs
+run_fio randwrite 60 256 $fio_bs
 
 run_fio write 60 256 $fio_bs
 
@@ -85,6 +85,24 @@ printf "=========================================\n"
 printf "=== Trying out different queue depths ===\n"
 printf "=========================================\n"
 printf "\n\n"
+
+run_fio randread 60 1 $fio_bs
+run_fio randread 60 1 $fio_bs
+run_fio randread 60 32 $fio_bs
+run_fio randread 60 32 $fio_bs
+run_fio randread 60 64 $fio_bs
+run_fio randread 60 64 $fio_bs
+run_fio randread 60 128 $fio_bs
+run_fio randread 60 128 $fio_bs
+
+run_fio read 60 1 $fio_bs
+run_fio read 60 1 $fio_bs
+run_fio read 60 32 $fio_bs
+run_fio read 60 32 $fio_bs
+run_fio read 60 64 $fio_bs
+run_fio read 60 64 $fio_bs
+run_fio read 60 128 $fio_bs
+run_fio read 60 128 $fio_bs
 
 run_fio randwrite 60 1 $fio_bs
 run_fio randwrite 60 32 $fio_bs
@@ -96,25 +114,7 @@ run_fio write 60 32 $fio_bs
 run_fio write 60 64 $fio_bs
 run_fio write 60 128 $fio_bs
 
-run_fio randread 60 1 $fio_bs
-run_fio randread 60 1 $fio_bs
-run_fio randread 60 32 $fio_bs
-run_fio randread 60 32 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 128 $fio_bs
-run_fio randread 60 128 $fio_bs
-run_fio randread 60 128 $fio_bs
 
-run_fio read 60 1 $fio_bs
-run_fio read 60 1 $fio_bs
-run_fio read 60 32 $fio_bs
-run_fio read 60 32 $fio_bs
-run_fio read 60 64 $fio_bs
-run_fio read 60 64 $fio_bs
-run_fio read 60 128 $fio_bs
-run_fio read 60 128 $fio_bs
 
 printf "\n\n"
 printf "========================================\n"
@@ -127,13 +127,13 @@ run_fio read 60 64 16k
 run_fio read 60 64 64k
 run_fio read 60 64 64k
 
+run_fio randread 60 64 16k
+run_fio randread 60 64 16k
+run_fio randread 60 64 64k
+run_fio randread 60 64 64k
+
 run_fio write 60 64 16k
 run_fio write 60 64 64k
-
-run_fio randread 60 64 16k
-run_fio randread 60 64 16k
-run_fio randread 60 64 64k
-run_fio randread 60 64 64k
 
 run_fio randwrite 60 64 16k
 run_fio randwrite 60 64 64k
