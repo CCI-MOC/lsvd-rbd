@@ -39,8 +39,11 @@ num_fio_processes=1
 fio_size="80GB"
 fio_bs=${blksize:-4k}
 
-# thick provision, then warm the cache
-dd if=/dev/zero of=$dev_name bs=1048576 count=81910 status=progress
+# warm the cache by reading in the entire image
+# BUG: limit to slightly under 80GiB, lsvd doesn't like the last few sectors
+# don't thick provision here, since other workloads won't use this at all
+# TODO move this into just the lsvd benchmark script
+# dd if=/dev/zero of=$dev_name bs=1048576 count=81910 status=progress
 dd if=$dev_name of=/dev/null bs=1048576 count=81910 status=progress
 
 # fio
@@ -70,21 +73,37 @@ function run_fio {
 	sleep 2
 }
 
+# We run all the read workloads first, then the writes, to preserve the cache
+# This is a hack; we need to figure out a better solution later
+
 run_fio randread 60 256 $fio_bs
-run_fio randread 60 256 $fio_bs
+run_fio read 60 256 $fio_bs
+
+run_fio randread 60 1 $fio_bs
+run_fio randread 60 32 $fio_bs
+run_fio randread 60 64 $fio_bs
+run_fio randread 60 128 $fio_bs
+
+run_fio read 60 1 $fio_bs
+run_fio read 60 1 $fio_bs
+run_fio read 60 32 $fio_bs
+run_fio read 60 32 $fio_bs
+run_fio read 60 64 $fio_bs
+run_fio read 60 64 $fio_bs
+run_fio read 60 128 $fio_bs
+run_fio read 60 128 $fio_bs
+
+run_fio read 60 64 16k
+run_fio read 60 64 16k
+run_fio read 60 64 64k
+run_fio read 60 64 64k
+
+run_fio randread 60 64 4k
+run_fio randread 60 64 16k
+run_fio randread 60 64 64k
 
 run_fio randwrite 60 256 $fio_bs
-
-run_fio read 60 256 $fio_bs
-run_fio read 60 256 $fio_bs
-
 run_fio write 60 256 $fio_bs
-
-printf "\n\n"
-printf "=========================================\n"
-printf "=== Trying out different queue depths ===\n"
-printf "=========================================\n"
-printf "\n\n"
 
 run_fio randwrite 60 1 $fio_bs
 run_fio randwrite 60 32 $fio_bs
@@ -96,44 +115,8 @@ run_fio write 60 32 $fio_bs
 run_fio write 60 64 $fio_bs
 run_fio write 60 128 $fio_bs
 
-run_fio randread 60 1 $fio_bs
-run_fio randread 60 1 $fio_bs
-run_fio randread 60 32 $fio_bs
-run_fio randread 60 32 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 128 $fio_bs
-run_fio randread 60 128 $fio_bs
-run_fio randread 60 128 $fio_bs
-
-run_fio read 60 1 $fio_bs
-run_fio read 60 1 $fio_bs
-run_fio read 60 32 $fio_bs
-run_fio read 60 32 $fio_bs
-run_fio read 60 64 $fio_bs
-run_fio read 60 64 $fio_bs
-run_fio read 60 128 $fio_bs
-run_fio read 60 128 $fio_bs
-
-printf "\n\n"
-printf "========================================\n"
-printf "=== Trying out different block sizes ===\n"
-printf "========================================\n"
-printf "\n\n"
-
-run_fio read 60 64 16k
-run_fio read 60 64 16k
-run_fio read 60 64 64k
-run_fio read 60 64 64k
-
 run_fio write 60 64 16k
 run_fio write 60 64 64k
-
-run_fio randread 60 64 16k
-run_fio randread 60 64 16k
-run_fio randread 60 64 64k
-run_fio randread 60 64 64k
 
 run_fio randwrite 60 64 16k
 run_fio randwrite 60 64 64k
