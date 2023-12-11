@@ -19,7 +19,7 @@ echo "Running gateway on $gw_ip, client on $client_ip"
 echo "Running with image $pool_name/$imgname"
 
 cd $lsvd_dir
-# make clean
+make clean
 make -j20 release
 
 # make sure image exists
@@ -30,4 +30,4 @@ launch_lsvd_gw_background $rcache $wlog $((5 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
-# wait
+wait

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -xeuo pipefail
+set -euo pipefail
 
 for pair in $*; do
 	if [ ${pair#*=} != $pair ]; then
@@ -39,6 +39,10 @@ num_fio_processes=1
 fio_size="80GB"
 fio_bs=${blksize:-4k}
 
+# thick provision, then warm the cache
+dd if=/dev/zero of=$dev_name bs=1048576 count=81910 status=progress
+dd if=$dev_name of=/dev/null bs=1048576 count=81910 status=progress
+
 # fio
 
 function run_fio {
@@ -60,10 +64,8 @@ function run_fio {
 		--output-format=normal,terse \
 		--eta-newline=1 | tee /tmp/client-bench-results.txt
 
-	set +x
 	printf "\nRESULT: Fio (iodepth=$3) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
-	set -x
 
 	sleep 2
 }
@@ -100,6 +102,8 @@ run_fio randread 60 32 $fio_bs
 run_fio randread 60 32 $fio_bs
 run_fio randread 60 64 $fio_bs
 run_fio randread 60 64 $fio_bs
+run_fio randread 60 64 $fio_bs
+run_fio randread 60 128 $fio_bs
 run_fio randread 60 128 $fio_bs
 run_fio randread 60 128 $fio_bs
 
