@@ -70,9 +70,9 @@ class rados_backend : public backend
 
 /* needed for implementation hiding
  */
-std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io)
+std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
 {
-    return std::make_unique<rados_backend>(io);
+    return std::make_shared<rados_backend>(io);
 }
 
 /* see https://docs.ceph.com/en/latest/rados/api/librados/
@@ -80,17 +80,18 @@ std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io)
  */
 rados_backend::rados_backend(rados_ioctx_t io_)
 {
+    memset(pool, 0, sizeof(pool));
     io_ctx = io_;
     if (io_ctx != nullptr)
         enable_ioctx_bypass_hack = true;
 
     int r;
     if ((r = rados_create(&cluster, NULL)) < 0) // NULL = ".client"
-        throw("rados create");
+        throw std::runtime_error("rados create");
     if ((r = rados_conf_read_file(cluster, NULL)) < 0)
-        throw("rados conf");
+        throw std::runtime_error("rados conf");
     if ((r = rados_connect(cluster)) < 0)
-        throw("rados connect");
+        throw std::runtime_error("rados connect");
 }
 
 rados_backend::~rados_backend()
@@ -271,7 +272,11 @@ class rados_be_request : public request
     {
         auto req = (rados_be_request *)ptr;
         int rv = rados_aio_get_return_value(c);
-        // assert(rv >= 0);
+        if (rv < 0)
+            log_error(
+                "rados req failed: err={}, type={}, name={}, offset={}, len={}",
+                rv, req->op == OP_READ ? "read" : "write", req->oid,
+                req->offset, req->client_len);
         req->notify(NULL);
     }
 
@@ -291,11 +296,12 @@ class rados_be_request : public request
                 if (op == OP_WRITE)
                     _iovs.copy_out(buf);
             }
+            client_len = _iovs.bytes();
 
             if (op == OP_READ)
-                rados_aio_read(io_ctx, oid, c, _buf, _iovs.bytes(), offset);
+                rados_aio_read(io_ctx, oid, c, _buf, client_len, offset);
             else
-                rados_aio_write_full(io_ctx, oid, c, _buf, _iovs.bytes());
+                rados_aio_write_full(io_ctx, oid, c, _buf, client_len);
         } else {
             if (op == OP_READ)
                 rados_aio_read(io_ctx, oid, c, client_buf, client_len, offset);

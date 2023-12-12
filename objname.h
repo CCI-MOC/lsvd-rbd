@@ -7,10 +7,13 @@
  *              LGPL-2.1-or-later
  */
 
-#ifndef __OBJNAME_H__
-#define __OBJNAME_H__
+#pragma once
 
+#include <cassert>
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 class objname
 {
@@ -18,7 +21,9 @@ class objname
 
   public:
     objname() {}
+    objname(std::string prefix, uint32_t seq) { init(prefix.c_str(), seq); }
     objname(const char *prefix, uint32_t seq) { init(prefix, seq); }
+
     void init(const char *prefix, uint32_t seq)
     {
         size_t len = strlen(prefix);
@@ -28,5 +33,3 @@ class objname
     }
     const char *c_str() { return buf; }
 };
-
-#endif

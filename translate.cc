@@ -344,10 +344,10 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
 
     auto [_buf, bytes] =
         parser->read_super(super_name, ckpts, clones, snaps, uuid);
-    if (bytes < 0)
-        return bytes;
-    if (_buf == NULL)
-        return -ENOENT;
+
+    check_cond(bytes < 0, "read_super failed");
+    check_cond(_buf == NULL, "no superblock");
+
     int n_ckpts = ckpts.size();
 
     super_buf = _buf;
@@ -363,28 +363,37 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
     /* is this a clone?
      */
     if (super_sh->clones_len > 0) {
+        debug("Image is a clone, parsing cloneinfo headers");
+
         char buf[4096];
         auto ci = (clone_info *)(_buf + super_sh->clones_offset);
         auto obj_name = (char *)(ci + 1);
         while (true) {
-            if (objstore->read_object(obj_name, buf, sizeof(buf), 0) < 0)
-                return -1;
+            if (has_poolname_prefix(obj_name)) {
+                log_warn("Found poolname prefix in baseimg name: {}; stripping "
+                         "it out. Cross-pool clones are not supported.",
+                         obj_name);
+                obj_name = strip_poolname_prefix(obj_name);
+                log_info("Using base name: {}", obj_name);
+            }
+
+            auto rv = objstore->read_object(obj_name, buf, sizeof(buf), 0);
+            check_cond(rv < 0, "Failed to read {}", obj_name);
+
             auto _h = (obj_hdr *)buf;
             auto _sh = (super_hdr *)(_h + 1);
-            if (_h->magic != LSVD_MAGIC || _h->type != LSVD_SUPER) {
-                printf("clone: bad magic\n");
-                return -1;
-            }
-            if (memcmp(_h->vol_uuid, ci->vol_uuid, sizeof(uuid_t)) != 0) {
-                printf("clone: bad UUID\n");
-                return -1;
-            }
+
+            check_cond(_h->magic != LSVD_MAGIC || _h->type != LSVD_SUPER,
+                       "Corrupted superblock in {}", obj_name);
+            check_cond(memcmp(_h->vol_uuid, ci->vol_uuid, sizeof(uuid_t)) != 0,
+                       "UUID mismatch in {}", obj_name);
             clone c;
             strcpy(c.prefix, obj_name);
             c.last_seq = ci->last_seq;
             if (clone_list.size() > 0)
                 clone_list.back().first_seq = ci->last_seq + 1;
             clone_list.push_back(c);
+            debug("Using base image {} upto seq {}", obj_name, c.last_seq);
 
             if (_sh->clones_len == 0)
                 break;
@@ -556,9 +565,18 @@ void translate_impl::make_obj_hdr(char *buf, uint32_t _seq,
 ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
                                int iovcnt)
 {
+
     smartiov siov(iov, iovcnt);
     size_t bytes = siov.bytes();
     sector_t base = offset / 512, limit = (offset + bytes) / 512;
+
+    static std::atomic_int counter = 0;
+    static std::atomic_size_t user_write_bytes = 0;
+    counter++;
+    user_write_bytes += bytes;
+    if (counter % 10'000 == 0)
+        trace("{} write reqs, {} MiB total", counter,
+              user_write_bytes / 1024 / 1024);
 
     std::unique_lock lk(m);
     if (!current->room(bytes)) {
@@ -1080,6 +1098,7 @@ struct _extent {
 void translate_impl::do_gc(bool *running)
 {
     gc_cycles++;
+    trace("Start GC cycle {}", gc_cycles);
     int max_obj = seq.load();
 
     std::shared_lock obj_r_lock(*map_lock);
@@ -1331,6 +1350,7 @@ void translate_impl::stop_gc(void)
 
 void translate_impl::gc_thread(thread_pool<int> *p)
 {
+    debug("starting gc thread");
     auto interval = std::chrono::milliseconds(100);
     // sector_t trigger = 128 * 1024 * 2; // 128 MB
     const char *name = "gc_thread";
@@ -1380,7 +1400,7 @@ void set_image_header(char *buf, size_t vol_size)
 
     auto superblock = (super_hdr *)(hdr + 1);
     memset(superblock, 0, sizeof(*superblock));
-    // superblock->vol_size = 0;
+    superblock->vol_size = vol_size / 512;
     // superblock->ckpts_offset = 0;
     // superblock->ckpts_len = 0;
     // superblock->clones_offset = 0;
@@ -1506,12 +1526,12 @@ int translate_clone_image(sptr<backend> objstore, const char *source,
                           const char *dest)
 {
     // read superblock
-    char buf[4096];
-    int rv = objstore->read_object(source, buf, sizeof(buf), 0);
+    char base_buf[4096];
+    int rv = objstore->read_object(source, base_buf, sizeof(base_buf), 0);
     if (rv < 0)
         throw std::runtime_error("failed to read superblock");
 
-    auto base_hdr = (obj_hdr *)buf;
+    auto base_hdr = (obj_hdr *)base_buf;
     auto base_super = (super_hdr *)(base_hdr + 1);
 
     if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
@@ -1519,7 +1539,15 @@ int translate_clone_image(sptr<backend> objstore, const char *source,
 
     // get checkpoints
     int seq = 1;
-    auto checkpoints = deserialise_checkpoint_ids(buf);
+    auto cp_ids = deserialise_checkpoint_ids(base_buf);
+    if (cp_ids.size() == 0) {
+        log_error("We need at least 1 checkpoint in the base image to clone");
+        throw std::runtime_error("no checkpoints found");
+    }
+
+    auto cp_name = fmt::format("{}.{:08x}", source, cp_ids.back());
+    char cp_buf[4096];
+    objstore->read_object(cp_name.c_str(), cp_buf, sizeof(cp_buf), 0);
 
     throw std::runtime_error("unimplemented");
 }

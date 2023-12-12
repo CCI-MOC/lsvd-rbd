@@ -8,40 +8,36 @@
  *              LGPL-2.1-or-later
  */
 
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
-#include <unistd.h>
-
-#include <uuid/uuid.h>
-
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <shared_mutex>
-#include <thread>
-
-#include <algorithm>
-
 #include <map>
+#include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <stack>
-#include <vector>
-
-#include <cassert>
 #include <string>
+#include <thread>
+#include <unistd.h>
+#include <uuid/uuid.h>
+#include <vector>
 
 #include "backend.h"
 #include "config.h"
 #include "extent.h"
 #include "fake_rbd.h"
 #include "image.h"
+#include "img_reader.h"
 #include "journal.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
-#include "read_cache.h"
 #include "request.h"
+#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "translate.h"
 #include "utils.h"
@@ -57,89 +53,63 @@ extern void add_crc(sector_t sector, iovec *iov, int niovs);
  * don't break them out into a .h
  */
 
-extern int init_rcache(int fd, uuid_t &uuid, int n_pages);
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
-
-std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
-                                     const char *name)
-{
-
-    if (cfg->backend == BACKEND_FILE)
-        return make_file_backend(name);
-    if (cfg->backend == BACKEND_RADOS)
-        return make_rados_backend(io);
-
-    throw std::runtime_error("Unknown backend");
-}
 
 int rbd_image::image_open(rados_ioctx_t io, const char *name)
 {
+    this->image_name = name;
 
     if (cfg.read() < 0)
-        return -1;
+        throw std::runtime_error("Failed to read config");
+
     objstore = get_backend(&cfg, io, name);
+    auto shared_cache_path = cfg.shared_read_cache_path;
+    shared_cache = shared_read_cache::get_instance(
+        shared_cache_path, cfg.cache_size / CACHE_CHUNK_SIZE, objstore);
 
     /* read superblock and initialize translation layer
      */
     xlate =
         make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
     size = xlate->init(name, true);
+    check_cond(size < 0, "Failed to initialize translation layer err={}", size);
 
     /* figure out cache file name, create it if necessary
      */
 
     /*
-     * TODO: Open 2 files. One for wcache and one for rcache
+     * TODO: Open 2 files. One for wcache and one for reader
      */
-    std::string rcache_name =
-        cfg.cache_filename(xlate->uuid, name, LSVD_CFG_READ);
     std::string wcache_name =
         cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
-    if (access(rcache_name.c_str(), R_OK | W_OK) < 0) {
-        int cache_pages = cfg.cache_size / 4096;
-        int fd = open(rcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (fd < 0)
-            return fd;
-        if (init_rcache(fd, xlate->uuid, cache_pages) < 0)
-            return -1;
-        close(fd);
-    }
 
     if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
-        int cache_pages = cfg.cache_size / 4096;
+        log_info("Creating write cache file {}", wcache_name);
+        int cache_pages = cfg.wlog_size / 4096;
+
         int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (fd < 0)
-            return fd;
+        check_ret_errno(fd, "Can't open wcache file");
+
         if (init_wcache(fd, xlate->uuid, cache_pages) < 0)
             return -1;
         close(fd);
     }
 
-    read_fd = open(rcache_name.c_str(), O_RDWR);
-    if (read_fd < 0)
-        return -1;
     write_fd = open(wcache_name.c_str(), O_RDWR);
-    if (write_fd < 0)
-        return -1;
+    check_ret_errno(write_fd, "Can't open wcache file");
 
-    j_read_super *jrs = (j_read_super *)aligned_alloc(512, 4096);
-    if (pread(read_fd, (char *)jrs, 4096, 0) < 0)
-        return -1;
-    if (jrs->magic != LSVD_MAGIC || jrs->type != LSVD_J_R_SUPER)
-        return -1;
     j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
-    if (pread(write_fd, (char *)jws, 4096, 0) < 0)
-        return -1;
+
+    check_ret_errno(pread(write_fd, (char *)jws, 4096, 0),
+                    "Can't read wcache superblock");
     if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
-        return -1;
-    if (memcmp(jrs->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0 ||
-        memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
-        throw("object and cache UUIDs don't match");
+        throw std::runtime_error("bad magic/type in write cache superblock\n");
+    if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
+        throw std::runtime_error("object and cache UUIDs don't match");
 
     wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    rcache = make_read_cache(0, read_fd, xlate, &cfg, &map, &bufmap, &map_lock,
-                             &bufmap_lock, objstore);
-    free(jrs);
+    reader = make_reader(0, xlate, &cfg, &map, &bufmap, &map_lock, &bufmap_lock,
+                         objstore, shared_cache);
     free(jws);
 
     if (!cfg.no_gc)
@@ -159,13 +129,13 @@ void rbd_image::notify(rbd_completion_t c)
 /* for debug use
  */
 rbd_image *make_rbd_image(sptr<backend> b, translate *t, write_cache *w,
-                          read_cache *r)
+                          img_reader *r)
 {
     auto img = new rbd_image;
     img->objstore = b;
     img->xlate = t;
     img->wcache = w;
-    img->rcache = r;
+    img->reader = r;
     return img;
 }
 
@@ -182,17 +152,18 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
 {
     auto img = new rbd_image;
     if (img->image_open(io, name) < 0) {
+        log_error("Failed to open image {}", name);
         delete img;
         return -1;
     }
     *image = __lsvd_dbg_img = (void *)img;
+    log_info("Opened image: {}, size {}", name, img->size);
     return 0;
 }
 
 int rbd_image::image_close(void)
 {
-    rcache->write_map();
-    delete rcache;
+    delete reader;
     wcache->flush();
     wcache->do_write_checkpoint();
     delete wcache;
@@ -200,7 +171,6 @@ int rbd_image::image_close(void)
         xlate->stop_gc();
     xlate->checkpoint();
     delete xlate;
-    close(read_fd);
     close(write_fd);
     return 0;
 }
@@ -208,6 +178,7 @@ int rbd_image::image_close(void)
 extern "C" int rbd_close(rbd_image_t image)
 {
     rbd_image *img = (rbd_image *)image;
+    log_info("Closing image {}", img->image_name);
     img->image_close();
     delete img;
 
@@ -493,7 +464,7 @@ class rbd_aio_req : public request
         __reqs++;
         std::vector<request *> requests;
 
-        img->rcache->handle_read(offset, &aligned_iovs, requests);
+        img->reader->handle_read(offset, &aligned_iovs, requests);
 
         n_req = requests.size();
         // do_log("rbd_read %ld:\n", offset/512);

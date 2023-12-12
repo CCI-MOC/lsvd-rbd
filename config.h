@@ -25,18 +25,20 @@ class lsvd_config
     int batch_size = 8 * 1024 * 1024;   // in bytes
     int wcache_batch = 8;               // requests
     int wcache_chunk = 2 * 1024 * 1024; // bytes
+    std::string shared_read_cache_path = "/mnt/nvme/lsvd/shared_read_cache";
     std::string rcache_dir = "/tmp";
     std::string wcache_dir = "/tmp";
-    int xlate_window = 20;
+    int xlate_window = 8;
     int hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
     long cache_size = 500 * 1024 * 1024; // in bytes
+    long wlog_size = 500 * 1024 * 1024; // in bytes
     int ckpt_interval = 500;             // objects
     int flush_msec = 2000;               // flush timeout
     int gc_threshold = 60;               // GC threshold, percent
     int gc_window = 4;			 // max GC writes outstanding
     int fetch_window = 12;               // read cache fetches
-    int fetch_ratio = 67;                // anti-thrash ratio, percent
+    int fetch_ratio = 67;                // anti-thrash served:backend ratio
     int no_gc = 0;			 // turn off GC
 
     lsvd_config() {}

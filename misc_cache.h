@@ -3,7 +3,7 @@
  * description: grab-bag of various classes and structures:
  *              -thread_pool
  *		-sized_vector for caches
- *		-objmap (map shared by translate, read_cache)
+ *		-objmap (map shared by translate, img_reader)
  *
  * author:      Peter Desnoyers, Northeastern University
  * Copyright 2021, 2022 Peter Desnoyers

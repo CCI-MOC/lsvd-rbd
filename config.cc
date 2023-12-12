@@ -73,11 +73,13 @@ int lsvd_config::read()
             F_CONFIG_H_INT(words[0], words[1], batch_size);
             F_CONFIG_INT(words[0], words[1], wcache_batch);
             F_CONFIG_H_INT(words[0], words[1], wcache_chunk);
+            F_CONFIG_STR(words[0], words[1], shared_read_cache_path);
             F_CONFIG_STR(words[0], words[1], rcache_dir);
             F_CONFIG_STR(words[0], words[1], wcache_dir);
             F_CONFIG_INT(words[0], words[1], xlate_window);
             F_CONFIG_TABLE(words[0], words[1], backend, m);
             F_CONFIG_H_INT(words[0], words[1], cache_size);
+            F_CONFIG_H_INT(words[0], words[1], wlog_size);
             F_CONFIG_INT(words[0], words[1], hard_sync);
             F_CONFIG_INT(words[0], words[1], ckpt_interval);
             F_CONFIG_INT(words[0], words[1], flush_msec);
@@ -94,11 +96,13 @@ int lsvd_config::read()
     ENV_CONFIG_H_INT(batch_size);
     ENV_CONFIG_INT(wcache_batch);
     ENV_CONFIG_H_INT(wcache_chunk);
+    ENV_CONFIG_STR(shared_read_cache_path);
     ENV_CONFIG_STR(rcache_dir);
     ENV_CONFIG_STR(wcache_dir);
     ENV_CONFIG_INT(xlate_window);
     ENV_CONFIG_TABLE(backend, m);
     ENV_CONFIG_H_INT(cache_size);
+    ENV_CONFIG_H_INT(wlog_size);
     ENV_CONFIG_INT(hard_sync);
     ENV_CONFIG_INT(ckpt_interval);
     ENV_CONFIG_INT(flush_msec);

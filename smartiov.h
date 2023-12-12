@@ -1,15 +1,4 @@
-/*
- * file:        smartiov.h
- * description: iovec-based buffer list
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#ifndef SMARTIOV_H
-#define SMARTIOV_H
+#pragma once
 
 #include <cassert>
 #include <string.h>
@@ -24,27 +13,33 @@ class smartiov
 
   public:
     smartiov() {}
+
     smartiov(const iovec *iov, int iovcnt)
     {
         for (int i = 0; i < iovcnt; i++)
             if (iov[i].iov_len > 0)
                 iovs.push_back(iov[i]);
     }
+
     smartiov(char *buf, size_t len) { iovs.push_back((iovec){buf, len}); }
     void push_back(const iovec &iov) { iovs.push_back(iov); }
+
     void ingest(const iovec *iov, int iovcnt)
     {
         for (int i = 0; i < iovcnt; i++)
             if (iov[i].iov_len > 0)
                 iovs.push_back(iov[i]);
     }
+
     iovec *data(void) { return iovs.data(); }
     iovec &operator[](int i) { return iovs[i]; }
     int size(void) { return iovs.size(); }
+
     std::pair<iovec *, int> c_iov(void)
     {
         return std::pair(iovs.data(), (int)iovs.size());
     }
+
     size_t bytes(void)
     {
         size_t sum = 0;
@@ -52,6 +47,7 @@ class smartiov
             sum += i.iov_len;
         return sum;
     }
+
     smartiov slice(size_t off, size_t limit)
     {
         assert(limit <= bytes());
@@ -69,11 +65,13 @@ class smartiov
         }
         return other;
     }
+
     void zero(void)
     {
         for (auto i : iovs)
             memset(i.iov_base, 0, i.iov_len);
     }
+
     void zero(size_t off, size_t limit)
     {
         size_t len = limit - off;
@@ -88,6 +86,7 @@ class smartiov
             }
         }
     }
+
     void copy_in(char *buf)
     {
         for (auto i : iovs) {
@@ -95,6 +94,7 @@ class smartiov
             buf += i.iov_len;
         }
     }
+
     void copy_out(char *buf)
     {
         for (auto i : iovs) {
@@ -102,6 +102,7 @@ class smartiov
             buf += i.iov_len;
         }
     }
+
     bool aligned(int n)
     {
         for (auto i : iovs)
@@ -145,5 +146,4 @@ void test1(void)
 }
 
 int main(int argc, char **argv) { test1(); }
-#endif
 #endif

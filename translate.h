@@ -11,6 +11,11 @@
 #ifndef TRANSLATE_H
 #define TRANSLATE_H
 
+#include <mutex>
+#include <shared_mutex>
+
+#include "backend.h"
+#include "extent.h"
 #include "backend.h"
 #include "config.h"
 #include "smartiov.h"

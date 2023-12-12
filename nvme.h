@@ -33,7 +33,6 @@ class nvme
                                        size_t offset) = 0;
 };
 
-nvme *make_nvme_aio(int fd, const char *name);
 nvme *make_nvme_uring(int fd, const char *name);
 
 #endif

@@ -6,13 +6,13 @@
 #ifndef BACKEND_H
 #define BACKEND_H
 
+#include <memory>
 #include <string>
 #include <sys/uio.h>
-#include <memory>
 
+#include "config.h"
 #include "fake_rbd.h"
-
-class request;
+#include "request.h"
 
 class backend
 {
@@ -42,7 +42,18 @@ class backend
                                    size_t len) = 0;
 };
 
-extern std::unique_ptr<backend> make_file_backend(const char *prefix);
-extern std::unique_ptr<backend> make_rados_backend(rados_ioctx_t io);
+extern std::shared_ptr<backend> make_file_backend(const char *prefix);
+extern std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io);
+
+inline std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
+                                            const char *name)
+{
+    if (cfg->backend == BACKEND_FILE)
+        return make_file_backend(name);
+    if (cfg->backend == BACKEND_RADOS)
+        return make_rados_backend(io);
+
+    throw std::runtime_error("Unknown backend");
+}
 
 #endif

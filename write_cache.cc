@@ -8,27 +8,23 @@
  *              LGPL-2.1-or-later
  */
 
-#include <uuid/uuid.h>
-
-#include <atomic>
-
-#include <map>
-#include <stack>
-#include <vector>
-
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
+#include <map>
 #include <mutex>
 #include <shared_mutex>
+#include <stack>
 #include <thread>
-
-#include "lsvd_types.h"
+#include <uuid/uuid.h>
+#include <vector>
 
 #include "backend.h"
 #include "extent.h"
 #include "io.h"
 #include "journal.h"
+#include "lsvd_types.h"
 #include "misc_cache.h"
 #include "nvme.h"
 #include "request.h"
@@ -297,7 +293,7 @@ uint32_t write_cache_impl::allocate(page_t n, page_t &pad, page_t &n_pad,
     auto start = previous_hdr = next_alloc;
     next_alloc += n;
     if (next_alloc == super->limit)
-	next_alloc = super->base;
+        next_alloc = super->base;
     return start;
 }
 
@@ -501,7 +497,7 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
     } else if (roll_log_forward() < 0)
         throw("write log roll-forward failed");
     next_alloc = super->base;
-    
+
     super->clean = false;
     if (nvme_w->write(buf, 4096, 4096L * super_blkno) < 4096)
         throw_fs_error("wcache");
@@ -541,7 +537,7 @@ request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
     auto [iov, iovcnt] = iovs->c_iov();
     outstanding_writes++;
     lk.unlock();
-    
+
     be->writev(req->seq, lba * 512, iov, iovcnt);
 
     return req;

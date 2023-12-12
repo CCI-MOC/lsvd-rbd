@@ -1,11 +1,13 @@
 #pragma once
 #include <cassert>
 #include <chrono>
+#include <errno.h>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <iostream>
+#include <signal.h>
 #include <source_location>
 #include <span>
 #include <sstream>
@@ -18,6 +20,7 @@
 #endif
 
 template <typename T> using sptr = std::shared_ptr<T>;
+template <typename T> using uptr = std::unique_ptr<T>;
 
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
@@ -29,59 +32,74 @@ template <typename T> using sptr = std::shared_ptr<T>;
 #define debug(MSG, ...)                                                        \
     do {                                                                       \
         if (LOGLV <= 1)                                                        \
-            fmt::print(stderr, "[DBG {}:{} {}] " MSG "\n", __FILE__, __LINE__, \
+            fmt::print(stderr, fg(fmt::terminal_color::magenta),               \
+                       "[DBG {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
 #define log_info(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 2)                                                        \
-            fmt::print(stderr, fg(fmt::color::yellow) | fmt::emphasis::bold,   \
+            fmt::print(stderr,                                                 \
+                       fg(fmt::terminal_color::cyan) | fmt::emphasis::bold,    \
                        "[INFO {}:{} {}] " MSG "\n", __FILE__, __LINE__,        \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
 #define log_error(MSG, ...)                                                    \
     do {                                                                       \
+        fmt::print(stderr, fg(fmt::terminal_color::red) | fmt::emphasis::bold, \
+                   "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__, __func__,   \
+                   ##__VA_ARGS__);                                             \
+    } while (0)
+
+#define log_warn(MSG, ...)                                                     \
+    do {                                                                       \
         if (LOGLV <= 3)                                                        \
-            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
-                       "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__,         \
+            fmt::print(stderr,                                                 \
+                       fg(fmt::terminal_color::yellow) | fmt::emphasis::bold,  \
+                       "[WARN {}:{} {}] " MSG "\n", __FILE__, __LINE__,        \
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
-#ifndef NDEBUG
-#define ASSERT(condition, message)                                             \
+#define trap_to_debugger()                                                     \
     do {                                                                       \
-        if (!(condition)) {                                                    \
-            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
-                       "[ERR {}:{} {}] Assertion `" #condition                 \
-                       "` failed: {}\n",                                       \
-                       __FILE__, __LINE__, __func__, message);                 \
-            throw std::runtime_error("Assertion failed");                      \
-        }                                                                      \
-    } while (false)
-#else
-#define ASSERT(condition, message)                                             \
-    do {                                                                       \
-    } while (false)
-#endif
+        raise(SIGTRAP);                                                        \
+    } while (0)
 
-#ifndef NDEBUG
-#define ASSERT_VAL(val, expected, message)                                     \
+/**
+ * Check return values of libstdc functions. If it's -1, print the error and
+ * throw an exception
+ */
+#define check_ret_errno(ret, MSG, ...)                                         \
     do {                                                                       \
-        if (val != expected) {                                                 \
-            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,      \
-                       "[ERR {}:{} {}] Assertion `" #val " == " #expected      \
-                       "` failed, expected {}, found {}: {}\n",                \
-                       __FILE__, __LINE__, __func__, expected, val, message);  \
-            throw std::runtime_error("Assertion failed");                      \
+        if (ret == -1) {                                                       \
+            auto en = errno;                                                   \
+            auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] " MSG "\n",     \
+                                 __FILE__, __LINE__, __func__, en,             \
+                                 strerror(en), ##__VA_ARGS__);                 \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            throw std::runtime_error(s);                                       \
         }                                                                      \
-    } while (false)
-#else
-#define ASSERT_VAL(condition, message)                                         \
+    } while (0)
+
+#define check_cond(cond, MSG, ...)                                             \
     do {                                                                       \
-    } while (false)
-#endif
+        if (cond) {                                                            \
+            auto s = fmt::format("[ERR {}:{} {}]: " MSG "\n", __FILE__,        \
+                                 __LINE__, __func__, ##__VA_ARGS__);           \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            throw std::runtime_error(s);                                       \
+        }                                                                      \
+    } while (0)
+
+#define UNIMPLEMENTED()                                                        \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
+                   "[ERR {}:{} {}] Unimplemented\n", __FILE__, __LINE__,       \
+                   __func__);                                                  \
+        throw std::runtime_error("Unimplemented");                             \
+    } while (0)
 
 template <class... Ts> struct overloaded : Ts... {
     using Ts::operator()...;
@@ -135,4 +153,18 @@ constexpr int64_t tdus(std::chrono::time_point<std::chrono::system_clock> start,
 template <typename T> std::shared_ptr<T> to_shared(std::unique_ptr<T> ptr)
 {
     return std::shared_ptr<T>(std::move(ptr));
+}
+
+inline bool has_poolname_prefix(const std::string &s)
+{
+    auto idx = s.find("/");
+    return idx != std::string::npos;
+}
+
+inline char *strip_poolname_prefix(char *s)
+{
+    auto idx = strchr(s, '/');
+    if (idx == nullptr)
+        return s;
+    return idx + 1;
 }

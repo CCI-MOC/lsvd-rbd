@@ -1,5 +1,46 @@
-## ATC 24 todos
+## Todos W49-2
 
+- RDB and LSVD on both HDD and SSDs, all 4 configurations
+- Working set (80g) < nvme cache (500g)
+- Fio synthetic workloads, vary blocksize, io depth, workload
+- Filebench (varmail, oltp, fileserver, fileserver-fsync?), maybe YCSB
+- Shared cache VM boot times
+
+Notes on write log:
+
+- Remote malloc
+- Remote nvme
+- 2 remote nvme
+- Measure all of this with a single write workload, reads don't matter here
+
+## Todos W49-1
+
+- By W49-2, run benchmarks for:
+	- SSD backend
+	- HDD backend
+	- blocksize 4K, 8K, 16K
+- By w49-3, set up VM boot for shared cache
+
+Notes on VMWare proposal:
+
+- IOPs guarantee for certain users
+
+## W48-5: to get done week Dec 4-7 for presentation dec 12th
+
+- filesystem benchamrks - fix OLTP - this weekend - same parametser as eurosys Logical disk and cache both
+- working set for disk benchmark < size disk - same as eurosys
+- all above with Ceph disk backend - run both filesystem and disk bencharks - this will require much larger read cache block size
+- trace-driven optimization - from start to adding a print statement in init - VM boot
+- shared cache - boot multiple clones demnstrate: 1) easest - boot clone after ahving booked another one becomes warm show both miss rate and boot time, 2) boot time for a fleet of similar images 10 VMs simultaneously
+- test larger block sizes for read cache and impact on trace optimization - i.e., prefetching - especially for disk backend
+- presentation drafts by the 6th
+
+### stretch goals
+- write-ahead log should be memory-only - want to show it with 1- malloc store, 2- versus with 1 NVME log, and 3- 2 NVME log
+- NVME rather than ramdisk
+- iscsi target 
+
+## ATC 24 todos
 - benchmark against nvme drive instead of ramdisk
 - trace-driven optimisation of VM boot image - timo
 - ycsb benchmark?
