@@ -183,7 +183,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
 
             auto &entry = cache.cache_state[chunk];
             entry.status = entry_status::FILLING;
-            // entry.pending_fill_data = buf;
+            entry.pending_fill_data = buf;
 
             for (auto &req : entry.pending_reads)
                 req->on_backend_done(buf);
@@ -203,25 +203,46 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     void on_store_done()
     {
         free_child(subrequest);
+        cache.on_cache_store_done(chunk, buf);
+        this->dec_and_free();
+    }
+};
 
-        {
-            std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
+class shared_read_cache::cache_insert_request : public self_refcount_request
+{
+    shared_read_cache &cache;
 
-            auto &entry = cache.cache_state[chunk];
-            entry.status = entry_status::VALID;
-            cache.cache_map.left.insert(std::make_pair(key, chunk));
+    chunk_idx chunk;
+    chunk_key key;
+    void *buf;
+    size_t adjust;
 
-            // TEMPORARY HACK: disptach reads on store done because we don't
-            // directly read from the buffer when it's there
-            for (auto &req : entry.pending_reads)
-                req->on_backend_done(buf);
-            entry.pending_reads.clear();
+    request *subrequest;
 
-            // entry.pending_fill_data = nullptr;
-            free(buf);
-            entry.refcount--;
-        }
+  public:
+    cache_insert_request(shared_read_cache &cache, chunk_idx chunk,
+                         chunk_key key, void *buf, size_t adjust)
+        : cache(cache), chunk(chunk), key(key), buf(buf), adjust(adjust)
+    {
+        subrequest = cache.cache_store->make_write_request(
+            (char *)buf, CACHE_CHUNK_SIZE,
+            cache.get_store_offset_for_chunk(chunk));
 
+        // we shouldn't have a parent, so we only have 1 refcount
+        refcount = 1;
+    }
+
+    void run(request *parent)
+    {
+        assert(parent == nullptr); // assume that we have no parent
+        subrequest->run(this);
+    }
+
+    void notify(request *child)
+    {
+        assert(child == subrequest);
+        cache.on_cache_store_done(chunk, buf);
+        free_child(subrequest);
         this->dec_and_free();
     }
 };
@@ -367,12 +388,17 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // Backend request is done but we're pushing it to nvme, in this case
         // the data will be in the pending_fill_data field and we should just
         // directly return it
+        if (entry.status == entry_status::FILLING) {
+            auto offset = get_store_offset_for_chunk(idx);
+            dest.copy_in((char *)entry.pending_fill_data + adjust);
+            return nullptr;
+        }
+
         // TEMPORARY HACK: just use the pending read request and dispatch
         // the pending reads when the fill is done
 
         // Backend request is pending, wait for it to complete
-        if (entry.status == entry_status::FETCHING ||
-            entry.status == entry_status::FILLING) {
+        if (entry.status == entry_status::FETCHING) {
             trace("pending on chunk {}", idx);
             auto req = new pending_read_request(*this, idx, adjust, dest);
             entry.pending_reads.push_back(req);
@@ -397,10 +423,10 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
-    auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
+    auto buf = malloc(CACHE_CHUNK_SIZE);
 
     auto &entry = cache_state[idx];
-    // entry.pending_fill_data = buf;
+    entry.pending_fill_data = buf;
     entry.refcount++;
 
     objname obj_name(img_prefix, seqnum);
@@ -409,7 +435,59 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);
+    // immediately insert into the cache_map because the next request will
+    // need to be put on pending instead of going through the miss path again
+    cache_map.left.insert(std::make_pair(cache_key, idx));
+
     return req;
+}
+
+void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
+                                      size_t obj_size, void *obj_data)
+{
+    // The incoming object is the raw object that's going to the backend; we
+    // need to first chop it up into cache chunks before we can store it
+    size_t processed_bytes = 0;
+    std::vector<chunk_data> chunks;
+    while (processed_bytes < obj_size) {
+        chunk_data data;
+        auto to_copy = std::min(obj_size - processed_bytes, CACHE_CHUNK_SIZE);
+        memcpy(data.data(), obj_data + processed_bytes, to_copy);
+        chunks.push_back(data);
+    }
+
+    trace("inserting obj with size {} in {} chunks", obj_size, chunks.size());
+
+    std::vector<cache_insert_request *> reqs;
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+
+    // ASSUMPTION: we have more cache blocks without abit set than the number
+    // of blocks we're inserting. If not, allocate_chunk will infinite loop as
+    // everybody gets a positive refconut
+    // TODO: detect this case and maybe implement logic to bypass cache when
+    // it's too small. Something like allocate_chunk is best-effort only and
+    // we only insert if we can allocate a chunk. This also limits the time
+    // that we hold locks and spend time searching for space
+    for (auto &chunk : chunks) {
+        auto idx = allocate_chunk();
+        auto offset = get_store_offset_for_chunk(idx);
+
+        auto key = std::make_tuple(img_prefix, seqnum, offset);
+        auto req = new cache_insert_request(*this, idx, key, chunk.data(), 0);
+        reqs.push_back(req);
+
+        auto &entry = cache_state[idx];
+        entry.refcount++;
+        entry.accessed = false; // clear abit so they're cleared the 1st time
+        entry.status = entry_status::FILLING;
+
+        cache_map.left.insert(std::make_pair(key, idx));
+    }
+
+    lock.unlock();
+
+    for (auto &req : reqs)
+        req->run(nullptr);
 }
 
 void shared_read_cache::report_cache_stats()
@@ -422,9 +500,9 @@ void shared_read_cache::report_cache_stats()
         std::lock_guard lock(cache_stats_lock);
 
         // Don't report anything if there were no new requests
-        if(total_requests == last_total_reqs)
+        if (total_requests == last_total_reqs)
             continue;
-        
+
         last_total_reqs = total_requests;
 
         auto frontend = rolling_sum(user_bytes);
@@ -496,4 +574,24 @@ request *shared_read_cache::get_fill_req(chunk_idx chunk, void *buf)
     auto offset = get_store_offset_for_chunk(chunk);
     return cache_store->make_write_request((char *)buf, CACHE_CHUNK_SIZE,
                                            offset);
+}
+
+void shared_read_cache::on_cache_store_done(chunk_idx idx, void *data)
+{
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+
+    auto &entry = cache_state[idx];
+    assert(entry.status == entry_status::FILLING);
+    entry.status = entry_status::VALID;
+
+    // dispatch pending reads
+    if (!entry.pending_reads.empty())
+        log_warn("There are pending reads for chunk {} during store done", idx);
+
+    for (auto &req : entry.pending_reads)
+        req->on_backend_done(data);
+    entry.pending_reads.clear();
+
+    entry.pending_fill_data = nullptr;
+    entry.refcount--;
 }

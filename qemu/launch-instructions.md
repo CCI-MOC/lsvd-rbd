@@ -25,6 +25,13 @@ qemu-system-x86_64 \
    -drive format=raw,file=seed.iso,cache=none,if=virtio \
    -drive format=raw,file=<device where you want ubuntu installed>
 ```
+qemu-system-x86_64 \
+   -enable-kvm \
+   -m 1024 \
+   -cdrom \
+   -vnc :1 -serial mon:stdio \
+   -drive format=raw,file=seed.iso,cache=none,if=virtio \
+   -drive format=raw,file=<device where you want ubuntu installed>
 
 To run a VM with an existing image, use:
 

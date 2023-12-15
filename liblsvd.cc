@@ -69,8 +69,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
 
     /* read superblock and initialize translation layer
      */
-    xlate =
-        make_translate(objstore, &cfg, &map, &bufmap, &map_lock, &bufmap_lock);
+    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock,
+                           &bufmap_lock, shared_cache);
     size = xlate->init(name, true);
     check_cond(size < 0, "Failed to initialize translation layer err={}", size);
 

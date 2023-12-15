@@ -11,6 +11,10 @@
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H
 
+#include "shared_read_cache.h"
+#include "smartiov.h"
+#include "utils.h"
+
 /* all addresses are in units of 4KB blocks
  */
 class write_cache
