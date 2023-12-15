@@ -54,6 +54,19 @@ class map:
         self._i += 1
         return tmp
 
+    # returns iterator pointing to:
+    #  - extent containing 'base'; if none,
+    #  - extent immediately after 'base'; if none,
+    #  - end of map
+    #
+    def lookup(self, base):
+        key = extent(base, base, 0, 0)
+        i = bisect_left(self.exts, key)
+        if i < len(self.exts) and base == self.exts[i].limit:
+            i += 1
+        self._i = i
+        return self
+
     def size(self):
         return len(self.exts)
     
