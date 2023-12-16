@@ -178,6 +178,9 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     {
         is_backend_done = true;
 
+        // Copy out pending requests so we can dispatch them outside the
+        // critical section. Also avoids self-deadlock
+        std::vector<pending_read_request *> pending_reads;
         {
             std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
 
@@ -185,10 +188,12 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
             entry.status = entry_status::FILLING;
             entry.pending_fill_data = buf;
 
-            for (auto &req : entry.pending_reads)
-                req->on_backend_done(buf);
+            pending_reads = entry.pending_reads;
             entry.pending_reads.clear();
         }
+
+        for (auto &req : pending_reads)
+            req->on_backend_done(buf);
 
         // there is enough info to complete the parent request, do it asap
         // to improve latency instead of waiting until the cache write is done
@@ -389,7 +394,6 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // the data will be in the pending_fill_data field and we should just
         // directly return it
         if (entry.status == entry_status::FILLING) {
-            auto offset = get_store_offset_for_chunk(idx);
             dest.copy_in((char *)entry.pending_fill_data + adjust);
             return nullptr;
         }
@@ -399,7 +403,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 
         // Backend request is pending, wait for it to complete
         if (entry.status == entry_status::FETCHING) {
-            trace("pending on chunk {}", idx);
+            // trace("pending on chunk {}", idx);
             auto req = new pending_read_request(*this, idx, adjust, dest);
             entry.pending_reads.push_back(req);
             return req;
@@ -452,7 +456,7 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
     while (processed_bytes < obj_size) {
         chunk_data data;
         auto to_copy = std::min(obj_size - processed_bytes, CACHE_CHUNK_SIZE);
-        memcpy(data.data(), obj_data + processed_bytes, to_copy);
+        memcpy(data.data(), (char *)obj_data + processed_bytes, to_copy);
         chunks.push_back(data);
     }
 
