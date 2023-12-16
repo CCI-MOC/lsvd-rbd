@@ -189,7 +189,9 @@ class nvme_uring : public nvme
 
         void on_complete(int result)
         {
-            assert((size_t)result == iovs_.bytes());
+            // TODO figure out error handling
+            if(result != iovs_.bytes())
+                log_error("nvme uring request completed with partial result");
 
             parent_->notify(this);
             dec_and_free();
@@ -199,7 +201,8 @@ class nvme_uring : public nvme
         {
             // TODO there's no failure path yet so just no-op
             log_error("nvme uring request failed");
-            return;
+            parent_->notify(this);
+            dec_and_free();
         }
 
         void notify(request *child) { UNIMPLEMENTED(); }

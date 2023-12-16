@@ -37,7 +37,6 @@ printf "Using device $dev_name\n"
 #num_fio_processes=4
 num_fio_processes=1
 fio_size="80GB"
-fio_bs=${blksize:-4k}
 
 read_entire_img=${read_entire_img:-0}
 
@@ -75,7 +74,7 @@ function run_fio {
 		--output-format=normal,terse \
 		--eta-newline=1 | tee /tmp/client-bench-results.txt
 
-	printf "\nRESULT: Fio (iodepth=$3) $1:"
+	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
@@ -84,50 +83,46 @@ function run_fio {
 # We run all the read workloads first, then the writes, to preserve the cache
 # This is a hack; we need to figure out a better solution later
 
-run_fio randread 60 256 $fio_bs
-run_fio read 60 256 $fio_bs
+run_fio randread 60 256 4k
+run_fio read 60 256 4k
 
-run_fio randread 60 1 $fio_bs
-run_fio randread 60 32 $fio_bs
-run_fio randread 60 64 $fio_bs
-run_fio randread 60 128 $fio_bs
-
-run_fio read 60 1 $fio_bs
-run_fio read 60 1 $fio_bs
-run_fio read 60 32 $fio_bs
-run_fio read 60 32 $fio_bs
-run_fio read 60 64 $fio_bs
-run_fio read 60 64 $fio_bs
-run_fio read 60 128 $fio_bs
-run_fio read 60 128 $fio_bs
-
-run_fio read 60 64 16k
-run_fio read 60 64 16k
-run_fio read 60 64 64k
-run_fio read 60 64 64k
-
+run_fio randread 60 1 4k
+# run_fio randread 60 32 4k
 run_fio randread 60 64 4k
-run_fio randread 60 64 16k
-run_fio randread 60 64 64k
+# run_fio randread 60 128 4k
 
-run_fio randwrite 60 256 $fio_bs
-run_fio write 60 256 $fio_bs
+run_fio read 60 1 4k
+# run_fio read 60 32 4k
+run_fio read 60 64 4k
+# run_fio read 60 128 4k
 
-run_fio randwrite 60 1 $fio_bs
-run_fio randwrite 60 32 $fio_bs
-run_fio randwrite 60 64 $fio_bs
-run_fio randwrite 60 128 $fio_bs
+run_fio read 60 256 4k
+run_fio read 60 256 16k
+run_fio read 60 256 64k
 
-run_fio write 60 1 $fio_bs
-run_fio write 60 32 $fio_bs
-run_fio write 60 64 $fio_bs
-run_fio write 60 128 $fio_bs
+run_fio randread 60 256 4k
+run_fio randread 60 256 16k
+run_fio randread 60 256 64k
 
-run_fio write 60 64 16k
-run_fio write 60 64 64k
 
-run_fio randwrite 60 64 16k
-run_fio randwrite 60 64 64k
+run_fio randwrite 60 1 4k
+# run_fio randwrite 60 32 4k
+run_fio randwrite 60 64 4k
+# run_fio randwrite 60 128 4k
+
+run_fio write 60 1 4k
+# run_fio write 60 32 4k
+run_fio write 60 64 4k
+# run_fio write 60 128 4k
+
+run_fio write 60 256 16k
+run_fio write 60 256 64k
+
+run_fio randwrite 60 256 16k
+run_fio randwrite 60 256 64k
+
+run_fio randwrite 60 256 4k
+run_fio write 60 256 4k
 
 # filesystem benchmarks
 
