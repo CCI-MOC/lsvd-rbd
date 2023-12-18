@@ -22,14 +22,30 @@ our strategy:
 - handle all the IOPS near the edge
 - focus on overall performance (means we need >1 disk experiments)
 
+engineering left:
+- should image optimization be improved? (also optimize boot image a bit more?)
+- read cache fill from write path - debug P & Isaac?
+- 
+  
 to do:
 - copy data to read cache [done?]
 - measure backend CPU usage, drive busy-ness
 - run benchmarks on erasure-coded LSVD pools
+- prefetch? **NO!!!** not enough time to do before 16th
 
+Orran's multi-backend idea
+- rbd / rbd+writethru cache / lsvd
+- [multiple pools, migrate at cache eviction time?? maybe don't send to victor?]
+- peter to write up and send to victor
+  
 compare to:
 - pool-o-SSDs **LSVD over HDD is competitive with RBD over SSD**
-- 
+
+todos for publication:
+- nail down the thesis (abstract / intro)
+- concrete list of engineering
+- concrete list of experiments
+- do it
 
 ## Todos W49-2
 
