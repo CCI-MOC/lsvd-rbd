@@ -25,6 +25,7 @@ const size_t CACHE_HEADER_SIZE = 4096;
 using chunk_idx = size_t;
 
 using chunk_key = std::tuple<std::string, uint64_t, size_t>;
+using chunk_data = std::array<std::byte, CACHE_CHUNK_SIZE>;
 
 using namespace boost::accumulators;
 const size_t CACHE_STATS_WINDOW = 10'000;
@@ -59,6 +60,7 @@ class shared_read_cache
     class cache_hit_request;
     class cache_miss_request;
     class pending_read_request;
+    class cache_insert_request;
 
     enum entry_status {
         EMPTY,
@@ -79,7 +81,7 @@ class shared_read_cache
         // This is used when the backend request has come back and we're now
         // going to fill it into the cache. Status must be FILLING.
         // NULL at all other times
-        // void *pending_fill_data = nullptr;
+        void *pending_fill_data = nullptr;
 
         // Keep track of pending reads
         std::vector<pending_read_request *> pending_reads;
@@ -133,6 +135,9 @@ class shared_read_cache
     size_t get_store_offset_for_chunk(chunk_idx idx);
     request *get_fill_req(chunk_idx idx, void *data);
 
+    // request callbacks
+    void on_cache_store_done(chunk_idx idx, void *data);
+
   public:
     shared_read_cache(std::string cache_path, size_t num_cache_chunks,
                       sptr<backend> obj_backend);
@@ -166,4 +171,19 @@ class shared_read_cache
      */
     request *make_read_req(std::string img_prefix, uint64_t seqnum,
                            size_t obj_offset, size_t adjust, smartiov &dest);
+
+    /**
+     * Insert an object into the cache. Intended for use on the write path to
+     * directly put data that was just written into the cache.
+     * 
+     * We need to take care to ensure that the transition of data from
+     * the pending write buffer to the cache is atomic, so the state where
+     * the data is in neither place is never visible to any reader. This
+     * is something that the reader needs to take care of.
+     * 
+     * If this is incorrectly handled, we will falsely return 0s where there
+     * should be data and have incorrect read-after-write semantics.
+    */
+    void insert_object(std::string img_prefix, uint64_t seqnum, size_t obj_size,
+                       void *obj_data);
 };

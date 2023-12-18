@@ -33,6 +33,7 @@
 #include "objects.h"
 #include "objname.h"
 #include "request.h"
+#include "shared_read_cache.h"
 #include "translate.h"
 
 void do_log(const char *, ...);
@@ -264,11 +265,13 @@ class translate_impl : public translate
     void flush_thread(thread_pool<int> *p);
 
     std::shared_ptr<backend> objstore;
+    std::shared_ptr<shared_read_cache> cache;
 
   public:
     translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
                    extmap::objmap *map, extmap::bufmap *bufmap,
-                   std::shared_mutex *m, std::mutex *buf_m);
+                   std::shared_mutex *m, std::mutex *buf_m,
+                   sptr<shared_read_cache> cache);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
@@ -301,7 +304,9 @@ const char *translate_impl::prefix(int seq)
 
 translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
                                extmap::objmap *map_, extmap::bufmap *bufmap_,
-                               std::shared_mutex *m_, std::mutex *buf_m)
+                               std::shared_mutex *m_, std::mutex *buf_m,
+                               sptr<shared_read_cache> cache)
+    : cache(cache)
 {
     misc_threads = new thread_pool<int>(&m);
     workers = new thread_pool<translate_req *>(&m);
@@ -316,9 +321,11 @@ translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
 
 translate *make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
                           extmap::objmap *map, extmap::bufmap *bufmap,
-                          std::shared_mutex *m, std::mutex *buf_m)
+                          std::shared_mutex *m, std::mutex *buf_m,
+                          sptr<shared_read_cache> cache)
 {
-    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m);
+    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m,
+                                           cache);
 }
 
 translate_impl::~translate_impl()
@@ -722,6 +729,8 @@ void translate_req::notify(request *child)
  */
 void translate_impl::write_checkpoint(int _seq, translate_req *req)
 {
+    debug("Writing checkpoint at seqnum {}", _seq);
+
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
@@ -755,7 +764,8 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req)
                    .type = LSVD_CKPT,
                    .seq = (uint32_t)_seq,
                    .hdr_sectors = (uint32_t)sectors,
-                   .data_sectors = 0};
+                   .data_sectors = 0,
+                   .crc = 0};
     memcpy(h->vol_uuid, uuid, sizeof(uuid_t));
     auto ch = (obj_ckpt_hdr *)(h + 1);
 
@@ -974,8 +984,16 @@ void translate_impl::process_batch(int _seq, translate_req *req)
                  dm_entries.size(), false);
 
     objname name(prefix(_seq), _seq);
-    auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr,
-                                         (hdr_sectors + data_sectors) * 512);
+    auto obj_size = (hdr_sectors + data_sectors) * 512;
+    auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr, obj_size);
+
+    // insert object into the read cache as well, to better provide
+    // read-after-write semantics
+    // TODO figure out precise semantics here, will the data live in the
+    // buffer map until the backend request is done? or do we have to rely
+    // on its presence in the cache?
+    cache->insert_object(prefix(_seq), _seq, obj_size, hdr_ptr);
+
     outstanding_writes++;
     req2->run(req);
 }
@@ -1098,7 +1116,7 @@ struct _extent {
 void translate_impl::do_gc(bool *running)
 {
     gc_cycles++;
-    trace("Start GC cycle {}", gc_cycles);
+    // trace("Start GC cycle {}", gc_cycles);
     int max_obj = seq.load();
 
     std::shared_lock obj_r_lock(*map_lock);
@@ -1422,7 +1440,8 @@ int translate_create_image(sptr<backend> objstore, const char *name,
                       LSVD_SUPER, // type
                       0,          // seq
                       8,          // hdr_sectors
-                      0};         // data_sectors
+                      0,          // data_sectors
+                      0};
     uuid_generate_random(_hdr->vol_uuid);
 
     auto _super = (super_hdr *)(_hdr + 1);
@@ -1525,29 +1544,5 @@ int translate_remove_image(sptr<backend> objstore, const char *name)
 int translate_clone_image(sptr<backend> objstore, const char *source,
                           const char *dest)
 {
-    // read superblock
-    char base_buf[4096];
-    int rv = objstore->read_object(source, base_buf, sizeof(base_buf), 0);
-    if (rv < 0)
-        throw std::runtime_error("failed to read superblock");
-
-    auto base_hdr = (obj_hdr *)base_buf;
-    auto base_super = (super_hdr *)(base_hdr + 1);
-
-    if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
-        throw std::runtime_error("corrupt superblock");
-
-    // get checkpoints
-    int seq = 1;
-    auto cp_ids = deserialise_checkpoint_ids(base_buf);
-    if (cp_ids.size() == 0) {
-        log_error("We need at least 1 checkpoint in the base image to clone");
-        throw std::runtime_error("no checkpoints found");
-    }
-
-    auto cp_name = fmt::format("{}.{:08x}", source, cp_ids.back());
-    char cp_buf[4096];
-    objstore->read_object(cp_name.c_str(), cp_buf, sizeof(cp_buf), 0);
-
-    throw std::runtime_error("unimplemented");
+    UNIMPLEMENTED();
 }

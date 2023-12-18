@@ -35,5 +35,3 @@ scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 bdev_uring0
 
 run_client_bench $client_ip $outfile
 cleanup_nvmf
-
-rmmod brd
