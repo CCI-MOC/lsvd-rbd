@@ -189,9 +189,9 @@ class nvme_uring : public nvme
 
         void on_complete(int result)
         {
-            // TODO figure out error handling
-            if(result != iovs_.bytes())
-                log_error("nvme uring request completed with partial result");
+            // TODO figure out what to do for partial results
+            if (result != iovs_.bytes())
+                log_error("partial result: {}/{} bytes", result, iovs_.bytes());
 
             parent_->notify(this);
             dec_and_free();
