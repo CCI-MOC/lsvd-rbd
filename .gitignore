@@ -68,3 +68,6 @@ spdk/
 ceph/
 
 qemu/*.img
+
+perf.*
+experiment-results.*
