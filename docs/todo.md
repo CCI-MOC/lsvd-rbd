@@ -6,6 +6,18 @@
 - garbage collection
 - prefetching / cache block size
 
+## disaggregation argument
+- elastic CPU for gateway - decouple CPU needed for IOPS from capacity
+- elastic I/O performance - decouple media capacity (backend) from performance (cache/journal)
+- trade-offs for media properties (durability, write/read performance, ...) 
+
+the datacenter architecture paper:
+- people have put stuff into SSDs or into OSDs
+- or into clients (eurosys)
+- objects don't have to be in same backend (QLC, SSD, HDD) [select ahead of time? GC-time tiering? migrate at cache eviction time?]
+- something missing too much in cache -> migrate to faster storage
+- **readaround strategy** should vary depending on backend performance, so moving into SSD pool reduces total cache used?
+
 our strategy:
 - handle all the IOPS near the edge
 - focus on overall performance (means we need >1 disk experiments)
