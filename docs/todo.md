@@ -1,3 +1,24 @@
+## what are the big results for the paper?
+- gateway
+- failover strategy
+- cache sharing
+- image optimization
+- garbage collection
+- prefetching / cache block size
+
+our strategy:
+- handle all the IOPS near the edge
+- focus on overall performance (means we need >1 disk experiments)
+
+to do:
+- copy data to read cache [done?]
+- measure backend CPU usage, drive busy-ness
+- run benchmarks on erasure-coded LSVD pools
+
+compare to:
+- pool-o-SSDs **LSVD over HDD is competitive with RBD over SSD**
+- 
+
 ## Todos W49-2
 
 - RDB and LSVD on both HDD and SSDs, all 4 configurations
