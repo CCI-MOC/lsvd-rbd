@@ -194,9 +194,7 @@ class nvme_uring : public nvme
         {
             // TODO figure out error handling
             if ((size_t)result != iovs_.bytes())
-                log_error("nvme uring request completed with partial result "
-                          "{}/{} bytes",
-                          result, iovs_.bytes());
+                log_error("partial result {}/{} bytes", result, iovs_.bytes());
 
             parent_->notify(this);
             dec_and_free();

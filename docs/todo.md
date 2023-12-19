@@ -1,3 +1,52 @@
+## what are the big results for the paper?
+- gateway
+- failover strategy
+- cache sharing
+- image optimization
+- garbage collection
+- prefetching / cache block size
+
+## disaggregation argument
+- elastic CPU for gateway - decouple CPU needed for IOPS from capacity
+- elastic I/O performance - decouple media capacity (backend) from performance (cache/journal)
+- trade-offs for media properties (durability, write/read performance, ...) 
+
+the datacenter architecture paper:
+- people have put stuff into SSDs or into OSDs
+- or into clients (eurosys)
+- objects don't have to be in same backend (QLC, SSD, HDD) [select ahead of time? GC-time tiering? migrate at cache eviction time?]
+- something missing too much in cache -> migrate to faster storage
+- **readaround strategy** should vary depending on backend performance, so moving into SSD pool reduces total cache used?
+
+our strategy:
+- handle all the IOPS near the edge
+- focus on overall performance (means we need >1 disk experiments)
+
+engineering left:
+- should image optimization be improved? (also optimize boot image a bit more?)
+- read cache fill from write path - debug P & Isaac?
+- 
+  
+to do:
+- copy data to read cache [done?]
+- measure backend CPU usage, drive busy-ness
+- run benchmarks on erasure-coded LSVD pools
+- prefetch? **NO!!!** not enough time to do before 16th
+
+Orran's multi-backend idea
+- rbd / rbd+writethru cache / lsvd
+- [multiple pools, migrate at cache eviction time?? maybe don't send to victor?]
+- peter to write up and send to victor
+  
+compare to:
+- pool-o-SSDs **LSVD over HDD is competitive with RBD over SSD**
+
+todos for publication:
+- nail down the thesis (abstract / intro)
+- concrete list of engineering
+- concrete list of experiments
+- do it
+
 ## Todos W49-2
 
 - RDB and LSVD on both HDD and SSDs, all 4 configurations
