@@ -53,6 +53,11 @@ compile_commands.json
 
 thick-image
 imgtool
+lsvd_crash_test
+lsvd_rnd_test
+test-rados
+test-seq
+unit-test
 .vscode
 
 # don't try to add results by default
@@ -68,3 +73,4 @@ spdk/
 ceph/
 
 qemu/*.img
+perf.*

@@ -819,7 +819,7 @@ extern "C" int rbd_diff_iterate2(rbd_image_t image, const char *fromsnapname,
                                  void *arg)
 {
     fp_log("rbd_diff_iterate2: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_encryption_format(rbd_image_t image,
@@ -828,7 +828,7 @@ extern "C" int rbd_encryption_format(rbd_image_t image,
                                      size_t opts_size)
 {
     fp_log("rbd_encryption_format: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_encryption_load(rbd_image_t image,
@@ -837,23 +837,22 @@ extern "C" int rbd_encryption_load(rbd_image_t image,
                                    size_t opts_size)
 {
     fp_log("rbd_encryption_load: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_get_features(rbd_image_t image, uint64_t *features)
 {
     fp_log("rbd_get_features: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_get_flags(rbd_image_t image, uint64_t *flags)
 {
     fp_log("rbd_get_flags: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
-static int _tmp;
-#define ASSERT_FAIL() _tmp += *(int *)0
+#define ASSERT_FAIL() __builtin_trap()
 
 extern "C" void rbd_image_spec_cleanup(rbd_image_spec_t *image)
 {
@@ -870,14 +869,14 @@ extern "C" void rbd_linked_image_spec_cleanup(rbd_linked_image_spec_t *image)
 extern "C" int rbd_mirror_image_enable(rbd_image_t image)
 {
     fp_log("rbd_mirror_image_enable: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_mirror_image_enable2(rbd_image_t image,
                                         rbd_mirror_image_mode_t mode)
 {
     fp_log("rbd_mirror_image_enable2: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" void
@@ -901,7 +900,7 @@ extern "C" int rbd_mirror_peer_site_add(rados_ioctx_t io_ctx, char *uuid,
                                         const char *client_name)
 {
     fp_log("rbd_mirror_peer_site_add: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_mirror_peer_site_get_attributes(
@@ -909,14 +908,14 @@ extern "C" int rbd_mirror_peer_site_get_attributes(
     char *values, size_t *max_value_len, size_t *key_value_count)
 {
     fp_log("rbd_mirror_peer_site_get_attributes: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_mirror_peer_site_remove(rados_ioctx_t io_ctx,
                                            const char *uuid)
 {
     fp_log("rbd_mirror_peer_site_remove: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_mirror_peer_site_set_attributes(rados_ioctx_t p,
@@ -926,7 +925,7 @@ extern "C" int rbd_mirror_peer_site_set_attributes(rados_ioctx_t p,
                                                    size_t key_value_count)
 {
     fp_log("rbd_mirror_peer_site_set_attributes: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_mirror_peer_site_set_name(rados_ioctx_t io_ctx,
@@ -934,7 +933,7 @@ extern "C" int rbd_mirror_peer_site_set_name(rados_ioctx_t io_ctx,
                                              const char *site_name)
 {
     fp_log("rbd_mirror_peer_site_set_name: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" int rbd_mirror_peer_site_set_client_name(rados_ioctx_t io_ctx,
@@ -942,7 +941,7 @@ extern "C" int rbd_mirror_peer_site_set_client_name(rados_ioctx_t io_ctx,
                                                     const char *client_name)
 {
     fp_log("rbd_mirror_peer_site_set_client_name: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" void rbd_pool_stats_create(rbd_pool_stats_t *stats)
@@ -962,7 +961,7 @@ extern "C" int rbd_pool_stats_option_add_uint64(rbd_pool_stats_t stats,
                                                 uint64_t *stat_val)
 {
     fp_log("rbd_pool_stats_option_add_uint64: not implemented\n");
-    return *(int *)0;
+    __builtin_trap();
 }
 
 extern "C" void rbd_trash_get_cleanup(rbd_trash_image_info_t *info)

@@ -581,7 +581,7 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
     static std::atomic_size_t user_write_bytes = 0;
     counter++;
     user_write_bytes += bytes;
-    if (counter % 10'000 == 0)
+    if (counter % 50'000 == 0)
         trace("{} write reqs, {} MiB total", counter,
               user_write_bytes / 1024 / 1024);
 
@@ -850,7 +850,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
     auto data_ptr0 = data_ptr;
     auto in_ptr = req->gc_data;
 
-    int _data_sectors = 0; // actual sectors in GC write
+    // int _data_sectors = 0; // actual sectors in GC write
     std::vector<data_map> obj_extents;
 
     req->local_buf_base = data_ptr;
@@ -866,7 +866,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
                 continue;
 
             sector_t _sectors = _limit - _base;
-            _data_sectors += _sectors;
+            // _data_sectors += _sectors;
             int bytes = _sectors * 512;
 
             sector_t extent_offset = _base - base;
@@ -1168,7 +1168,7 @@ void translate_impl::do_gc(bool *running)
      * utilization, i.e. (live data) / (total size)
      */
     obj_r_lock.lock();
-    int calculated_total = 0;
+    // int calculated_total = 0;
     std::set<std::tuple<double, int, int>> utilization;
     for (auto p : object_info) {
         if (p.first > last_ckpt)
@@ -1176,7 +1176,7 @@ void translate_impl::do_gc(bool *running)
         auto [hdrlen, datalen, live] = p.second;
         double rho = 1.0 * live / datalen;
         sector_t sectors = hdrlen + datalen;
-        calculated_total += datalen;
+        // calculated_total += datalen;
         utilization.insert(std::make_tuple(rho, p.first, sectors));
     }
     obj_r_lock.unlock();

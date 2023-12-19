@@ -213,6 +213,10 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     }
 };
 
+/**
+ * Request to insert an object into the cache. Takes ownership of the passed-in
+ * buffer and will free it on completion
+ */
 class shared_read_cache::cache_insert_request : public self_refcount_request
 {
     shared_read_cache &cache;
@@ -220,14 +224,13 @@ class shared_read_cache::cache_insert_request : public self_refcount_request
     chunk_idx chunk;
     chunk_key key;
     void *buf;
-    size_t adjust;
 
     request *subrequest;
 
   public:
     cache_insert_request(shared_read_cache &cache, chunk_idx chunk,
-                         chunk_key key, void *buf, size_t adjust)
-        : cache(cache), chunk(chunk), key(key), buf(buf), adjust(adjust)
+                         chunk_key key, void *buf)
+        : cache(cache), chunk(chunk), key(key), buf(buf)
     {
         subrequest = cache.cache_store->make_write_request(
             (char *)buf, CACHE_CHUNK_SIZE,
@@ -247,6 +250,7 @@ class shared_read_cache::cache_insert_request : public self_refcount_request
     {
         assert(child == subrequest);
         cache.on_cache_store_done(chunk, buf);
+        free(buf);
         free_child(subrequest);
         this->dec_and_free();
     }
@@ -297,8 +301,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
           cache_filesize_bytes, header_size_bytes, num_cache_blocks,
           CACHE_CHUNK_SIZE);
 
-    cache_store =
-        std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));
+    cache_store = std::unique_ptr<nvme>(make_nvme_uring(fd, "rcache_uring"));
     cache_state = std::vector<entry_state>(num_cache_blocks);
 
     cache_stats_reporter =
@@ -320,7 +323,7 @@ chunk_idx shared_read_cache::allocate_chunk()
     // assumes that lock is held by the caller
 
     // search for the first empty or evictable entry
-    int searched_entries = 0;
+    // int searched_entries = 0;
     while (true) {
         auto &entry = cache_state[clock_idx];
 
@@ -333,7 +336,7 @@ chunk_idx shared_read_cache::allocate_chunk()
             entry.accessed = false;
 
         clock_idx = (clock_idx + 1) % size_in_chunks;
-        searched_entries++;
+        // searched_entries++;
     }
 
     // trace("allocate chunk: searched {} entries", searched_entries);
@@ -424,11 +427,10 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // upgrade to write lock
     // TODO verify safety? the only person to read the abit is the allocator,
     // and it is protected by an exclusive lock, so it should be fine
+    auto buf = malloc(CACHE_CHUNK_SIZE);
     std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
-    auto buf = malloc(CACHE_CHUNK_SIZE);
-
     auto &entry = cache_state[idx];
     entry.pending_fill_data = buf;
     entry.refcount++;
@@ -452,15 +454,17 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
     // The incoming object is the raw object that's going to the backend; we
     // need to first chop it up into cache chunks before we can store it
     size_t processed_bytes = 0;
-    std::vector<chunk_data> chunks;
+    std::vector<void *> chunks;
     while (processed_bytes < obj_size) {
-        chunk_data data;
+        auto data = malloc(CACHE_CHUNK_SIZE);
         auto to_copy = std::min(obj_size - processed_bytes, CACHE_CHUNK_SIZE);
-        memcpy(data.data(), (char *)obj_data + processed_bytes, to_copy);
+        memcpy(data, (char *)obj_data + processed_bytes, to_copy);
         chunks.push_back(data);
+        processed_bytes += to_copy;
     }
 
-    trace("inserting obj with size {} in {} chunks", obj_size, chunks.size());
+    // trace("Inserting obj with size {} in {} chunks", obj_size,
+    // chunks.size());
 
     std::vector<cache_insert_request *> reqs;
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
@@ -472,12 +476,12 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
     // it's too small. Something like allocate_chunk is best-effort only and
     // we only insert if we can allocate a chunk. This also limits the time
     // that we hold locks and spend time searching for space
-    for (auto &chunk : chunks) {
+    for (auto chunk : chunks) {
         auto idx = allocate_chunk();
         auto offset = get_store_offset_for_chunk(idx);
 
         auto key = std::make_tuple(img_prefix, seqnum, offset);
-        auto req = new cache_insert_request(*this, idx, key, chunk.data(), 0);
+        auto req = new cache_insert_request(*this, idx, key, chunk);
         reqs.push_back(req);
 
         auto &entry = cache_state[idx];
@@ -570,6 +574,7 @@ void shared_read_cache::set_chunk_status(chunk_idx chunk, entry_status status)
 
 size_t shared_read_cache::get_store_offset_for_chunk(chunk_idx chunk)
 {
+    assert(chunk >= 0 && chunk < size_in_chunks);
     return chunk * CACHE_CHUNK_SIZE + header_size_bytes;
 }
 
