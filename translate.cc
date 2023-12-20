@@ -134,7 +134,15 @@ class translate_req : public request
         return len + bytes <= max;
     }
 
-    ~translate_req() {}
+    ~translate_req()
+    {
+        if (gc_buf)
+            free(gc_buf);
+        if (batch_buf)
+            free(batch_buf);
+        if (gc_data)
+            free(gc_data);
+    }
 
     /* NOTE - this assumes the only significant header entry is the map
      */
@@ -704,13 +712,6 @@ void translate_req::notify(request *child)
             tx->bufmap->trim(base, limit);
         }
     }
-
-    if (batch_buf != NULL) // allocated in constructor
-        free(batch_buf);
-    if (gc_buf != NULL) // allocated in write_gc
-        free(gc_buf);
-    if (gc_data != NULL) // allocated in gc threqad
-        free(gc_data);
 
     if (op == REQ_GC) {
         std::unique_lock lk(m);

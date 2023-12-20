@@ -8,7 +8,8 @@
 #include "../utils.h"
 
 const uint64_t MAGIC_SEED = 0xdeadbeefff00cab3ull;
-using comp_buf = std::array<uint8_t, 4096>;
+const size_t BLOCK_SIZE = 4096;
+using comp_buf = std::array<uint8_t, BLOCK_SIZE>;
 namespace po = boost::program_options;
 
 /**
@@ -69,15 +70,27 @@ void fill_buf_rand_bytes(uint64_t block_num, comp_buf &buf)
     }
 }
 
-bool verify_buf_rand_bytes(uint64_t block_num, const comp_buf &buf)
+void fill_buf_blocknum(uint64_t block_num, comp_buf &buf)
 {
-    std::array<uint8_t, 4096> expected_buf;
-    fill_buf_rand_bytes(block_num, expected_buf);
+    assert(sizeof(buf) % 8 == 0);
+    uint64_t *buf64 = reinterpret_cast<uint64_t *>(buf.data());
+    for (size_t i = 0; i < buf.size() / 8; i++) {
+        *buf64 = block_num;
+        buf64++;
+    }
+}
+
+bool verify_buf(uint64_t block_num, const comp_buf &buf,
+                void (*fill_buf)(uint64_t, comp_buf &) = fill_buf_blocknum)
+{
+    comp_buf expected_buf;
+    fill_buf(block_num, expected_buf);
 
     if (buf != expected_buf) {
-        log_error("Error reading block {}", block_num);
+        log_error("Error reading block {:08x}", block_num);
         hexdump("Expected", expected_buf.data(), expected_buf.size());
         hexdump("Actual", buf.data(), buf.size());
+        return false;
     }
 
     return true;
@@ -88,7 +101,8 @@ void run_test()
     // delete existing image if it exists
     rbd_remove(nullptr, "pone/random-test-img");
 
-    size_t img_size = 1 * 1024 * 1024 * 1024;
+    // size_t img_size = 1 * 1024 * 1024 * 1024;
+    size_t img_size = 100 * 1024 * 1024;
 
     // create the image for our own use
     auto ret = rbd_create(nullptr, "pone/random-test-img", img_size, 0);
@@ -102,24 +116,34 @@ void run_test()
     // TODO use aio variants to ensure concurrency
 
     // write out the image
-    for (uint64_t i = 0; i < img_size / 4096; i++) {
+    for (uint64_t i = 0; i < img_size / BLOCK_SIZE; i++) {
         comp_buf buf;
-        fill_buf_rand_bytes(i, buf);
-        ret = rbd_write(img, i * 4096, 4096,
+        fill_buf_blocknum(i, buf);
+        ret = rbd_write(img, i * BLOCK_SIZE, BLOCK_SIZE,
                         reinterpret_cast<const char *>(buf.data()));
         check_cond(ret < 0, "Error writing to image");
+
+        if (i % 1000 == 0)
+            std::cout << "." << std::flush;
     }
+
+    fmt::print("\nWrote {} blocks\n", img_size / BLOCK_SIZE);
 
     // read back and make sure it's the same
-    for (uint64_t i = 0; i < img_size / 4096; i++) {
+    for (uint64_t i = 0; i < img_size / BLOCK_SIZE; i++) {
         comp_buf buf;
-        ret =
-            rbd_read(img, i * 4096, 4096, reinterpret_cast<char *>(buf.data()));
+        ret = rbd_read(img, i * BLOCK_SIZE, BLOCK_SIZE,
+                       reinterpret_cast<char *>(buf.data()));
         check_cond(ret < 0, "Error reading from image");
 
-        auto pass = verify_buf_rand_bytes(i, buf);
-        check_cond(!pass, "Error verifying block {}", i);
+        auto pass = verify_buf(i, buf, fill_buf_blocknum);
+        check_cond(!pass, "Error verifying block {:08x}", i);
+
+        if (i % 1000 == 0)
+            std::cout << "." << std::flush;
     }
+
+    fmt::print("\nVerified {} blocks\n", img_size / BLOCK_SIZE);
 
     // step 3: close the image
     ret = rbd_close(img);

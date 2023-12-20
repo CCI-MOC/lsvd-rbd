@@ -46,107 +46,6 @@
 extern void do_log(const char *, ...);
 extern void fp_log(const char *, ...);
 
-extern void check_crc(sector_t sector, iovec *iov, int niovs, const char *msg);
-extern void add_crc(sector_t sector, iovec *iov, int niovs);
-
-/* RBD "image" and completions are only used in this file, so we
- * don't break them out into a .h
- */
-
-extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
-
-int rbd_image::image_open(rados_ioctx_t io, const char *name)
-{
-    this->image_name = name;
-
-    if (cfg.read() < 0)
-        throw std::runtime_error("Failed to read config");
-
-    objstore = get_backend(&cfg, io, name);
-    auto shared_cache_path = cfg.shared_read_cache_path;
-    shared_cache = shared_read_cache::get_instance(
-        shared_cache_path, cfg.cache_size / CACHE_CHUNK_SIZE, objstore);
-
-    /* read superblock and initialize translation layer
-     */
-    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock,
-                           &bufmap_lock, shared_cache);
-    size = xlate->init(name, true);
-    check_cond(size < 0, "Failed to initialize translation layer err={}", size);
-
-    /* figure out cache file name, create it if necessary
-     */
-
-    /*
-     * TODO: Open 2 files. One for wcache and one for reader
-     */
-    std::string wcache_name =
-        cfg.cache_filename(xlate->uuid, name, LSVD_CFG_WRITE);
-
-    if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
-        log_info("Creating write cache file {}", wcache_name);
-        int cache_pages = cfg.wlog_size / 4096;
-
-        int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        check_ret_errno(fd, "Can't open wcache file");
-
-        if (init_wcache(fd, xlate->uuid, cache_pages) < 0)
-            return -1;
-        close(fd);
-    }
-
-    write_fd = open(wcache_name.c_str(), O_RDWR);
-    check_ret_errno(write_fd, "Can't open wcache file");
-
-    j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
-
-    check_ret_errno(pread(write_fd, (char *)jws, 4096, 0),
-                    "Can't read wcache superblock");
-    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
-        throw std::runtime_error("bad magic/type in write cache superblock\n");
-    if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
-        throw std::runtime_error("object and cache UUIDs don't match");
-
-    wcache = make_write_cache(0, write_fd, xlate, &cfg);
-    reader = make_reader(0, xlate, &cfg, &map, &bufmap, &map_lock, &bufmap_lock,
-                         objstore, shared_cache);
-    free(jws);
-
-    if (!cfg.no_gc)
-        xlate->start_gc();
-    return 0;
-}
-
-void rbd_image::notify(rbd_completion_t c)
-{
-    std::unique_lock lk(m);
-    if (ev.is_valid()) {
-        completions.push(c);
-        ev.notify();
-    }
-}
-
-/* for debug use
- */
-rbd_image *make_rbd_image(sptr<backend> b, translate *t, write_cache *w,
-                          img_reader *r)
-{
-    auto img = new rbd_image;
-    img->objstore = b;
-    img->xlate = t;
-    img->wcache = w;
-    img->reader = r;
-    return img;
-}
-
-translate *image_2_xlate(rbd_image_t image)
-{
-    auto img = (rbd_image *)image;
-    return img->xlate;
-}
-
-rbd_image_t __lsvd_dbg_img;
-
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
                         const char *snap_name)
 {
@@ -156,22 +55,8 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
         delete img;
         return -1;
     }
-    *image = __lsvd_dbg_img = (void *)img;
+    *image = (void *)img;
     log_info("Opened image: {}, size {}", name, img->size);
-    return 0;
-}
-
-int rbd_image::image_close(void)
-{
-    delete reader;
-    wcache->flush();
-    wcache->do_write_checkpoint();
-    delete wcache;
-    if (!cfg.no_gc)
-        xlate->stop_gc();
-    xlate->checkpoint();
-    delete xlate;
-    close(write_fd);
     return 0;
 }
 
@@ -184,6 +69,61 @@ extern "C" int rbd_close(rbd_image_t image)
 
     return 0;
 }
+
+/* RBD-level completion structure
+ */
+// struct lsvd_completion {
+//   public:
+//     int magic = LSVD_MAGIC;
+//     std::atomic_int refcount = 2;
+//     std::atomic_flag done = ATOMIC_FLAG_INIT;
+
+//     rbd_callback_t cb;
+//     void *cb_arg;
+
+//     rbd_image *img;
+//     int retval;
+
+//     request *req;
+
+//     lsvd_completion(rbd_callback_t cb, void *cb_arg) : cb(cb), cb_arg(cb_arg)
+//     {} ~lsvd_completion()
+//     {
+//         if (req)
+//             req->release();
+//     }
+
+//     /* see Ceph AioCompletion::complete
+//      */
+//     void complete(int val)
+//     {
+//         retval = val;
+//         if (cb)
+//             cb((rbd_completion_t)this, cb_arg);
+//         img->notify((rbd_completion_t)this);
+
+//         done.test_and_set();
+//         done.notify_all();
+//         dec_and_free();
+//     }
+
+//     void release() { dec_and_free(); }
+
+//     void wait()
+//     {
+//         refcount++;
+//         req->wait();
+//         refcount--;
+//     }
+
+//   private:
+//     inline void dec_and_free()
+//     {
+//         auto old = refcount.fetch_sub(1, std::memory_order_seq_cst);
+//         if (old == 1)
+//             delete this;
+//     }
+// };
 
 /* RBD-level completion structure
  */
@@ -230,19 +170,6 @@ struct lsvd_completion {
             delete this;
     }
 };
-
-int rbd_image::poll_io_events(rbd_completion_t *comps, int numcomp)
-{
-    std::unique_lock lk(m);
-    int i;
-    for (i = 0; i < numcomp && !completions.empty(); i++) {
-        auto p = (lsvd_completion *)completions.front();
-        assert(p->magic == LSVD_MAGIC);
-        comps[i] = p;
-        completions.pop();
-    }
-    return i;
-}
 
 extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps,
                                   int numcomp)
@@ -327,7 +254,164 @@ extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
     return p->retval;
 }
 
-static std::atomic<int> __reqs;
+/**
+ * This is the base for aio read and write requests. It's copied from
+ * the old rbd_aio_req omniclass, with the read and write paths split out and
+ * the common completion handling moved here.
+ */
+class aio_request : public self_refcount_request
+{
+  private:
+    lsvd_completion *p;
+    std::atomic_flag done = false;
+
+  protected:
+    rbd_image *img;
+    smartiov iovs;
+
+    size_t req_offset;
+    size_t req_bytes;
+
+    aio_request(rbd_image *img, size_t offset, smartiov iovs,
+                lsvd_completion *p)
+        : p(p), img(img), iovs(iovs), req_offset(offset)
+    {
+        req_bytes = iovs.bytes();
+    }
+
+    void complete_request(int val)
+    {
+        if (p)
+            p->complete(val);
+
+        done.test_and_set(std::memory_order_seq_cst);
+        done.notify_all();
+        dec_and_free();
+    }
+
+  public:
+    inline virtual void wait() override
+    {
+        inc_rc();
+        done.wait(false, std::memory_order_seq_cst);
+        dec_and_free();
+    }
+};
+
+class read_request : public aio_request
+{
+  private:
+    std::atomic_int num_subreqs = 0;
+    // std::atomic_bool notified = false;
+
+  public:
+    read_request(rbd_image *img, size_t offset, smartiov iovs,
+                 lsvd_completion *p)
+        : aio_request(img, offset, iovs, p)
+    {
+    }
+
+    void run(request *parent) override
+    {
+        assert(parent == nullptr);
+
+        std::vector<request *> requests;
+        img->reader->handle_read(req_offset, &iovs, requests);
+        num_subreqs = requests.size();
+
+        // We might sometimes instantly complete; in that case, there will be
+        // no notifiers, we must notify ourselves.
+        // NOTE lookout for self-deadlock
+        if (num_subreqs == 0) {
+            // inc_rc();
+            notify(nullptr);
+        } else {
+            for (auto const &r : requests)
+                r->run(this);
+        }
+    }
+
+    void notify(request *child) override
+    {
+        // if (notified) {
+        //     log_error("req {} already notified", (void *)this);
+        //     trap_to_debugger();
+        // }
+        // notified = true;
+
+        free_child(child);
+
+        auto old = num_subreqs.fetch_sub(1, std::memory_order_seq_cst);
+        if (old > 1)
+            return;
+
+        complete_request(req_bytes);
+    }
+};
+
+class write_request : public aio_request
+{
+  private:
+    std::atomic_int n_req = 0;
+    /**
+     * Not quite sure we own these iovs; we should transfer ownership to writev
+     * and be done with it. The old code had these as pointers, but changed
+     * them to be in the vectwor.
+     */
+    std::vector<smartiov> sub_iovs;
+
+  public:
+    write_request(rbd_image *img, size_t offset, smartiov iovs,
+                  lsvd_completion *p)
+        : aio_request(img, offset, iovs, p)
+    {
+    }
+
+    void notify(request *req) override
+    {
+        free_child(req);
+        auto old = n_req.fetch_sub(1, std::memory_order_seq_cst);
+        if (old > 1)
+            return;
+
+        img->wcache->release_room(req_bytes / 512);
+        complete_request(0); // TODO shouldn't we return bytes written?
+    }
+
+    void run(request *parent) override
+    {
+        assert(parent == nullptr);
+
+        img->wcache->get_room(req_bytes / 512);
+        img->xlate->wait_for_room();
+
+        sector_t size_sectors = req_bytes / 512;
+
+        // split large requests into 2MB (default) chunks
+        sector_t max_sectors = img->cfg.wcache_chunk / 512;
+        n_req += div_round_up(req_bytes / 512, max_sectors);
+        // TODO: this is horribly ugly
+
+        std::vector<request *> requests;
+        auto cur_offset = req_offset;
+
+        for (sector_t s_offset = 0; s_offset < size_sectors;
+             s_offset += max_sectors) {
+            auto _sectors = std::min(size_sectors - s_offset, max_sectors);
+            smartiov tmp =
+                iovs.slice(s_offset * 512L, s_offset * 512L + _sectors * 512L);
+            smartiov _iov(tmp.data(), tmp.size());
+            sub_iovs.push_back(_iov);
+            auto req = img->wcache->writev(cur_offset / 512, &_iov);
+            requests.push_back(req);
+
+            cur_offset += _sectors * 512L;
+        }
+
+        for (auto r : requests)
+            r->run(this);
+    }
+};
 
 enum rbd_req_status {
     REQ_NOWAIT = 0,
@@ -461,7 +545,6 @@ class rbd_aio_req : public request
 
     void run_r()
     {
-        __reqs++;
         std::vector<request *> requests;
 
         img->reader->handle_read(offset, &aligned_iovs, requests);
@@ -514,12 +597,14 @@ class rbd_aio_req : public request
     {
         setup(op_, img_, p_, offset_, status_);
     }
+
     rbd_aio_req(lsvd_op op_, rbd_image *img_, lsvd_completion *p_,
                 uint64_t offset_, int status_, char *buf_, size_t len_)
         : iovs(buf_, len_)
     {
         setup(op_, img_, p_, offset_, status_);
     }
+
     ~rbd_aio_req()
     {
         if (aligned_buf)
@@ -561,12 +646,6 @@ class rbd_aio_req : public request
         else
             run_w();
     }
-
-    static void aio_read_cb(void *ptr)
-    {
-        auto req = (rbd_aio_req *)ptr;
-        req->notify(NULL);
-    }
 };
 
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
@@ -578,6 +657,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
     p->img = img;
 
     p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, buf, len);
+    // p->req = new read_request(img, offset, smartiov(buf, len), p);
     p->req->run(NULL);
     return 0;
 }
@@ -591,6 +671,7 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
     p->img = img;
 
     p->req = new rbd_aio_req(OP_READ, img, p, offset, REQ_NOWAIT, iov, iovcnt);
+    // p->req = new read_request(img, offset, smartiov(iov, iovcnt), p);
     p->req->run(NULL);
     return 0;
 }
@@ -604,6 +685,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
     p->img = img;
 
     p->req = new rbd_aio_req(OP_WRITE, img, p, offset, REQ_NOWAIT, iov, iovcnt);
+    // p->req = new write_request(img, offset, smartiov(iov, iovcnt), p);
     p->req->run(NULL);
     return 0;
 }
@@ -648,6 +730,10 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
 
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
+    // lsvd_completion *p = (lsvd_completion *)c;
+    // assert(p->magic == LSVD_MAGIC);
+    // p->wait();
+    // return 0;
     lsvd_completion *p = (lsvd_completion *)c;
     assert(p->magic == LSVD_MAGIC);
     p->done_released += 20;
@@ -771,44 +857,29 @@ extern "C" int rbd_aio_write_zeroes(rbd_image_t image, uint64_t off, size_t len,
 
 /* any following functions are stubs only
  */
-extern "C" int rbd_invalidate_cache(rbd_image_t image)
-{
-    fp_log("rbd_invalidate_cache: not implemented\n");
-    return 0;
-}
+extern "C" int rbd_invalidate_cache(rbd_image_t image) { UNIMPLEMENTED(); }
 
 /* These RBD functions are unimplemented and return errors
  */
-extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
-{
-    fp_log("rbd_resize: not implemented\n");
-    return -1;
-}
+extern "C" int rbd_resize(rbd_image_t image, uint64_t size) { UNIMPLEMENTED(); }
 
 extern "C" int rbd_snap_create(rbd_image_t image, const char *snapname)
 {
-    fp_log("rbd_snap_create: not implemented\n");
-    return -1;
+    UNIMPLEMENTED();
 }
 extern "C" int rbd_snap_list(rbd_image_t image, rbd_snap_info_t *snaps,
                              int *max_snaps)
 {
-    fp_log("rbd_snap_list: not implemented\n");
-    return -1;
+    UNIMPLEMENTED();
 }
-extern "C" void rbd_snap_list_end(rbd_snap_info_t *snaps)
-{
-    fp_log("rbd_snap_list_end: not implemented\n");
-}
+extern "C" void rbd_snap_list_end(rbd_snap_info_t *snaps) { UNIMPLEMENTED(); }
 extern "C" int rbd_snap_remove(rbd_image_t image, const char *snapname)
 {
-    fp_log("rbd_snap_remove: not implemented\n");
-    return -1;
+    UNIMPLEMENTED();
 }
 extern "C" int rbd_snap_rollback(rbd_image_t image, const char *snapname)
 {
-    fp_log("rbd_snap_rollback: not implemented\n");
-    return -1;
+    UNIMPLEMENTED();
 }
 
 /* */
@@ -818,8 +889,7 @@ extern "C" int rbd_diff_iterate2(rbd_image_t image, const char *fromsnapname,
                                  int (*cb)(uint64_t, size_t, int, void *),
                                  void *arg)
 {
-    fp_log("rbd_diff_iterate2: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_encryption_format(rbd_image_t image,
@@ -827,8 +897,7 @@ extern "C" int rbd_encryption_format(rbd_image_t image,
                                      rbd_encryption_options_t opts,
                                      size_t opts_size)
 {
-    fp_log("rbd_encryption_format: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_encryption_load(rbd_image_t image,
@@ -836,61 +905,49 @@ extern "C" int rbd_encryption_load(rbd_image_t image,
                                    rbd_encryption_options_t opts,
                                    size_t opts_size)
 {
-    fp_log("rbd_encryption_load: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_get_features(rbd_image_t image, uint64_t *features)
 {
-    fp_log("rbd_get_features: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_get_flags(rbd_image_t image, uint64_t *flags)
 {
-    fp_log("rbd_get_flags: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 #define ASSERT_FAIL() __builtin_trap()
 
 extern "C" void rbd_image_spec_cleanup(rbd_image_spec_t *image)
 {
-    fp_log("rbd_image_spec_cleanup: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
 extern "C" void rbd_linked_image_spec_cleanup(rbd_linked_image_spec_t *image)
 {
-    fp_log("rbd_linked_image_spec_cleanup: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
-extern "C" int rbd_mirror_image_enable(rbd_image_t image)
-{
-    fp_log("rbd_mirror_image_enable: not implemented\n");
-    __builtin_trap();
-}
+extern "C" int rbd_mirror_image_enable(rbd_image_t image) { UNIMPLEMENTED(); }
 
 extern "C" int rbd_mirror_image_enable2(rbd_image_t image,
                                         rbd_mirror_image_mode_t mode)
 {
-    fp_log("rbd_mirror_image_enable2: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" void
 rbd_mirror_image_get_info_cleanup(rbd_mirror_image_info_t *mirror_image_info)
 {
-    fp_log("rbd_mirror_image_get_info_cleanup: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
 extern "C" void rbd_mirror_image_global_status_cleanup(
     rbd_mirror_image_global_status_t *mirror_image_global_status)
 {
-    fp_log("rbd_mirror_image_global_status_cleanup: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_mirror_peer_site_add(rados_ioctx_t io_ctx, char *uuid,
@@ -899,23 +956,20 @@ extern "C" int rbd_mirror_peer_site_add(rados_ioctx_t io_ctx, char *uuid,
                                         const char *site_name,
                                         const char *client_name)
 {
-    fp_log("rbd_mirror_peer_site_add: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_mirror_peer_site_get_attributes(
     rados_ioctx_t p, const char *uuid, char *keys, size_t *max_key_len,
     char *values, size_t *max_value_len, size_t *key_value_count)
 {
-    fp_log("rbd_mirror_peer_site_get_attributes: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_mirror_peer_site_remove(rados_ioctx_t io_ctx,
                                            const char *uuid)
 {
-    fp_log("rbd_mirror_peer_site_remove: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_mirror_peer_site_set_attributes(rados_ioctx_t p,
@@ -924,50 +978,43 @@ extern "C" int rbd_mirror_peer_site_set_attributes(rados_ioctx_t p,
                                                    const char *values,
                                                    size_t key_value_count)
 {
-    fp_log("rbd_mirror_peer_site_set_attributes: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_mirror_peer_site_set_name(rados_ioctx_t io_ctx,
                                              const char *uuid,
                                              const char *site_name)
 {
-    fp_log("rbd_mirror_peer_site_set_name: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_mirror_peer_site_set_client_name(rados_ioctx_t io_ctx,
                                                     const char *uuid,
                                                     const char *client_name)
 {
-    fp_log("rbd_mirror_peer_site_set_client_name: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" void rbd_pool_stats_create(rbd_pool_stats_t *stats)
 {
-    fp_log("rbd_pool_stats_create: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
 extern "C" void rbd_pool_stats_destroy(rbd_pool_stats_t stats)
 {
-    fp_log("rbd_pool_stats_destroy: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
 extern "C" int rbd_pool_stats_option_add_uint64(rbd_pool_stats_t stats,
                                                 int stat_option,
                                                 uint64_t *stat_val)
 {
-    fp_log("rbd_pool_stats_option_add_uint64: not implemented\n");
-    __builtin_trap();
+    UNIMPLEMENTED();
 }
 
 extern "C" void rbd_trash_get_cleanup(rbd_trash_image_info_t *info)
 {
-    fp_log("rbd_trash_get_cleanup: not implemented\n");
-    ASSERT_FAIL();
+    UNIMPLEMENTED();
 }
 
 extern "C" void rbd_version(int *major, int *minor, int *extra)

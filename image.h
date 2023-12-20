@@ -2,12 +2,16 @@
 
 #include <queue>
 
+#include "backend.h"
 #include "config.h"
 #include "extent.h"
 #include "fake_rbd.h"
+#include "img_reader.h"
 #include "lsvd_types.h"
 #include "objects.h"
 #include "shared_read_cache.h"
+#include "translate.h"
+#include "write_cache.h"
 
 struct event_socket {
     int socket;
@@ -44,11 +48,6 @@ struct event_socket {
         return rv;
     }
 };
-
-class img_reader;
-class write_cache;
-class backend;
-class translate;
 
 struct rbd_image {
     std::string image_name;

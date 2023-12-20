@@ -286,39 +286,39 @@ void run_test(unsigned long seed, struct cfg *cfg)
 static char args_doc[] = "RUNS";
 
 static struct argp_option options[] = {
-    {"seed", 's', "S", 0, "use this seed (one run)"},
-    {"len", 'l', "N", 0, "run length"},
-    {"window", 'w', "W", 0, "write window"},
-    {"size", 'z', "S", 0, "volume size (e.g. 1G, 100M)"},
-    {"cache-dir", 'd', "DIR", 0, "cache directory"},
-    {"prefix", 'p', "PREFIX", 0, "object prefix"},
-    {"reads", 'r', "FRAC", 0, "fraction reads (0.0-1.0)"},
-    {"close", 'c', 0, 0, "close and re-open"},
-    {"keep", 'k', 0, 0, "keep data between tests"},
-    {"verbose", 'v', 0, 0, "print LBAs and CRCs"},
-    {"reverse", 'R', 0, 0, "reverse NVMe completion order"},
-    {"existing", 'x', 0, 0, "don't delete existing cache"},
-    {"delay", 'D', 0, 0, "add random backend delays"},
-    {"rados", 'O', 0, 0, "use RADOS"},
-    {"cache-size", 'Z', "N", 0, "cache size (K/M/G)"},
-    {"deterministic", 'Q', 0, 0, "no backend non-determinism"},
-    {0},
+    {"seed", 's', "S", 0, "use this seed (one run)", 0},
+    {"len", 'l', "N", 0, "run length", 0},
+    {"window", 'w', "W", 0, "write window", 0},
+    {"size", 'z', "S", 0, "volume size (e.g. 1G, 100M)", 0},
+    {"cache-dir", 'd', "DIR", 0, "cache directory", 0},
+    {"prefix", 'p', "PREFIX", 0, "object prefix", 0},
+    {"reads", 'r', "FRAC", 0, "fraction reads (0.0-1.0)", 0},
+    {"close", 'c', 0, 0, "close and re-open", 0},
+    {"keep", 'k', 0, 0, "keep data between tests", 0},
+    {"verbose", 'v', 0, 0, "print LBAs and CRCs", 0},
+    {"reverse", 'R', 0, 0, "reverse NVMe completion order", 0},
+    {"existing", 'x', 0, 0, "don't delete existing cache", 0},
+    {"delay", 'D', 0, 0, "add random backend delays", 0},
+    {"rados", 'O', 0, 0, "use RADOS", 0},
+    {"cache-size", 'Z', "N", 0, "cache size (K/M/G)", 0},
+    {"deterministic", 'Q', 0, 0, "no backend non-determinism", 0},
+    {0, 0, 0, 0, 0, 0},
 };
 
-struct cfg _cfg = {.cache_dir = "/tmp",		     // cache_dir
-                   .cache_size = "100m",	     // cache_size
+struct cfg _cfg = {.cache_dir = "/tmp",              // cache_dir
+                   .cache_size = "100m",             // cache_size
                    .obj_prefix = "/tmp/bkt/obj",     // obj_prefix
-                   .backend = "file",          // backend
-                   .run_len = 10000,           // run_len
-                   .window = 16,	       // window
+                   .backend = "file",                // backend
+                   .run_len = 10000,                 // run_len
+                   .window = 16,                     // window
                    .image_sectors = 1024 * 1024 * 2, // image_sectors,
                    .read_fraction = 0.0,             // read_fraction
-		   .n_runs = 1,			     // n_runs
-                   .seeds = {},			     // seeds
-                   .reopen = false,		     // reopen
-                   .restart = true,		     // restart
-                   .verbose = false,		     // verbose
-                   .existing = false,		     // existing
+                   .n_runs = 1,                      // n_runs
+                   .seeds = {},                      // seeds
+                   .reopen = false,                  // reopen
+                   .restart = true,                  // restart
+                   .verbose = false,                 // verbose
+                   .existing = false,                // existing
                    .deterministic = false};          // deterministic
 
 off_t parseint(char *s)
@@ -394,7 +394,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     }
     return 0;
 }
-static struct argp argp = {options, parse_opt, NULL, args_doc};
+static struct argp argp = {options, parse_opt, NULL, args_doc, 0, 0, 0};
 
 void do_run_cmd(void)
 {

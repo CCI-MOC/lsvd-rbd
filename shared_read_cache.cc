@@ -123,7 +123,8 @@ class shared_read_cache::cache_hit_request : public self_refcount_request
  *   the buffer
  *
  * Thus the in-memory buffer of the backend data only exists between the backend
- * request completing and the cache write completing.
+ * request completing and the cache write completing. Takes ownership of that
+ * buffer and will free it on request destruction
  *
  * There is an alternative architecture where we just wait far the nvme cache
  * write to complete before dispatching everything, but that's additional
@@ -153,7 +154,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     {
     }
 
-    ~cache_miss_request() {}
+    ~cache_miss_request() { free(buf); }
 
     virtual void run(request *parent)
     {
@@ -237,7 +238,7 @@ class shared_read_cache::cache_insert_request : public self_refcount_request
             cache.get_store_offset_for_chunk(chunk));
 
         // we shouldn't have a parent, so we only have 1 refcount
-        refcount = 1;
+        dec_and_free();
     }
 
     void run(request *parent)
@@ -401,9 +402,6 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
             return nullptr;
         }
 
-        // TEMPORARY HACK: just use the pending read request and dispatch
-        // the pending reads when the fill is done
-
         // Backend request is pending, wait for it to complete
         if (entry.status == entry_status::FETCHING) {
             // trace("pending on chunk {}", idx);
@@ -432,6 +430,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 
     auto idx = allocate_chunk();
     auto &entry = cache_state[idx];
+    entry.status = entry_status::FETCHING;
     entry.pending_fill_data = buf;
     entry.refcount++;
 
@@ -500,7 +499,7 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
 
 void shared_read_cache::report_cache_stats()
 {
-    pthread_setname_np(pthread_self(), "cache_stats_reporter");
+    pthread_setname_np(pthread_self(), "rcache_stats");
     static int last_total_reqs = 0;
 
     while (!stop_cache_stats_reporter.load()) {

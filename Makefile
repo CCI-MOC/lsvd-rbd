@@ -5,7 +5,7 @@ BUILD_DIR = build
 .SILENT: debug release
 
 CFLAGS = -ggdb3 -Wall $(OPT)
-CXXFLAGS = -std=c++17 -ggdb3 $(OPT) -fno-omit-frame-pointer -fPIC
+CXXFLAGS = -std=c++20 -ggdb3 $(OPT) -fno-omit-frame-pointer -fPIC
 LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -luring
 LDFLAGS += -fuse-ld=mold
 SOFLAGS = -shared -fPIC
@@ -14,9 +14,10 @@ TARGET_EXECS = imgtool thick-image
 TEST_EXECS = lsvd_crash_test lsvd_rnd_test test-rados test-seq unit-test 
 LSVD_DEPS = objects.o translate.o io.o img_reader.o config.o mkcache.o \
 	nvme.o write_cache.o file_backend.o shared_read_cache.o \
-	rados_backend.o lsvd_debug.o liblsvd.o
+	rados_backend.o lsvd_debug.o image.o liblsvd.o
 
-debug: CXXFLAGS += -fsanitize=undefined -fno-sanitize-recover=all -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fno-sanitize=null -fno-sanitize=alignment
+debug: CXXFLAGS += -fsanitize=undefined -fsanitize=float-divide-by-zero -fsanitize=local-bounds 
+debug: CXXFLAGS += -fsanitize=implicit-conversion -fsanitize=nullability -fsanitize=integer
 debug: CXXFLAGS += -fsanitize=address
 # debug: CXXFLAGS += -fsanitize=thread
 debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion -Wno-conversion -Wno-unused-parameter
@@ -24,8 +25,8 @@ debug: CXXFLAGS += -O0 -fno-inline
 nosan: CXXFLAGS += -O0 -fno-inline
 release: CXXFLAGS += -O3 -DLOGLV=1
 
-debug: liblsvd.so imgtool thick-image lsvd_rnd_test test-seq
-nosan: liblsvd.so imgtool thick-image
+debug: liblsvd.so imgtool thick-image test-seq
+nosan: liblsvd.so imgtool thick-image test-seq
 release: liblsvd.so imgtool thick-image
 
 CPP = $(wildcard *.cc)
@@ -59,7 +60,7 @@ liblsvd.so: $(LSVD_OBJS)
 	@$(CXX) $(SOFLAGS) -o $@ $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
 clean:
-	@rm -f liblsvd.so $(OBJS) $(DEPS) *.o *.d $(TARGET_EXECS)
+	@rm -rf liblsvd.so $(TARGET_EXECS) $(TEST_EXECS) $(BUILD_DIR)/*
 
 install-deps:
 	sudo apt install libfmt-dev libaio-dev librados-dev mold

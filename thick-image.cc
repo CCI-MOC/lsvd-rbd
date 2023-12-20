@@ -75,9 +75,9 @@ long img_size = 0;
 char *image_name;
 
 static struct argp_option options[] = {
-    {"size", 's', "SIZE", 0, "size in bytes (M/G=2^20,2^30)"},
+    {"size", 's', "SIZE", 0, "size in bytes (M/G=2^20,2^30)", 0},
     // {"pool", 'p', "POOL", 0, "pool for object"},
-    {0},
+    {0, 0, 0, 0, 0, 0},
 };
 
 static char args_doc[] = "IMAGE";
@@ -98,7 +98,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     }
     return 0;
 }
-static struct argp argp = {options, parse_opt, NULL, args_doc};
+static struct argp argp = {options, parse_opt, NULL, args_doc, 0, 0, 0};
 
 void create_thick(char *name, long size)
 {

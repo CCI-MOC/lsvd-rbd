@@ -69,9 +69,11 @@ class trivial_request : public request
  */
 class self_refcount_request : public request
 {
-  protected:
+  public:
     std::atomic_int refcount = 2;
 
+  protected:
+    inline void inc_rc() { refcount.fetch_add(1, std::memory_order_seq_cst); }
     inline void dec_and_free()
     {
         auto old = refcount.fetch_sub(1, std::memory_order_seq_cst);

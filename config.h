@@ -32,19 +32,20 @@ class lsvd_config
     int hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;
     long cache_size = 500 * 1024 * 1024; // in bytes
-    long wlog_size = 500 * 1024 * 1024; // in bytes
+    long wlog_size = 500 * 1024 * 1024;  // in bytes
     int ckpt_interval = 500;             // objects
     int flush_msec = 2000;               // flush timeout
     int gc_threshold = 60;               // GC threshold, percent
-    int gc_window = 4;			 // max GC writes outstanding
+    int gc_window = 4;                   // max GC writes outstanding
     int fetch_window = 12;               // read cache fetches
     int fetch_ratio = 67;                // anti-thrash served:backend ratio
-    int no_gc = 0;			 // turn off GC
+    int no_gc = 0;                       // turn off GC
 
     lsvd_config() {}
     ~lsvd_config() {}
     int read();
-    std::string cache_filename(uuid_t &uuid, const char *name, cfg_cache_type type);
+    std::string cache_filename(uuid_t &uuid, const char *name,
+                               cfg_cache_type type);
 };
 
 #endif
