@@ -399,6 +399,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // directly return it
         if (entry.status == entry_status::FILLING) {
             dest.copy_in((char *)entry.pending_fill_data + adjust);
+            entry.refcount--;
             return nullptr;
         }
 
