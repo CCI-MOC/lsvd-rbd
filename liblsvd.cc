@@ -857,7 +857,11 @@ extern "C" int rbd_aio_write_zeroes(rbd_image_t image, uint64_t off, size_t len,
 
 /* any following functions are stubs only
  */
-extern "C" int rbd_invalidate_cache(rbd_image_t image) { UNIMPLEMENTED(); }
+extern "C" int rbd_invalidate_cache(rbd_image_t image)
+{
+    // TODO expose shared_read_cache and wlog invalidation
+    return 0;
+}
 
 /* These RBD functions are unimplemented and return errors
  */

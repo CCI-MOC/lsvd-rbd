@@ -7,7 +7,6 @@
 #include "../fake_rbd.h"
 #include "../utils.h"
 
-const uint64_t MAGIC_SEED = 0xdeadbeefff00cab3ull;
 const size_t BLOCK_SIZE = 4096;
 using comp_buf = std::array<uint8_t, BLOCK_SIZE>;
 namespace po = boost::program_options;
@@ -55,8 +54,10 @@ void hexdump(std::string desc, const void *addr, const int len,
     printf("  %s\n", buff);
 }
 
+/*
 void fill_buf_rand_bytes(uint64_t block_num, comp_buf &buf)
 {
+    static const uint64_t MAGIC_SEED = 0xdeadbeefff00cab3ull;
     auto seed = block_num ^ MAGIC_SEED;
 
     std::mt19937 gen;
@@ -69,14 +70,16 @@ void fill_buf_rand_bytes(uint64_t block_num, comp_buf &buf)
         buf[i] = dis(gen);
     }
 }
+*/
 
 void fill_buf_blocknum(uint64_t block_num, comp_buf &buf)
 {
     assert(sizeof(buf) % 8 == 0);
-    uint64_t *buf64 = reinterpret_cast<uint64_t *>(buf.data());
-    for (size_t i = 0; i < buf.size() / 8; i++) {
-        *buf64 = block_num;
-        buf64++;
+    uint32_t trunc_num = block_num & 0xffffffff;
+    auto *bp = reinterpret_cast<uint32_t *>(buf.data());
+    for (size_t i = 0; i < buf.size() / 4; i++) {
+        *bp = trunc_num;
+        bp++;
     }
 }
 
@@ -101,8 +104,8 @@ void run_test()
     // delete existing image if it exists
     rbd_remove(nullptr, "pone/random-test-img");
 
-    // size_t img_size = 1 * 1024 * 1024 * 1024;
-    size_t img_size = 100 * 1024 * 1024;
+    size_t img_size = 1 * 1024 * 1024 * 1024;
+    // size_t img_size = 100 * 1024 * 1024;
 
     // create the image for our own use
     auto ret = rbd_create(nullptr, "pone/random-test-img", img_size, 0);

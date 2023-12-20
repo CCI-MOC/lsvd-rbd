@@ -443,6 +443,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // immediately insert into the cache_map because the next request will
     // need to be put on pending instead of going through the miss path again
     cache_map.left.insert(std::make_pair(cache_key, idx));
+    // trace("miss on key {} {} {}", img_prefix, seqnum, obj_offset);
 
     return req;
 }
@@ -453,17 +454,17 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
     // The incoming object is the raw object that's going to the backend; we
     // need to first chop it up into cache chunks before we can store it
     size_t processed_bytes = 0;
-    std::vector<void *> chunks;
+    std::vector<std::tuple<size_t, void *>> chunks;
     while (processed_bytes < obj_size) {
         auto data = malloc(CACHE_CHUNK_SIZE);
         auto to_copy = std::min(obj_size - processed_bytes, CACHE_CHUNK_SIZE);
         memcpy(data, (char *)obj_data + processed_bytes, to_copy);
-        chunks.push_back(data);
+        chunks.push_back(std::make_tuple(processed_bytes, data));
         processed_bytes += to_copy;
     }
 
-    // trace("Inserting obj with size {} in {} chunks", obj_size,
-    // chunks.size());
+    // trace("Inserting obj {}: {} bytes/{} chunks", seqnum, obj_size,
+    //       chunks.size());
 
     std::vector<cache_insert_request *> reqs;
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
@@ -475,12 +476,10 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
     // it's too small. Something like allocate_chunk is best-effort only and
     // we only insert if we can allocate a chunk. This also limits the time
     // that we hold locks and spend time searching for space
-    for (auto chunk : chunks) {
+    for (auto &[ooffset, odata] : chunks) {
         auto idx = allocate_chunk();
-        auto offset = get_store_offset_for_chunk(idx);
-
-        auto key = std::make_tuple(img_prefix, seqnum, offset);
-        auto req = new cache_insert_request(*this, idx, key, chunk);
+        auto key = std::make_tuple(img_prefix, seqnum, ooffset);
+        auto req = new cache_insert_request(*this, idx, key, odata);
         reqs.push_back(req);
 
         auto &entry = cache_state[idx];
@@ -500,10 +499,15 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
 void shared_read_cache::report_cache_stats()
 {
     pthread_setname_np(pthread_self(), "rcache_stats");
+    debug("Starting cache stats reporter ({})", gettid());
     static int last_total_reqs = 0;
 
+    int wakeup_count = 0;
     while (!stop_cache_stats_reporter.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1'000));
+        if (wakeup_count++ % 20 != 0)
+            continue;
+
         std::lock_guard lock(cache_stats_lock);
 
         // Don't report anything if there were no new requests
@@ -512,19 +516,25 @@ void shared_read_cache::report_cache_stats()
 
         last_total_reqs = total_requests;
 
-        auto frontend = rolling_sum(user_bytes);
-        auto backend = rolling_sum(backend_bytes);
-        double readamp =
-            frontend == 0 ? -1 : (double)backend / (double)frontend;
-
-        auto hits = rolling_sum(hitrate_stats);
-        auto count = rolling_count(hitrate_stats);
-
-        debug("{}/{} hits, {} MiB read, {:.3f} read amp, {} total", hits, count,
-              frontend / 1024 / 1024, readamp, total_requests);
+        print_stats();
     }
 
-    debug("cache stats reporter exiting");
+    std::lock_guard lock(cache_stats_lock);
+    print_stats();
+    debug("Stopping cache stats reporter ({})", gettid());
+}
+
+void shared_read_cache::print_stats()
+{
+    auto frontend = rolling_sum(user_bytes);
+    auto backend = rolling_sum(backend_bytes);
+    double readamp = frontend == 0 ? -1 : (double)backend / (double)frontend;
+
+    auto hits = rolling_sum(hitrate_stats);
+    auto count = rolling_count(hitrate_stats);
+
+    debug("{}/{} hits, {} MiB read, {:.3f} read amp, {} total", hits, count,
+          frontend / 1024 / 1024, readamp, total_requests);
 }
 
 bool shared_read_cache::should_bypass_cache()

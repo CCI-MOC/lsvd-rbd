@@ -340,11 +340,18 @@ translate_impl::~translate_impl()
 {
     stopped = true;
     cv.notify_all();
+
+    workers->stop();
+    misc_threads->stop();
+
     if (current)
         delete current;
     delete parser;
     if (super_buf)
         free(super_buf);
+
+    delete workers;
+    delete misc_threads;
 }
 
 ssize_t translate_impl::init(const char *prefix_, bool timedflush)
@@ -1002,6 +1009,7 @@ void translate_impl::process_batch(int _seq, translate_req *req)
 void translate_impl::worker_thread(thread_pool<translate_req *> *p)
 {
     pthread_setname_np(pthread_self(), "batch_worker");
+    debug("Starting batch worker ({})", gettid());
     while (p->running) {
         std::unique_lock lk(m);
         translate_req *req;
@@ -1038,6 +1046,7 @@ void translate_impl::worker_thread(thread_pool<translate_req *> *p)
         } else
             assert(false);
     }
+    debug("Stopping batch worker ({})", gettid());
 }
 
 /* flushes any data buffered in current batch, and blocks until all
@@ -1080,6 +1089,7 @@ void translate_impl::checkpoint(void)
 void translate_impl::flush_thread(thread_pool<int> *p)
 {
     pthread_setname_np(pthread_self(), "flush_thread");
+    debug("Starting flush thread ({})", gettid());
     auto wait_time = std::chrono::milliseconds(500);
     auto timeout = std::chrono::milliseconds(cfg->flush_msec);
     auto t0 = std::chrono::system_clock::now();
@@ -1101,7 +1111,7 @@ void translate_impl::flush_thread(thread_pool<int> *p)
             t0 = std::chrono::system_clock::now();
         }
     }
-    printf("flush thread (%lx) exiting\n", pthread_self());
+    debug("Stopping flush thread ({})", gettid());
 }
 
 /* -------------- Garbage collection ---------------- */
@@ -1361,7 +1371,6 @@ void translate_impl::do_gc(bool *running)
 void translate_impl::stop_gc(void)
 {
     stopped = true;
-    delete misc_threads;
     std::unique_lock lk(m);
     while (gc_running)
         gc_cv.wait(lk);
@@ -1369,7 +1378,7 @@ void translate_impl::stop_gc(void)
 
 void translate_impl::gc_thread(thread_pool<int> *p)
 {
-    debug("starting gc thread");
+    debug("Starting GC thread ({})", gettid());
     auto interval = std::chrono::milliseconds(100);
     // sector_t trigger = 128 * 1024 * 2; // 128 MB
     const char *name = "gc_thread";
@@ -1397,6 +1406,8 @@ void translate_impl::gc_thread(thread_pool<int> *p)
         gc_running = false;
         gc_cv.notify_all();
     }
+
+    debug("Stopping GC thread ({})", gettid());
 }
 
 /* ---------------- Debug ---------------- */

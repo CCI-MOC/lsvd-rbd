@@ -21,7 +21,7 @@ debug: CXXFLAGS += -fsanitize=implicit-conversion -fsanitize=nullability -fsanit
 debug: CXXFLAGS += -fsanitize=address
 # debug: CXXFLAGS += -fsanitize=thread
 debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion -Wno-conversion -Wno-unused-parameter
-debug: CXXFLAGS += -O0 -fno-inline
+debug: CXXFLAGS += -O0 -fno-inline -DLOGLV=0
 nosan: CXXFLAGS += -O0 -fno-inline
 release: CXXFLAGS += -O3 -DLOGLV=1
 
@@ -42,11 +42,11 @@ LSVD_OBJS = $(LSVD_DEPS:%.o=$(BUILD_DIR)/%.o)
 
 include $(wildcard $(BUILD_DIR)/*.d)
 
-$(TARGET_EXECS): %: $(BUILD_DIR)/%.o $(LSVD_OBJS)
+$(TARGET_EXECS): %: $(BUILD_DIR)/%.o $(LSVD_OBJS) liblsvd.so
 	@echo "LD $@"
 	@$(CXX) -o $@ $< $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
-$(TEST_EXECS): %: $(BUILD_DIR)/test/%.o $(LSVD_OBJS)
+$(TEST_EXECS): %: $(BUILD_DIR)/test/%.o $(LSVD_OBJS) liblsvd.so
 	@echo "LD $@"
 	@$(CXX) -o $@ $< $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 

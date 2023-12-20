@@ -116,6 +116,7 @@ class shared_read_cache
     accumulator_set<size_t, stats<tag::rolling_sum>> backend_bytes;
 
     void report_cache_stats();
+    void print_stats();
     std::thread cache_stats_reporter;
     std::atomic<bool> stop_cache_stats_reporter = false;
 

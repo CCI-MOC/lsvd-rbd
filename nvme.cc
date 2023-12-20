@@ -114,6 +114,7 @@ class nvme_uring : public nvme
     void uring_completion_worker(const char *name)
     {
         pthread_setname_np(pthread_self(), name);
+        debug("Starting uring worker '{}' ({})", name, gettid());
 
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
         while (cqe_worker_should_continue.load(std::memory_order_seq_cst)) {
@@ -135,6 +136,8 @@ class nvme_uring : public nvme
 
             io_uring_cqe_seen(&ring, cqe);
         }
+
+        debug("Stopping uring worker '{}' ({})", name, gettid());
     }
 
   private:
