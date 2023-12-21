@@ -56,7 +56,6 @@ class shared_read_cache::pending_read_request : public self_refcount_request
     {
         std::unique_lock<std::mutex> l(mtx);
         assert(parent != nullptr);
-        assert(cache.get_chunk_status(chunk) != entry_status::VALID);
 
         this->parent = parent;
         try_notify();

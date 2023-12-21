@@ -104,7 +104,6 @@ run_fio randread 60 256 4k
 run_fio randread 60 256 16k
 run_fio randread 60 256 64k
 
-
 run_fio randwrite 60 1 4k
 # run_fio randwrite 60 32 4k
 run_fio randwrite 60 64 4k
