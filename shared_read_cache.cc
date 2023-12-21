@@ -603,13 +603,8 @@ void shared_read_cache::on_cache_store_done(chunk_idx idx, void *data)
     assert(entry.status == entry_status::FILLING);
     entry.status = entry_status::VALID;
 
-    // dispatch pending reads
     if (!entry.pending_reads.empty())
-        log_warn("There are pending reads for chunk {} during store done", idx);
-
-    for (auto &req : entry.pending_reads)
-        req->on_backend_done(data);
-    entry.pending_reads.clear();
+        log_error("pending reads not empty");
 
     entry.pending_fill_data = nullptr;
     entry.refcount--;

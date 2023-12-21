@@ -104,8 +104,8 @@ void run_test()
     // delete existing image if it exists
     rbd_remove(nullptr, "pone/random-test-img");
 
-    size_t img_size = 1 * 1024 * 1024 * 1024;
-    // size_t img_size = 100 * 1024 * 1024;
+    // size_t img_size = 1 * 1024 * 1024 * 1024;
+    size_t img_size = 400 * 1024 * 1024;
 
     // create the image for our own use
     auto ret = rbd_create(nullptr, "pone/random-test-img", img_size, 0);
