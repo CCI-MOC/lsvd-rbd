@@ -316,7 +316,7 @@ class read_request : public aio_request
         assert(parent == nullptr);
 
         std::vector<request *> requests;
-        img->reader->handle_read(req_offset, &iovs, requests);
+        img->reader->handle_read(req_offset, iovs, requests);
         num_subreqs = requests.size();
 
         // We might sometimes instantly complete; in that case, there will be
@@ -547,7 +547,7 @@ class rbd_aio_req : public request
     {
         std::vector<request *> requests;
 
-        img->reader->handle_read(offset, &aligned_iovs, requests);
+        img->reader->handle_read(offset, aligned_iovs, requests);
 
         n_req = requests.size();
         // do_log("rbd_read %ld:\n", offset/512);

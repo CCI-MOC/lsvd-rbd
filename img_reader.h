@@ -28,7 +28,7 @@ class img_reader
   public:
     virtual ~img_reader(){};
 
-    virtual void handle_read(size_t offset, smartiov *iovs,
+    virtual void handle_read(size_t offset, smartiov iovs,
                              std::vector<request *> &requests) = 0;
 };
 

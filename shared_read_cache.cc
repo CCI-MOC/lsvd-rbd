@@ -353,8 +353,9 @@ chunk_idx shared_read_cache::allocate_chunk()
 
 request *shared_read_cache::make_read_req(std::string img_prefix,
                                           uint64_t seqnum, size_t obj_offset,
-                                          size_t adjust, smartiov &dest)
+                                          size_t adjust, smartiov &dest_)
 {
+    smartiov dest = dest_; // make a local copy
     auto req_size = dest.bytes();
 
     assert(obj_offset % CACHE_CHUNK_SIZE == 0);
@@ -363,7 +364,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
     total_requests++;
 
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
     auto r =
@@ -388,7 +389,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // Happy path: the entry is valid, we fetch it and return
         if (entry.status == entry_status::VALID) {
             auto offset = get_store_offset_for_chunk(idx);
-            auto req = cache_store->make_read_request(&dest, offset + adjust);
+            auto req = cache_store->make_read_request(dest, offset + adjust);
             return new cache_hit_request(*this, idx, req);
         }
 
@@ -396,14 +397,16 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // Backend request is done but we're pushing it to nvme, in this case
         // the data will be in the pending_fill_data field and we should just
         // directly return it
-        if (entry.status == entry_status::FILLING) {
-            dest.copy_in((char *)entry.pending_fill_data + adjust);
-            entry.refcount--;
-            return nullptr;
-        }
+        // TODO temporarily disable this
+        // if (entry.status == entry_status::FILLING) {
+        //     dest.copy_in((char *)entry.pending_fill_data + adjust);
+        //     entry.refcount--;
+        //     return nullptr;
+        // }
 
         // Backend request is pending, wait for it to complete
-        if (entry.status == entry_status::FETCHING) {
+        if (entry.status == entry_status::FETCHING ||
+            entry.status == entry_status::FILLING) {
             // trace("pending on chunk {}", idx);
             auto req = new pending_read_request(*this, idx, adjust, dest);
             entry.pending_reads.push_back(req);
@@ -411,7 +414,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         }
     }
 
-    lock.unlock();
+    // lock.unlock();
 
     // Cache miss path: allocate a chunk, fetch from backend, and then fill
     // the chunk in
@@ -426,7 +429,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // TODO verify safety? the only person to read the abit is the allocator,
     // and it is protected by an exclusive lock, so it should be fine
     auto buf = malloc(CACHE_CHUNK_SIZE);
-    std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
+    // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
     auto &entry = cache_state[idx];
@@ -601,15 +604,19 @@ void shared_read_cache::on_cache_store_done(chunk_idx idx, void *data)
     auto &entry = cache_state[idx];
     assert(entry.status == entry_status::FILLING);
     entry.status = entry_status::VALID;
-
-    // dispatch pending reads
-    if (!entry.pending_reads.empty())
-        log_warn("There are pending reads for chunk {} during store done", idx);
-
-    for (auto &req : entry.pending_reads)
-        req->on_backend_done(data);
-    entry.pending_reads.clear();
-
     entry.pending_fill_data = nullptr;
     entry.refcount--;
+
+    // dispatch pending reads
+    // if (!entry.pending_reads.empty())
+    //     log_warn("There are pending reads for chunk {} during store done",
+    //     idx);
+
+    // dispatch requests outside the lock
+    auto reqs = entry.pending_reads;
+    entry.pending_reads.clear();
+    lock.unlock();
+
+    for (auto &req : reqs)
+        req->on_backend_done(data);
 }

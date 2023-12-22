@@ -11,6 +11,7 @@ source $lsvd_dir/experiments/common.bash
 cd $lsvd_dir
 make clean
 make -j$(nproc) release
+# make -j$(nproc) nosan
 
 kill_nvmf
 

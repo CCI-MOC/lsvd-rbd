@@ -78,7 +78,7 @@ class reader_impl : public img_reader
 
     ~reader_impl() {}
 
-    void handle_read(size_t offset, smartiov *iovs,
+    void handle_read(size_t offset, smartiov iovs,
                      std::vector<request *> &requests);
 };
 
@@ -136,11 +136,11 @@ class direct_read_req : public self_refcount_request
 };
 
 // [[clang::optnone]] // figure out crash
-void reader_impl::handle_read(size_t offset, smartiov *iovs,
+void reader_impl::handle_read(size_t offset, smartiov iovs,
                               std::vector<request *> &requests)
 {
     sector_t start_sector = offset / 512;
-    sector_t end_sector = start_sector + iovs->bytes() / 512;
+    sector_t end_sector = start_sector + iovs.bytes() / 512;
 
     std::unique_lock lk(m);
     std::shared_lock lk2(*obj_lock);
@@ -195,7 +195,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         auto base3 = std::min(base1, base2);
         if (base3 > start_sector) {
             sector_t sectors = base3 - start_sector;
-            iovs->zero(_offset, _offset + sectors * 512L);
+            iovs.zero(_offset, _offset + sectors * 512L);
             start_sector = base3;
             _offset += sectors * 512L;
             continue;
@@ -205,7 +205,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
          */
         if (base1 == start_sector) {
             sector_t sectors = limit1 - start_sector;
-            auto slice = iovs->slice(_offset, _offset + sectors * 512L);
+            auto slice = iovs.slice(_offset, _offset + sectors * 512L);
             slice.copy_in(bufptr.buf);
             // hit_stats.serve(sectors);
 
@@ -255,7 +255,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         if (false) {
             sector_t sectors = limit2 - start_sector;
             backing_cache->served_bypass_request(sectors * 512L);
-            auto slice = iovs->slice(_offset, _offset + sectors * 512L);
+            auto slice = iovs.slice(_offset, _offset + sectors * 512L);
             auto req = new direct_read_req(this, objptr, slice);
             requests.push_back(req);
 
@@ -278,7 +278,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         else {
             sector_t sectors = offset_limit - objptr.offset;
             limit2 = start_sector + sectors;
-            auto slice = iovs->slice(_offset, _offset + sectors * 512L);
+            auto slice = iovs.slice(_offset, _offset + sectors * 512L);
             sector_t sector_in_blk = objptr.offset % block_sectors;
 
             /* parameters to the request:

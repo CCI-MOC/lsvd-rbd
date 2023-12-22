@@ -167,7 +167,7 @@ wcache_write_req::wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages,
         pad_iov.push_back((iovec){pad_hdr, 4096});
         pad_out(pad_iov, n_pad);
         reqs++;
-        r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad * 4096L);
+        r_pad = wcache->nvme_w->make_write_request(pad_iov, pad * 4096L);
     }
 
     std::vector<j_extent> extents;
@@ -191,7 +191,7 @@ wcache_write_req::wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages,
     data_iovs->ingest(iov, iovcnt);
 
     reqs++;
-    r_data = wcache->nvme_w->make_write_request(data_iovs, page * 4096L);
+    r_data = wcache->nvme_w->make_write_request(*data_iovs, page * 4096L);
 }
 
 wcache_write_req::~wcache_write_req()

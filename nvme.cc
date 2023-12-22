@@ -87,7 +87,7 @@ class nvme_uring : public nvme
         return preadv(fd, iov, iovcnt, offset);
     }
 
-    request *make_write_request(smartiov *iov, size_t offset)
+    request *make_write_request(smartiov iov, size_t offset)
     {
         assert(offset != 0);
         return (request *)new nvme_uring_request(iov, offset, OP_WRITE, this);
@@ -100,7 +100,7 @@ class nvme_uring : public nvme
                                                  this);
     }
 
-    request *make_read_request(smartiov *iov, size_t offset)
+    request *make_read_request(smartiov iov, size_t offset)
     {
         return (request *)new nvme_uring_request(iov, offset, OP_READ, this);
     }
@@ -153,10 +153,9 @@ class nvme_uring : public nvme
         request *parent_;
 
       public:
-        nvme_uring_request(smartiov *iovs, size_t offset, lsvd_op op,
+        nvme_uring_request(smartiov iovs, size_t offset, lsvd_op op,
                            nvme_uring *nvmu)
-            : nvmu_(nvmu), iovs_(iovs->data(), iovs->size()), op_(op),
-              offset_(offset)
+            : nvmu_(nvmu), iovs_(iovs), op_(op), offset_(offset)
         {
         }
 
