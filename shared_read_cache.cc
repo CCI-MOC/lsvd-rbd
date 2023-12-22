@@ -344,7 +344,10 @@ chunk_idx shared_read_cache::allocate_chunk()
     // evict the entry
     auto &entry = cache_state[clock_idx];
     entry.status = entry_status::EMPTY;
-    cache_map.right.erase(clock_idx);
+    entry.refcount = 0;
+
+    auto key = entry.key;
+    cache_map.erase(key);
 
     auto ret = clock_idx;
     clock_idx = (clock_idx + 1) % size_in_chunks;
@@ -367,9 +370,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
-    auto r =
-        cache_map.left.find(std::make_tuple(img_prefix, seqnum, obj_offset));
-    if (r != cache_map.left.end()) {
+    auto r = cache_map.find(std::make_tuple(img_prefix, seqnum, obj_offset));
+    if (r != cache_map.end()) {
         auto idx = r->second;
         // trace("cache hit {}", idx);
         {
@@ -431,21 +433,25 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     auto buf = malloc(CACHE_CHUNK_SIZE);
     // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
+    auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
+
     auto idx = allocate_chunk();
     auto &entry = cache_state[idx];
     entry.status = entry_status::FETCHING;
+    entry.accessed = false;
+    entry.refcount = 1;
     entry.pending_fill_data = buf;
-    entry.refcount++;
+    entry.pending_reads = {};
+    entry.key = cache_key;
 
     objname obj_name(img_prefix, seqnum);
     auto backend_req = obj_backend->make_read_req(
         obj_name.c_str(), obj_offset, (char *)buf, CACHE_CHUNK_SIZE);
-    auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);
     // immediately insert into the cache_map because the next request will
     // need to be put on pending instead of going through the miss path again
-    cache_map.left.insert(std::make_pair(cache_key, idx));
+    cache_map.insert(std::make_pair(cache_key, idx));
     // trace("miss on key {} {} {}", img_prefix, seqnum, obj_offset);
 
     return req;
@@ -489,8 +495,9 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
         entry.refcount++;
         entry.accessed = false; // clear abit so they're cleared the 1st time
         entry.status = entry_status::FILLING;
+        entry.key = key;
 
-        cache_map.left.insert(std::make_pair(key, idx));
+        cache_map.insert(std::make_pair(key, idx));
     }
 
     lock.unlock();
@@ -565,7 +572,7 @@ void shared_read_cache::served_bypass_request(size_t bytes)
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 {
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
     auto &entry = cache_state[chunk];
     assert(entry.refcount > 0);
     entry.refcount--;
