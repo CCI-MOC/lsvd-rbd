@@ -367,7 +367,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
     total_requests++;
 
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    // std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
     auto r = cache_map.find(std::make_tuple(img_prefix, seqnum, obj_offset));
@@ -416,7 +417,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         }
     }
 
-    // lock.unlock();
+    lock.unlock();
 
     // Cache miss path: allocate a chunk, fetch from backend, and then fill
     // the chunk in
@@ -431,7 +432,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // TODO verify safety? the only person to read the abit is the allocator,
     // and it is protected by an exclusive lock, so it should be fine
     auto buf = malloc(CACHE_CHUNK_SIZE);
-    // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
+    std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
 
@@ -440,7 +441,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     entry.status = entry_status::FETCHING;
     entry.accessed = false;
     entry.refcount = 1;
-    entry.pending_fill_data = buf;
+    entry.pending_fill_data = nullptr;
     entry.pending_reads = {};
     entry.key = cache_key;
 
