@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -xeuo pipefail
+ulimit -c
 
 if [ -z "${1:-}" ]
   then echo "Please provide a pool name"

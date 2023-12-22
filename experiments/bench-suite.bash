@@ -5,6 +5,9 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
+lsvd_dir=$(git rev-parse --show-toplevel)
+cd $lsvd_dir/experiments/
+
 # designed to run nightly; we don't care if one of them fails
 # set -euo pipefail
 set -x
@@ -12,6 +15,10 @@ set -x
 all_out=./experiment-results.txt
 # printf "\n\n\nBenchmark script raw output will be written to $all_out\n\n\n" | tee -a $all_out
 
+truncate -s 0 $all_out
+
+# enable coredumps for debugging
+ulimit -c unlimited
 
 printf "\n\n\n===New Experiment===\n\n\n"
 export lsvd_cache_size=$((240 * 1024 * 1024 * 1024))

@@ -64,6 +64,12 @@ class trivial_request : public request
  * but that would require rewriting the lifetime management of all requests
  * in the entire codebase. This way is a drop-in replacement that has minimal
  * impact on everything else.
+ * 
+ * INVARIANTS:
+ * - refcount starts at 2, release and notify decrements it
+ * - release() is called by the parent, notify() is called by the child
+ * - A notify() SHALL NOT be called before the parent has called run(). It
+ *   may happen DURING run() on the same thread, but NEVER before.
  *
  * TODO implement wait() if neccessary with atomic_flags
  */

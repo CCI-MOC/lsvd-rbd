@@ -1,4 +1,5 @@
 CXX = clang++-17
+# CXX = g++-12
 BUILD_DIR = build
 
 .DEFAULT_GOAL := debug
@@ -22,7 +23,7 @@ debug: CXXFLAGS += -fsanitize=address
 # debug: CXXFLAGS += -fsanitize=thread
 debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion -Wno-conversion -Wno-unused-parameter
 debug: CXXFLAGS += -O0 -fno-inline -DLOGLV=0
-nosan: CXXFLAGS += -O0 -fno-inline
+nosan: CXXFLAGS += -Og -fno-inline
 release: CXXFLAGS += -O3 -DLOGLV=1
 
 debug: liblsvd.so imgtool thick-image test-seq
