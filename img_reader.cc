@@ -84,10 +84,10 @@ class reader_impl : public img_reader
 
 /* factory function so we can hide implementation
  */
-img_reader *make_reader(uint32_t blkno, translate *_be,
-                        lsvd_config *cfg, extmap::objmap *map,
-                        extmap::bufmap *bufmap, std::shared_mutex *m,
-                        std::mutex *bufmap_m, sptr<backend> _io,
+img_reader *make_reader(uint32_t blkno, translate *_be, lsvd_config *cfg,
+                        extmap::objmap *map, extmap::bufmap *bufmap,
+                        std::shared_mutex *m, std::mutex *bufmap_m,
+                        sptr<backend> _io,
                         sptr<shared_read_cache> backing_cache)
 {
     return new reader_impl(blkno, _be, cfg, map, bufmap, m, bufmap_m, _io,
@@ -135,6 +135,7 @@ class direct_read_req : public self_refcount_request
     }
 };
 
+// [[clang::optnone]] // figure out crash
 void reader_impl::handle_read(size_t offset, smartiov *iovs,
                               std::vector<request *> &requests)
 {

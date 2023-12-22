@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -xeuo pipefail
+ulimit -c
 
 if [ -z "${1:-}" ]
   then echo "Please provide a pool name"
@@ -35,7 +36,7 @@ make clean
 make -j20 release
 
 # create_lsvd_thin $pool_name $imgname $imgsize
-create_lsvd_thick $pool_name $imgname $imgsize
+# create_lsvd_thick $pool_name $imgname $imgsize
 
 kill_nvmf
 
