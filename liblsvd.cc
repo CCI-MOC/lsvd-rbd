@@ -77,7 +77,7 @@ struct lsvd_completion {
     int magic = LSVD_MAGIC;
 
   private:
-    std::atomic_int refcount = 1;
+    std::atomic_int refcount = 2;
     std::atomic_flag done = ATOMIC_FLAG_INIT;
 
     rbd_callback_t cb;
@@ -108,7 +108,7 @@ struct lsvd_completion {
     void run()
     {
         assert(req != nullptr);
-        refcount++;
+        // refcount++;
         this->req->run(nullptr);
     }
 
@@ -247,8 +247,9 @@ class aio_request : public self_refcount_request
     size_t req_offset;
     size_t req_bytes;
 
-    // bool has_ran = false;
-    // bool has_notified = false;
+    std::mutex mtx;
+    bool has_ran = false;
+    bool has_notified = false;
 
     aio_request(rbd_image *img, size_t offset, smartiov iovs,
                 lsvd_completion *p)
@@ -267,11 +268,11 @@ class aio_request : public self_refcount_request
         dec_and_free();
     }
 
-    // void try_complete(int val)
-    // {
-    //     if (has_notified && has_ran)
-    //         complete_request(val);
-    // }
+    void try_complete(int val)
+    {
+        if (has_notified && has_ran)
+            complete_request(val);
+    }
 
   public:
     inline virtual void wait() override
@@ -299,20 +300,26 @@ class read_request : public aio_request
     {
         assert(parent == nullptr);
 
+        std::unique_lock<std::mutex> lock(mtx);
         std::vector<request *> requests;
         img->reader->handle_read(req_offset, iovs, requests);
         num_subreqs = requests.size();
+
+        for (auto const &r : requests)
+            r->run(this);
+
+        has_ran = true;
 
         // We might sometimes instantly complete; in that case, there will be
         // no notifiers, we must notify ourselves.
         // NOTE lookout for self-deadlock
         if (num_subreqs == 0) {
-            // inc_rc();
+            lock.unlock();
             notify(nullptr);
-        } else {
-            for (auto const &r : requests)
-                r->run(this);
+            return;
         }
+
+        try_complete(req_bytes);
     }
 
     void notify(request *child) override
@@ -323,7 +330,9 @@ class read_request : public aio_request
         if (old > 1)
             return;
 
-        complete_request(req_bytes);
+        std::lock_guard<std::mutex> lock(mtx);
+        has_notified = true;
+        try_complete(req_bytes);
     }
 };
 
@@ -345,17 +354,6 @@ class write_request : public aio_request
     {
     }
 
-    void notify(request *req) override
-    {
-        free_child(req);
-        auto old = n_req.fetch_sub(1, std::memory_order_seq_cst);
-        if (old > 1)
-            return;
-
-        img->wcache->release_room(req_bytes / 512);
-        complete_request(0); // TODO shouldn't we return bytes written?
-    }
-
     void run(request *parent) override
     {
         assert(parent == nullptr);
@@ -370,6 +368,7 @@ class write_request : public aio_request
         n_req += div_round_up(req_bytes / 512, max_sectors);
         // TODO: this is horribly ugly
 
+        std::lock_guard<std::mutex> lock(mtx);
         std::vector<request *> requests;
         auto cur_offset = req_offset;
 
@@ -388,6 +387,24 @@ class write_request : public aio_request
 
         for (auto r : requests)
             r->run(this);
+
+        has_ran = true;
+        try_complete(0);
+    }
+
+    void notify(request *req) override
+    {
+        free_child(req);
+
+        auto old = n_req.fetch_sub(1, std::memory_order_seq_cst);
+        if (old > 1)
+            return;
+
+        std::lock_guard<std::mutex> lock(mtx);
+        img->wcache->release_room(req_bytes / 512);
+
+        has_notified = true;
+        try_complete(0); // TODO shouldn't we return bytes written?
     }
 };
 
