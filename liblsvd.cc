@@ -305,21 +305,19 @@ class read_request : public aio_request
         img->reader->handle_read(req_offset, iovs, requests);
         num_subreqs = requests.size();
 
-        for (auto const &r : requests)
-            r->run(this);
-
-        has_ran = true;
-
-        // We might sometimes instantly complete; in that case, there will be
-        // no notifiers, we must notify ourselves.
-        // NOTE lookout for self-deadlock
-        if (num_subreqs == 0) {
+        if (num_subreqs > 0) {
+            for (auto const &r : requests)
+                r->run(this);
+            has_ran = true;
+            // try_complete(req_bytes);
+        } else {
+            // We might sometimes instantly complete; in that case, there will
+            // be no notifiers, we must notify ourselves. NOTE lookout for
+            // self-deadlock
+            has_ran = true;
             lock.unlock();
             notify(nullptr);
-            return;
         }
-
-        try_complete(req_bytes);
     }
 
     void notify(request *child) override
