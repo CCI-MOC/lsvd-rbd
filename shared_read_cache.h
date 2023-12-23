@@ -187,7 +187,7 @@ class shared_read_cache
      * If data is in memory, this will fill in the iov and return NULL
      */
     request *make_read_req(std::string img_prefix, uint64_t seqnum,
-                           size_t obj_offset, size_t adjust, smartiov &dest);
+                           size_t obj_offset, size_t adjust, smartiov dest);
 
     /**
      * Insert an object into the cache. Intended for use on the write path to

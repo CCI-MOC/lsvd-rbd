@@ -107,7 +107,7 @@ class direct_read_req : public self_refcount_request
     extmap::obj_offset oo;
 
   public:
-    direct_read_req(reader_impl *r_, extmap::obj_offset oo_, smartiov &slice)
+    direct_read_req(reader_impl *r_, extmap::obj_offset oo_, smartiov slice)
         : iovs(slice)
     {
         oo = oo_;

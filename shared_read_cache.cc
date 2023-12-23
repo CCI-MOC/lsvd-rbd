@@ -356,9 +356,8 @@ chunk_idx shared_read_cache::allocate_chunk()
 
 request *shared_read_cache::make_read_req(std::string img_prefix,
                                           uint64_t seqnum, size_t obj_offset,
-                                          size_t adjust, smartiov &dest_)
+                                          size_t adjust, smartiov dest)
 {
-    smartiov dest = dest_; // make a local copy
     auto req_size = dest.bytes();
 
     assert(obj_offset % CACHE_CHUNK_SIZE == 0);
