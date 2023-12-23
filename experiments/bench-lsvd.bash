@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
 set -xeuo pipefail
+ulimit -c
 
-if [ -z "${1:-}" ]
-  then echo "Please provide a pool name"
+if [ -z "${1:-}" ]; then
+  echo "Please provide a pool name"
   exit
 fi
 
@@ -18,7 +19,8 @@ gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
 client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
 wlog=/mnt/nvme-remote/
-outfile=$lsvd_dir/experiments/results/$cur_time.lsvd.$pool_name.txt
+cache_size_gb=$(($cache_size / 1024 / 1024 / 1024))
+outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-$cache_size_gb.$pool_name.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
@@ -33,6 +35,7 @@ echo '===Building LSVD...'
 cd $lsvd_dir
 make clean
 make -j20 release
+# make -j20 nosan
 
 # create_lsvd_thin $pool_name $imgname $imgsize
 create_lsvd_thick $pool_name $imgname $imgsize
