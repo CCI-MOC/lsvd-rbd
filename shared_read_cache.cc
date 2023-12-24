@@ -47,7 +47,6 @@ class shared_read_cache::pending_read_request : public self_refcount_request
     {
         if (is_backend_done && parent != nullptr) {
             parent->notify(this);
-            cache.dec_chunk_refcount(chunk);
             this->dec_and_free();
         }
     }
@@ -56,7 +55,7 @@ class shared_read_cache::pending_read_request : public self_refcount_request
     {
         std::unique_lock<std::mutex> l(mtx);
         assert(parent != nullptr);
-        assert(cache.get_chunk_status(chunk) != entry_status::VALID);
+        // assert(cache.get_chunk_status(chunk) != entry_status::VALID);
 
         this->parent = parent;
         try_notify();
@@ -67,6 +66,8 @@ class shared_read_cache::pending_read_request : public self_refcount_request
         std::unique_lock<std::mutex> l(mtx);
         dest.copy_in((char *)buf + adjust);
         is_backend_done = true;
+
+        cache.dec_chunk_refcount(chunk);
         try_notify();
     }
 
@@ -178,6 +179,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     {
         is_backend_done = true;
 
+        std::vector<pending_read_request *> reqs;
         {
             std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
 
@@ -185,10 +187,12 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
             entry.status = entry_status::FILLING;
             // entry.pending_fill_data = buf;
 
-            for (auto &req : entry.pending_reads)
-                req->on_backend_done(buf);
+            reqs = entry.pending_reads;
             entry.pending_reads.clear();
         }
+
+        for (auto &req : reqs)
+            req->on_backend_done(buf);
 
         // there is enough info to complete the parent request, do it asap
         // to improve latency instead of waiting until the cache write is done
@@ -204,6 +208,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     {
         free_child(subrequest);
 
+        std::vector<pending_read_request *> reqs;
         {
             std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
 
@@ -213,15 +218,17 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
 
             // TEMPORARY HACK: disptach reads on store done because we don't
             // directly read from the buffer when it's there
-            for (auto &req : entry.pending_reads)
-                req->on_backend_done(buf);
+            reqs = entry.pending_reads;
             entry.pending_reads.clear();
 
             // entry.pending_fill_data = nullptr;
-            free(buf);
             entry.refcount--;
         }
 
+        for (auto &req : reqs)
+            req->on_backend_done(buf);
+
+        free(buf);
         this->dec_and_free();
     }
 };
@@ -422,9 +429,9 @@ void shared_read_cache::report_cache_stats()
         std::lock_guard lock(cache_stats_lock);
 
         // Don't report anything if there were no new requests
-        if(total_requests == last_total_reqs)
+        if (total_requests == last_total_reqs)
             continue;
-        
+
         last_total_reqs = total_requests;
 
         auto frontend = rolling_sum(user_bytes);
