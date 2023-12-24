@@ -6,9 +6,9 @@ BUILD_DIR = build
 .SILENT: debug release
 
 CFLAGS = -ggdb3 -Wall $(OPT)
-CXXFLAGS = -std=c++20 -ggdb3 $(OPT) -fno-omit-frame-pointer -fPIC
-LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -luring
-LDFLAGS += -fuse-ld=mold
+CXXFLAGS = -std=c++20 -ggdb3 $(OPT) -fno-omit-frame-pointer -fPIC -I./liburing/src/include
+LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt
+LDFLAGS += -fuse-ld=mold -L./liburing/src -l:liburing.a
 SOFLAGS = -shared -fPIC
 
 TARGET_EXECS = imgtool thick-image
