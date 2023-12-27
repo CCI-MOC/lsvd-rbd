@@ -5,8 +5,7 @@ sidetest/
 
 build/*
 experiments/results/*
-experiments/experiment-results.txt
-experiments/experiment-results.txt.old
+experiments/experiment-results.*
 test/baklibs/*
 
 *.o
