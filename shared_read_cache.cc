@@ -267,8 +267,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
           cache_filesize_bytes, header_size_bytes, num_cache_blocks,
           CACHE_CHUNK_SIZE);
 
-    cache_store =
-        std::unique_ptr<nvme>(make_nvme_uring(fd, "rcache_uring"));
+    cache_store = std::unique_ptr<nvme>(make_nvme_uring(fd, "rcache_uring"));
     cache_state = std::vector<entry_state>(num_cache_blocks);
 
     cache_stats_reporter =
@@ -310,8 +309,13 @@ chunk_idx shared_read_cache::allocate_chunk()
 
     // evict the entry
     auto &entry = cache_state[clock_idx];
+    assert(entry.pending_fill_data == nullptr);
+    assert(entry.pending_reads.empty());
+
+    auto key = entry.key;
+    cache_map.erase(key);
+
     entry.status = entry_status::EMPTY;
-    cache_map.right.erase(clock_idx);
 
     auto ret = clock_idx;
     clock_idx = (clock_idx + 1) % size_in_chunks;
@@ -333,9 +337,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
-    auto r =
-        cache_map.left.find(std::make_tuple(img_prefix, seqnum, obj_offset));
-    if (r != cache_map.left.end()) {
+    auto r = cache_map.find(std::make_tuple(img_prefix, seqnum, obj_offset));
+    if (r != cache_map.end()) {
         auto idx = r->second;
         // trace("cache hit {}", idx);
         {
@@ -392,6 +395,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // TODO verify safety? the only person to read the abit is the allocator,
     // and it is protected by an exclusive lock, so it should be fine
     auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
+    auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
     // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
@@ -399,12 +403,12 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     entry.pending_fill_data = buf;
     entry.refcount++;
     entry.status = entry_status::FETCHING;
+    entry.key = cache_key;
 
     objname obj_name(img_prefix, seqnum);
     auto backend_req = obj_backend->make_read_req(
         obj_name.c_str(), obj_offset, (char *)buf, CACHE_CHUNK_SIZE);
-    auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
-    cache_map.left.insert(std::make_pair(cache_key, idx));
+    cache_map.insert(std::make_pair(cache_key, idx));
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);
     return req;

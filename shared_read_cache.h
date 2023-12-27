@@ -8,10 +8,12 @@
 #include <boost/accumulators/statistics/rolling_count.hpp>
 #include <boost/accumulators/statistics/rolling_sum.hpp>
 #include <boost/bimap.hpp>
+#include <boost/container_hash/hash.hpp>
 #include <map>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
+#include <unordered_map>
 
 #include "backend.h"
 #include "extent.h"
@@ -25,6 +27,16 @@ const size_t CACHE_HEADER_SIZE = 4096;
 using chunk_idx = size_t;
 
 using chunk_key = std::tuple<std::string, uint64_t, size_t>;
+struct chunk_key_hash {
+    inline size_t operator()(const chunk_key &k) const
+    {
+        size_t seed = 0;
+        boost::hash_combine(seed, std::get<0>(k));
+        boost::hash_combine(seed, std::get<1>(k));
+        boost::hash_combine(seed, std::get<2>(k));
+        return seed;
+    }
+};
 
 using namespace boost::accumulators;
 const size_t CACHE_STATS_WINDOW = 10'000;
@@ -83,6 +95,9 @@ class shared_read_cache
 
         // Keep track of pending reads
         std::vector<pending_read_request *> pending_reads;
+
+        // Keep track of the reverse map so we can evict this entry
+        chunk_key key;
     };
 
     std::vector<entry_state> cache_state;
@@ -101,7 +116,8 @@ class shared_read_cache
     // we map <objname, seqnum, offset> to a cache block
     // offset MUST be a multiple of CACHE_CHUNK_SIZE
     // the reverse map exists so that we can evict entries
-    boost::bimap<chunk_key, chunk_idx> cache_map;
+    // boost::bimap<chunk_key, chunk_idx> cache_map;
+    std::unordered_map<chunk_key, chunk_idx, chunk_key_hash> cache_map;
 
     // clock eviction
     size_t clock_idx = 0;
