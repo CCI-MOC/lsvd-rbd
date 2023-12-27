@@ -1110,7 +1110,7 @@ struct _extent {
 void translate_impl::do_gc(bool *running)
 {
     gc_cycles++;
-    trace("Start GC cycle {}", gc_cycles);
+    // trace("Start GC cycle {}", gc_cycles);
     int max_obj = seq.load();
 
     std::shared_lock obj_r_lock(*map_lock);

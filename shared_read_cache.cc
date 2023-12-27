@@ -409,7 +409,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
 
         // Backend request is pending, wait for it to complete
         if (entry.status == entry_status::FETCHING) {
-            trace("pending on chunk {}", idx);
+            // trace("pending on chunk {}", idx);
             auto req = new pending_read_request(*this, idx, adjust, dest);
             entry.pending_reads.push_back(req);
             return req;
@@ -465,8 +465,8 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
         processed_bytes += to_copy;
     }
 
-    // trace("Inserting obj {}: {} bytes/{} chunks", seqnum, obj_size,
-    //       chunks.size());
+    trace("Inserting obj {}: {} bytes/{} chunks", seqnum, obj_size,
+          chunks.size());
 
     std::vector<cache_insert_request *> reqs;
     std::unique_lock<std::shared_mutex> lock(global_cache_lock);
