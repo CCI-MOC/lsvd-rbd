@@ -71,6 +71,7 @@ class shared_read_cache
     class cache_hit_request;
     class cache_miss_request;
     class pending_read_request;
+    class cache_insert_request;
 
     enum entry_status {
         EMPTY,
@@ -149,6 +150,8 @@ class shared_read_cache
     size_t get_store_offset_for_chunk(chunk_idx idx);
     request *get_fill_req(chunk_idx idx, void *data);
 
+    void on_store_done(chunk_idx idx);
+
   public:
     shared_read_cache(std::string cache_path, size_t num_cache_chunks,
                       sptr<backend> obj_backend);
@@ -182,4 +185,10 @@ class shared_read_cache
      */
     request *make_read_req(std::string img_prefix, uint64_t seqnum,
                            size_t obj_offset, size_t adjust, smartiov &dest);
+
+    /**
+     * Insert a backend object into the cache.
+    */
+    void insert_object(std::string img_prefix, uint64_t seqnum, size_t obj_size,
+                       void *obj_data);
 };

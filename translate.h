@@ -15,9 +15,9 @@
 #include <shared_mutex>
 
 #include "backend.h"
-#include "extent.h"
-#include "backend.h"
 #include "config.h"
+#include "extent.h"
+#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "utils.h"
 
@@ -52,7 +52,8 @@ class translate
 
 extern translate *make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
                                  extmap::objmap *map, extmap::bufmap *bufmap,
-                                 std::shared_mutex *m, std::mutex *buf_m);
+                                 std::shared_mutex *m, std::mutex *buf_m,
+                                 sptr<shared_read_cache> rcache);
 
 extern int translate_create_image(sptr<backend> objstore, const char *name,
                                   uint64_t size);
