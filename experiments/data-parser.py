@@ -76,6 +76,7 @@ files.sort(key=lambda x: os.path.getctime(os.path.join(result_dir, x)))
 
 for file_name in files:
     file_path = os.path.join(result_dir, file_name)
+    print(file_name)
     #timestamp = os.path.getctime(file_path)
     suffixes = {'k': 1e3, 'm': 1e6, 'g': 1e9}
     suffixes_bw = {'kib/s': 1e3, 'mib/s': 1e6, 'gib/s': 1e9}
@@ -102,7 +103,7 @@ for file_name in files:
         n_ram=n_ram+1
         #print("else: " +file_name)
 
-    if file_split[2]=='triple-ssd':
+    if file_split[2]=='rssd2':
         pool_type='ssd'
     elif file_split[2]=='triple-hdd':
         pool_type='hdd'
@@ -131,7 +132,7 @@ for file_name in files:
                     bs = match.group(4)
 
 
-                    # print("Workload:", workload)
+                    print("Workload:", workload)
                     # print("Time:", time_value)
                     # print("Iodepth:", iodepth)
                     # print("Block Size:", bs)
@@ -140,20 +141,22 @@ for file_name in files:
 
             if line.startswith("RESULT"):
                 #print(line)
-                match_fio = re.search("Fio \(iodepth=(\d+)\) (\w+): .* IOPS=([\d.]+[kKmMgG]?)?, BW=([\d.]+(?:[kKmMgG]i?)?B/s)?", line)
+                #match_fio = re.search("Fio \(iodepth=(\d+)\) (\w+): .* IOPS=([\d.]+[kKmMgG]?)?, BW=([\d.]+(?:[kKmMgG]i?)?B/s)?", line)
+                match_fio = re.search("Fio \(iodepth=(\d+); bs=(\w+)\) (\w+): .* IOPS=([\d.]+[kKmMgG]?)?, BW=([\d.]+(?:[kKmMgG]i?)?B/s)?", line)
                 #match_fio = re.search("Fio \(iodepth=(\d+)\) (\w+): .* IOPS=([\d.]+[kKmMgG]?)?, BW=([\d.]+)([BKMGTPEZY]?B/s)?", line)
                 #match_filebench = re.search("Filebench /tmp/filebench/(.*?):\d+\.\d+:.* IO Summary: (\d+) ops (\d+\.\d+) ops/s (\d+)/(\d+) rd/wr (\d+\.\d+[kKmMgG]?[Bb]/s)? (\d+\.\d+ms/op)?", line)
                 #match_filebench = re.search("Filebench /tmp/filebench/(.*?):\d+\.\d+:.* IO Summary: (\d+) ops (\d+\.\d+) .* (\d+\.\d+[kKmMgG]?[Bb]/s)? (\d+\.\d+ms/op)?", line)
                 match_filebench = re.search("Filebench /tmp/filebench/(.*?):\d+\.\d+:.* IO Summary: (\d+) ops (\d+\.\d+) .* (\d+\.\d+)[kKmMgG]?[Bb]/s? (\d+\.\d+ms/op)?", line)
 
-                # print(match_fio)
-                # print(match_filebench)
+                print(match_fio)
+                #print(match_filebench)
                 if match_fio:
                     result=True
                     iodepth_value = match_fio.group(1)
-                    request_type = match_fio.group(2)
-                    iops = match_fio.group(3)
-                    bw= match_fio.group(4)
+                    bs_value= match_fio.group(2)
+                    request_type = match_fio.group(3)
+                    iops = match_fio.group(4)
+                    bw= match_fio.group(5)
                     # print("iops_value: "+ iops_value)
                     # print("bw: "+ bw)
                     # bw2= match_fio.group(5)
@@ -175,7 +178,7 @@ for file_name in files:
                         bw_value = float(bw[:-5]) * suffixes_bw[suffix_bw]/1000000
                     else:
                         bw_value = float(bw)/1000
-                    print('bw_value: ' + str(bw_value))
+                    #print('bw_value: ' + str(bw_value))
                     #bw_value = match_fio.group(4)
 
                     
@@ -223,7 +226,7 @@ for file_name in files:
                          workload_array[6]=total_ops
                          workload_array[7]=throughput
             if(fio and result):
-                #print("INSIDE: " + workload)
+                print("INSIDE: " + workload)
                 csv_writer_fio_2.writerow([timestamp, hash_id, disk_type, pool_type, cache_size, workload, iodepth, bs, iops, iops_value, bw, bw_value])
                 fio=False
                 result=False

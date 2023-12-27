@@ -214,7 +214,7 @@ conditions_rbd_hdd_sw = (
 
 bw_lsvd_ssd_rr=df[conditions_lsvd_ssd_rr]
 bw_lsvd_ssd_rr=bw_lsvd_ssd_rr['bw'].iloc[0]
-#print(bw_lsvd_ssd_rr)
+print(bw_lsvd_ssd_rr)
 
 bw_rbd_ssd_rr=df[conditions_rbd_ssd_rr]
 bw_rbd_ssd_rr=bw_rbd_ssd_rr['bw'].iloc[0]
@@ -301,7 +301,7 @@ xlabel=['rand read', 'rand write', 'seq read', 'seq write']
 
 # fio_x =  df.loc[conditions_lsvd_ssd].head(5)['iodepth'].to_numpy() 
 # # set width of bar 
-barWidth = 0.20
+barWidth = 0.30
 fig = plt.subplots(figsize =(12, 8)) 
 
  
@@ -322,19 +322,20 @@ plt.bar(br2, rbd_ssd_bw, color ='g', width = barWidth,
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 # Adding Xticks 
-plt.xlabel('Request Type', fontweight ='bold', fontsize = 15) 
-plt.ylabel('Average Throughput (MiB/s)', fontweight ='bold', fontsize = 15) 
+plt.xlabel('Experiment', fontweight ='bold', fontsize = 20) 
+plt.ylim(0, 300)
+plt.ylabel('Throughput (MB/s)', fontweight ='bold', fontsize = 20) 
 plt.xticks([r + barWidth for r in range(len(lsvd_hdd_bw))], 
-        xlabel)
+        xlabel, fontsize=20)
  
 plt.legend()
-description = f"Request performance LSVD vs RBD for SSD backend. 80GB volume, 20GB cache, 4K blocksize, queue depth of 256"
-plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-plt.subplots_adjust(bottom=0.2) 
+description = f"FIO performance LSVD vs RBD for SSD backend. 80GB volume, 20GB cache, 4K blocksize, queue depth of 256"
+#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+#plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'request_bw_ssd_20gb.png'))
 plt.show()
 
-barWidth = 0.20
+barWidth = 0.30
 fig = plt.subplots(figsize =(12, 8)) 
 
  
@@ -355,15 +356,16 @@ plt.bar(br2, rbd_hdd_bw, color ='g', width = barWidth,
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 # Adding Xticks 
-plt.xlabel('Request Type', fontweight ='bold', fontsize = 15) 
-plt.ylabel('Average Throughput (MiB/s)', fontweight ='bold', fontsize = 15) 
+plt.xlabel('Experiment', fontweight ='bold', fontsize = 20) 
+plt.ylabel('Throughput (MB/s)', fontweight ='bold', fontsize = 20) 
+plt.ylim(0, 300)
 plt.xticks([r + barWidth for r in range(len(lsvd_hdd_bw))], 
-        xlabel)
+        xlabel, fontsize=20)
  
 plt.legend()
-description = f"Request performance LSVD vs RBD for Hard Disk backend. 80GB volume, 20GB cache, 4K blocksize, queue depth of 256"
-plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-plt.subplots_adjust(bottom=0.2) 
+description = f"FIO performance LSVD vs RBD for Hard Disk backend. 80GB volume, 20GB cache, 4K blocksize, queue depth of 256"
+#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+#plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'request_bw_hdd_20gb.png'))
 plt.show()
 
@@ -626,7 +628,7 @@ xlabel=['rand read', 'rand write', 'seq read', 'seq write']
 
 # fio_x =  df.loc[conditions_lsvd_ssd].head(5)['iodepth'].to_numpy() 
 
-barWidth = 0.20
+barWidth = 0.30
 fig = plt.subplots(figsize =(12, 8)) 
 
  
@@ -646,19 +648,20 @@ plt.bar(br2, rbd_ssd_bw, color ='g', width = barWidth,
 # plt.bar(br4, rbd_ssd_bw, color ='c', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
   
-plt.xlabel('Request Type', fontweight ='bold', fontsize = 15) 
-plt.ylabel('Average Throughput (MiB/s)', fontweight ='bold', fontsize = 15) 
+plt.xlabel('Experiment', fontweight ='bold', fontsize = 20) 
+plt.ylabel('Throughput (MB/s)', fontweight ='bold', fontsize = 20) 
+plt.ylim(0, 300)
 plt.xticks([r + barWidth for r in range(len(lsvd_hdd_bw))], 
-        xlabel)
+        xlabel, fontsize=20)
  
 plt.legend()
-description = f"Request performance LSVD vs RBD for SSD backend. 80GB volume, 240gb cache, 4K blocksize, queue depth of 256"
-plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-plt.subplots_adjust(bottom=0.2) 
+description = f"FIO Performance LSVD vs RBD for SSD backend. 80GB volume, 240GB cache, 4K blocksize, queue depth of 256"
+#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+#plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'request_bw_ssd_240gb.png'))
 plt.show()
 
-barWidth = 0.20
+barWidth = 0.30
 fig = plt.subplots(figsize =(12, 8)) 
 
  
@@ -677,15 +680,16 @@ plt.bar(br2, rbd_hdd_bw, color ='g', width = barWidth,
 # plt.bar(br4, rbd_ssd_bw, color ='c', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
  
-plt.xlabel('Request Type', fontweight ='bold', fontsize = 15) 
-plt.ylabel('Average Throughput (MiB/s)', fontweight ='bold', fontsize = 15) 
+plt.xlabel('Experiment', fontweight ='bold', fontsize = 20) 
+plt.ylabel('Throughput (MB/s)', fontweight ='bold', fontsize = 20)
+plt.ylim(0, 300) 
 plt.xticks([r + barWidth for r in range(len(lsvd_hdd_bw))], 
-        xlabel)
+        xlabel, fontsize=20)
  
 plt.legend()
-description = f"Request performance LSVD vs RBD for Hard Disk backend. 80GB volume, 240gb cache, 4K blocksize, queue depth of 256"
-plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-plt.subplots_adjust(bottom=0.2) 
+description = f"FIO Performance LSVD vs RBD for Hard Disk backend. 80GB volume, 240GB cache, 4K blocksize, queue depth of 256"
+#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+#plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'request_bw_hdd_240gb.png'))
 plt.show()
 
@@ -724,29 +728,30 @@ fig = plt.subplots(figsize =(12, 8))
  
 br1 = np.arange(len(lsvd_hdd)) 
 br2 = [x + barWidth for x in br1] 
-# br3 = [x + barWidth for x in br2] 
+br3 = [x + barWidth for x in br2] 
 # br4 = [x + barWidth for x in br3]
  
 
 plt.bar(br1, lsvd_hdd, color ='r', width = barWidth, 
         edgecolor ='grey', label ='lsvd_hdd') 
-plt.bar(br2, rbd_ssd, color ='g', width = barWidth, 
-        edgecolor ='grey', label ='rbd_ssd') 
-# plt.bar(br3, rbd_hdd, color ='b', width = barWidth, 
-#         edgecolor ='grey', label ='rbd_hdd')
+plt.bar(br2, lsvd_ssd, color ='g', width = barWidth, 
+        edgecolor ='grey', label ='lsvd_ssd') 
+plt.bar(br3, rbd_ssd, color ='b', width = barWidth, 
+        edgecolor ='grey', label ='rbd_ssd')
 # plt.bar(br4, rbd_ssd, color ='c', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 # Adding Xticks 
-plt.xlabel('Filebench Workload', fontweight ='bold', fontsize = 15) 
-plt.ylabel('Average Throughput (MiB/s)', fontweight ='bold', fontsize = 15) 
+plt.xlabel('Filebench Workload', fontweight ='bold', fontsize = 20)
+plt.ylim(0, 1800)  
+plt.ylabel('Throughput (MB/s)', fontweight ='bold', fontsize = 20) 
 plt.xticks([r + barWidth for r in range(len(lsvd_hdd))], 
-        file_x)
+        file_x, fontsize=20)
  
 plt.legend()
 description = f"Filebench throughput, LSVD on Hard Disk vs RBD on SSD backend. 80GB volume, 240GB cache"
-plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-plt.subplots_adjust(bottom=0.2) 
+#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+#plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'filebench_240g.png'))
 plt.show() 
 
@@ -782,29 +787,30 @@ fig = plt.subplots(figsize =(12, 8))
 # Set position of bar on X axis 
 br1 = np.arange(len(lsvd_hdd)) 
 br2 = [x + barWidth for x in br1] 
-# br3 = [x + barWidth for x in br2] 
+br3 = [x + barWidth for x in br2] 
 # br4 = [x + barWidth for x in br3]
  
 # Make the plot
 plt.bar(br1, lsvd_hdd, color ='r', width = barWidth, 
         edgecolor ='grey', label ='lsvd_hdd') 
-plt.bar(br2, rbd_ssd, color ='g', width = barWidth, 
-        edgecolor ='grey', label ='rbd_ssd') 
-# plt.bar(br3, rbd_hdd, color ='b', width = barWidth, 
-#         edgecolor ='grey', label ='rbd_hdd')
-# plt.bar(br4, rbd_ssd, color ='c', width = barWidth, 
-#         edgecolor ='grey', label ='rbd_ssd') 
+plt.bar(br2, lsvd_ssd, color ='g', width = barWidth, 
+        edgecolor ='grey', label ='lsvd_ssd') 
+plt.bar(br3, rbd_ssd, color ='b', width = barWidth, 
+        edgecolor ='grey', label ='rbd_ssd')
+# plt.bar(br4, lsvd_ssd, color ='c', width = barWidth, 
+#         edgecolor ='grey', label ='lsvd_ssd') 
  
 # Adding Xticks 
-plt.xlabel('Filebench Workload', fontweight ='bold', fontsize = 15) 
-plt.ylabel('Average Throughput (MiB/s)', fontweight ='bold', fontsize = 15) 
+plt.xlabel('Filebench Workload', fontweight ='bold', fontsize = 20) 
+plt.ylim(0, 1800) 
+plt.ylabel('Throughput (MB/s)', fontweight ='bold', fontsize = 20) 
 plt.xticks([r + barWidth for r in range(len(lsvd_hdd))], 
-        file_x)
+        file_x, fontsize=20)
  
 plt.legend()
 description = f"Filebench throughput, LSVD on Hard Disk vs RBD on SSD backend. 80GB volume, 20GB cache"
-plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-plt.subplots_adjust(bottom=0.2) 
+#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+#plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'filebench_20g.png'))
 plt.show() 
 
