@@ -185,7 +185,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
 
             auto &entry = cache.cache_state[chunk];
             entry.status = entry_status::FILLING;
-            // entry.pending_fill_data = buf;
+            entry.pending_fill_data = buf;
 
             reqs = entry.pending_reads;
             entry.pending_reads.clear();
@@ -208,25 +208,14 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     {
         free_child(subrequest);
 
-        std::vector<pending_read_request *> reqs;
         {
             std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
 
             auto &entry = cache.cache_state[chunk];
             entry.status = entry_status::VALID;
-            cache.cache_map.left.insert(std::make_pair(key, chunk));
-
-            // TEMPORARY HACK: disptach reads on store done because we don't
-            // directly read from the buffer when it's there
-            reqs = entry.pending_reads;
-            entry.pending_reads.clear();
-
-            // entry.pending_fill_data = nullptr;
+            entry.pending_fill_data = nullptr;
             entry.refcount--;
         }
-
-        for (auto &req : reqs)
-            req->on_backend_done(buf);
 
         free(buf);
         this->dec_and_free();
@@ -341,7 +330,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
     total_requests++;
 
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
     auto r =
@@ -374,12 +363,13 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         // Backend request is done but we're pushing it to nvme, in this case
         // the data will be in the pending_fill_data field and we should just
         // directly return it
-        // TEMPORARY HACK: just use the pending read request and dispatch
-        // the pending reads when the fill is done
+        if (entry.status == entry_status::FILLING) {
+            dest.copy_in((char *)entry.pending_fill_data + adjust);
+            return nullptr;
+        }
 
         // Backend request is pending, wait for it to complete
-        if (entry.status == entry_status::FETCHING ||
-            entry.status == entry_status::FILLING) {
+        if (entry.status == entry_status::FETCHING) {
             trace("pending on chunk {}", idx);
             auto req = new pending_read_request(*this, idx, adjust, dest);
             entry.pending_reads.push_back(req);
@@ -387,7 +377,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         }
     }
 
-    lock.unlock();
+    // lock.unlock();
 
     // Cache miss path: allocate a chunk, fetch from backend, and then fill
     // the chunk in
@@ -401,19 +391,20 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // upgrade to write lock
     // TODO verify safety? the only person to read the abit is the allocator,
     // and it is protected by an exclusive lock, so it should be fine
-    std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
+    auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
+    // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
-    auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
-
     auto &entry = cache_state[idx];
-    // entry.pending_fill_data = buf;
+    entry.pending_fill_data = buf;
     entry.refcount++;
+    entry.status = entry_status::FETCHING;
 
     objname obj_name(img_prefix, seqnum);
     auto backend_req = obj_backend->make_read_req(
         obj_name.c_str(), obj_offset, (char *)buf, CACHE_CHUNK_SIZE);
     auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
+    cache_map.left.insert(std::make_pair(cache_key, idx));
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);
     return req;
@@ -474,7 +465,7 @@ void shared_read_cache::served_bypass_request(size_t bytes)
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 {
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
     auto &entry = cache_state[chunk];
     assert(entry.refcount > 0);
     entry.refcount--;

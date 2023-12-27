@@ -79,7 +79,7 @@ class shared_read_cache
         // This is used when the backend request has come back and we're now
         // going to fill it into the cache. Status must be FILLING.
         // NULL at all other times
-        // void *pending_fill_data = nullptr;
+        void *pending_fill_data = nullptr;
 
         // Keep track of pending reads
         std::vector<pending_read_request *> pending_reads;
