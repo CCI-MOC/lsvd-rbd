@@ -268,7 +268,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
           CACHE_CHUNK_SIZE);
 
     cache_store =
-        std::unique_ptr<nvme>(make_nvme_uring(fd, "shared_read_cache"));
+        std::unique_ptr<nvme>(make_nvme_uring(fd, "rcache_uring"));
     cache_state = std::vector<entry_state>(num_cache_blocks);
 
     cache_stats_reporter =
