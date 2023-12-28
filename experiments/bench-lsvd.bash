@@ -38,8 +38,8 @@ make -j20 release
 # make -j20 nosan
 
 # keep a copy of the library around to debug coredumps
-mkdir -p $lsvd_dir/baklibs/
-cp $lsvd_dir/liblsvd.so $lsvd_dir/baklibs/liblsvd.so.$cur_time
+mkdir -p $lsvd_dir/test/baklibs/
+cp $lsvd_dir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
 
 # create_lsvd_thin $pool_name $imgname $imgsize
 create_lsvd_thick $pool_name $imgname $imgsize
