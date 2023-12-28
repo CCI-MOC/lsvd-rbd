@@ -31,18 +31,38 @@ source $lsvd_dir/experiments/common.bash
 echo '===Building LSVD...'
 cd $lsvd_dir
 make clean
-make -j20 release
-# make -j20 nosan
+# make -j20 release
+make -j20 debug
 
 # create_lsvd_thin $pool_name $imgname $imgsize
-create_lsvd_thick $pool_name $imgname $imgsize
+# create_lsvd_thick $pool_name $imgname $imgsize
 
 kill_nvmf
 
 fstrim /mnt/nvme
-launch_lsvd_gw_background $rcache $wlog $cache_size
+
+mkdir -p /mnt/nvme//lsvd-read/ /mnt/nvme-remote//lsvd-write/
+export LSVD_RCACHE_DIR=/mnt/nvme//lsvd-read/
+export LSVD_WCACHE_DIR=/mnt/nvme-remote//lsvd-write/
+export LSVD_GC_THRESHOLD=40
+export LSVD_CACHE_SIZE=$lsvd_cache_size
+rm -rf /mnt/nvme-remote/lsvd-write/*
+
+LD_PRELOAD="/lib/x86_64-linux-gnu/libasan.so.8 /lib/x86_64-linux-gnu/libubsan.so.1 /home/isaackhor/code/lsvd-rbd/liblsvd.so" \
+	./build/bin/nvmf_tgt -m '[0,1,2,3]' &
+
+sleep 5
+
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 
-run_client_bench $client_ip $outfile client-bench.bash "read_entire_img=1"
+lsvd_pid=$(ps aux | perl -lane 'print @F[1] if /nvmf_tgt/ and not /perl/')
+gdb attach $lsvd_pid -ex cont
+
+exit
+
+cd $lsvd_dir
+ssh $client_ip 'mkdir -p /tmp/filebench; rm -rf /tmp/filebench/*'
+scp ./experiments/filebench-workloads/*.f root@$client_ip:/tmp/filebench/
+ssh $client_ip "bash -s gw_ip=$gw_ip" <./test/client-repro-bug.bash 2>&1 | tee -a $outfile
