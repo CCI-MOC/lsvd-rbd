@@ -49,7 +49,7 @@ struct lsvd_completion {
     int magic = LSVD_MAGIC;
 
   private:
-    std::atomic_int refcount = 1;
+    std::atomic_int refcount = 2;
     std::atomic_flag done = ATOMIC_FLAG_INIT;
 
     rbd_callback_t cb;
@@ -80,7 +80,7 @@ struct lsvd_completion {
     void run()
     {
         assert(req != nullptr);
-        refcount++;
+        // refcount++;
         this->req->run(nullptr);
     }
 
