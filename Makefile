@@ -16,7 +16,7 @@ TARGET_EXECS = imgtool thick-image
 TEST_EXECS = lsvd_crash_test lsvd_rnd_test test-rados test-seq unit-test 
 LSVD_DEPS = objects.o translate.o io.o img_reader.o config.o mkcache.o \
 	nvme.o write_cache.o file_backend.o shared_read_cache.o \
-	rados_backend.o lsvd_debug.o liblsvd.o
+	rados_backend.o lsvd_debug.o liblsvd.o image.o
 
 debug: CXXFLAGS += -fsanitize=undefined -fsanitize=float-divide-by-zero -fsanitize=local-bounds 
 debug: CXXFLAGS += -fsanitize=implicit-conversion -fsanitize=nullability -fsanitize=integer

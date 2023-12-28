@@ -8,6 +8,10 @@
 #include "lsvd_types.h"
 #include "objects.h"
 #include "shared_read_cache.h"
+#include "backend.h"
+#include "write_cache.h"
+#include "translate.h"
+#include "img_reader.h"
 
 struct event_socket {
     int socket;
@@ -44,11 +48,6 @@ struct event_socket {
         return rv;
     }
 };
-
-class img_reader;
-class write_cache;
-class backend;
-class translate;
 
 struct rbd_image {
     std::string image_name;

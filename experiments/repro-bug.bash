@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -xeuo pipefail
-ulimit -c
+ulimit -c unlimited
 
 export lsvd_cache_size=$((240 * 1024 * 1024 * 1024))
 
@@ -21,7 +21,7 @@ outfile=$lsvd_dir/experiments/results/debug.out
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
-imgname=lsvd-benchmark
+imgname=lsvd-bug-repro
 imgsize=80g
 blocksize=4096
 
@@ -35,7 +35,7 @@ make -j20 release
 # make -j20 nosan
 
 # create_lsvd_thin $pool_name $imgname $imgsize
-# create_lsvd_thick $pool_name $imgname $imgsize
+create_lsvd_thick $pool_name $imgname $imgsize
 
 kill_nvmf
 
