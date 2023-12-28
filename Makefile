@@ -5,8 +5,7 @@ BUILD_DIR = build
 .DEFAULT_GOAL := debug
 .SILENT: debug release
 
-CFLAGS = -ggdb3 -Wall $(OPT)
-CXXFLAGS = -std=c++20 -ggdb3 $(OPT) -fno-omit-frame-pointer -fPIC -I./liburing/src/include
+CXXFLAGS = -std=c++20 -ggdb3 -fno-omit-frame-pointer -fPIC -I./liburing/src/include
 CXXFLAGS += -fsized-deallocation
 LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -ltcmalloc
 LDFLAGS += -fuse-ld=mold -L./liburing/src -l:liburing.a
