@@ -286,8 +286,11 @@ extern "C" int rbd_close(rbd_image_t image)
     rbd_image *img = (rbd_image *)image;
     log_info("Closing image {}", img->image_name);
     img->image_close();
-    delete img;
 
+    // poor man's race prevention. wait for in-flight requests
+    sleep(2);
+
+    delete img;
     return 0;
 }
 

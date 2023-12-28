@@ -3,8 +3,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "journal.h"
 #include "image.h"
+#include "journal.h"
 #include "lsvd_types.h"
 
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
@@ -24,17 +24,22 @@ int rbd_image::poll_io_events(rbd_completion_t *comps, int numcomp)
     return i;
 }
 
-int rbd_image::image_close(void)
+rbd_image::~rbd_image()
 {
     delete reader;
+    delete wcache;
+    delete xlate;
+
+    close(write_fd);
+}
+
+int rbd_image::image_close(void)
+{
     wcache->flush();
     wcache->do_write_checkpoint();
-    delete wcache;
     if (!cfg.no_gc)
         xlate->stop_gc();
     xlate->checkpoint();
-    delete xlate;
-    close(write_fd);
     return 0;
 }
 

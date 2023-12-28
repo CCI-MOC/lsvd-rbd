@@ -78,7 +78,7 @@ struct rbd_image {
     bool done = false;
 
     rbd_image() {}
-    ~rbd_image() {}
+    ~rbd_image();
 
     int image_open(rados_ioctx_t io, const char *name);
     int image_close(void);

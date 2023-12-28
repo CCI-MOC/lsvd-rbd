@@ -515,8 +515,12 @@ void shared_read_cache::report_cache_stats()
     pthread_setname_np(pthread_self(), "cache_stats_reporter");
     static int last_total_reqs = 0;
 
+    auto wakes = 0;
     while (!stop_cache_stats_reporter.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1'000));
+        if (wakes++ % 20 != 0)
+            continue;
+
         std::lock_guard lock(cache_stats_lock);
 
         // Don't report anything if there were no new requests
