@@ -1,0 +1,1077 @@
+===Starting client benchmark
+
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 0 controller(s)
+device: nvme1
+Node                  SN                   Model                                    Namespace Usage                      Format           FW Rev  
+--------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+/dev/nvme0n1          PHM27522000B480BGN   INTEL SSDPE21D480GA                      1         480.10  GB / 480.10  GB    512   B +  0 B   E2010414
+/dev/nvme1n1          SPDK00000000000001   SPDK_Controller1                         1          85.90  GB /  85.90  GB      4 KiB +  0 B   23.09   
+Using device /dev/nvme1n1
+
+
+===Reading entire image to warm cache===
+
+100663296 bytes (101 MB, 96 MiB) copied, 1 s, 100 MB/s212860928 bytes (213 MB, 203 MiB) copied, 2 s, 106 MB/s322961408 bytes (323 MB, 308 MiB) copied, 3 s, 108 MB/s435159040 bytes (435 MB, 415 MiB) copied, 4 s, 109 MB/s551550976 bytes (552 MB, 526 MiB) copied, 5 s, 110 MB/s665845760 bytes (666 MB, 635 MiB) copied, 6 s, 111 MB/s784334848 bytes (784 MB, 748 MiB) copied, 7 s, 112 MB/s897581056 bytes (898 MB, 856 MiB) copied, 8 s, 112 MB/s1007681536 bytes (1.0 GB, 961 MiB) copied, 9 s, 112 MB/s1115684864 bytes (1.1 GB, 1.0 GiB) copied, 10 s, 111 MB/s1223688192 bytes (1.2 GB, 1.1 GiB) copied, 11 s, 111 MB/s1327497216 bytes (1.3 GB, 1.2 GiB) copied, 12 s, 111 MB/s1435500544 bytes (1.4 GB, 1.3 GiB) copied, 13 s, 110 MB/s1544552448 bytes (1.5 GB, 1.4 GiB) copied, 14 s, 110 MB/s1653604352 bytes (1.7 GB, 1.5 GiB) copied, 15 s, 110 MB/s1772093440 bytes (1.8 GB, 1.7 GiB) copied, 16 s, 111 MB/s1882193920 bytes (1.9 GB, 1.8 GiB) copied, 17 s, 111 MB/s1996488704 bytes (2.0 GB, 1.9 GiB) copied, 18 s, 111 MB/s2108686336 bytes (2.1 GB, 2.0 GiB) copied, 19 s, 111 MB/s2215641088 bytes (2.2 GB, 2.1 GiB) copied, 20 s, 111 MB/s2333081600 bytes (2.3 GB, 2.2 GiB) copied, 21 s, 111 MB/s2442133504 bytes (2.4 GB, 2.3 GiB) copied, 22 s, 111 MB/s2550136832 bytes (2.6 GB, 2.4 GiB) copied, 23 s, 111 MB/s2663383040 bytes (2.7 GB, 2.5 GiB) copied, 24 s, 111 MB/s2773483520 bytes (2.8 GB, 2.6 GiB) copied, 25 s, 111 MB/s2883584000 bytes (2.9 GB, 2.7 GiB) copied, 26 s, 111 MB/s2987393024 bytes (3.0 GB, 2.8 GiB) copied, 27 s, 111 MB/s3091202048 bytes (3.1 GB, 2.9 GiB) copied, 28 s, 110 MB/s3204448256 bytes (3.2 GB, 3.0 GiB) copied, 29 s, 110 MB/s3308257280 bytes (3.3 GB, 3.1 GiB) copied, 30 s, 110 MB/s3421503488 bytes (3.4 GB, 3.2 GiB) copied, 31 s, 110 MB/s3525312512 bytes (3.5 GB, 3.3 GiB) copied, 32 s, 110 MB/s3629121536 bytes (3.6 GB, 3.4 GiB) copied, 33 s, 110 MB/s3745513472 bytes (3.7 GB, 3.5 GiB) copied, 34 s, 110 MB/s3858759680 bytes (3.9 GB, 3.6 GiB) copied, 35 s, 110 MB/s3963617280 bytes (4.0 GB, 3.7 GiB) copied, 36 s, 110 MB/s4075814912 bytes (4.1 GB, 3.8 GiB) copied, 37 s, 110 MB/s4191158272 bytes (4.2 GB, 3.9 GiB) copied, 38 s, 110 MB/s4299161600 bytes (4.3 GB, 4.0 GiB) copied, 39 s, 110 MB/s4412407808 bytes (4.4 GB, 4.1 GiB) copied, 40 s, 110 MB/s4517265408 bytes (4.5 GB, 4.2 GiB) copied, 41 s, 110 MB/s4627365888 bytes (4.6 GB, 4.3 GiB) copied, 42 s, 110 MB/s4739563520 bytes (4.7 GB, 4.4 GiB) copied, 43 s, 110 MB/s4852809728 bytes (4.9 GB, 4.5 GiB) copied, 44 s, 110 MB/s4968153088 bytes (5.0 GB, 4.6 GiB) copied, 45 s, 110 MB/s5083496448 bytes (5.1 GB, 4.7 GiB) copied, 46 s, 111 MB/s5194645504 bytes (5.2 GB, 4.8 GiB) copied, 47 s, 111 MB/s5299503104 bytes (5.3 GB, 4.9 GiB) copied, 48 s, 110 MB/s5406457856 bytes (5.4 GB, 5.0 GiB) copied, 49 s, 110 MB/s5517606912 bytes (5.5 GB, 5.1 GiB) copied, 50 s, 110 MB/s5635047424 bytes (5.6 GB, 5.2 GiB) copied, 51 s, 110 MB/s5746196480 bytes (5.7 GB, 5.4 GiB) copied, 52 s, 110 MB/s5856296960 bytes (5.9 GB, 5.5 GiB) copied, 53 s, 110 MB/s5966397440 bytes (6.0 GB, 5.6 GiB) copied, 54 s, 110 MB/s6079643648 bytes (6.1 GB, 5.7 GiB) copied, 55 s, 111 MB/s6191841280 bytes (6.2 GB, 5.8 GiB) copied, 56 s, 111 MB/s6299844608 bytes (6.3 GB, 5.9 GiB) copied, 57 s, 111 MB/s6407847936 bytes (6.4 GB, 6.0 GiB) copied, 58 s, 110 MB/s6524239872 bytes (6.5 GB, 6.1 GiB) copied, 59 s, 111 MB/s6642728960 bytes (6.6 GB, 6.2 GiB) copied, 60 s, 111 MB/s6753878016 bytes (6.8 GB, 6.3 GiB) copied, 61 s, 111 MB/s6871318528 bytes (6.9 GB, 6.4 GiB) copied, 62 s, 111 MB/s6974078976 bytes (7.0 GB, 6.5 GiB) copied, 63 s, 111 MB/s7079985152 bytes (7.1 GB, 6.6 GiB) copied, 64 s, 111 MB/s7196377088 bytes (7.2 GB, 6.7 GiB) copied, 65 s, 111 MB/s7309623296 bytes (7.3 GB, 6.8 GiB) copied, 66 s, 111 MB/s7414480896 bytes (7.4 GB, 6.9 GiB) copied, 67 s, 111 MB/s7529824256 bytes (7.5 GB, 7.0 GiB) copied, 68 s, 111 MB/s7649361920 bytes (7.6 GB, 7.1 GiB) copied, 69 s, 111 MB/s7759462400 bytes (7.8 GB, 7.2 GiB) copied, 70 s, 111 MB/s7872708608 bytes (7.9 GB, 7.3 GiB) copied, 71 s, 111 MB/s7982809088 bytes (8.0 GB, 7.4 GiB) copied, 72 s, 111 MB/s8103395328 bytes (8.1 GB, 7.5 GiB) copied, 73 s, 111 MB/s8213495808 bytes (8.2 GB, 7.6 GiB) copied, 74 s, 111 MB/s8330936320 bytes (8.3 GB, 7.8 GiB) copied, 75 s, 111 MB/s8432648192 bytes (8.4 GB, 7.9 GiB) copied, 76 s, 111 MB/s8540651520 bytes (8.5 GB, 8.0 GiB) copied, 77 s, 111 MB/s8651800576 bytes (8.7 GB, 8.1 GiB) copied, 78 s, 111 MB/s8772386816 bytes (8.8 GB, 8.2 GiB) copied, 79 s, 111 MB/s8888778752 bytes (8.9 GB, 8.3 GiB) copied, 80 s, 111 MB/s9004122112 bytes (9.0 GB, 8.4 GiB) copied, 81 s, 111 MB/s9118416896 bytes (9.1 GB, 8.5 GiB) copied, 82 s, 111 MB/s9232711680 bytes (9.2 GB, 8.6 GiB) copied, 83 s, 111 MB/s9350152192 bytes (9.4 GB, 8.7 GiB) copied, 84 s, 111 MB/s9465495552 bytes (9.5 GB, 8.8 GiB) copied, 85 s, 111 MB/s9575596032 bytes (9.6 GB, 8.9 GiB) copied, 86 s, 111 MB/s9684647936 bytes (9.7 GB, 9.0 GiB) copied, 87 s, 111 MB/s9799991296 bytes (9.8 GB, 9.1 GiB) copied, 88 s, 111 MB/s9916383232 bytes (9.9 GB, 9.2 GiB) copied, 89 s, 111 MB/s10026483712 bytes (10 GB, 9.3 GiB) copied, 90 s, 111 MB/s10129244160 bytes (10 GB, 9.4 GiB) copied, 91 s, 111 MB/s10235150336 bytes (10 GB, 9.5 GiB) copied, 92 s, 111 MB/s10341056512 bytes (10 GB, 9.6 GiB) copied, 93 s, 111 MB/s10452205568 bytes (10 GB, 9.7 GiB) copied, 94 s, 111 MB/s10569646080 bytes (11 GB, 9.8 GiB) copied, 95 s, 111 MB/s10684989440 bytes (11 GB, 10 GiB) copied, 96 s, 111 MB/s 10798235648 bytes (11 GB, 10 GiB) copied, 97 s, 111 MB/s10912530432 bytes (11 GB, 10 GiB) copied, 98 s, 111 MB/s11027873792 bytes (11 GB, 10 GiB) copied, 99 s, 111 MB/s11127488512 bytes (11 GB, 10 GiB) copied, 100 s, 111 MB/s11240734720 bytes (11 GB, 10 GiB) copied, 101 s, 111 MB/s11349786624 bytes (11 GB, 11 GiB) copied, 102 s, 111 MB/s11460935680 bytes (11 GB, 11 GiB) copied, 103 s, 111 MB/s11578376192 bytes (12 GB, 11 GiB) copied, 104 s, 111 MB/s11690573824 bytes (12 GB, 11 GiB) copied, 105 s, 111 MB/s11803820032 bytes (12 GB, 11 GiB) copied, 106 s, 111 MB/s11916017664 bytes (12 GB, 11 GiB) copied, 107 s, 111 MB/s12034506752 bytes (12 GB, 11 GiB) copied, 108 s, 111 MB/s12140412928 bytes (12 GB, 11 GiB) copied, 109 s, 111 MB/s12255756288 bytes (12 GB, 11 GiB) copied, 110 s, 111 MB/s12369002496 bytes (12 GB, 12 GiB) copied, 111 s, 111 MB/s12478054400 bytes (12 GB, 12 GiB) copied, 112 s, 111 MB/s12583960576 bytes (13 GB, 12 GiB) copied, 113 s, 111 MB/s12698255360 bytes (13 GB, 12 GiB) copied, 114 s, 111 MB/s12817793024 bytes (13 GB, 12 GiB) copied, 115 s, 111 MB/s12933136384 bytes (13 GB, 12 GiB) copied, 116 s, 111 MB/s13050576896 bytes (13 GB, 12 GiB) copied, 117 s, 112 MB/s13159628800 bytes (13 GB, 12 GiB) copied, 118 s, 112 MB/s13274972160 bytes (13 GB, 12 GiB) copied, 119 s, 112 MB/s13389266944 bytes (13 GB, 12 GiB) copied, 120 s, 112 MB/s13501464576 bytes (14 GB, 13 GiB) copied, 121 s, 112 MB/s13610516480 bytes (14 GB, 13 GiB) copied, 122 s, 112 MB/s13717471232 bytes (14 GB, 13 GiB) copied, 123 s, 112 MB/s13832814592 bytes (14 GB, 13 GiB) copied, 124 s, 112 MB/s13943963648 bytes (14 GB, 13 GiB) copied, 125 s, 112 MB/s14066647040 bytes (14 GB, 13 GiB) copied, 126 s, 112 MB/s14184087552 bytes (14 GB, 13 GiB) copied, 127 s, 112 MB/s14304673792 bytes (14 GB, 13 GiB) copied, 128 s, 112 MB/s14421065728 bytes (14 GB, 13 GiB) copied, 129 s, 112 MB/s14525923328 bytes (15 GB, 14 GiB) copied, 130 s, 112 MB/s14647558144 bytes (15 GB, 14 GiB) copied, 131 s, 112 MB/s14762901504 bytes (15 GB, 14 GiB) copied, 132 s, 112 MB/s14876147712 bytes (15 GB, 14 GiB) copied, 133 s, 112 MB/s14990442496 bytes (15 GB, 14 GiB) copied, 134 s, 112 MB/s15112077312 bytes (15 GB, 14 GiB) copied, 135 s, 112 MB/s15225323520 bytes (15 GB, 14 GiB) copied, 136 s, 112 MB/s15339618304 bytes (15 GB, 14 GiB) copied, 137 s, 112 MB/s15448670208 bytes (15 GB, 14 GiB) copied, 138 s, 112 MB/s15553527808 bytes (16 GB, 14 GiB) copied, 139 s, 112 MB/s15670968320 bytes (16 GB, 15 GiB) copied, 140 s, 112 MB/s15770583040 bytes (16 GB, 15 GiB) copied, 141 s, 112 MB/s15883829248 bytes (16 GB, 15 GiB) copied, 142 s, 112 MB/s15999172608 bytes (16 GB, 15 GiB) copied, 143 s, 112 MB/s16119758848 bytes (16 GB, 15 GiB) copied, 144 s, 112 MB/s16236150784 bytes (16 GB, 15 GiB) copied, 145 s, 112 MB/s16350445568 bytes (16 GB, 15 GiB) copied, 146 s, 112 MB/s16455303168 bytes (16 GB, 15 GiB) copied, 147 s, 112 MB/s16558063616 bytes (17 GB, 15 GiB) copied, 148 s, 112 MB/s16666066944 bytes (17 GB, 16 GiB) copied, 149 s, 112 MB/s16776167424 bytes (17 GB, 16 GiB) copied, 150 s, 112 MB/s16890462208 bytes (17 GB, 16 GiB) copied, 151 s, 112 MB/s16992174080 bytes (17 GB, 16 GiB) copied, 152 s, 112 MB/s17100177408 bytes (17 GB, 16 GiB) copied, 153 s, 112 MB/s17212375040 bytes (17 GB, 16 GiB) copied, 154 s, 112 MB/s17322475520 bytes (17 GB, 16 GiB) copied, 155 s, 112 MB/s17434673152 bytes (17 GB, 16 GiB) copied, 156 s, 112 MB/s17540579328 bytes (18 GB, 16 GiB) copied, 157 s, 112 MB/s17649631232 bytes (18 GB, 16 GiB) copied, 158 s, 112 MB/s17759731712 bytes (18 GB, 17 GiB) copied, 159 s, 112 MB/s17865637888 bytes (18 GB, 17 GiB) copied, 160 s, 112 MB/s17978884096 bytes (18 GB, 17 GiB) copied, 161 s, 112 MB/s18088984576 bytes (18 GB, 17 GiB) copied, 162 s, 112 MB/s18193842176 bytes (18 GB, 17 GiB) copied, 163 s, 112 MB/s18309185536 bytes (18 GB, 17 GiB) copied, 164 s, 112 MB/s18424528896 bytes (18 GB, 17 GiB) copied, 165 s, 112 MB/s18532532224 bytes (19 GB, 17 GiB) copied, 166 s, 112 MB/s18644729856 bytes (19 GB, 17 GiB) copied, 167 s, 112 MB/s18762170368 bytes (19 GB, 17 GiB) copied, 168 s, 112 MB/s18875416576 bytes (19 GB, 18 GiB) copied, 169 s, 112 MB/s18980274176 bytes (19 GB, 18 GiB) copied, 170 s, 112 MB/s19094568960 bytes (19 GB, 18 GiB) copied, 171 s, 112 MB/s19199426560 bytes (19 GB, 18 GiB) copied, 172 s, 112 MB/s19295895552 bytes (19 GB, 18 GiB) copied, 173 s, 112 MB/s19414384640 bytes (19 GB, 18 GiB) copied, 174 s, 112 MB/s19529728000 bytes (20 GB, 18 GiB) copied, 175 s, 112 MB/s19644022784 bytes (20 GB, 18 GiB) copied, 176 s, 112 MB/s19747831808 bytes (20 GB, 18 GiB) copied, 177 s, 112 MB/s19860029440 bytes (20 GB, 18 GiB) copied, 178 s, 112 MB/s19970129920 bytes (20 GB, 19 GiB) copied, 179 s, 112 MB/s20080230400 bytes (20 GB, 19 GiB) copied, 180 s, 112 MB/s20191379456 bytes (20 GB, 19 GiB) copied, 181 s, 112 MB/s20308819968 bytes (20 GB, 19 GiB) copied, 182 s, 112 MB/s20421017600 bytes (20 GB, 19 GiB) copied, 183 s, 112 MB/s20539506688 bytes (21 GB, 19 GiB) copied, 184 s, 112 MB/s20653801472 bytes (21 GB, 19 GiB) copied, 185 s, 112 MB/s20767047680 bytes (21 GB, 19 GiB) copied, 186 s, 112 MB/s20880293888 bytes (21 GB, 19 GiB) copied, 187 s, 112 MB/s20997734400 bytes (21 GB, 20 GiB) copied, 188 s, 112 MB/s21098397696 bytes (21 GB, 20 GiB) copied, 189 s, 112 MB/s21210595328 bytes (21 GB, 20 GiB) copied, 190 s, 112 MB/s21319647232 bytes (21 GB, 20 GiB) copied, 191 s, 112 MB/s21433942016 bytes (21 GB, 20 GiB) copied, 192 s, 112 MB/s21539848192 bytes (22 GB, 20 GiB) copied, 193 s, 112 MB/s21653094400 bytes (22 GB, 20 GiB) copied, 194 s, 112 MB/s21765292032 bytes (22 GB, 20 GiB) copied, 195 s, 112 MB/s21878538240 bytes (22 GB, 20 GiB) copied, 196 s, 112 MB/s21990735872 bytes (22 GB, 20 GiB) copied, 197 s, 112 MB/s22097690624 bytes (22 GB, 21 GiB) copied, 198 s, 112 MB/s22207791104 bytes (22 GB, 21 GiB) copied, 199 s, 112 MB/s22321037312 bytes (22 GB, 21 GiB) copied, 200 s, 112 MB/s22438477824 bytes (22 GB, 21 GiB) copied, 201 s, 112 MB/s22552772608 bytes (23 GB, 21 GiB) copied, 202 s, 112 MB/s22663921664 bytes (23 GB, 21 GiB) copied, 203 s, 112 MB/s22781362176 bytes (23 GB, 21 GiB) copied, 204 s, 112 MB/s22888316928 bytes (23 GB, 21 GiB) copied, 205 s, 112 MB/s23002611712 bytes (23 GB, 21 GiB) copied, 206 s, 112 MB/s23113760768 bytes (23 GB, 22 GiB) copied, 207 s, 112 MB/s23229104128 bytes (23 GB, 22 GiB) copied, 208 s, 112 MB/s23333961728 bytes (23 GB, 22 GiB) copied, 209 s, 112 MB/s23450353664 bytes (23 GB, 22 GiB) copied, 210 s, 112 MB/s23557308416 bytes (24 GB, 22 GiB) copied, 211 s, 112 MB/s23670554624 bytes (24 GB, 22 GiB) copied, 212 s, 112 MB/s23782752256 bytes (24 GB, 22 GiB) copied, 213 s, 112 MB/s23893901312 bytes (24 GB, 22 GiB) copied, 214 s, 112 MB/s24005050368 bytes (24 GB, 22 GiB) copied, 215 s, 112 MB/s24119345152 bytes (24 GB, 22 GiB) copied, 216 s, 112 MB/s24231542784 bytes (24 GB, 23 GiB) copied, 217 s, 112 MB/s24344788992 bytes (24 GB, 23 GiB) copied, 218 s, 112 MB/s24443355136 bytes (24 GB, 23 GiB) copied, 219 s, 112 MB/s24561844224 bytes (25 GB, 23 GiB) copied, 220 s, 112 MB/s24680333312 bytes (25 GB, 23 GiB) copied, 221 s, 112 MB/s24794628096 bytes (25 GB, 23 GiB) copied, 222 s, 112 MB/s24909971456 bytes (25 GB, 23 GiB) copied, 223 s, 112 MB/s25020071936 bytes (25 GB, 23 GiB) copied, 224 s, 112 MB/s25127026688 bytes (25 GB, 23 GiB) copied, 225 s, 112 MB/s25242370048 bytes (25 GB, 24 GiB) copied, 226 s, 112 MB/s25356664832 bytes (25 GB, 24 GiB) copied, 227 s, 112 MB/s25474105344 bytes (25 GB, 24 GiB) copied, 228 s, 112 MB/s25575817216 bytes (26 GB, 24 GiB) copied, 229 s, 112 MB/s25680674816 bytes (26 GB, 24 GiB) copied, 230 s, 112 MB/s25787629568 bytes (26 GB, 24 GiB) copied, 231 s, 112 MB/s25898778624 bytes (26 GB, 24 GiB) copied, 232 s, 112 MB/s26010976256 bytes (26 GB, 24 GiB) copied, 233 s, 112 MB/s26120028160 bytes (26 GB, 24 GiB) copied, 234 s, 112 MB/s26224885760 bytes (26 GB, 24 GiB) copied, 235 s, 112 MB/s26343374848 bytes (26 GB, 25 GiB) copied, 236 s, 112 MB/s26455572480 bytes (26 GB, 25 GiB) copied, 237 s, 112 MB/s26564624384 bytes (27 GB, 25 GiB) copied, 238 s, 112 MB/s26675773440 bytes (27 GB, 25 GiB) copied, 239 s, 112 MB/s26785873920 bytes (27 GB, 25 GiB) copied, 240 s, 112 MB/s26901217280 bytes (27 GB, 25 GiB) copied, 241 s, 112 MB/s27003977728 bytes (27 GB, 25 GiB) copied, 242 s, 112 MB/s27108835328 bytes (27 GB, 25 GiB) copied, 243 s, 112 MB/s27221032960 bytes (27 GB, 25 GiB) copied, 244 s, 112 MB/s27340570624 bytes (27 GB, 25 GiB) copied, 245 s, 112 MB/s27459059712 bytes (27 GB, 26 GiB) copied, 246 s, 112 MB/s27569160192 bytes (28 GB, 26 GiB) copied, 247 s, 112 MB/s27687649280 bytes (28 GB, 26 GiB) copied, 248 s, 112 MB/s27796701184 bytes (28 GB, 26 GiB) copied, 249 s, 112 MB/s27912044544 bytes (28 GB, 26 GiB) copied, 250 s, 112 MB/s28028436480 bytes (28 GB, 26 GiB) copied, 251 s, 112 MB/s28140634112 bytes (28 GB, 26 GiB) copied, 252 s, 112 MB/s28255977472 bytes (28 GB, 26 GiB) copied, 253 s, 112 MB/s28370272256 bytes (28 GB, 26 GiB) copied, 254 s, 112 MB/s28484567040 bytes (28 GB, 27 GiB) copied, 255 s, 112 MB/s28599910400 bytes (29 GB, 27 GiB) copied, 256 s, 112 MB/s28721545216 bytes (29 GB, 27 GiB) copied, 257 s, 112 MB/s28833742848 bytes (29 GB, 27 GiB) copied, 258 s, 112 MB/s28945940480 bytes (29 GB, 27 GiB) copied, 259 s, 112 MB/s29034020864 bytes (29 GB, 27 GiB) copied, 260 s, 112 MB/s29146218496 bytes (29 GB, 27 GiB) copied, 261 s, 112 MB/s29248978944 bytes (29 GB, 27 GiB) copied, 262 s, 112 MB/s29354885120 bytes (29 GB, 27 GiB) copied, 263 s, 112 MB/s29477568512 bytes (29 GB, 27 GiB) copied, 264 s, 112 MB/s29595009024 bytes (30 GB, 28 GiB) copied, 265 s, 112 MB/s29708255232 bytes (30 GB, 28 GiB) copied, 266 s, 112 MB/s29814161408 bytes (30 GB, 28 GiB) copied, 267 s, 112 MB/s29932650496 bytes (30 GB, 28 GiB) copied, 268 s, 112 MB/s30044848128 bytes (30 GB, 28 GiB) copied, 269 s, 112 MB/s30160191488 bytes (30 GB, 28 GiB) copied, 270 s, 112 MB/s30267146240 bytes (30 GB, 28 GiB) copied, 271 s, 112 MB/s30376198144 bytes (30 GB, 28 GiB) copied, 272 s, 112 MB/s30485250048 bytes (30 GB, 28 GiB) copied, 273 s, 112 MB/s30596399104 bytes (31 GB, 28 GiB) copied, 274 s, 112 MB/s30704402432 bytes (31 GB, 29 GiB) copied, 275 s, 112 MB/s30823940096 bytes (31 GB, 29 GiB) copied, 276 s, 112 MB/s30940332032 bytes (31 GB, 29 GiB) copied, 277 s, 112 MB/s31058821120 bytes (31 GB, 29 GiB) copied, 278 s, 112 MB/s31176261632 bytes (31 GB, 29 GiB) copied, 279 s, 112 MB/s31292653568 bytes (31 GB, 29 GiB) copied, 280 s, 112 MB/s31400656896 bytes (31 GB, 29 GiB) copied, 281 s, 112 MB/s31510757376 bytes (32 GB, 29 GiB) copied, 282 s, 112 MB/s31624003584 bytes (32 GB, 29 GiB) copied, 283 s, 112 MB/s31742492672 bytes (32 GB, 30 GiB) copied, 284 s, 112 MB/s31857836032 bytes (32 GB, 30 GiB) copied, 285 s, 112 MB/s31973179392 bytes (32 GB, 30 GiB) copied, 286 s, 112 MB/s32086425600 bytes (32 GB, 30 GiB) copied, 287 s, 112 MB/s32199671808 bytes (32 GB, 30 GiB) copied, 288 s, 112 MB/s32312918016 bytes (32 GB, 30 GiB) copied, 289 s, 112 MB/s32420921344 bytes (32 GB, 30 GiB) copied, 290 s, 112 MB/s32539410432 bytes (33 GB, 30 GiB) copied, 291 s, 112 MB/s32649510912 bytes (33 GB, 30 GiB) copied, 292 s, 112 MB/s32765902848 bytes (33 GB, 31 GiB) copied, 293 s, 112 MB/s32885440512 bytes (33 GB, 31 GiB) copied, 294 s, 112 MB/s33000783872 bytes (33 GB, 31 GiB) copied, 295 s, 112 MB/s33120321536 bytes (33 GB, 31 GiB) copied, 296 s, 112 MB/s33234616320 bytes (33 GB, 31 GiB) copied, 297 s, 112 MB/s33343668224 bytes (33 GB, 31 GiB) copied, 298 s, 112 MB/s33464254464 bytes (33 GB, 31 GiB) copied, 299 s, 112 MB/s33577500672 bytes (34 GB, 31 GiB) copied, 300 s, 112 MB/s33693892608 bytes (34 GB, 31 GiB) copied, 301 s, 112 MB/s33802944512 bytes (34 GB, 31 GiB) copied, 302 s, 112 MB/s33916190720 bytes (34 GB, 32 GiB) copied, 303 s, 112 MB/s34030485504 bytes (34 GB, 32 GiB) copied, 304 s, 112 MB/s34143731712 bytes (34 GB, 32 GiB) copied, 305 s, 112 MB/s34256977920 bytes (34 GB, 32 GiB) copied, 306 s, 112 MB/s34370224128 bytes (34 GB, 32 GiB) copied, 307 s, 112 MB/s34489761792 bytes (34 GB, 32 GiB) copied, 308 s, 112 MB/s34595667968 bytes (35 GB, 32 GiB) copied, 309 s, 112 MB/s34701574144 bytes (35 GB, 32 GiB) copied, 310 s, 112 MB/s34810626048 bytes (35 GB, 32 GiB) copied, 311 s, 112 MB/s34922823680 bytes (35 GB, 33 GiB) copied, 312 s, 112 MB/s35042361344 bytes (35 GB, 33 GiB) copied, 313 s, 112 MB/s35147218944 bytes (35 GB, 33 GiB) copied, 314 s, 112 MB/s35269902336 bytes (35 GB, 33 GiB) copied, 315 s, 112 MB/s35383148544 bytes (35 GB, 33 GiB) copied, 316 s, 112 MB/s35492200448 bytes (35 GB, 33 GiB) copied, 317 s, 112 MB/s35598106624 bytes (36 GB, 33 GiB) copied, 318 s, 112 MB/s35714498560 bytes (36 GB, 33 GiB) copied, 319 s, 112 MB/s35827744768 bytes (36 GB, 33 GiB) copied, 320 s, 112 MB/s35944136704 bytes (36 GB, 33 GiB) copied, 321 s, 112 MB/s36063674368 bytes (36 GB, 34 GiB) copied, 322 s, 112 MB/s36181114880 bytes (36 GB, 34 GiB) copied, 323 s, 112 MB/s36298555392 bytes (36 GB, 34 GiB) copied, 324 s, 112 MB/s36414947328 bytes (36 GB, 34 GiB) copied, 325 s, 112 MB/s36528193536 bytes (37 GB, 34 GiB) copied, 326 s, 112 MB/s36639342592 bytes (37 GB, 34 GiB) copied, 327 s, 112 MB/s36748394496 bytes (37 GB, 34 GiB) copied, 328 s, 112 MB/s36864786432 bytes (37 GB, 34 GiB) copied, 329 s, 112 MB/s36979081216 bytes (37 GB, 34 GiB) copied, 330 s, 112 MB/s37096521728 bytes (37 GB, 35 GiB) copied, 331 s, 112 MB/s37221302272 bytes (37 GB, 35 GiB) copied, 332 s, 112 MB/s37333499904 bytes (37 GB, 35 GiB) copied, 333 s, 112 MB/s37443600384 bytes (37 GB, 35 GiB) copied, 334 s, 112 MB/s37556846592 bytes (38 GB, 35 GiB) copied, 335 s, 112 MB/s37674287104 bytes (38 GB, 35 GiB) copied, 336 s, 112 MB/s37780193280 bytes (38 GB, 35 GiB) copied, 337 s, 112 MB/s37889245184 bytes (38 GB, 35 GiB) copied, 338 s, 112 MB/s38005637120 bytes (38 GB, 35 GiB) copied, 339 s, 112 MB/s38120980480 bytes (38 GB, 36 GiB) copied, 340 s, 112 MB/s38230032384 bytes (38 GB, 36 GiB) copied, 341 s, 112 MB/s38346424320 bytes (38 GB, 36 GiB) copied, 342 s, 112 MB/s38456524800 bytes (38 GB, 36 GiB) copied, 343 s, 112 MB/s38568722432 bytes (39 GB, 36 GiB) copied, 344 s, 112 MB/s38685114368 bytes (39 GB, 36 GiB) copied, 345 s, 112 MB/s38797312000 bytes (39 GB, 36 GiB) copied, 346 s, 112 MB/s38909509632 bytes (39 GB, 36 GiB) copied, 347 s, 112 MB/s39009124352 bytes (39 GB, 36 GiB) copied, 348 s, 112 MB/s39120273408 bytes (39 GB, 36 GiB) copied, 349 s, 112 MB/s39236665344 bytes (39 GB, 37 GiB) copied, 350 s, 112 MB/s39348862976 bytes (39 GB, 37 GiB) copied, 351 s, 112 MB/s39458963456 bytes (39 GB, 37 GiB) copied, 352 s, 112 MB/s39571161088 bytes (40 GB, 37 GiB) copied, 353 s, 112 MB/s39678115840 bytes (40 GB, 37 GiB) copied, 354 s, 112 MB/s39791362048 bytes (40 GB, 37 GiB) copied, 355 s, 112 MB/s39908802560 bytes (40 GB, 37 GiB) copied, 356 s, 112 MB/s40018903040 bytes (40 GB, 37 GiB) copied, 357 s, 112 MB/s40123760640 bytes (40 GB, 37 GiB) copied, 358 s, 112 MB/s40239104000 bytes (40 GB, 37 GiB) copied, 359 s, 112 MB/s40351301632 bytes (40 GB, 38 GiB) copied, 360 s, 112 MB/s40459304960 bytes (40 GB, 38 GiB) copied, 361 s, 112 MB/s40578842624 bytes (41 GB, 38 GiB) copied, 362 s, 112 MB/s40689991680 bytes (41 GB, 38 GiB) copied, 363 s, 112 MB/s40799043584 bytes (41 GB, 38 GiB) copied, 364 s, 112 MB/s40908095488 bytes (41 GB, 38 GiB) copied, 365 s, 112 MB/s41018195968 bytes (41 GB, 38 GiB) copied, 366 s, 112 MB/s41133539328 bytes (41 GB, 38 GiB) copied, 367 s, 112 MB/s41232105472 bytes (41 GB, 38 GiB) copied, 368 s, 112 MB/s41341157376 bytes (41 GB, 39 GiB) copied, 369 s, 112 MB/s41425043456 bytes (41 GB, 39 GiB) copied, 370 s, 112 MB/s41530949632 bytes (42 GB, 39 GiB) copied, 371 s, 112 MB/s41645244416 bytes (42 GB, 39 GiB) copied, 372 s, 112 MB/s41760587776 bytes (42 GB, 39 GiB) copied, 373 s, 112 MB/s41874882560 bytes (42 GB, 39 GiB) copied, 374 s, 112 MB/s41984983040 bytes (42 GB, 39 GiB) copied, 375 s, 112 MB/s42102423552 bytes (42 GB, 39 GiB) copied, 376 s, 112 MB/s42214621184 bytes (42 GB, 39 GiB) copied, 377 s, 112 MB/s42328915968 bytes (42 GB, 39 GiB) copied, 378 s, 112 MB/s42441113600 bytes (42 GB, 40 GiB) copied, 379 s, 112 MB/s42550165504 bytes (43 GB, 40 GiB) copied, 380 s, 112 MB/s42665508864 bytes (43 GB, 40 GiB) copied, 381 s, 112 MB/s42775609344 bytes (43 GB, 40 GiB) copied, 382 s, 112 MB/s42890952704 bytes (43 GB, 40 GiB) copied, 383 s, 112 MB/s43008393216 bytes (43 GB, 40 GiB) copied, 384 s, 112 MB/s43123736576 bytes (43 GB, 40 GiB) copied, 385 s, 112 MB/s43239079936 bytes (43 GB, 40 GiB) copied, 386 s, 112 MB/s43344986112 bytes (43 GB, 40 GiB) copied, 387 s, 112 MB/s43458232320 bytes (43 GB, 40 GiB) copied, 388 s, 112 MB/s43570429952 bytes (44 GB, 41 GiB) copied, 389 s, 112 MB/s43678433280 bytes (44 GB, 41 GiB) copied, 390 s, 112 MB/s43795873792 bytes (44 GB, 41 GiB) copied, 391 s, 112 MB/s43915411456 bytes (44 GB, 41 GiB) copied, 392 s, 112 MB/s44039143424 bytes (44 GB, 41 GiB) copied, 393 s, 112 MB/s44161826816 bytes (44 GB, 41 GiB) copied, 394 s, 112 MB/s44279267328 bytes (44 GB, 41 GiB) copied, 395 s, 112 MB/s44393562112 bytes (44 GB, 41 GiB) copied, 396 s, 112 MB/s44499468288 bytes (44 GB, 41 GiB) copied, 397 s, 112 MB/s44611665920 bytes (45 GB, 42 GiB) copied, 398 s, 112 MB/s44731203584 bytes (45 GB, 42 GiB) copied, 399 s, 112 MB/s44846546944 bytes (45 GB, 42 GiB) copied, 400 s, 112 MB/s44966084608 bytes (45 GB, 42 GiB) copied, 401 s, 112 MB/s45081427968 bytes (45 GB, 42 GiB) copied, 402 s, 112 MB/s45187334144 bytes (45 GB, 42 GiB) copied, 403 s, 112 MB/s45292191744 bytes (45 GB, 42 GiB) copied, 404 s, 112 MB/s45397049344 bytes (45 GB, 42 GiB) copied, 405 s, 112 MB/s45511344128 bytes (46 GB, 42 GiB) copied, 406 s, 112 MB/s45626687488 bytes (46 GB, 42 GiB) copied, 407 s, 112 MB/s45740982272 bytes (46 GB, 43 GiB) copied, 408 s, 112 MB/s45851082752 bytes (46 GB, 43 GiB) copied, 409 s, 112 MB/s45948600320 bytes (46 GB, 43 GiB) copied, 410 s, 112 MB/s46067089408 bytes (46 GB, 43 GiB) copied, 411 s, 112 MB/s46185578496 bytes (46 GB, 43 GiB) copied, 412 s, 112 MB/s46305116160 bytes (46 GB, 43 GiB) copied, 413 s, 112 MB/s46405779456 bytes (46 GB, 43 GiB) copied, 414 s, 112 MB/s46508539904 bytes (47 GB, 43 GiB) copied, 415 s, 112 MB/s46617591808 bytes (47 GB, 43 GiB) copied, 416 s, 112 MB/s46722449408 bytes (47 GB, 44 GiB) copied, 417 s, 112 MB/s46835695616 bytes (47 GB, 44 GiB) copied, 418 s, 112 MB/s46947893248 bytes (47 GB, 44 GiB) copied, 419 s, 112 MB/s47055896576 bytes (47 GB, 44 GiB) copied, 420 s, 112 MB/s47167045632 bytes (47 GB, 44 GiB) copied, 421 s, 112 MB/s47280291840 bytes (47 GB, 44 GiB) copied, 422 s, 112 MB/s47395635200 bytes (47 GB, 44 GiB) copied, 423 s, 112 MB/s47497347072 bytes (47 GB, 44 GiB) copied, 424 s, 112 MB/s47610593280 bytes (48 GB, 44 GiB) copied, 425 s, 112 MB/s47714402304 bytes (48 GB, 44 GiB) copied, 426 s, 112 MB/s47824502784 bytes (48 GB, 45 GiB) copied, 427 s, 112 MB/s47935651840 bytes (48 GB, 45 GiB) copied, 428 s, 112 MB/s48046800896 bytes (48 GB, 45 GiB) copied, 429 s, 112 MB/s48147464192 bytes (48 GB, 45 GiB) copied, 430 s, 112 MB/s48261758976 bytes (48 GB, 45 GiB) copied, 431 s, 112 MB/s48373956608 bytes (48 GB, 45 GiB) copied, 432 s, 112 MB/s48485105664 bytes (48 GB, 45 GiB) copied, 433 s, 112 MB/s48600449024 bytes (49 GB, 45 GiB) copied, 434 s, 112 MB/s48712646656 bytes (49 GB, 45 GiB) copied, 435 s, 112 MB/s48822747136 bytes (49 GB, 45 GiB) copied, 436 s, 112 MB/s48932847616 bytes (49 GB, 46 GiB) copied, 437 s, 112 MB/s49049239552 bytes (49 GB, 46 GiB) copied, 438 s, 112 MB/s49163534336 bytes (49 GB, 46 GiB) copied, 439 s, 112 MB/s49277829120 bytes (49 GB, 46 GiB) copied, 440 s, 112 MB/s49390026752 bytes (49 GB, 46 GiB) copied, 441 s, 112 MB/s49510612992 bytes (50 GB, 46 GiB) copied, 442 s, 112 MB/s49629102080 bytes (50 GB, 46 GiB) copied, 443 s, 112 MB/s49740251136 bytes (50 GB, 46 GiB) copied, 444 s, 112 MB/s49852448768 bytes (50 GB, 46 GiB) copied, 445 s, 112 MB/s49962549248 bytes (50 GB, 47 GiB) copied, 446 s, 112 MB/s50082086912 bytes (50 GB, 47 GiB) copied, 447 s, 112 MB/s50192187392 bytes (50 GB, 47 GiB) copied, 448 s, 112 MB/s50305433600 bytes (50 GB, 47 GiB) copied, 449 s, 112 MB/s50419728384 bytes (50 GB, 47 GiB) copied, 450 s, 112 MB/s50534023168 bytes (51 GB, 47 GiB) copied, 451 s, 112 MB/s50650415104 bytes (51 GB, 47 GiB) copied, 452 s, 112 MB/s50758418432 bytes (51 GB, 47 GiB) copied, 453 s, 112 MB/s50870616064 bytes (51 GB, 47 GiB) copied, 454 s, 112 MB/s50989105152 bytes (51 GB, 47 GiB) copied, 455 s, 112 MB/s51099205632 bytes (51 GB, 48 GiB) copied, 456 s, 112 MB/s51209306112 bytes (51 GB, 48 GiB) copied, 457 s, 112 MB/s51318358016 bytes (51 GB, 48 GiB) copied, 458 s, 112 MB/s51430555648 bytes (51 GB, 48 GiB) copied, 459 s, 112 MB/s51541704704 bytes (52 GB, 48 GiB) copied, 460 s, 112 MB/s51654950912 bytes (52 GB, 48 GiB) copied, 461 s, 112 MB/s51760857088 bytes (52 GB, 48 GiB) copied, 462 s, 112 MB/s51877249024 bytes (52 GB, 48 GiB) copied, 463 s, 112 MB/s51988398080 bytes (52 GB, 48 GiB) copied, 464 s, 112 MB/s52106887168 bytes (52 GB, 49 GiB) copied, 465 s, 112 MB/s52223279104 bytes (52 GB, 49 GiB) copied, 466 s, 112 MB/s52334428160 bytes (52 GB, 49 GiB) copied, 467 s, 112 MB/s52443480064 bytes (52 GB, 49 GiB) copied, 468 s, 112 MB/s52558823424 bytes (53 GB, 49 GiB) copied, 469 s, 112 MB/s52672069632 bytes (53 GB, 49 GiB) copied, 470 s, 112 MB/s52781121536 bytes (53 GB, 49 GiB) copied, 471 s, 112 MB/s52888076288 bytes (53 GB, 49 GiB) copied, 472 s, 112 MB/s53000273920 bytes (53 GB, 49 GiB) copied, 473 s, 112 MB/s53111422976 bytes (53 GB, 49 GiB) copied, 474 s, 112 MB/s53227814912 bytes (53 GB, 50 GiB) copied, 475 s, 112 MB/s53345255424 bytes (53 GB, 50 GiB) copied, 476 s, 112 MB/s53458501632 bytes (53 GB, 50 GiB) copied, 477 s, 112 MB/s53570699264 bytes (54 GB, 50 GiB) copied, 478 s, 112 MB/s53686042624 bytes (54 GB, 50 GiB) copied, 479 s, 112 MB/s53801385984 bytes (54 GB, 50 GiB) copied, 480 s, 112 MB/s53910437888 bytes (54 GB, 50 GiB) copied, 481 s, 112 MB/s54025781248 bytes (54 GB, 50 GiB) copied, 482 s, 112 MB/s54133784576 bytes (54 GB, 50 GiB) copied, 483 s, 112 MB/s54242836480 bytes (54 GB, 51 GiB) copied, 484 s, 112 MB/s54362374144 bytes (54 GB, 51 GiB) copied, 485 s, 112 MB/s54480863232 bytes (54 GB, 51 GiB) copied, 486 s, 112 MB/s54596206592 bytes (55 GB, 51 GiB) copied, 487 s, 112 MB/s54713647104 bytes (55 GB, 51 GiB) copied, 488 s, 112 MB/s54830039040 bytes (55 GB, 51 GiB) copied, 489 s, 112 MB/s54945382400 bytes (55 GB, 51 GiB) copied, 490 s, 112 MB/s55056531456 bytes (55 GB, 51 GiB) copied, 491 s, 112 MB/s55168729088 bytes (55 GB, 51 GiB) copied, 492 s, 112 MB/s55275683840 bytes (55 GB, 51 GiB) copied, 493 s, 112 MB/s55398367232 bytes (55 GB, 52 GiB) copied, 494 s, 112 MB/s55514759168 bytes (56 GB, 52 GiB) copied, 495 s, 112 MB/s55626956800 bytes (56 GB, 52 GiB) copied, 496 s, 112 MB/s55730765824 bytes (56 GB, 52 GiB) copied, 497 s, 112 MB/s55844012032 bytes (56 GB, 52 GiB) copied, 498 s, 112 MB/s55956209664 bytes (56 GB, 52 GiB) copied, 499 s, 112 MB/s56076795904 bytes (56 GB, 52 GiB) copied, 500 s, 112 MB/s56188993536 bytes (56 GB, 52 GiB) copied, 501 s, 112 MB/s56300142592 bytes (56 GB, 52 GiB) copied, 502 s, 112 MB/s56407097344 bytes (56 GB, 53 GiB) copied, 503 s, 112 MB/s56514052096 bytes (57 GB, 53 GiB) copied, 504 s, 112 MB/s56630444032 bytes (57 GB, 53 GiB) copied, 505 s, 112 MB/s56736350208 bytes (57 GB, 53 GiB) copied, 506 s, 112 MB/s56846450688 bytes (57 GB, 53 GiB) copied, 507 s, 112 MB/s56964939776 bytes (57 GB, 53 GiB) copied, 508 s, 112 MB/s57082380288 bytes (57 GB, 53 GiB) copied, 509 s, 112 MB/s57195626496 bytes (57 GB, 53 GiB) copied, 510 s, 112 MB/s57313067008 bytes (57 GB, 53 GiB) copied, 511 s, 112 MB/s57421070336 bytes (57 GB, 53 GiB) copied, 512 s, 112 MB/s57525927936 bytes (58 GB, 54 GiB) copied, 513 s, 112 MB/s57642319872 bytes (58 GB, 54 GiB) copied, 514 s, 112 MB/s57749274624 bytes (58 GB, 54 GiB) copied, 515 s, 112 MB/s57863569408 bytes (58 GB, 54 GiB) copied, 516 s, 112 MB/s57974718464 bytes (58 GB, 54 GiB) copied, 517 s, 112 MB/s58083770368 bytes (58 GB, 54 GiB) copied, 518 s, 112 MB/s58198065152 bytes (58 GB, 54 GiB) copied, 519 s, 112 MB/s58310262784 bytes (58 GB, 54 GiB) copied, 520 s, 112 MB/s58427703296 bytes (58 GB, 54 GiB) copied, 521 s, 112 MB/s58537803776 bytes (59 GB, 55 GiB) copied, 522 s, 112 MB/s58650001408 bytes (59 GB, 55 GiB) copied, 523 s, 112 MB/s58765344768 bytes (59 GB, 55 GiB) copied, 524 s, 112 MB/s58881736704 bytes (59 GB, 55 GiB) copied, 525 s, 112 MB/s58985545728 bytes (59 GB, 55 GiB) copied, 526 s, 112 MB/s59099840512 bytes (59 GB, 55 GiB) copied, 527 s, 112 MB/s59216232448 bytes (59 GB, 55 GiB) copied, 528 s, 112 MB/s59336818688 bytes (59 GB, 55 GiB) copied, 529 s, 112 MB/s59451113472 bytes (59 GB, 55 GiB) copied, 530 s, 112 MB/s59560165376 bytes (60 GB, 55 GiB) copied, 531 s, 112 MB/s59671314432 bytes (60 GB, 56 GiB) copied, 532 s, 112 MB/s59768832000 bytes (60 GB, 56 GiB) copied, 533 s, 112 MB/s59882078208 bytes (60 GB, 56 GiB) copied, 534 s, 112 MB/s59992178688 bytes (60 GB, 56 GiB) copied, 535 s, 112 MB/s60101230592 bytes (60 GB, 56 GiB) copied, 536 s, 112 MB/s60214476800 bytes (60 GB, 56 GiB) copied, 537 s, 112 MB/s60331917312 bytes (60 GB, 56 GiB) copied, 538 s, 112 MB/s60448309248 bytes (60 GB, 56 GiB) copied, 539 s, 112 MB/s60563652608 bytes (61 GB, 56 GiB) copied, 540 s, 112 MB/s60663267328 bytes (61 GB, 56 GiB) copied, 541 s, 112 MB/s60773367808 bytes (61 GB, 57 GiB) copied, 542 s, 112 MB/s60882419712 bytes (61 GB, 57 GiB) copied, 543 s, 112 MB/s60994617344 bytes (61 GB, 57 GiB) copied, 544 s, 112 MB/s61108912128 bytes (61 GB, 57 GiB) copied, 545 s, 112 MB/s61219012608 bytes (61 GB, 57 GiB) copied, 546 s, 112 MB/s61334355968 bytes (61 GB, 57 GiB) copied, 547 s, 112 MB/s61446553600 bytes (61 GB, 57 GiB) copied, 548 s, 112 MB/s61557702656 bytes (62 GB, 57 GiB) copied, 549 s, 112 MB/s61663608832 bytes (62 GB, 57 GiB) copied, 550 s, 112 MB/s61778952192 bytes (62 GB, 58 GiB) copied, 551 s, 112 MB/s61889052672 bytes (62 GB, 58 GiB) copied, 552 s, 112 MB/s62001250304 bytes (62 GB, 58 GiB) copied, 553 s, 112 MB/s62109253632 bytes (62 GB, 58 GiB) copied, 554 s, 112 MB/s62227742720 bytes (62 GB, 58 GiB) copied, 555 s, 112 MB/s62342037504 bytes (62 GB, 58 GiB) copied, 556 s, 112 MB/s62456332288 bytes (62 GB, 58 GiB) copied, 557 s, 112 MB/s62566432768 bytes (63 GB, 58 GiB) copied, 558 s, 112 MB/s62683873280 bytes (63 GB, 58 GiB) copied, 559 s, 112 MB/s62798168064 bytes (63 GB, 58 GiB) copied, 560 s, 112 MB/s62915608576 bytes (63 GB, 59 GiB) copied, 561 s, 112 MB/s63023611904 bytes (63 GB, 59 GiB) copied, 562 s, 112 MB/s63133712384 bytes (63 GB, 59 GiB) copied, 563 s, 112 MB/s63241715712 bytes (63 GB, 59 GiB) copied, 564 s, 112 MB/s63350767616 bytes (63 GB, 59 GiB) copied, 565 s, 112 MB/s63471353856 bytes (63 GB, 59 GiB) copied, 566 s, 112 MB/s63581454336 bytes (64 GB, 59 GiB) copied, 567 s, 112 MB/s63689457664 bytes (64 GB, 59 GiB) copied, 568 s, 112 MB/s63798509568 bytes (64 GB, 59 GiB) copied, 569 s, 112 MB/s63913852928 bytes (64 GB, 60 GiB) copied, 570 s, 112 MB/s64031293440 bytes (64 GB, 60 GiB) copied, 571 s, 112 MB/s64144539648 bytes (64 GB, 60 GiB) copied, 572 s, 112 MB/s64252542976 bytes (64 GB, 60 GiB) copied, 573 s, 112 MB/s64365789184 bytes (64 GB, 60 GiB) copied, 574 s, 112 MB/s64470646784 bytes (64 GB, 60 GiB) copied, 575 s, 112 MB/s64580747264 bytes (65 GB, 60 GiB) copied, 576 s, 112 MB/s64689799168 bytes (65 GB, 60 GiB) copied, 577 s, 112 MB/s64797802496 bytes (65 GB, 60 GiB) copied, 578 s, 112 MB/s64905805824 bytes (65 GB, 60 GiB) copied, 579 s, 112 MB/s65024294912 bytes (65 GB, 61 GiB) copied, 580 s, 112 MB/s65146978304 bytes (65 GB, 61 GiB) copied, 581 s, 112 MB/s65266515968 bytes (65 GB, 61 GiB) copied, 582 s, 112 MB/s65379762176 bytes (65 GB, 61 GiB) copied, 583 s, 112 MB/s65483571200 bytes (65 GB, 61 GiB) copied, 584 s, 112 MB/s65595768832 bytes (66 GB, 61 GiB) copied, 585 s, 112 MB/s65710063616 bytes (66 GB, 61 GiB) copied, 586 s, 112 MB/s65824358400 bytes (66 GB, 61 GiB) copied, 587 s, 112 MB/s65935507456 bytes (66 GB, 61 GiB) copied, 588 s, 112 MB/s66056093696 bytes (66 GB, 62 GiB) copied, 589 s, 112 MB/s66157805568 bytes (66 GB, 62 GiB) copied, 590 s, 112 MB/s66271051776 bytes (66 GB, 62 GiB) copied, 591 s, 112 MB/s66382200832 bytes (66 GB, 62 GiB) copied, 592 s, 112 MB/s66491252736 bytes (66 GB, 62 GiB) copied, 593 s, 112 MB/s66600304640 bytes (67 GB, 62 GiB) copied, 594 s, 112 MB/s66710405120 bytes (67 GB, 62 GiB) copied, 595 s, 112 MB/s66824699904 bytes (67 GB, 62 GiB) copied, 596 s, 112 MB/s66923266048 bytes (67 GB, 62 GiB) copied, 597 s, 112 MB/s67034415104 bytes (67 GB, 62 GiB) copied, 598 s, 112 MB/s67148709888 bytes (67 GB, 63 GiB) copied, 599 s, 112 MB/s67260907520 bytes (67 GB, 63 GiB) copied, 600 s, 112 MB/s67376250880 bytes (67 GB, 63 GiB) copied, 601 s, 112 MB/s67488448512 bytes (67 GB, 63 GiB) copied, 602 s, 112 MB/s67604840448 bytes (68 GB, 63 GiB) copied, 603 s, 112 MB/s67724378112 bytes (68 GB, 63 GiB) copied, 604 s, 112 MB/s67837624320 bytes (68 GB, 63 GiB) copied, 605 s, 112 MB/s67944579072 bytes (68 GB, 63 GiB) copied, 606 s, 112 MB/s68052582400 bytes (68 GB, 63 GiB) copied, 607 s, 112 MB/s68166877184 bytes (68 GB, 63 GiB) copied, 608 s, 112 MB/s68269637632 bytes (68 GB, 64 GiB) copied, 609 s, 112 MB/s68376592384 bytes (68 GB, 64 GiB) copied, 610 s, 112 MB/s68484595712 bytes (68 GB, 64 GiB) copied, 611 s, 112 MB/s68591550464 bytes (69 GB, 64 GiB) copied, 612 s, 112 MB/s68693262336 bytes (69 GB, 64 GiB) copied, 613 s, 112 MB/s68804411392 bytes (69 GB, 64 GiB) copied, 614 s, 112 MB/s68902977536 bytes (69 GB, 64 GiB) copied, 615 s, 112 MB/s69013078016 bytes (69 GB, 64 GiB) copied, 616 s, 112 MB/s69124227072 bytes (69 GB, 64 GiB) copied, 617 s, 112 MB/s69236424704 bytes (69 GB, 64 GiB) copied, 618 s, 112 MB/s69347573760 bytes (69 GB, 65 GiB) copied, 619 s, 112 MB/s69456625664 bytes (69 GB, 65 GiB) copied, 620 s, 112 MB/s69571969024 bytes (70 GB, 65 GiB) copied, 621 s, 112 MB/s69687312384 bytes (70 GB, 65 GiB) copied, 622 s, 112 MB/s69799510016 bytes (70 GB, 65 GiB) copied, 623 s, 112 MB/s69901221888 bytes (70 GB, 65 GiB) copied, 624 s, 112 MB/s70011322368 bytes (70 GB, 65 GiB) copied, 625 s, 112 MB/s70121422848 bytes (70 GB, 65 GiB) copied, 626 s, 112 MB/s70238863360 bytes (70 GB, 65 GiB) copied, 627 s, 112 MB/s70348963840 bytes (70 GB, 66 GiB) copied, 628 s, 112 MB/s70455918592 bytes (70 GB, 66 GiB) copied, 629 s, 112 MB/s70563921920 bytes (71 GB, 66 GiB) copied, 630 s, 112 MB/s70679265280 bytes (71 GB, 66 GiB) copied, 631 s, 112 MB/s70784122880 bytes (71 GB, 66 GiB) copied, 632 s, 112 MB/s70884786176 bytes (71 GB, 66 GiB) copied, 633 s, 112 MB/s70998032384 bytes (71 GB, 66 GiB) copied, 634 s, 112 MB/s71107084288 bytes (71 GB, 66 GiB) copied, 635 s, 112 MB/s71214039040 bytes (71 GB, 66 GiB) copied, 636 s, 112 MB/s71326236672 bytes (71 GB, 66 GiB) copied, 637 s, 112 MB/s71440531456 bytes (71 GB, 67 GiB) copied, 638 s, 112 MB/s71549583360 bytes (72 GB, 67 GiB) copied, 639 s, 112 MB/s71660732416 bytes (72 GB, 67 GiB) copied, 640 s, 112 MB/s71781318656 bytes (72 GB, 67 GiB) copied, 641 s, 112 MB/s71897710592 bytes (72 GB, 67 GiB) copied, 642 s, 112 MB/s72008859648 bytes (72 GB, 67 GiB) copied, 643 s, 112 MB/s72126300160 bytes (72 GB, 67 GiB) copied, 644 s, 112 MB/s72236400640 bytes (72 GB, 67 GiB) copied, 645 s, 112 MB/s72344403968 bytes (72 GB, 67 GiB) copied, 646 s, 112 MB/s72455553024 bytes (72 GB, 67 GiB) copied, 647 s, 112 MB/s72569847808 bytes (73 GB, 68 GiB) copied, 648 s, 112 MB/s72684142592 bytes (73 GB, 68 GiB) copied, 649 s, 112 MB/s72794243072 bytes (73 GB, 68 GiB) copied, 650 s, 112 MB/s72911683584 bytes (73 GB, 68 GiB) copied, 651 s, 112 MB/s73023881216 bytes (73 GB, 68 GiB) copied, 652 s, 112 MB/s73126641664 bytes (73 GB, 68 GiB) copied, 653 s, 112 MB/s73241985024 bytes (73 GB, 68 GiB) copied, 654 s, 112 MB/s73362571264 bytes (73 GB, 68 GiB) copied, 655 s, 112 MB/s73478963200 bytes (73 GB, 68 GiB) copied, 656 s, 112 MB/s73588015104 bytes (74 GB, 69 GiB) copied, 657 s, 112 MB/s73708601344 bytes (74 GB, 69 GiB) copied, 658 s, 112 MB/s73826041856 bytes (74 GB, 69 GiB) copied, 659 s, 112 MB/s73940336640 bytes (74 GB, 69 GiB) copied, 660 s, 112 MB/s74053582848 bytes (74 GB, 69 GiB) copied, 661 s, 112 MB/s74163683328 bytes (74 GB, 69 GiB) copied, 662 s, 112 MB/s74282172416 bytes (74 GB, 69 GiB) copied, 663 s, 112 MB/s74396467200 bytes (74 GB, 69 GiB) copied, 664 s, 112 MB/s74508664832 bytes (75 GB, 69 GiB) copied, 665 s, 112 MB/s74619813888 bytes (75 GB, 69 GiB) copied, 666 s, 112 MB/s74736205824 bytes (75 GB, 70 GiB) copied, 667 s, 112 MB/s74852597760 bytes (75 GB, 70 GiB) copied, 668 s, 112 MB/s74965843968 bytes (75 GB, 70 GiB) copied, 669 s, 112 MB/s75080138752 bytes (75 GB, 70 GiB) copied, 670 s, 112 MB/s75197579264 bytes (75 GB, 70 GiB) copied, 671 s, 112 MB/s75311874048 bytes (75 GB, 70 GiB) copied, 672 s, 112 MB/s75420925952 bytes (75 GB, 70 GiB) copied, 673 s, 112 MB/s75535220736 bytes (76 GB, 70 GiB) copied, 674 s, 112 MB/s75647418368 bytes (76 GB, 70 GiB) copied, 675 s, 112 MB/s75754373120 bytes (76 GB, 71 GiB) copied, 676 s, 112 MB/s75860279296 bytes (76 GB, 71 GiB) copied, 677 s, 112 MB/s75977719808 bytes (76 GB, 71 GiB) copied, 678 s, 112 MB/s76089917440 bytes (76 GB, 71 GiB) copied, 679 s, 112 MB/s76197920768 bytes (76 GB, 71 GiB) copied, 680 s, 112 MB/s76309069824 bytes (76 GB, 71 GiB) copied, 681 s, 112 MB/s76425461760 bytes (76 GB, 71 GiB) copied, 682 s, 112 MB/s76536610816 bytes (77 GB, 71 GiB) copied, 683 s, 112 MB/s76646711296 bytes (77 GB, 71 GiB) copied, 684 s, 112 MB/s76757860352 bytes (77 GB, 71 GiB) copied, 685 s, 112 MB/s76872155136 bytes (77 GB, 72 GiB) copied, 686 s, 112 MB/s76988547072 bytes (77 GB, 72 GiB) copied, 687 s, 112 MB/s77094453248 bytes (77 GB, 72 GiB) copied, 688 s, 112 MB/s77196165120 bytes (77 GB, 72 GiB) copied, 689 s, 112 MB/s77309411328 bytes (77 GB, 72 GiB) copied, 690 s, 112 MB/s77422657536 bytes (77 GB, 72 GiB) copied, 691 s, 112 MB/s77539049472 bytes (78 GB, 72 GiB) copied, 692 s, 112 MB/s77654392832 bytes (78 GB, 72 GiB) copied, 693 s, 112 MB/s77766590464 bytes (78 GB, 72 GiB) copied, 694 s, 112 MB/s77872496640 bytes (78 GB, 73 GiB) copied, 695 s, 112 MB/s77988888576 bytes (78 GB, 73 GiB) copied, 696 s, 112 MB/s78102134784 bytes (78 GB, 73 GiB) copied, 697 s, 112 MB/s78220623872 bytes (78 GB, 73 GiB) copied, 698 s, 112 MB/s78343307264 bytes (78 GB, 73 GiB) copied, 699 s, 112 MB/s78463893504 bytes (78 GB, 73 GiB) copied, 700 s, 112 MB/s78580285440 bytes (79 GB, 73 GiB) copied, 701 s, 112 MB/s78692483072 bytes (79 GB, 73 GiB) copied, 702 s, 112 MB/s78807826432 bytes (79 GB, 73 GiB) copied, 703 s, 112 MB/s78939947008 bytes (79 GB, 74 GiB) copied, 704 s, 112 MB/s79056338944 bytes (79 GB, 74 GiB) copied, 705 s, 112 MB/s79172730880 bytes (79 GB, 74 GiB) copied, 706 s, 112 MB/s79275491328 bytes (79 GB, 74 GiB) copied, 707 s, 112 MB/s79387688960 bytes (79 GB, 74 GiB) copied, 708 s, 112 MB/s79500935168 bytes (80 GB, 74 GiB) copied, 709 s, 112 MB/s79618375680 bytes (80 GB, 74 GiB) copied, 710 s, 112 MB/s79733719040 bytes (80 GB, 74 GiB) copied, 711 s, 112 MB/s79852208128 bytes (80 GB, 74 GiB) copied, 712 s, 112 MB/s79970697216 bytes (80 GB, 74 GiB) copied, 713 s, 112 MB/s80082894848 bytes (80 GB, 75 GiB) copied, 714 s, 112 MB/s80198238208 bytes (80 GB, 75 GiB) copied, 715 s, 112 MB/s80312532992 bytes (80 GB, 75 GiB) copied, 716 s, 112 MB/s80420536320 bytes (80 GB, 75 GiB) copied, 717 s, 112 MB/s80532733952 bytes (81 GB, 75 GiB) copied, 718 s, 112 MB/s80649125888 bytes (81 GB, 75 GiB) copied, 719 s, 112 MB/s80758177792 bytes (81 GB, 75 GiB) copied, 720 s, 112 MB/s80872472576 bytes (81 GB, 75 GiB) copied, 721 s, 112 MB/s80989913088 bytes (81 GB, 75 GiB) copied, 722 s, 112 MB/s81105256448 bytes (81 GB, 76 GiB) copied, 723 s, 112 MB/s81221648384 bytes (81 GB, 76 GiB) copied, 724 s, 112 MB/s81334894592 bytes (81 GB, 76 GiB) copied, 725 s, 112 MB/s81448140800 bytes (81 GB, 76 GiB) copied, 726 s, 112 MB/s81564532736 bytes (82 GB, 76 GiB) copied, 727 s, 112 MB/s81673584640 bytes (82 GB, 76 GiB) copied, 728 s, 112 MB/s81787879424 bytes (82 GB, 76 GiB) copied, 729 s, 112 MB/s81894834176 bytes (82 GB, 76 GiB) copied, 730 s, 112 MB/s82010177536 bytes (82 GB, 76 GiB) copied, 731 s, 112 MB/s82120278016 bytes (82 GB, 76 GiB) copied, 732 s, 112 MB/s82233524224 bytes (82 GB, 77 GiB) copied, 733 s, 112 MB/s82346770432 bytes (82 GB, 77 GiB) copied, 734 s, 112 MB/s82450579456 bytes (82 GB, 77 GiB) copied, 735 s, 112 MB/s82560679936 bytes (83 GB, 77 GiB) copied, 736 s, 112 MB/s82673926144 bytes (83 GB, 77 GiB) copied, 737 s, 112 MB/s82790318080 bytes (83 GB, 77 GiB) copied, 738 s, 112 MB/s82900418560 bytes (83 GB, 77 GiB) copied, 739 s, 112 MB/s83007373312 bytes (83 GB, 77 GiB) copied, 740 s, 112 MB/s83114328064 bytes (83 GB, 77 GiB) copied, 741 s, 112 MB/s83225477120 bytes (83 GB, 78 GiB) copied, 742 s, 112 MB/s83341869056 bytes (83 GB, 78 GiB) copied, 743 s, 112 MB/s83460358144 bytes (83 GB, 78 GiB) copied, 744 s, 112 MB/s83573604352 bytes (84 GB, 78 GiB) copied, 745 s, 112 MB/s83684753408 bytes (84 GB, 78 GiB) copied, 746 s, 112 MB/s83796951040 bytes (84 GB, 78 GiB) copied, 747 s, 112 MB/s83910197248 bytes (84 GB, 78 GiB) copied, 748 s, 112 MB/s84023443456 bytes (84 GB, 78 GiB) copied, 749 s, 112 MB/s84138786816 bytes (84 GB, 78 GiB) copied, 750 s, 112 MB/s84250984448 bytes (84 GB, 78 GiB) copied, 751 s, 112 MB/s84355842048 bytes (84 GB, 79 GiB) copied, 752 s, 112 MB/s84468039680 bytes (84 GB, 79 GiB) copied, 753 s, 112 MB/s84580237312 bytes (85 GB, 79 GiB) copied, 754 s, 112 MB/s84693483520 bytes (85 GB, 79 GiB) copied, 755 s, 112 MB/s84799389696 bytes (85 GB, 79 GiB) copied, 756 s, 112 MB/s84917878784 bytes (85 GB, 79 GiB) copied, 757 s, 112 MB/s85025882112 bytes (85 GB, 79 GiB) copied, 758 s, 112 MB/s85140176896 bytes (85 GB, 79 GiB) copied, 759 s, 112 MB/s85254471680 bytes (85 GB, 79 GiB) copied, 760 s, 112 MB/s85368766464 bytes (85 GB, 80 GiB) copied, 761 s, 112 MB/s85478866944 bytes (85 GB, 80 GiB) copied, 762 s, 112 MB/s85595258880 bytes (86 GB, 80 GiB) copied, 763 s, 112 MB/s85708505088 bytes (86 GB, 80 GiB) copied, 764 s, 112 MB/s85824897024 bytes (86 GB, 80 GiB) copied, 765 s, 112 MB/s
+81910+0 records in
+81910+0 records out
+85888860160 bytes (86 GB, 80 GiB) copied, 772.808 s, 111 MB/s
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randread;0;0;16015432;266919;66729;60001;3;3907;12.576223;34.620990;595;11200;3821.524411;449.908351;1.000000%=2965;5.000000%=3194;10.000000%=3358;20.000000%=3522;30.000000%=3620;40.000000%=3719;50.000000%=3784;60.000000%=3850;70.000000%=3948;80.000000%=4079;90.000000%=4292;95.000000%=4489;99.000000%=5603;99.500000%=6062;99.900000%=6782;99.950000%=6914;99.990000%=7700;0%=0;0%=0;0%=0;601;11214;3834.374554;450.560838;220416;284680;100.000000%;267218.084034;13812.978204;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;18.575000%;55.466667%;127685;0;269;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;0.01%;74.69%;25.30%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=529793: Wed Dec 27 22:02:23 2023
+  read: IOPS=66.7k, BW=261MiB/s (273MB/s)(15.3GiB/60001msec)
+    slat (usec): min=3, max=3907, avg=12.58, stdev=34.62
+    clat (usec): min=595, max=11200, avg=3821.52, stdev=449.91
+     lat (usec): min=601, max=11214, avg=3834.37, stdev=450.56
+    clat percentiles (usec):
+     |  1.00th=[ 2966],  5.00th=[ 3195], 10.00th=[ 3359], 20.00th=[ 3523],
+     | 30.00th=[ 3621], 40.00th=[ 3720], 50.00th=[ 3785], 60.00th=[ 3851],
+     | 70.00th=[ 3949], 80.00th=[ 4080], 90.00th=[ 4293], 95.00th=[ 4490],
+     | 99.00th=[ 5604], 99.50th=[ 6063], 99.90th=[ 6783], 99.95th=[ 6915],
+     | 99.99th=[ 7701]
+   bw (  KiB/s): min=220416, max=284680, per=100.00%, avg=267218.08, stdev=13812.98, samples=119
+   iops        : min=55104, max=71172, avg=66804.52, stdev=3453.29, samples=119
+  lat (usec)   : 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=74.69%, 10=25.30%, 20=0.01%
+  cpu          : usr=18.57%, sys=55.47%, ctx=127685, majf=0, minf=269
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=4003858,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=261MiB/s (273MB/s), 261MiB/s-261MiB/s (273MB/s-273MB/s), io=15.3GiB (16.4GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=4k) randread:  read: IOPS=66.7k, BW=261MiB/s (273MB/s)(15.3GiB/60001msec)
+
+
+===Fio: workload=read, time=60, iodepth=256, bs=4k===
+
+fio-read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-read;0;0;14896556;248267;62066;60002;3;4794;13.958556;64.135526;827;9679;4108.630774;563.752042;1.000000%=2801;5.000000%=3227;10.000000%=3424;20.000000%=3522;30.000000%=3620;40.000000%=4014;50.000000%=4358;60.000000%=4423;70.000000%=4489;80.000000%=4554;90.000000%=4685;95.000000%=4816;99.000000%=5079;99.500000%=5210;99.900000%=6520;99.950000%=7962;99.990000%=8978;0%=0;0%=0;0%=0;1280;9688;4122.890580;562.868983;238024;316168;99.846232%;247885.243697;18756.486605;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;18.009700%;44.435926%;80890;0;266;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;39.89%;60.11%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=529839: Wed Dec 27 22:03:25 2023
+  read: IOPS=62.1k, BW=242MiB/s (254MB/s)(14.2GiB/60002msec)
+    slat (usec): min=3, max=4794, avg=13.96, stdev=64.14
+    clat (usec): min=827, max=9679, avg=4108.63, stdev=563.75
+     lat (usec): min=1280, max=9688, avg=4122.89, stdev=562.87
+    clat percentiles (usec):
+     |  1.00th=[ 2802],  5.00th=[ 3228], 10.00th=[ 3425], 20.00th=[ 3523],
+     | 30.00th=[ 3621], 40.00th=[ 4015], 50.00th=[ 4359], 60.00th=[ 4424],
+     | 70.00th=[ 4490], 80.00th=[ 4555], 90.00th=[ 4686], 95.00th=[ 4817],
+     | 99.00th=[ 5080], 99.50th=[ 5211], 99.90th=[ 6521], 99.95th=[ 7963],
+     | 99.99th=[ 8979]
+   bw (  KiB/s): min=238024, max=316168, per=99.85%, avg=247885.24, stdev=18756.49, samples=119
+   iops        : min=59506, max=79042, avg=61971.31, stdev=4689.12, samples=119
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=39.89%, 10=60.11%
+  cpu          : usr=18.01%, sys=44.44%, ctx=80890, majf=0, minf=266
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=3724139,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=242MiB/s (254MB/s), 242MiB/s-242MiB/s (254MB/s-254MB/s), io=14.2GiB (15.3GB), run=60002-60002msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=4k) read:  read: IOPS=62.1k, BW=242MiB/s (254MB/s)(14.2GiB/60002msec)
+
+
+===Fio: workload=randread, time=60, iodepth=1, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=1
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randread;0;0;1700872;28347;7086;60001;10;404;12.824493;3.741822;0;2799;124.203578;31.391496;1.000000%=101;5.000000%=109;10.000000%=111;20.000000%=112;30.000000%=114;40.000000%=116;50.000000%=117;60.000000%=118;70.000000%=120;80.000000%=123;90.000000%=132;95.000000%=183;99.000000%=218;99.500000%=280;99.900000%=536;99.950000%=561;99.990000%=618;0%=0;0%=0;0%=0;103;2813;137.562196;31.710980;27032;30480;100.000000%;28357.310924;575.025803;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;6.160000%;13.115000%;425218;0;11;100.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.85%;98.54%;0.46%;0.14%;0.01%;0.01%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=529890: Wed Dec 27 22:04:28 2023
+  read: IOPS=7086, BW=27.7MiB/s (29.0MB/s)(1661MiB/60001msec)
+    slat (usec): min=10, max=404, avg=12.82, stdev= 3.74
+    clat (nsec): min=708, max=2799.7k, avg=124203.58, stdev=31391.50
+     lat (usec): min=103, max=2813, avg=137.56, stdev=31.71
+    clat percentiles (usec):
+     |  1.00th=[  102],  5.00th=[  110], 10.00th=[  112], 20.00th=[  113],
+     | 30.00th=[  115], 40.00th=[  117], 50.00th=[  118], 60.00th=[  119],
+     | 70.00th=[  121], 80.00th=[  124], 90.00th=[  133], 95.00th=[  184],
+     | 99.00th=[  219], 99.50th=[  281], 99.90th=[  537], 99.95th=[  562],
+     | 99.99th=[  619]
+   bw (  KiB/s): min=27032, max=30480, per=100.00%, avg=28357.31, stdev=575.03, samples=119
+   iops        : min= 6758, max= 7620, avg=7089.31, stdev=143.75, samples=119
+  lat (nsec)   : 750=0.01%
+  lat (usec)   : 100=0.85%, 250=98.54%, 500=0.46%, 750=0.14%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=0.01%
+  cpu          : usr=6.16%, sys=13.12%, ctx=425218, majf=0, minf=11
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=425218,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+   READ: bw=27.7MiB/s (29.0MB/s), 27.7MiB/s-27.7MiB/s (29.0MB/s-29.0MB/s), io=1661MiB (1742MB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=1; bs=4k) randread:  read: IOPS=7086, BW=27.7MiB/s (29.0MB/s)(1661MiB/60001msec)
+
+
+===Fio: workload=randread, time=60, iodepth=64, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randread;0;0;14102792;235042;58760;60001;3;564;7.323736;3.872242;212;12987;1079.691517;281.431238;1.000000%=452;5.000000%=651;10.000000%=708;20.000000%=839;30.000000%=962;40.000000%=1056;50.000000%=1138;60.000000%=1187;70.000000%=1236;80.000000%=1269;90.000000%=1335;95.000000%=1400;99.000000%=1597;99.500000%=1679;99.900000%=2179;99.950000%=2408;99.990000%=8585;0%=0;0%=0;0%=0;221;12991;1087.271499;281.770839;199296;291640;100.000000%;235421.445378;25542.121711;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;19.078333%;40.988333%;146725;0;73;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;2.20%;10.75%;20.54%;66.35%;0.14%;0.01%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=529936: Wed Dec 27 22:05:30 2023
+  read: IOPS=58.8k, BW=230MiB/s (241MB/s)(13.4GiB/60001msec)
+    slat (usec): min=3, max=564, avg= 7.32, stdev= 3.87
+    clat (usec): min=212, max=12987, avg=1079.69, stdev=281.43
+     lat (usec): min=221, max=12991, avg=1087.27, stdev=281.77
+    clat percentiles (usec):
+     |  1.00th=[  453],  5.00th=[  652], 10.00th=[  709], 20.00th=[  840],
+     | 30.00th=[  963], 40.00th=[ 1057], 50.00th=[ 1139], 60.00th=[ 1188],
+     | 70.00th=[ 1237], 80.00th=[ 1270], 90.00th=[ 1336], 95.00th=[ 1401],
+     | 99.00th=[ 1598], 99.50th=[ 1680], 99.90th=[ 2180], 99.95th=[ 2409],
+     | 99.99th=[ 8586]
+   bw (  KiB/s): min=199296, max=291640, per=100.00%, avg=235421.45, stdev=25542.12, samples=119
+   iops        : min=49824, max=72910, avg=58855.34, stdev=6385.55, samples=119
+  lat (usec)   : 250=0.01%, 500=2.20%, 750=10.75%, 1000=20.54%
+  lat (msec)   : 2=66.35%, 4=0.14%, 10=0.01%, 20=0.01%
+  cpu          : usr=19.08%, sys=40.99%, ctx=146725, majf=0, minf=73
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=3525698,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=230MiB/s (241MB/s), 230MiB/s-230MiB/s (241MB/s-241MB/s), io=13.4GiB (14.4GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64; bs=4k) randread:  read: IOPS=58.8k, BW=230MiB/s (241MB/s)(13.4GiB/60001msec)
+
+
+===Fio: workload=read, time=60, iodepth=1, bs=4k===
+
+fio-read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=1
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-read;0;0;1947344;32455;8113;60001;5;399;10.699398;4.494961;0;2265;109.977503;29.719156;1.000000%=89;5.000000%=92;10.000000%=94;20.000000%=96;30.000000%=98;40.000000%=102;50.000000%=104;60.000000%=104;70.000000%=105;80.000000%=109;90.000000%=124;95.000000%=173;99.000000%=203;99.500000%=228;99.900000%=481;99.950000%=501;99.990000%=577;0%=0;0%=0;0%=0;86;2273;121.057935;30.565757;30432;36832;100.000000%;32505.478992;2128.453365;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;4.416667%;13.035000%;486837;0;13;100.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.00%;0.00%;0.00%;0.00%;0.00%;33.28%;66.33%;0.34%;0.05%;0.01%;0.01%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=529988: Wed Dec 27 22:06:32 2023
+  read: IOPS=8113, BW=31.7MiB/s (33.2MB/s)(1902MiB/60001msec)
+    slat (usec): min=5, max=399, avg=10.70, stdev= 4.49
+    clat (nsec): min=501, max=2265.5k, avg=109977.50, stdev=29719.16
+     lat (usec): min=86, max=2273, avg=121.06, stdev=30.57
+    clat percentiles (usec):
+     |  1.00th=[   90],  5.00th=[   93], 10.00th=[   95], 20.00th=[   97],
+     | 30.00th=[   99], 40.00th=[  103], 50.00th=[  105], 60.00th=[  105],
+     | 70.00th=[  106], 80.00th=[  110], 90.00th=[  125], 95.00th=[  174],
+     | 99.00th=[  204], 99.50th=[  229], 99.90th=[  482], 99.95th=[  502],
+     | 99.99th=[  578]
+   bw (  KiB/s): min=30432, max=36832, per=100.00%, avg=32505.48, stdev=2128.45, samples=119
+   iops        : min= 7608, max= 9208, avg=8126.39, stdev=532.10, samples=119
+  lat (nsec)   : 750=0.01%, 1000=0.01%
+  lat (usec)   : 100=33.28%, 250=66.33%, 500=0.34%, 750=0.05%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=0.01%
+  cpu          : usr=4.42%, sys=13.04%, ctx=486837, majf=0, minf=13
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=486836,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+   READ: bw=31.7MiB/s (33.2MB/s), 31.7MiB/s-31.7MiB/s (33.2MB/s-33.2MB/s), io=1902MiB (1994MB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=1; bs=4k) read:  read: IOPS=8113, BW=31.7MiB/s (33.2MB/s)(1902MiB/60001msec)
+
+
+===Fio: workload=read, time=60, iodepth=64, bs=4k===
+
+fio-read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-read;0;0;17713408;295218;73804;60001;3;532;6.401930;3.412103;381;2731;859.215372;209.645275;1.000000%=415;5.000000%=477;10.000000%=552;20.000000%=675;30.000000%=757;40.000000%=823;50.000000%=872;60.000000%=921;70.000000%=987;80.000000%=1044;90.000000%=1105;95.000000%=1155;99.000000%=1318;99.500000%=1400;99.900000%=1531;99.950000%=1613;99.990000%=2244;0%=0;0%=0;0%=0;386;2751;865.840337;210.224853;248248;345032;100.000000%;295824.605042;38038.441604;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;17.798333%;45.808333%;210144;0;73;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;6.51%;22.81%;43.22%;27.44%;0.02%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=530034: Wed Dec 27 22:07:35 2023
+  read: IOPS=73.8k, BW=288MiB/s (302MB/s)(16.9GiB/60001msec)
+    slat (usec): min=3, max=532, avg= 6.40, stdev= 3.41
+    clat (usec): min=381, max=2731, avg=859.22, stdev=209.65
+     lat (usec): min=386, max=2751, avg=865.84, stdev=210.22
+    clat percentiles (usec):
+     |  1.00th=[  416],  5.00th=[  478], 10.00th=[  553], 20.00th=[  676],
+     | 30.00th=[  758], 40.00th=[  824], 50.00th=[  873], 60.00th=[  922],
+     | 70.00th=[  988], 80.00th=[ 1045], 90.00th=[ 1106], 95.00th=[ 1156],
+     | 99.00th=[ 1319], 99.50th=[ 1401], 99.90th=[ 1532], 99.95th=[ 1614],
+     | 99.99th=[ 2245]
+   bw (  KiB/s): min=248248, max=345032, per=100.00%, avg=295824.61, stdev=38038.44, samples=119
+   iops        : min=62062, max=86260, avg=73956.22, stdev=9509.68, samples=119
+  lat (usec)   : 500=6.51%, 750=22.81%, 1000=43.22%
+  lat (msec)   : 2=27.44%, 4=0.02%
+  cpu          : usr=17.80%, sys=45.81%, ctx=210144, majf=0, minf=73
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=4428352,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=288MiB/s (302MB/s), 288MiB/s-288MiB/s (302MB/s-302MB/s), io=16.9GiB (18.1GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64; bs=4k) read:  read: IOPS=73.8k, BW=288MiB/s (302MB/s)(16.9GiB/60001msec)
+
+
+===Fio: workload=read, time=60, iodepth=256, bs=4k===
+
+fio-read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-read;0;0;19706628;328438;82109;60001;3;3748;10.095881;19.230765;802;8964;3105.787444;376.964473;1.000000%=2473;5.000000%=2605;10.000000%=2736;20.000000%=2834;30.000000%=2932;40.000000%=2998;50.000000%=3063;60.000000%=3129;70.000000%=3194;80.000000%=3325;90.000000%=3555;95.000000%=3653;99.000000%=4227;99.500000%=4816;99.900000%=6520;99.950000%=6651;99.990000%=8355;0%=0;0%=0;0%=0;878;8973;3116.162953;377.790586;279144;355896;100.000000%;328937.613445;15666.360812;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;18.761667%;67.648333%;87787;0;270;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;98.25%;1.75%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=530080: Wed Dec 27 22:08:37 2023
+  read: IOPS=82.1k, BW=321MiB/s (336MB/s)(18.8GiB/60001msec)
+    slat (usec): min=3, max=3748, avg=10.10, stdev=19.23
+    clat (usec): min=802, max=8964, avg=3105.79, stdev=376.96
+     lat (usec): min=878, max=8973, avg=3116.16, stdev=377.79
+    clat percentiles (usec):
+     |  1.00th=[ 2474],  5.00th=[ 2606], 10.00th=[ 2737], 20.00th=[ 2835],
+     | 30.00th=[ 2933], 40.00th=[ 2999], 50.00th=[ 3064], 60.00th=[ 3130],
+     | 70.00th=[ 3195], 80.00th=[ 3326], 90.00th=[ 3556], 95.00th=[ 3654],
+     | 99.00th=[ 4228], 99.50th=[ 4817], 99.90th=[ 6521], 99.95th=[ 6652],
+     | 99.99th=[ 8356]
+   bw (  KiB/s): min=279144, max=355896, per=100.00%, avg=328937.61, stdev=15666.36, samples=119
+   iops        : min=69786, max=88974, avg=82234.50, stdev=3916.65, samples=119
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=98.25%, 10=1.75%
+  cpu          : usr=18.76%, sys=67.65%, ctx=87787, majf=0, minf=270
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=4926657,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=321MiB/s (336MB/s), 321MiB/s-321MiB/s (336MB/s-336MB/s), io=18.8GiB (20.2GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=4k) read:  read: IOPS=82.1k, BW=321MiB/s (336MB/s)(18.8GiB/60001msec)
+
+
+===Fio: workload=read, time=60, iodepth=256, bs=16k===
+
+fio-read: (g=0): rw=read, bs=(R) 16.0KiB-16.0KiB, (W) 16.0KiB-16.0KiB, (T) 16.0KiB-16.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-read;0;0;44426016;740396;46274;60003;4;2327;19.219872;44.080932;1236;10033;5510.601455;953.468224;1.000000%=4554;5.000000%=4685;10.000000%=4751;20.000000%=4882;30.000000%=4947;40.000000%=5013;50.000000%=5144;60.000000%=5275;70.000000%=5472;80.000000%=6127;90.000000%=7176;95.000000%=7569;99.000000%=8585;99.500000%=8847;99.900000%=9240;99.950000%=9371;99.990000%=9633;0%=0;0%=0;0%=0;1246;10071;5530.167243;956.489462;541952;832288;99.994457%;740354.957983;105293.773309;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;13.821206%;47.143429%;596910;0;2103;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.05%;99.95%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=530126: Wed Dec 27 22:09:39 2023
+  read: IOPS=46.3k, BW=723MiB/s (758MB/s)(42.4GiB/60003msec)
+    slat (usec): min=4, max=2327, avg=19.22, stdev=44.08
+    clat (usec): min=1236, max=10033, avg=5510.60, stdev=953.47
+     lat (usec): min=1246, max=10071, avg=5530.17, stdev=956.49
+    clat percentiles (usec):
+     |  1.00th=[ 4555],  5.00th=[ 4686], 10.00th=[ 4752], 20.00th=[ 4883],
+     | 30.00th=[ 4948], 40.00th=[ 5014], 50.00th=[ 5145], 60.00th=[ 5276],
+     | 70.00th=[ 5473], 80.00th=[ 6128], 90.00th=[ 7177], 95.00th=[ 7570],
+     | 99.00th=[ 8586], 99.50th=[ 8848], 99.90th=[ 9241], 99.95th=[ 9372],
+     | 99.99th=[ 9634]
+   bw (  KiB/s): min=541952, max=832288, per=99.99%, avg=740354.96, stdev=105293.77, samples=119
+   iops        : min=33872, max=52018, avg=46272.27, stdev=6580.87, samples=119
+  lat (msec)   : 2=0.01%, 4=0.05%, 10=99.95%, 20=0.01%
+  cpu          : usr=13.82%, sys=47.14%, ctx=596910, majf=0, minf=2103
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=2776626,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=723MiB/s (758MB/s), 723MiB/s-723MiB/s (758MB/s-758MB/s), io=42.4GiB (45.5GB), run=60003-60003msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=16k) read:  read: IOPS=46.3k, BW=723MiB/s (758MB/s)(42.4GiB/60003msec)
+
+
+===Fio: workload=read, time=60, iodepth=256, bs=64k===
+
+fio-read: (g=0): rw=read, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-read;0;0;52068288;867689;13557;60008;5;15596;70.673323;80.965142;1848;111837;18806.539680;2615.593135;1.000000%=15269;5.000000%=15925;10.000000%=16449;20.000000%=16908;30.000000%=17170;40.000000%=17694;50.000000%=18743;60.000000%=19529;70.000000%=20054;80.000000%=20578;90.000000%=21364;95.000000%=21889;99.000000%=23199;99.500000%=23724;99.900000%=27394;99.950000%=57933;99.990000%=99090;0%=0;0%=0;0%=0;1869;112074;18877.710102;2623.990389;718592;1042048;100.000000%;867862.588235;79290.627564;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;6.514240%;21.717466%;803483;0;4107;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;0.07%;68.95%;30.92%;0.05%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-read: (groupid=0, jobs=1): err= 0: pid=530174: Wed Dec 27 22:10:42 2023
+  read: IOPS=13.6k, BW=847MiB/s (889MB/s)(49.7GiB/60008msec)
+    slat (usec): min=5, max=15596, avg=70.67, stdev=80.97
+    clat (usec): min=1848, max=111837, avg=18806.54, stdev=2615.59
+     lat (usec): min=1869, max=112074, avg=18877.71, stdev=2623.99
+    clat percentiles (usec):
+     |  1.00th=[15270],  5.00th=[15926], 10.00th=[16450], 20.00th=[16909],
+     | 30.00th=[17171], 40.00th=[17695], 50.00th=[18744], 60.00th=[19530],
+     | 70.00th=[20055], 80.00th=[20579], 90.00th=[21365], 95.00th=[21890],
+     | 99.00th=[23200], 99.50th=[23725], 99.90th=[27395], 99.95th=[57934],
+     | 99.99th=[99091]
+   bw (  KiB/s): min=718592, max=1042048, per=100.00%, avg=867862.59, stdev=79290.63, samples=119
+   iops        : min=11228, max=16282, avg=13560.40, stdev=1238.90, samples=119
+  lat (msec)   : 2=0.01%, 4=0.01%, 10=0.07%, 20=68.95%, 50=30.92%
+  lat (msec)   : 100=0.05%, 250=0.01%
+  cpu          : usr=6.51%, sys=21.72%, ctx=803483, majf=0, minf=4107
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=813567,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=847MiB/s (889MB/s), 847MiB/s-847MiB/s (889MB/s-889MB/s), io=49.7GiB (53.3GB), run=60008-60008msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=64k) read:  read: IOPS=13.6k, BW=847MiB/s (889MB/s)(49.7GiB/60008msec)
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=4k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randread;0;0;14779912;246323;61580;60002;3;15772;13.878629;62.024189;901;27976;4141.005549;754.003403;1.000000%=2965;5.000000%=3194;10.000000%=3358;20.000000%=3522;30.000000%=3686;40.000000%=3784;50.000000%=3915;60.000000%=4358;70.000000%=4685;80.000000%=4816;90.000000%=4947;95.000000%=5144;99.000000%=5472;99.500000%=5668;99.900000%=8978;99.950000%=15663;99.990000%=16187;0%=0;0%=0;0%=0;1207;27985;4155.153894;754.519322;164984;290792;99.991168%;246301.243697;30586.402393;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;18.276362%;42.219296%;112109;0;265;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;52.94%;46.96%;0.09%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=530221: Wed Dec 27 22:11:44 2023
+  read: IOPS=61.6k, BW=241MiB/s (252MB/s)(14.1GiB/60002msec)
+    slat (usec): min=3, max=15772, avg=13.88, stdev=62.02
+    clat (usec): min=901, max=27976, avg=4141.01, stdev=754.00
+     lat (usec): min=1207, max=27985, avg=4155.15, stdev=754.52
+    clat percentiles (usec):
+     |  1.00th=[ 2966],  5.00th=[ 3195], 10.00th=[ 3359], 20.00th=[ 3523],
+     | 30.00th=[ 3687], 40.00th=[ 3785], 50.00th=[ 3916], 60.00th=[ 4359],
+     | 70.00th=[ 4686], 80.00th=[ 4817], 90.00th=[ 4948], 95.00th=[ 5145],
+     | 99.00th=[ 5473], 99.50th=[ 5669], 99.90th=[ 8979], 99.95th=[15664],
+     | 99.99th=[16188]
+   bw (  KiB/s): min=164984, max=290792, per=99.99%, avg=246301.24, stdev=30586.40, samples=119
+   iops        : min=41246, max=72698, avg=61575.34, stdev=7646.68, samples=119
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=52.94%, 10=46.96%, 20=0.09%, 50=0.01%
+  cpu          : usr=18.28%, sys=42.22%, ctx=112109, majf=0, minf=265
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=3694978,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=241MiB/s (252MB/s), 241MiB/s-241MiB/s (252MB/s-252MB/s), io=14.1GiB (15.1GB), run=60002-60002msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=4k) randread:  read: IOPS=61.6k, BW=241MiB/s (252MB/s)(14.1GiB/60002msec)
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=16k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 16.0KiB-16.0KiB, (W) 16.0KiB-16.0KiB, (T) 16.0KiB-16.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randread;0;0;37068432;617766;38610;60004;4;5961;23.020618;71.846655;1276;11602;6604.563453;1330.096877;1.000000%=4947;5.000000%=5079;10.000000%=5210;20.000000%=5341;30.000000%=5472;40.000000%=5668;50.000000%=6193;60.000000%=7176;70.000000%=7503;80.000000%=7831;90.000000%=8454;95.000000%=9109;99.000000%=9502;99.500000%=9633;99.900000%=9895;99.950000%=10027;99.990000%=11075;0%=0;0%=0;0%=0;1381;11889;6627.940487;1333.816059;514112;773184;100.000000%;618920.025210;105347.867002;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;13.910971%;34.989917%;686004;0;1033;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;99.93%;0.06%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=530270: Wed Dec 27 22:12:47 2023
+  read: IOPS=38.6k, BW=603MiB/s (633MB/s)(35.4GiB/60004msec)
+    slat (usec): min=4, max=5961, avg=23.02, stdev=71.85
+    clat (usec): min=1276, max=11602, avg=6604.56, stdev=1330.10
+     lat (usec): min=1381, max=11889, avg=6627.94, stdev=1333.82
+    clat percentiles (usec):
+     |  1.00th=[ 4948],  5.00th=[ 5080], 10.00th=[ 5211], 20.00th=[ 5342],
+     | 30.00th=[ 5473], 40.00th=[ 5669], 50.00th=[ 6194], 60.00th=[ 7177],
+     | 70.00th=[ 7504], 80.00th=[ 7832], 90.00th=[ 8455], 95.00th=[ 9110],
+     | 99.00th=[ 9503], 99.50th=[ 9634], 99.90th=[ 9896], 99.95th=[10028],
+     | 99.99th=[11076]
+   bw (  KiB/s): min=514112, max=773184, per=100.00%, avg=618920.03, stdev=105347.87, samples=119
+   iops        : min=32132, max=48324, avg=38682.55, stdev=6584.28, samples=119
+  lat (msec)   : 2=0.01%, 4=0.01%, 10=99.93%, 20=0.06%
+  cpu          : usr=13.91%, sys=34.99%, ctx=686004, majf=0, minf=1033
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=2316777,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=603MiB/s (633MB/s), 603MiB/s-603MiB/s (633MB/s-633MB/s), io=35.4GiB (38.0GB), run=60004-60004msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=16k) randread:  read: IOPS=38.6k, BW=603MiB/s (633MB/s)(35.4GiB/60004msec)
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=64k===
+
+fio-randread: (g=0): rw=randread, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randread;0;0;56210624;936687;14635;60010;6;13302;65.253883;62.944822;1579;75603;17421.464076;1710.487381;1.000000%=13565;5.000000%=15794;10.000000%=16187;20.000000%=16449;30.000000%=16711;40.000000%=16908;50.000000%=17170;60.000000%=17432;70.000000%=17694;80.000000%=18219;90.000000%=19005;95.000000%=20316;99.000000%=22151;99.500000%=23199;99.900000%=24248;99.950000%=26607;99.990000%=67633;0%=0;0%=0;0%=0;1666;75657;17487.142900;1715.427569;780672;1113600;100.000000%;937259.033613;52627.388859;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;7.067273%;23.268176%;861983;0;8050;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.02%;0.19%;93.51%;6.26%;0.02%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randread: (groupid=0, jobs=1): err= 0: pid=530316: Wed Dec 27 22:13:49 2023
+  read: IOPS=14.6k, BW=915MiB/s (959MB/s)(53.6GiB/60010msec)
+    slat (usec): min=6, max=13302, avg=65.25, stdev=62.94
+    clat (usec): min=1579, max=75603, avg=17421.46, stdev=1710.49
+     lat (usec): min=1666, max=75657, avg=17487.14, stdev=1715.43
+    clat percentiles (usec):
+     |  1.00th=[13566],  5.00th=[15795], 10.00th=[16188], 20.00th=[16450],
+     | 30.00th=[16712], 40.00th=[16909], 50.00th=[17171], 60.00th=[17433],
+     | 70.00th=[17695], 80.00th=[18220], 90.00th=[19006], 95.00th=[20317],
+     | 99.00th=[22152], 99.50th=[23200], 99.90th=[24249], 99.95th=[26608],
+     | 99.99th=[67634]
+   bw (  KiB/s): min=780672, max=1113600, per=100.00%, avg=937259.03, stdev=52627.39, samples=119
+   iops        : min=12198, max=17400, avg=14644.66, stdev=822.29, samples=119
+  lat (msec)   : 2=0.01%, 4=0.02%, 10=0.19%, 20=93.51%, 50=6.26%
+  lat (msec)   : 100=0.02%
+  cpu          : usr=7.07%, sys=23.27%, ctx=861983, majf=0, minf=8050
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=878291,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=915MiB/s (959MB/s), 915MiB/s-915MiB/s (959MB/s-959MB/s), io=53.6GiB (57.6GB), run=60010-60010msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=64k) randread:  read: IOPS=14.6k, BW=915MiB/s (959MB/s)(53.6GiB/60010msec)
+
+
+===Fio: workload=randwrite, time=60, iodepth=1, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=1
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randwrite;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;1520536;25341;6335;60001;9;395;10.419530;3.359705;0;3388;143.932475;62.055237;1.000000%=116;5.000000%=120;10.000000%=122;20.000000%=125;30.000000%=126;40.000000%=127;50.000000%=129;60.000000%=132;70.000000%=134;80.000000%=140;90.000000%=154;95.000000%=248;99.000000%=403;99.500000%=432;99.900000%=585;99.950000%=995;99.990000%=1794;0%=0;0%=0;0%=0;117;3399;154.778293;62.225809;23464;27104;100.000000%;25364.168067;626.476484;4.613333%;11.470000%;380135;0;12;100.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;95.01%;4.75%;0.18%;0.01%;0.05%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=530366: Wed Dec 27 22:14:51 2023
+  write: IOPS=6335, BW=24.7MiB/s (25.9MB/s)(1485MiB/60001msec); 0 zone resets
+    slat (usec): min=9, max=395, avg=10.42, stdev= 3.36
+    clat (nsec): min=705, max=3388.7k, avg=143932.48, stdev=62055.24
+     lat (usec): min=117, max=3399, avg=154.78, stdev=62.23
+    clat percentiles (usec):
+     |  1.00th=[  117],  5.00th=[  121], 10.00th=[  123], 20.00th=[  126],
+     | 30.00th=[  127], 40.00th=[  128], 50.00th=[  130], 60.00th=[  133],
+     | 70.00th=[  135], 80.00th=[  141], 90.00th=[  155], 95.00th=[  249],
+     | 99.00th=[  404], 99.50th=[  433], 99.90th=[  586], 99.95th=[  996],
+     | 99.99th=[ 1795]
+   bw (  KiB/s): min=23464, max=27104, per=100.00%, avg=25364.17, stdev=626.48, samples=119
+   iops        : min= 5866, max= 6776, avg=6341.06, stdev=156.60, samples=119
+  lat (nsec)   : 750=0.01%
+  lat (usec)   : 50=0.01%, 100=0.01%, 250=95.01%, 500=4.75%, 750=0.18%
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=0.05%, 4=0.01%
+  cpu          : usr=4.61%, sys=11.47%, ctx=380135, majf=0, minf=12
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=0,380134,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+  WRITE: bw=24.7MiB/s (25.9MB/s), 24.7MiB/s-24.7MiB/s (25.9MB/s-25.9MB/s), io=1485MiB (1557MB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=1; bs=4k) randwrite:  write: IOPS=6335, BW=24.7MiB/s (25.9MB/s)(1485MiB/60001msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=64, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randwrite;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;11835280;197251;49312;60001;4;768;7.997772;5.372246;124;100254;1287.770896;651.821168;1.000000%=561;5.000000%=708;10.000000%=815;20.000000%=954;30.000000%=1073;40.000000%=1155;50.000000%=1236;60.000000%=1318;70.000000%=1417;80.000000%=1531;90.000000%=1744;95.000000%=2023;99.000000%=2768;99.500000%=3162;99.900000%=4489;99.950000%=5144;99.990000%=14745;0%=0;0%=0;0%=0;133;100264;1296.019646;651.687230;132240;226432;100.000000%;197511.260504;19285.961354;16.923333%;40.108333%;198522;0;735;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.40%;6.30%;17.04%;71.08%;5.01%;0.15%;0.01%;0.00%;0.01%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=530420: Wed Dec 27 22:15:54 2023
+  write: IOPS=49.3k, BW=193MiB/s (202MB/s)(11.3GiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=768, avg= 8.00, stdev= 5.37
+    clat (usec): min=124, max=100254, avg=1287.77, stdev=651.82
+     lat (usec): min=133, max=100264, avg=1296.02, stdev=651.69
+    clat percentiles (usec):
+     |  1.00th=[  562],  5.00th=[  709], 10.00th=[  816], 20.00th=[  955],
+     | 30.00th=[ 1074], 40.00th=[ 1156], 50.00th=[ 1237], 60.00th=[ 1319],
+     | 70.00th=[ 1418], 80.00th=[ 1532], 90.00th=[ 1745], 95.00th=[ 2024],
+     | 99.00th=[ 2769], 99.50th=[ 3163], 99.90th=[ 4490], 99.95th=[ 5145],
+     | 99.99th=[14746]
+   bw (  KiB/s): min=132240, max=226432, per=100.00%, avg=197511.26, stdev=19285.96, samples=119
+   iops        : min=33060, max=56610, avg=49377.88, stdev=4821.56, samples=119
+  lat (usec)   : 250=0.01%, 500=0.40%, 750=6.30%, 1000=17.04%
+  lat (msec)   : 2=71.08%, 4=5.01%, 10=0.15%, 20=0.01%, 100=0.01%
+  lat (msec)   : 250=0.01%
+  cpu          : usr=16.92%, sys=40.11%, ctx=198522, majf=0, minf=735
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=0,2958820,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+  WRITE: bw=193MiB/s (202MB/s), 193MiB/s-193MiB/s (202MB/s-202MB/s), io=11.3GiB (12.1GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64; bs=4k) randwrite:  write: IOPS=49.3k, BW=193MiB/s (202MB/s)(11.3GiB/60001msec); 0 zone resets
+
+
+===Fio: workload=write, time=60, iodepth=1, bs=4k===
+
+fio-write: (g=0): rw=write, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=1
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-write;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;1631672;27194;6798;60001;6;409;9.811230;4.190009;0;12122;134.768418;57.992105;1.000000%=104;5.000000%=105;10.000000%=110;20.000000%=114;30.000000%=117;40.000000%=120;50.000000%=123;60.000000%=125;70.000000%=128;80.000000%=134;90.000000%=148;95.000000%=218;99.000000%=395;99.500000%=432;99.900000%=536;99.950000%=585;99.990000%=806;0%=0;0%=0;0%=0;101;12130;144.917738;58.403939;24520;30496;100.000000%;27203.159664;1625.919286;4.281667%;10.253333%;407925;0;13;100.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.0%;0.00%;0.00%;0.00%;0.00%;0.01%;0.10%;95.49%;4.21%;0.17%;0.01%;0.01%;0.01%;0.01%;0.01%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=530479: Wed Dec 27 22:16:56 2023
+  write: IOPS=6798, BW=26.6MiB/s (27.8MB/s)(1593MiB/60001msec); 0 zone resets
+    slat (usec): min=6, max=409, avg= 9.81, stdev= 4.19
+    clat (nsec): min=634, max=12122k, avg=134768.42, stdev=57992.11
+     lat (usec): min=101, max=12130, avg=144.92, stdev=58.40
+    clat percentiles (usec):
+     |  1.00th=[  105],  5.00th=[  106], 10.00th=[  111], 20.00th=[  115],
+     | 30.00th=[  118], 40.00th=[  121], 50.00th=[  124], 60.00th=[  126],
+     | 70.00th=[  129], 80.00th=[  135], 90.00th=[  149], 95.00th=[  219],
+     | 99.00th=[  396], 99.50th=[  433], 99.90th=[  537], 99.95th=[  586],
+     | 99.99th=[  807]
+   bw (  KiB/s): min=24520, max=30496, per=100.00%, avg=27203.16, stdev=1625.92, samples=119
+   iops        : min= 6130, max= 7624, avg=6800.79, stdev=406.48, samples=119
+  lat (nsec)   : 750=0.01%
+  lat (usec)   : 50=0.01%, 100=0.10%, 250=95.49%, 500=4.21%, 750=0.17%
+  lat (usec)   : 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=0.01%, 10=0.01%, 20=0.01%
+  cpu          : usr=4.28%, sys=10.25%, ctx=407925, majf=0, minf=13
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=0,407918,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+  WRITE: bw=26.6MiB/s (27.8MB/s), 26.6MiB/s-26.6MiB/s (27.8MB/s-27.8MB/s), io=1593MiB (1671MB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=1; bs=4k) write:  write: IOPS=6798, BW=26.6MiB/s (27.8MB/s)(1593MiB/60001msec); 0 zone resets
+
+
+===Fio: workload=write, time=60, iodepth=64, bs=4k===
+
+fio-write: (g=0): rw=write, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=64
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-write;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;10017464;166954;41738;60001;4;656;6.817289;3.930756;306;519862;1524.938120;7899.660407;1.000000%=569;5.000000%=716;10.000000%=839;20.000000%=987;30.000000%=1073;40.000000%=1138;50.000000%=1204;60.000000%=1253;70.000000%=1335;80.000000%=1433;90.000000%=1613;95.000000%=1875;99.000000%=4947;99.500000%=6258;99.900000%=33816;99.950000%=185597;99.990000%=400556;0%=0;0%=0;0%=0;371;519868;1531.998821;7899.692350;22560;251976;100.000000%;167070.319328;60215.767714;11.471667%;29.403333%;271734;0;12;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.37%;6.11%;14.74%;74.52%;2.92%;1.17%;0.06%;0.03%;0.01%;0.04%;0.04%;0.01%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=530533: Wed Dec 27 22:17:58 2023
+  write: IOPS=41.7k, BW=163MiB/s (171MB/s)(9783MiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=656, avg= 6.82, stdev= 3.93
+    clat (usec): min=306, max=519862, avg=1524.94, stdev=7899.66
+     lat (usec): min=371, max=519868, avg=1532.00, stdev=7899.69
+    clat percentiles (usec):
+     |  1.00th=[   570],  5.00th=[   717], 10.00th=[   840], 20.00th=[   988],
+     | 30.00th=[  1074], 40.00th=[  1139], 50.00th=[  1205], 60.00th=[  1254],
+     | 70.00th=[  1336], 80.00th=[  1434], 90.00th=[  1614], 95.00th=[  1876],
+     | 99.00th=[  4948], 99.50th=[  6259], 99.90th=[ 33817], 99.95th=[185598],
+     | 99.99th=[400557]
+   bw (  KiB/s): min=22560, max=251976, per=100.00%, avg=167070.32, stdev=60215.77, samples=119
+   iops        : min= 5640, max=62994, avg=41767.58, stdev=15053.94, samples=119
+  lat (usec)   : 500=0.37%, 750=6.11%, 1000=14.74%
+  lat (msec)   : 2=74.52%, 4=2.92%, 10=1.17%, 20=0.06%, 50=0.03%
+  lat (msec)   : 100=0.01%, 250=0.04%, 500=0.04%, 750=0.01%
+  cpu          : usr=11.47%, sys=29.40%, ctx=271734, majf=0, minf=12
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=0,2504366,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+  WRITE: bw=163MiB/s (171MB/s), 163MiB/s-163MiB/s (171MB/s-171MB/s), io=9783MiB (10.3GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=64; bs=4k) write:  write: IOPS=41.7k, BW=163MiB/s (171MB/s)(9783MiB/60001msec); 0 zone resets
+
+
+===Fio: workload=write, time=60, iodepth=256, bs=16k===
+
+fio-write: (g=0): rw=write, bs=(R) 16.0KiB-16.0KiB, (W) 16.0KiB-16.0KiB, (T) 16.0KiB-16.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-write;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;16754192;279203;17450;60007;4;655825;54.901801;2218.100610;1283;681598;14612.484241;36953.085695;1.000000%=8978;5.000000%=9502;10.000000%=9764;20.000000%=10027;30.000000%=10420;40.000000%=10813;50.000000%=11206;60.000000%=11468;70.000000%=11862;80.000000%=12386;90.000000%=13565;95.000000%=15269;99.000000%=56360;99.500000%=252706;99.900000%=624951;99.950000%=666894;99.990000%=675282;0%=0;0%=0;0%=0;1377;681609;14667.751490;37029.121835;6624;415648;100.000000%;283730.948718;112891.716099;7.815885%;21.972803%;276506;0;12;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.07%;17.78%;78.83%;2.19%;0.38%;0.23%;0.18%;0.34%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=530590: Wed Dec 27 22:19:01 2023
+  write: IOPS=17.5k, BW=273MiB/s (286MB/s)(16.0GiB/60007msec); 0 zone resets
+    slat (usec): min=4, max=655825, avg=54.90, stdev=2218.10
+    clat (usec): min=1283, max=681598, avg=14612.48, stdev=36953.09
+     lat (usec): min=1377, max=681609, avg=14667.75, stdev=37029.12
+    clat percentiles (msec):
+     |  1.00th=[    9],  5.00th=[   10], 10.00th=[   10], 20.00th=[   11],
+     | 30.00th=[   11], 40.00th=[   11], 50.00th=[   12], 60.00th=[   12],
+     | 70.00th=[   12], 80.00th=[   13], 90.00th=[   14], 95.00th=[   16],
+     | 99.00th=[   57], 99.50th=[  253], 99.90th=[  625], 99.95th=[  667],
+     | 99.99th=[  676]
+   bw (  KiB/s): min= 6624, max=415648, per=100.00%, avg=283730.95, stdev=112891.72, samples=117
+   iops        : min=  414, max=25978, avg=17733.16, stdev=7055.71, samples=117
+  lat (msec)   : 2=0.01%, 4=0.07%, 10=17.78%, 20=78.83%, 50=2.19%
+  lat (msec)   : 100=0.38%, 250=0.23%, 500=0.18%, 750=0.34%
+  cpu          : usr=7.82%, sys=21.97%, ctx=276506, majf=0, minf=12
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,1047137,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=273MiB/s (286MB/s), 273MiB/s-273MiB/s (286MB/s-286MB/s), io=16.0GiB (17.2GB), run=60007-60007msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=16k) write:  write: IOPS=17.5k, BW=273MiB/s (286MB/s)(16.0GiB/60007msec); 0 zone resets
+
+
+===Fio: workload=write, time=60, iodepth=256, bs=64k===
+
+fio-write: (g=0): rw=write, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-write;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;18581504;308202;4815;60290;6;805831;204.151808;5109.562577;1653;864263;52946.137827;86908.975943;1.000000%=32112;5.000000%=33423;10.000000%=34340;20.000000%=35913;30.000000%=37486;40.000000%=38535;50.000000%=39583;60.000000%=41156;70.000000%=42205;80.000000%=44302;90.000000%=49020;95.000000%=56360;99.000000%=675282;99.500000%=734003;99.900000%=809500;99.950000%=859832;99.990000%=859832;0%=0;0%=0;0%=0;1834;864488;53150.846412;87088.130667;1024;485120;100.000000%;320088.275862;129376.609593;3.518055%;8.324902%;251294;0;11;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;0.05%;0.09%;90.65%;7.01%;0.21%;0.32%;1.28%;0.38%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=530644: Wed Dec 27 22:20:03 2023
+  write: IOPS=4815, BW=301MiB/s (316MB/s)(17.7GiB/60290msec); 0 zone resets
+    slat (usec): min=6, max=805831, avg=204.15, stdev=5109.56
+    clat (usec): min=1653, max=864263, avg=52946.14, stdev=86908.98
+     lat (usec): min=1834, max=864488, avg=53150.85, stdev=87088.13
+    clat percentiles (msec):
+     |  1.00th=[   33],  5.00th=[   34], 10.00th=[   35], 20.00th=[   36],
+     | 30.00th=[   38], 40.00th=[   39], 50.00th=[   40], 60.00th=[   42],
+     | 70.00th=[   43], 80.00th=[   45], 90.00th=[   50], 95.00th=[   57],
+     | 99.00th=[  676], 99.50th=[  735], 99.90th=[  810], 99.95th=[  860],
+     | 99.99th=[  860]
+   bw (  KiB/s): min= 1024, max=485120, per=100.00%, avg=320088.28, stdev=129376.61, samples=116
+   iops        : min=   16, max= 7580, avg=5001.38, stdev=2021.51, samples=116
+  lat (msec)   : 2=0.01%, 4=0.01%, 10=0.05%, 20=0.09%, 50=90.65%
+  lat (msec)   : 100=7.01%, 250=0.21%, 500=0.32%, 750=1.28%, 1000=0.38%
+  cpu          : usr=3.52%, sys=8.32%, ctx=251294, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,290336,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=301MiB/s (316MB/s), 301MiB/s-301MiB/s (316MB/s-316MB/s), io=17.7GiB (19.0GB), run=60290-60290msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=64k) write:  write: IOPS=4815, BW=301MiB/s (316MB/s)(17.7GiB/60290msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=256, bs=16k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 16.0KiB-16.0KiB, (W) 16.0KiB-16.0KiB, (T) 16.0KiB-16.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randwrite;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;15191200;251376;15711;60432;4;585485;60.405963;2438.591608;1083;597865;16229.968469;41051.838015;1.000000%=8716;5.000000%=9109;10.000000%=9371;20.000000%=9633;30.000000%=9895;40.000000%=10027;50.000000%=10289;60.000000%=10682;70.000000%=11337;80.000000%=11862;90.000000%=12779;95.000000%=15794;99.000000%=254803;99.500000%=354418;99.900000%=530579;99.950000%=574619;99.990000%=599785;0%=0;0%=0;0%=0;1091;597917;16290.782649;41137.489580;10656;417504;100.000000%;253118.133333;129268.687236;7.837037%;16.938326%;265205;0;11;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.06%;37.46%;58.34%;2.09%;0.16%;0.82%;0.94%;0.13%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=530699: Wed Dec 27 22:21:06 2023
+  write: IOPS=15.7k, BW=245MiB/s (257MB/s)(14.5GiB/60432msec); 0 zone resets
+    slat (usec): min=4, max=585485, avg=60.41, stdev=2438.59
+    clat (usec): min=1083, max=597865, avg=16229.97, stdev=41051.84
+     lat (usec): min=1091, max=597917, avg=16290.78, stdev=41137.49
+    clat percentiles (msec):
+     |  1.00th=[    9],  5.00th=[   10], 10.00th=[   10], 20.00th=[   10],
+     | 30.00th=[   10], 40.00th=[   11], 50.00th=[   11], 60.00th=[   11],
+     | 70.00th=[   12], 80.00th=[   12], 90.00th=[   13], 95.00th=[   16],
+     | 99.00th=[  255], 99.50th=[  355], 99.90th=[  531], 99.95th=[  575],
+     | 99.99th=[  600]
+   bw (  KiB/s): min=10656, max=417504, per=100.00%, avg=253118.13, stdev=129268.69, samples=120
+   iops        : min=  666, max=26094, avg=15819.90, stdev=8079.29, samples=120
+  lat (msec)   : 2=0.01%, 4=0.06%, 10=37.46%, 20=58.34%, 50=2.09%
+  lat (msec)   : 100=0.16%, 250=0.82%, 500=0.94%, 750=0.13%
+  cpu          : usr=7.84%, sys=16.94%, ctx=265205, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,949450,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=245MiB/s (257MB/s), 245MiB/s-245MiB/s (257MB/s-257MB/s), io=14.5GiB (15.6GB), run=60432-60432msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=16k) randwrite:  write: IOPS=15.7k, BW=245MiB/s (257MB/s)(14.5GiB/60432msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=256, bs=64k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randwrite;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;16523776;275299;4301;60021;8;701177;227.661175;5527.523436;2276;748812;59273.866581;96814.490551;1.000000%=28704;5.000000%=32636;10.000000%=33161;20.000000%=33816;30.000000%=34340;40.000000%=34865;50.000000%=35389;60.000000%=36438;70.000000%=39059;80.000000%=42205;90.000000%=49020;95.000000%=233832;99.000000%=633339;99.500000%=683671;99.900000%=742391;99.950000%=742391;99.990000%=750780;0%=0;0%=0;0%=0;2303;748922;59502.173577;97018.261504;1408;479744;100.000000%;276037.423729;152553.907556;4.201933%;8.000666%;227166;0;10;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.02%;0.10%;0.25%;90.35%;3.35%;1.10%;3.19%;1.64%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=530756: Wed Dec 27 22:22:09 2023
+  write: IOPS=4301, BW=269MiB/s (282MB/s)(15.8GiB/60021msec); 0 zone resets
+    slat (usec): min=8, max=701177, avg=227.66, stdev=5527.52
+    clat (msec): min=2, max=748, avg=59.27, stdev=96.81
+     lat (msec): min=2, max=748, avg=59.50, stdev=97.02
+    clat percentiles (msec):
+     |  1.00th=[   29],  5.00th=[   33], 10.00th=[   34], 20.00th=[   34],
+     | 30.00th=[   35], 40.00th=[   35], 50.00th=[   36], 60.00th=[   37],
+     | 70.00th=[   40], 80.00th=[   43], 90.00th=[   50], 95.00th=[  234],
+     | 99.00th=[  634], 99.50th=[  684], 99.90th=[  743], 99.95th=[  743],
+     | 99.99th=[  751]
+   bw (  KiB/s): min= 1408, max=479744, per=100.00%, avg=276037.42, stdev=152553.91, samples=118
+   iops        : min=   22, max= 7496, avg=4313.08, stdev=2383.65, samples=118
+  lat (msec)   : 4=0.02%, 10=0.10%, 20=0.25%, 50=90.35%, 100=3.35%
+  lat (msec)   : 250=1.10%, 500=3.19%, 750=1.64%
+  cpu          : usr=4.20%, sys=8.00%, ctx=227166, majf=0, minf=10
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,258184,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=269MiB/s (282MB/s), 269MiB/s-269MiB/s (282MB/s-282MB/s), io=15.8GiB (16.9GB), run=60021-60021msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=64k) randwrite:  write: IOPS=4301, BW=269MiB/s (282MB/s)(15.8GiB/60021msec); 0 zone resets
+
+
+===Fio: workload=randwrite, time=60, iodepth=256, bs=4k===
+
+fio-randwrite: (g=0): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-randwrite;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;11109584;185156;46289;60001;4;362839;19.077224;554.742575;390;368776;5509.008911;9002.243008;1.000000%=3653;5.000000%=4014;10.000000%=4177;20.000000%=4358;30.000000%=4489;40.000000%=4620;50.000000%=4816;60.000000%=5013;70.000000%=5341;80.000000%=5668;90.000000%=6062;95.000000%=6651;99.000000%=9240;99.500000%=16711;99.900000%=181403;99.950000%=210763;99.990000%=287309;0%=0;0%=0;0%=0;895;368781;5528.391536;9020.067451;47664;229416;99.934482%;185034.689076;41627.165006;16.096667%;35.336667%;219756;0;11;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.00%;0.01%;0.01%;4.42%;94.73%;0.40%;0.14%;0.08%;0.19%;0.03%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-randwrite: (groupid=0, jobs=1): err= 0: pid=530811: Wed Dec 27 22:23:11 2023
+  write: IOPS=46.3k, BW=181MiB/s (190MB/s)(10.6GiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=362839, avg=19.08, stdev=554.74
+    clat (usec): min=390, max=368776, avg=5509.01, stdev=9002.24
+     lat (usec): min=895, max=368781, avg=5528.39, stdev=9020.07
+    clat percentiles (msec):
+     |  1.00th=[    4],  5.00th=[    5], 10.00th=[    5], 20.00th=[    5],
+     | 30.00th=[    5], 40.00th=[    5], 50.00th=[    5], 60.00th=[    6],
+     | 70.00th=[    6], 80.00th=[    6], 90.00th=[    7], 95.00th=[    7],
+     | 99.00th=[   10], 99.50th=[   17], 99.90th=[  182], 99.95th=[  211],
+     | 99.99th=[  288]
+   bw (  KiB/s): min=47664, max=229416, per=99.93%, avg=185034.69, stdev=41627.17, samples=119
+   iops        : min=11916, max=57354, avg=46258.74, stdev=10406.78, samples=119
+  lat (usec)   : 500=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=4.42%, 10=94.73%, 20=0.40%, 50=0.14%
+  lat (msec)   : 100=0.08%, 250=0.19%, 500=0.03%
+  cpu          : usr=16.10%, sys=35.34%, ctx=219756, majf=0, minf=11
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2777396,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=181MiB/s (190MB/s), 181MiB/s-181MiB/s (190MB/s-190MB/s), io=10.6GiB (11.4GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=4k) randwrite:  write: IOPS=46.3k, BW=181MiB/s (190MB/s)(10.6GiB/60001msec); 0 zone resets
+
+
+===Fio: workload=write, time=60, iodepth=256, bs=4k===
+
+fio-write: (g=0): rw=write, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 1 process
+3;fio-3.28;fio-write;0;0;0;0;0;0;0;0;0.000000;0.000000;0;0;0.000000;0.000000;1.000000%=0;5.000000%=0;10.000000%=0;20.000000%=0;30.000000%=0;40.000000%=0;50.000000%=0;60.000000%=0;70.000000%=0;80.000000%=0;90.000000%=0;95.000000%=0;99.000000%=0;99.500000%=0;99.900000%=0;99.950000%=0;99.990000%=0;0%=0;0%=0;0%=0;0;0;0.000000;0.000000;0;0;0.000000%;0.000000;0.000000;10755120;179249;44812;60001;4;460480;20.459518;924.780288;337;466243;5690.466173;15021.041733;1.000000%=3424;5.000000%=3850;10.000000%=4014;20.000000%=4227;30.000000%=4358;40.000000%=4554;50.000000%=4751;60.000000%=4947;70.000000%=5210;80.000000%=5472;90.000000%=5931;95.000000%=6324;99.000000%=8093;99.500000%=12255;99.900000%=320864;99.950000%=379584;99.990000%=438304;0%=0;0%=0;0%=0;349;466247;5711.189221;15050.625692;27672;251080;99.951849%;179162.689076;52517.111922;11.915000%;30.960000%;224799;0;322;0.1%;0.1%;0.1%;0.1%;0.1%;0.1%;100.0%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.00%;0.01%;0.01%;0.01%;0.01%;9.83%;89.52%;0.22%;0.09%;0.03%;0.19%;0.11%;0.00%;0.00%;0.00%;0.00%;nvme1n1;0;0;0;0;0;0;0;0.00%
+
+fio-write: (groupid=0, jobs=1): err= 0: pid=530864: Wed Dec 27 22:24:13 2023
+  write: IOPS=44.8k, BW=175MiB/s (184MB/s)(10.3GiB/60001msec); 0 zone resets
+    slat (usec): min=4, max=460480, avg=20.46, stdev=924.78
+    clat (usec): min=337, max=466243, avg=5690.47, stdev=15021.04
+     lat (usec): min=349, max=466247, avg=5711.19, stdev=15050.63
+    clat percentiles (msec):
+     |  1.00th=[    4],  5.00th=[    4], 10.00th=[    5], 20.00th=[    5],
+     | 30.00th=[    5], 40.00th=[    5], 50.00th=[    5], 60.00th=[    5],
+     | 70.00th=[    6], 80.00th=[    6], 90.00th=[    6], 95.00th=[    7],
+     | 99.00th=[    9], 99.50th=[   13], 99.90th=[  321], 99.95th=[  380],
+     | 99.99th=[  439]
+   bw (  KiB/s): min=27672, max=251080, per=99.95%, avg=179162.69, stdev=52517.11, samples=119
+   iops        : min= 6918, max=62770, avg=44790.76, stdev=13129.28, samples=119
+  lat (usec)   : 500=0.01%, 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.01%, 4=9.83%, 10=89.52%, 20=0.22%, 50=0.09%
+  lat (msec)   : 100=0.03%, 250=0.19%, 500=0.11%
+  cpu          : usr=11.91%, sys=30.96%, ctx=224799, majf=0, minf=322
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=0,2688780,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+  WRITE: bw=175MiB/s (184MB/s), 175MiB/s-175MiB/s (184MB/s-184MB/s), io=10.3GiB (11.0GB), run=60001-60001msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (iodepth=256; bs=4k) write:  write: IOPS=44.8k, BW=175MiB/s (184MB/s)(10.3GiB/60001msec); 0 zone resets
+100+0 records in
+100+0 records out
+104857600 bytes (105 MB, 100 MiB) copied, 0.331369 s, 316 MB/s
+umount: /mnt/fsbench: not mounted.
+
+==== Creating filesystem ====
+mke2fs 1.46.5 (30-Dec-2021)
+Creating filesystem with 20971520 4k blocks and 5242880 inodes
+Filesystem UUID: 00a0dca8-80c6-44f2-a7a9-b8acd8bef063
+Superblock backups stored on blocks: 
+	32768, 98304, 163840, 229376, 294912, 819200, 884736, 1605632, 2654208, 
+	4096000, 7962624, 11239424, 20480000
+
+Allocating group tables:   0/640       done                            
+Writing inode tables:   0/640       done                            
+Creating journal (131072 blocks): done
+Writing superblocks and filesystem accounting information:   0/640       done
+
+
+
+=========================================
+=== Running filebench workloads       ===
+=========================================
+
+
+
+
+===Filebench: workload=/tmp/filebench/fileserver.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: File-server Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.227: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.227: Removing bigfileset tree (if exists)
+0.229: Pre-allocating directories in bigfileset tree
+0.650: Pre-allocating files in bigfileset tree
+41.747: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+41.747: Population and pre-allocation of filesets completed
+41.748: Starting 1 filereader instances
+42.756: Running...
+222.774: Run took 180 seconds...
+222.781: Per-Operation Breakdown
+statfile1            872614ops     4847ops/s   0.0mb/s    0.009ms/op [0.003ms - 5.805ms]
+deletefile1          872617ops     4847ops/s   0.0mb/s    0.134ms/op [0.027ms - 852.282ms]
+closefile3           872617ops     4847ops/s   0.0mb/s    0.003ms/op [0.001ms - 2.113ms]
+readfile1            872618ops     4847ops/s 637.8mb/s    0.090ms/op [0.004ms - 538.555ms]
+openfile2            872618ops     4847ops/s   0.0mb/s    0.041ms/op [0.005ms - 37.939ms]
+closefile2           872618ops     4847ops/s   0.0mb/s    0.003ms/op [0.001ms - 5.711ms]
+appendfilerand1      872618ops     4847ops/s  37.9mb/s    0.661ms/op [0.001ms - 871.880ms]
+openfile1            872621ops     4847ops/s   0.0mb/s    0.044ms/op [0.007ms - 37.224ms]
+closefile1           872621ops     4847ops/s   0.0mb/s    0.005ms/op [0.001ms - 26.052ms]
+wrtfile1             872623ops     4847ops/s 605.9mb/s    8.741ms/op [0.013ms - 899.132ms]
+createfile1          872664ops     4848ops/s   0.0mb/s    0.090ms/op [0.023ms - 261.554ms]
+222.781: IO Summary: 9598849 ops 53322.061 ops/s 4847/9695 rd/wr 1281.5mb/s 0.893ms/op
+222.781: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver.f:222.781: IO Summary: 9598849 ops 53322.061 ops/s 4847/9695 rd/wr 1281.5mb/s 0.893ms/op
+
+
+===Filebench: workload=/tmp/filebench/fileserver-fsync.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: File-server Version 3.0 personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.207: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.207: Removing bigfileset tree (if exists)
+0.210: Pre-allocating directories in bigfileset tree
+0.617: Pre-allocating files in bigfileset tree
+40.443: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+40.443: Population and pre-allocation of filesets completed
+40.443: Starting 1 filereader instances
+41.453: Running...
+221.468: Run took 180 seconds...
+221.472: Per-Operation Breakdown
+statfile1            432027ops     2400ops/s   0.0mb/s    0.012ms/op [0.003ms - 4.714ms]
+deletefile1          432030ops     2400ops/s   0.0mb/s    2.321ms/op [0.039ms - 27563.577ms]
+closefile3           432033ops     2400ops/s   0.0mb/s    0.005ms/op [0.001ms - 1.827ms]
+readfile1            432035ops     2400ops/s 310.7mb/s    2.680ms/op [0.006ms - 27562.389ms]
+openfile2            432037ops     2400ops/s   0.0mb/s    0.067ms/op [0.007ms - 35.760ms]
+closefile2           432037ops     2400ops/s   0.0mb/s    0.020ms/op [0.001ms - 16.172ms]
+fsyncfile2           432040ops     2400ops/s   0.0mb/s   11.238ms/op [0.141ms - 27621.103ms]
+appendfilerand1      432044ops     2400ops/s  18.7mb/s    0.482ms/op [0.001ms - 27562.303ms]
+openfile1            432048ops     2400ops/s   0.0mb/s    0.041ms/op [0.007ms - 28.222ms]
+closefile1           432048ops     2400ops/s   0.0mb/s    0.005ms/op [0.001ms - 1.786ms]
+wrtfile1             432050ops     2400ops/s 301.0mb/s    1.326ms/op [0.016ms - 27562.669ms]
+createfile1          432065ops     2400ops/s   0.0mb/s    2.076ms/op [0.029ms - 27563.269ms]
+221.472: IO Summary: 5184494 ops 28800.606 ops/s 2400/4800 rd/wr 630.5mb/s 1.689ms/op
+221.472: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver-fsync.f:221.472: IO Summary: 5184494 ops 28800.606 ops/s 2400/4800 rd/wr 630.5mb/s 1.689ms/op
+
+
+===Filebench: workload=/tmp/filebench/oltp.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: OLTP Version 3.0  personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.003: logfile populated: 1 files, avg. dir. width = 1024, avg. dir. depth = 0.0, 0 leafdirs, 100.000MB total size
+0.003: Removing logfile tree (if exists)
+0.005: Pre-allocating directories in logfile tree
+0.005: Pre-allocating files in logfile tree
+0.092: datafiles populated: 250 files, avg. dir. width = 1024, avg. dir. depth = 0.8, 0 leafdirs, 25000.000MB total size
+0.092: Removing datafiles tree (if exists)
+0.094: Pre-allocating directories in datafiles tree
+0.094: Pre-allocating files in datafiles tree
+45.314: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+45.314: Population and pre-allocation of filesets completed
+45.314: Starting 200 shadow instances
+45.435: Starting 10 dbwr instances
+45.440: Starting 1 lgwr instances
+46.445: Running...
+226.527: Run took 180 seconds...
+226.546: Per-Operation Breakdown
+random-rate          0ops        0ops/s   0.0mb/s    0.000ms/op [0.000ms - 0.000ms]
+shadow-post-dbwr     4259633ops    23654ops/s   0.0mb/s    6.714ms/op [0.016ms - 741.795ms]
+shadow-post-lg       4259637ops    23654ops/s   0.0mb/s    0.079ms/op [0.001ms - 67.807ms]
+shadowhog            4259658ops    23654ops/s   0.0mb/s    0.348ms/op [0.081ms - 124.207ms]
+shadowread           4285309ops    23797ops/s  46.2mb/s    1.199ms/op [0.001ms - 546.250ms]
+dbwr-aiowait         42584ops      236ops/s   0.0mb/s    2.340ms/op [0.004ms - 155.828ms]
+dbwr-block           42587ops      236ops/s   0.0mb/s   21.938ms/op [0.003ms - 308.207ms]
+dbwr-hog             42594ops      237ops/s   0.0mb/s    0.011ms/op [0.004ms - 9.154ms]
+dbwrite-a            4260680ops    23660ops/s  46.2mb/s    0.004ms/op [0.000ms - 41.224ms]
+lg-block             1331ops        7ops/s   0.0mb/s  135.221ms/op [35.524ms - 1138.035ms]
+lg-aiowait           1332ops        7ops/s   0.0mb/s    0.001ms/op [0.001ms - 0.018ms]
+lg-write             1333ops        7ops/s   1.8mb/s    0.009ms/op [0.001ms - 0.124ms]
+226.546: IO Summary: 8591238 ops 47708.038 ops/s 23797/23667 rd/wr  94.2mb/s 0.611ms/op
+226.546: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/oltp.f:226.546: IO Summary: 8591238 ops 47708.038 ops/s 23797/23667 rd/wr  94.2mb/s 0.611ms/op
+
+
+===Filebench: workload=/tmp/filebench/randomwrite.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.002: Random Write Version 3.0 personality successfully loaded
+0.002: Populating and pre-allocating filesets
+0.002: Removing largefile1 tree (if exists)
+0.004: Pre-allocating directories in largefile1 tree
+0.004: Pre-allocating files in largefile1 tree
+0.876: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+0.876: Population and pre-allocation of filesets completed
+0.876: Starting 1 rand-write instances
+1.881: Running...
+1.887: write failed, offset 547979264 io buffer 140737084729344: Invalid argument
+1.887: rand-thread-1: flowop rand-write1-1 failed
+2.881: Run took 1 seconds...
+2.881: Shutting down processes
+2.881: NO VALID RESULTS! Filebench run terminated prematurely around line 46
+
+RESULT: Filebench /tmp/filebench/randomwrite.f:
+
+===Filebench: workload=/tmp/filebench/varmail.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.002: Varmail Version 3.0 personality successfully loaded
+0.002: Populating and pre-allocating filesets
+0.752: bigfileset populated: 900000 files, avg. dir. width = 1000000, avg. dir. depth = 1.0, 0 leafdirs, 28154.289MB total size
+0.752: Removing bigfileset tree (if exists)
+0.754: Pre-allocating directories in bigfileset tree
+0.754: Pre-allocating files in bigfileset tree
+75.618: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+75.618: Population and pre-allocation of filesets completed
+75.618: Starting 1 filereader instances
+76.624: Running...
+256.638: Run took 180 seconds...
+256.639: Per-Operation Breakdown
+closefile4           346005ops     1922ops/s   0.0mb/s    0.003ms/op [0.001ms - 1.223ms]
+readfile4            346005ops     1922ops/s  50.2mb/s    0.604ms/op [0.005ms - 368.739ms]
+openfile4            346005ops     1922ops/s   0.0mb/s    0.021ms/op [0.005ms - 12.578ms]
+closefile3           346005ops     1922ops/s   0.0mb/s    0.006ms/op [0.001ms - 7.054ms]
+fsyncfile3           346005ops     1922ops/s   0.0mb/s    2.636ms/op [0.127ms - 644.773ms]
+appendfilerand3      346010ops     1922ops/s  15.0mb/s    0.089ms/op [0.001ms - 90.545ms]
+readfile3            346011ops     1922ops/s  50.1mb/s    0.647ms/op [0.005ms - 315.721ms]
+openfile3            346012ops     1922ops/s   0.0mb/s    0.021ms/op [0.005ms - 4.149ms]
+closefile2           346012ops     1922ops/s   0.0mb/s    0.006ms/op [0.001ms - 4.548ms]
+fsyncfile2           346012ops     1922ops/s   0.0mb/s    2.757ms/op [0.787ms - 789.304ms]
+appendfilerand2      346016ops     1922ops/s  15.0mb/s    0.241ms/op [0.001ms - 316.837ms]
+createfile2          346018ops     1922ops/s   0.0mb/s    0.530ms/op [0.034ms - 632.173ms]
+deletefile1          346018ops     1922ops/s   0.0mb/s    0.627ms/op [0.041ms - 631.961ms]
+256.639: IO Summary: 4498134 ops 24987.690 ops/s 3844/3844 rd/wr 130.3mb/s 0.630ms/op
+256.639: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/varmail.f:256.639: IO Summary: 4498134 ops 24987.690 ops/s 3844/3844 rd/wr 130.3mb/s 0.630ms/op
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 1 controller(s)
+Fio (iodepth=256; bs=4k) randread:  read: IOPS=66.7k, BW=261MiB/s (273MB/s)(15.3GiB/60001msec)
+Fio (iodepth=256; bs=4k) read:  read: IOPS=62.1k, BW=242MiB/s (254MB/s)(14.2GiB/60002msec)
+Fio (iodepth=1; bs=4k) randread:  read: IOPS=7086, BW=27.7MiB/s (29.0MB/s)(1661MiB/60001msec)
+Fio (iodepth=64; bs=4k) randread:  read: IOPS=58.8k, BW=230MiB/s (241MB/s)(13.4GiB/60001msec)
+Fio (iodepth=1; bs=4k) read:  read: IOPS=8113, BW=31.7MiB/s (33.2MB/s)(1902MiB/60001msec)
+Fio (iodepth=64; bs=4k) read:  read: IOPS=73.8k, BW=288MiB/s (302MB/s)(16.9GiB/60001msec)
+Fio (iodepth=256; bs=4k) read:  read: IOPS=82.1k, BW=321MiB/s (336MB/s)(18.8GiB/60001msec)
+Fio (iodepth=256; bs=16k) read:  read: IOPS=46.3k, BW=723MiB/s (758MB/s)(42.4GiB/60003msec)
+Fio (iodepth=256; bs=64k) read:  read: IOPS=13.6k, BW=847MiB/s (889MB/s)(49.7GiB/60008msec)
+Fio (iodepth=256; bs=4k) randread:  read: IOPS=61.6k, BW=241MiB/s (252MB/s)(14.1GiB/60002msec)
+Fio (iodepth=256; bs=16k) randread:  read: IOPS=38.6k, BW=603MiB/s (633MB/s)(35.4GiB/60004msec)
+Fio (iodepth=256; bs=64k) randread:  read: IOPS=14.6k, BW=915MiB/s (959MB/s)(53.6GiB/60010msec)
+Fio (iodepth=1; bs=4k) randwrite:  write: IOPS=6335, BW=24.7MiB/s (25.9MB/s)(1485MiB/60001msec); 0 zone resets
+Fio (iodepth=64; bs=4k) randwrite:  write: IOPS=49.3k, BW=193MiB/s (202MB/s)(11.3GiB/60001msec); 0 zone resets
+Fio (iodepth=1; bs=4k) write:  write: IOPS=6798, BW=26.6MiB/s (27.8MB/s)(1593MiB/60001msec); 0 zone resets
+Fio (iodepth=64; bs=4k) write:  write: IOPS=41.7k, BW=163MiB/s (171MB/s)(9783MiB/60001msec); 0 zone resets
+Fio (iodepth=256; bs=16k) write:  write: IOPS=17.5k, BW=273MiB/s (286MB/s)(16.0GiB/60007msec); 0 zone resets
+Fio (iodepth=256; bs=64k) write:  write: IOPS=4815, BW=301MiB/s (316MB/s)(17.7GiB/60290msec); 0 zone resets
+Fio (iodepth=256; bs=16k) randwrite:  write: IOPS=15.7k, BW=245MiB/s (257MB/s)(14.5GiB/60432msec); 0 zone resets
+Fio (iodepth=256; bs=64k) randwrite:  write: IOPS=4301, BW=269MiB/s (282MB/s)(15.8GiB/60021msec); 0 zone resets
+Fio (iodepth=256; bs=4k) randwrite:  write: IOPS=46.3k, BW=181MiB/s (190MB/s)(10.6GiB/60001msec); 0 zone resets
+Fio (iodepth=256; bs=4k) write:  write: IOPS=44.8k, BW=175MiB/s (184MB/s)(10.3GiB/60001msec); 0 zone resets
+Filebench /tmp/filebench/fileserver.f:222.781: IO Summary: 9598849 ops 53322.061 ops/s 4847/9695 rd/wr 1281.5mb/s 0.893ms/op
+Filebench /tmp/filebench/fileserver-fsync.f:221.472: IO Summary: 5184494 ops 28800.606 ops/s 2400/4800 rd/wr 630.5mb/s 1.689ms/op
+Filebench /tmp/filebench/oltp.f:226.546: IO Summary: 8591238 ops 47708.038 ops/s 23797/23667 rd/wr  94.2mb/s 0.611ms/op
+Filebench /tmp/filebench/randomwrite.f:
+Filebench /tmp/filebench/varmail.f:256.639: IO Summary: 4498134 ops 24987.690 ops/s 3844/3844 rd/wr 130.3mb/s 0.630ms/op
