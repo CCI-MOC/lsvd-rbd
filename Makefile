@@ -1,5 +1,5 @@
-#CXX = clang++-17
-CXX = g++-12
+CXX = clang++-17
+#CXX = g++-12
 BUILD_DIR = build
 
 .DEFAULT_GOAL := debug
@@ -7,7 +7,8 @@ BUILD_DIR = build
 
 CFLAGS = -ggdb3 -Wall $(OPT)
 CXXFLAGS = -std=c++20 -ggdb3 $(OPT) -fno-omit-frame-pointer -fPIC -I./liburing/src/include
-LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt
+CXXFLAGS += -fsized-deallocation
+LDFLAGS = -lstdc++fs -lpthread -lrt -laio -luuid -lz -lrados -lfmt -ltcmalloc
 LDFLAGS += -fuse-ld=mold -L./liburing/src -l:liburing.a
 SOFLAGS = -shared -fPIC
 
@@ -22,7 +23,7 @@ debug: CXXFLAGS += -fsanitize=implicit-conversion -fsanitize=nullability -fsanit
 debug: CXXFLAGS += -fsanitize=address
 # debug: CXXFLAGS += -fsanitize=thread
 debug: CXXFLAGS += -Wall -Wextra -Wdouble-promotion -Wno-sign-conversion -Wno-conversion -Wno-unused-parameter
-debug: CXXFLAGS += -O0 -fno-inline -DLOGLV=0
+debug: CXXFLAGS += -O0 -fno-inline -DLOGLV=1
 nosan: CXXFLAGS += -Og -fno-inline
 release: CXXFLAGS += -O3 -DLOGLV=1
 
