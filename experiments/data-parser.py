@@ -27,7 +27,7 @@ git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().de
 # directory = '/home/sumatrad/lsvd-rbd/experiments/'
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
-result_dir = os.path.join(directory, 'results')
+result_dir = os.path.join(directory, 'results/writec_results')
 graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
     os.makedirs(graph_dir)
@@ -85,6 +85,7 @@ for file_name in files:
     workload_array= [None]*8
     file_split= file_name.split('.')
     timestamp=file_split[0]
+    #cache_rex=file_split[0]
     edate=file_split[0].split('T')
     hash_id=str(edate[0][2]+edate[0][3]+edate[0][5]+edate[0][6]+edate[0][8]+edate[0][9])
     #print("hash_id: "+hash_id)
@@ -119,6 +120,8 @@ for file_name in files:
         bw_value=0
         fio=False
         result=False
+        print("filename: "+file_name)
+        print("cache_size: "+cache_size)
         for line in file:
             if line.startswith("===Fio: "):
                 match = re.search("===Fio: workload=(\w+), time=(\d+), iodepth=(\d+), bs=(\w+)===", line)
