@@ -4,3 +4,6 @@
 [submodule "liburing"]
 	path = liburing
 	url = https://github.com/axboe/liburing
+[submodule "lsvd-atc24"]
+	path = atc2024
+	url = git@github.com:CCI-MOC/lsvd-atc24.git
