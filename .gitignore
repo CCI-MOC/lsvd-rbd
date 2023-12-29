@@ -27,11 +27,4 @@ bzImage
 perf.*
 experiment-results.*
 
-*.pdf
-*.aux
-*.bbl
-*.blg
-*.fls
-*.gz
-*.fdb_latexmk
-
+atc2024/build/

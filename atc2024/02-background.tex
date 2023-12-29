@@ -1,0 +1,48 @@
+\section{Background and Motivation}
+
+Explain the architecture of:
+
+- How much of LSVD do we explain here?
+
+\subsection{Semantics}
+
+- Don't lose data - remote journal in a different failure domain
+
+- Sources of overhead: 
+    - IO amplification per write request
+    - Replication consistency invariants to maintain
+    - Data consistency between writes -- maintain ordering
+
+- Solved with batched writes (with write journal)
+    - Doesn't this just move the problem to our gateway instead?
+
+- Backend representation is always self-consistent - we never present a non-consistent
+  view of the disk at any point in time
+
+\subsection{Ceph RADOS Block Device}
+
+- Fairly simple implementation
+
+- Image is divided up into xMB chunks, each of them mapped to a RADOS object
+
+- Writes just write to that object, reads read from the object
+
+- Clones and snapshots are COW for that object
+
+- Since pools are triple-replicated, incredible amonuts of amplification
+
+- Consistency for the three copies, cost to maintain consistency is high
+
+\subsection{OpenStack Cinder}
+
+- Metadata stored in a DB
+
+- Data is backend agnostic, can be openstack swift or ceph rados?
+
+- Architecture unclear TODO
+
+- ??? does anybody know how this thing works
+
+\subsection{Others}
+
+- What we know about other proprietary elastic block stores

@@ -1,0 +1,22 @@
+\section{Introduction}
+
+- Distributed networked storage has high demands on bandwidth and on the storage medium
+
+- Traditionally solved with a write-back cache, but that makes state management hard
+
+- Small writes are incredibly costly, you need consistency/replication semantics on every request
+
+- We propose a log-structured virtual disk on a central storage gateway, on top
+  of immutable objects
+
+Benefits:
+
+- We get statistical multiplexing between different clients
+
+- Built on top of immutable objects = trivial caching
+
+- Batched writes for good write performance
+
+- Snapshots and clones are trivial
+
+- Elastic backend to prevent low-space GC thrashing

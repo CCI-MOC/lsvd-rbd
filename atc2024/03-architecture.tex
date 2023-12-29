@@ -1,0 +1,13 @@
+\section{Architecture}
+
+- Log structured on immutable backend objects
+
+- Present as librbd, on top of spdk
+
+- Remote write log, can be in-memory, on nvme, or on multiple nvmes
+
+- Greedy GC
+
+- Clones are forks in history
+
+- Centralised cache on the gateway, clones share base objects
