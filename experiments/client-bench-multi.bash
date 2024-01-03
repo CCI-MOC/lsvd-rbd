@@ -82,6 +82,8 @@ function run_fio {
 run_fio randread 60 256 4k
 run_fio read 60 256 4k
 
+exit
+
 run_fio randread 60 1 4k
 # run_fio randread 60 32 4k
 run_fio randread 60 64 4k
