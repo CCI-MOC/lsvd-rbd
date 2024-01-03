@@ -38,6 +38,8 @@ struct chunk_key_hash {
     }
 };
 
+using cache_map_t = std::unordered_map<chunk_key, chunk_idx, chunk_key_hash>;
+
 using namespace boost::accumulators;
 const size_t CACHE_STATS_WINDOW = 10'000;
 
@@ -64,6 +66,32 @@ const size_t CACHE_STATS_WINDOW = 10'000;
  *
  * We might also want to think about adding an in-memory cache to this instead
  * of just relying on the kernel page cache as the memory cache.
+ *
+ * A note about the locking model:
+ *
+ * The main concern is maintaining consistency between the cache map and the
+ * cache state. When we get an idx from the map, we must thus pin that entry
+ * until we're done with it to prevent eviction.
+ *
+ * The only invariant that we need to maintain here is thus that we cannot
+ * run eviction at the same time as any read request. Cache eviction is the
+ * only time we modify the map in any way.
+ *
+ * The locking model is thus as such: to do anything, we grab 2 locks: one
+ * is the sharded lock for the cache key, and the other is the sharded lock
+ * for the corresponding cache entry for that key.
+ *
+ * The sharded cache key lock is to ensure that requests for the same key are
+ * run exclusively. If two requests for the same key come in, they may both
+ * miss, which is undesirable. The lock also doubles as guards to the
+ * corresponding sharded cache map.
+ *
+ * The second is the cache entry lock, which ensures that only one request may
+ * access a single cache state entry at once. This prevents races around
+ * entry eviction. In theory, we can make this a rwlock, but the performance
+ * benefit of that is not so clear.
+ *
+ * LOCK ORDER: key lock -> entry lock
  */
 class shared_read_cache
 {
@@ -82,7 +110,6 @@ class shared_read_cache
 
     struct entry_state {
         entry_status status = EMPTY;
-
         std::atomic_bool accessed = false;
 
         // We use this to count how many requests refer to this chunk.
@@ -101,9 +128,19 @@ class shared_read_cache
         chunk_key key;
     };
 
-    std::vector<entry_state> cache_state;
+    size_t num_shards = 128;
 
-    std::shared_mutex global_cache_lock;
+    // cache map
+    // we map <objname, seqnum, offset> to a cache block, where
+    // offset MUST be a multiple of CACHE_CHUNK_SIZE
+    std::vector<cache_map_t> cache_map_shards;
+    std::vector<std::mutex> key_shard_locks;
+    std::vector<entry_state> cache_state;
+    std::vector<std::mutex> cache_state_shard_locks;
+
+    size_t get_key_shard(chunk_key key);
+    std::mutex &get_state_lock(chunk_idx idx);
+
     std::mutex cache_stats_lock;
 
     int fd;
@@ -113,15 +150,9 @@ class shared_read_cache
     size_t cache_filesize_bytes;
     sptr<backend> obj_backend;
 
-    // cache map
-    // we map <objname, seqnum, offset> to a cache block
-    // offset MUST be a multiple of CACHE_CHUNK_SIZE
-    // the reverse map exists so that we can evict entries
-    // boost::bimap<chunk_key, chunk_idx> cache_map;
-    std::unordered_map<chunk_key, chunk_idx, chunk_key_hash> cache_map;
-
     // clock eviction
     size_t clock_idx = 0;
+    // std::vector<size_t> sharded_clock_idxs;
 
     // maintain cache hit rate statistics
     std::atomic_int total_requests = 0;
@@ -140,8 +171,12 @@ class shared_read_cache
      * This uses the clock eviction policy; it will search through the cache
      * in index order, and clear abit it is set and evict the first entry
      * without abit set
+     *
+     * Additionally returns a lock on the chunk to ensure that no funny business
+     * happens between eviction and using that entry for something else
      */
-    chunk_idx allocate_chunk();
+    std::pair<chunk_idx, std::unique_lock<std::mutex>> allocate_chunk();
+    std::mutex allocate_mtx;
 
     void dec_chunk_refcount(chunk_idx idx);
     entry_status get_chunk_status(chunk_idx idx);
@@ -188,7 +223,7 @@ class shared_read_cache
 
     /**
      * Insert a backend object into the cache.
-    */
+     */
     void insert_object(std::string img_prefix, uint64_t seqnum, size_t obj_size,
                        void *obj_data);
 };
