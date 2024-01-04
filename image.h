@@ -62,7 +62,7 @@ struct rbd_image {
     std::map<int, char *> buffers;
 
     std::shared_ptr<backend> objstore;
-    std::shared_ptr<shared_read_cache> shared_cache;
+    std::shared_ptr<read_cache> shared_cache;
     translate *xlate;
     write_cache *wcache;
     img_reader *reader;

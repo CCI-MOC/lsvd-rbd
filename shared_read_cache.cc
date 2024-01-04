@@ -1,10 +1,172 @@
-#include <atomic>
-#include <fcntl.h>
-#include <sys/resource.h>
-#include <unistd.h>
-
-#include "objname.h"
 #include "shared_read_cache.h"
+
+const size_t CACHE_HEADER_SIZE = 4096;
+using chunk_idx = size_t;
+
+/**
+ * This is the key for the cache map. It's a tuple of <objname, seqnum, offset>
+ */
+using chunk_key = std::tuple<std::string, uint64_t, size_t>;
+struct chunk_key_hash {
+    inline size_t operator()(const chunk_key &k) const
+    {
+        size_t seed = 0;
+        boost::hash_combine(seed, std::get<0>(k));
+        boost::hash_combine(seed, std::get<1>(k));
+        boost::hash_combine(seed, std::get<2>(k));
+        return seed;
+    }
+};
+
+using namespace boost::accumulators;
+const size_t CACHE_STATS_WINDOW = 10'000;
+
+/**
+ * This is a cache in front of the backend. It's indexed by
+ * <objname, seqnum, offset>, where offset is aligned to CACHE_CHUNK_SIZE.
+ *
+ * The cache is fixed size, and cache chunks are allocated the pool of
+ * all blocks.
+ *
+ * The lifecycle of a request is:
+ * - We get a read request
+ * - We check if it's in the cache
+ * - If so, we return the cached data
+ * - Otherwise, we check if there's an outstanding fetch for the data
+ * - If so, we wait for the fetch to complete
+ * - Otherwise, we fetch the data from the backend
+ * - Once the backend request completes, we dispatch pending reads and write
+ *   to the cache
+ *
+ * Important to note is that the cache is currently a giant file, and read/write
+ * is done by nvme_uring. An alternative would be to use a giant mmap'ed file,
+ * or to be purely memory-backed.
+ *
+ * We might also want to think about adding an in-memory cache to this instead
+ * of just relying on the kernel page cache as the memory cache.
+ */
+class shared_read_cache
+{
+  private:
+    class cache_hit_request;
+    class cache_miss_request;
+    class pending_read_request;
+    class cache_insert_request;
+
+    enum entry_status {
+        EMPTY,
+        FETCHING,
+        FILLING,
+        VALID,
+    };
+
+    struct entry_state {
+        entry_status status = EMPTY;
+
+        std::atomic_bool accessed = false;
+
+        // We use this to count how many requests refer to this chunk.
+        // If non-zero, we cannot evict this chunk
+        std::atomic_int32_t refcount = 0;
+
+        // This is used when the backend request has come back and we're now
+        // going to fill it into the cache. Status must be FILLING.
+        // NULL at all other times
+        void *pending_fill_data = nullptr;
+
+        // Keep track of pending reads
+        std::vector<pending_read_request *> pending_reads;
+
+        // Keep track of the reverse map so we can evict this entry
+        chunk_key key;
+    };
+
+    std::vector<entry_state> cache_state;
+
+    std::mutex global_cache_lock;
+    std::mutex cache_stats_lock;
+
+    int fd;
+    uptr<nvme> cache_store;
+    size_t size_in_chunks;
+    size_t header_size_bytes;
+    size_t cache_filesize_bytes;
+    sptr<backend> obj_backend;
+
+    // cache map
+    // we map <objname, seqnum, offset> to a cache block
+    // offset MUST be a multiple of CACHE_CHUNK_SIZE
+    // the reverse map exists so that we can evict entries
+    // boost::bimap<chunk_key, chunk_idx> cache_map;
+    std::unordered_map<chunk_key, chunk_idx, chunk_key_hash> cache_map;
+
+    // clock eviction
+    size_t clock_idx = 0;
+
+    // maintain cache hit rate statistics
+    std::atomic_int total_requests = 0;
+    accumulator_set<int, stats<tag::rolling_sum, tag::rolling_count>>
+        hitrate_stats;
+    accumulator_set<size_t, stats<tag::rolling_sum>> user_bytes;
+    accumulator_set<size_t, stats<tag::rolling_sum>> backend_bytes;
+
+    /**
+     * Allocate a new cache chunk, and return its index
+     *
+     * This uses the clock eviction policy; it will search through the cache
+     * in index order, and clear abit it is set and evict the first entry
+     * without abit set
+     */
+    chunk_idx allocate_chunk();
+
+    void dec_chunk_refcount(chunk_idx idx);
+    entry_status get_chunk_status(chunk_idx idx);
+    void set_chunk_status(chunk_idx idx, entry_status status);
+
+    size_t get_store_offset_for_chunk(chunk_idx idx);
+    request *get_fill_req(chunk_idx idx, void *data);
+
+    void on_store_done(chunk_idx idx);
+
+  public:
+    shared_read_cache(std::string cache_path, size_t num_cache_chunks,
+                      sptr<backend> obj_backend);
+    ~shared_read_cache();
+
+    // because the part that does the request slicing is not here, we need to
+    // let the upper layers hint to us that there was a bypassed request
+    bool should_bypass_cache();
+    void served_bypass_request(size_t bytes);
+
+    /**
+     * Read a single cache chunk. obj_offset MUST be cache block aligned, and
+     * will read `iov.bytes` bytes from the cache block into the dest smartiov,
+     * starting at `obj_offset + adjust`. `adjust + iov.bytes` MUST be less than
+     * the size of a cache block.
+     *
+     * If the data is not in the cache, it will be fetched from the backend.
+     * See documentation for shared_read_cache for more details on the lifecycle
+     * of a request.
+     *
+     * If data is in memory, this will fill in the iov and return NULL
+     */
+    request *make_read_req(std::string img_prefix, uint64_t seqnum,
+                           size_t obj_offset, size_t adjust, smartiov &dest);
+
+    /**
+     * Insert a backend object into the cache.
+     */
+    void insert_object(chunk_key key, void *data);
+
+    std::tuple<size_t, size_t, size_t, size_t, size_t> get_stats()
+    {
+        std::unique_lock lock(cache_stats_lock);
+        return std::make_tuple(
+            rolling_sum(user_bytes), rolling_sum(backend_bytes),
+            rolling_sum(hitrate_stats), rolling_count(hitrate_stats),
+            (size_t)total_requests);
+    }
+};
 
 /**
  * This is a request that is waiting on a backend request to complete.
@@ -181,7 +343,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
 
         std::vector<pending_read_request *> reqs;
         {
-            std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
+            std::unique_lock lock(cache.global_cache_lock);
 
             auto &entry = cache.cache_state[chunk];
             entry.status = entry_status::FILLING;
@@ -258,24 +420,6 @@ class shared_read_cache::cache_insert_request : public self_refcount_request
     }
 };
 
-sptr<shared_read_cache>
-shared_read_cache::get_instance(std::string cache_path, size_t num_cache_blocks,
-                                sptr<backend> obj_backend)
-{
-    // If the last image is closed, clean up the cache as well. Don't keep the
-    // cache around forever
-    auto static singleton = std::weak_ptr<shared_read_cache>();
-
-    auto instance = singleton.lock();
-    if (sptr<shared_read_cache> ret = singleton.lock())
-        return ret;
-
-    auto new_instance = std::make_shared<shared_read_cache>(
-        cache_path, num_cache_blocks, obj_backend);
-    singleton = new_instance;
-    return new_instance;
-}
-
 shared_read_cache::shared_read_cache(std::string cache_path,
                                      size_t num_cache_blocks,
                                      sptr<backend> obj_backend)
@@ -285,7 +429,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
       user_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW),
       backend_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW)
 {
-    debug("Using {} as the shared read cache", cache_path);
+    debug("Opening {} for the read cache", cache_path);
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
     check_ret_errno(fd, "failed to open cache file");
 
@@ -299,33 +443,22 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     auto ret = ftruncate(fd, cache_filesize_bytes);
     check_ret_errno(ret, "failed to truncate cache file");
 
-    debug("Cache file size: {} bytes ({} header, {} chunks * {} per chunk)",
-          cache_filesize_bytes, header_size_bytes, num_cache_blocks,
-          CACHE_CHUNK_SIZE);
+    // debug("Cache file size: {} KiB ({} header, {} chunks * {} per chunk)",
+    //       cache_filesize_bytes / 1024, header_size_bytes, num_cache_blocks,
+    //       CACHE_CHUNK_SIZE);
 
     cache_store = std::unique_ptr<nvme>(make_nvme_uring(fd, "rcache_uring"));
     cache_state = std::vector<entry_state>(num_cache_blocks);
-
-    cache_stats_reporter =
-        std::thread(&shared_read_cache::report_cache_stats, this);
 }
 
-shared_read_cache::~shared_read_cache()
-{
-    // TODO
-    // flush all pending writes
-    // free all buffers
-    stop_cache_stats_reporter.store(true);
-    cache_stats_reporter.join();
-    close(fd);
-}
+shared_read_cache::~shared_read_cache() {}
 
 chunk_idx shared_read_cache::allocate_chunk()
 {
     // assumes that lock is held by the caller
 
     // search for the first empty or evictable entry
-    int searched_entries = 0;
+    [[maybe_unused]] int searched_entries = 0;
     while (true) {
         auto &entry = cache_state[clock_idx];
 
@@ -370,7 +503,7 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
     total_requests++;
 
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
     auto r = cache_map.find(std::make_tuple(img_prefix, seqnum, obj_offset));
@@ -433,7 +566,6 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // and it is protected by an exclusive lock, so it should be fine
     auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
     auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
-    // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
     auto idx = allocate_chunk();
     auto &entry = cache_state[idx];
@@ -451,98 +583,34 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     return req;
 }
 
-void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
-                                      size_t obj_size, void *obj_data)
+void shared_read_cache::insert_object(chunk_key key, void *data)
 {
-    // The incoming object is the raw object that's going to the backend; we
-    // need to first chop it up into cache chunks before we can store it
-    size_t processed_bytes = 0;
-    std::vector<std::tuple<size_t, void *>> chunks;
-    while (processed_bytes < obj_size) {
-        auto data = malloc(CACHE_CHUNK_SIZE);
-        auto to_copy = std::min(obj_size - processed_bytes, CACHE_CHUNK_SIZE);
-        memcpy(data, (char *)obj_data + processed_bytes, to_copy);
-        chunks.push_back(std::make_tuple(processed_bytes, data));
-        processed_bytes += to_copy;
-    }
+    std::unique_lock lock(global_cache_lock);
 
-    trace("Inserting obj {}: {} bytes/{} chunks", seqnum, obj_size,
-          chunks.size());
+    auto idx = allocate_chunk();
+    auto req = new cache_insert_request(*this, idx, key, data);
 
-    std::vector<cache_insert_request *> reqs;
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    auto &entry = cache_state[idx];
+    entry.refcount++;
+    entry.accessed = false; // clear abit so they're cleared the 1st time
+    entry.status = entry_status::FILLING;
+    entry.pending_fill_data = data;
+    entry.key = key;
 
-    // ASSUMPTION: we have more cache blocks without abit set than the number
-    // of blocks we're inserting. If not, allocate_chunk will infinite loop as
-    // everybody gets a positive refconut
-    // TODO: detect this case and maybe implement logic to bypass cache when
-    // it's too small. Something like allocate_chunk is best-effort only and
-    // we only insert if we can allocate a chunk. This also limits the time
-    // that we hold locks and spend time searching for space
-    for (auto &[ooffset, odata] : chunks) {
-        auto idx = allocate_chunk();
-        auto key = std::make_tuple(img_prefix, seqnum, ooffset);
-        auto req = new cache_insert_request(*this, idx, key, odata);
-        reqs.push_back(req);
-
-        auto &entry = cache_state[idx];
-        entry.refcount++;
-        entry.accessed = false; // clear abit so they're cleared the 1st time
-        entry.status = entry_status::FILLING;
-        entry.pending_fill_data = odata;
-        entry.key = key;
-
-        cache_map.insert(std::make_pair(key, idx));
-    }
+    cache_map.insert(std::make_pair(key, idx));
 
     lock.unlock();
-
-    for (auto &req : reqs)
-        req->run(nullptr);
+    req->run(nullptr);
 }
 
 void shared_read_cache::on_store_done(chunk_idx chunk)
 {
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock lock(global_cache_lock);
 
     auto &entry = cache_state[chunk];
     entry.status = entry_status::VALID;
     entry.pending_fill_data = nullptr;
     entry.refcount--;
-}
-
-void shared_read_cache::report_cache_stats()
-{
-    pthread_setname_np(pthread_self(), "cache_stats_reporter");
-    static int last_total_reqs = 0;
-
-    auto wakes = 0;
-    while (!stop_cache_stats_reporter.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1'000));
-        if (wakes++ % 20 != 0)
-            continue;
-
-        std::lock_guard lock(cache_stats_lock);
-
-        // Don't report anything if there were no new requests
-        if (total_requests == last_total_reqs)
-            continue;
-
-        last_total_reqs = total_requests;
-
-        auto frontend = rolling_sum(user_bytes);
-        auto backend = rolling_sum(backend_bytes);
-        double readamp =
-            frontend == 0 ? -1 : (double)backend / (double)frontend;
-
-        auto hits = rolling_sum(hitrate_stats);
-        auto count = rolling_count(hitrate_stats);
-
-        debug("{}/{} hits, {} MiB read, {:.3f} read amp, {} total", hits, count,
-              frontend / 1024 / 1024, readamp, total_requests);
-    }
-
-    debug("cache stats reporter exiting");
 }
 
 bool shared_read_cache::should_bypass_cache()
@@ -570,7 +638,7 @@ void shared_read_cache::served_bypass_request(size_t bytes)
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 {
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock lock(global_cache_lock);
     auto &entry = cache_state[chunk];
     assert(entry.refcount > 0);
     entry.refcount--;
@@ -579,13 +647,13 @@ void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 shared_read_cache::entry_status
 shared_read_cache::get_chunk_status(chunk_idx chunk)
 {
-    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock lock(global_cache_lock);
     return cache_state[chunk].status;
 }
 
 void shared_read_cache::set_chunk_status(chunk_idx chunk, entry_status status)
 {
-    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
+    std::unique_lock lock(global_cache_lock);
     cache_state[chunk].status = status;
 }
 
@@ -599,4 +667,158 @@ request *shared_read_cache::get_fill_req(chunk_idx chunk, void *buf)
     auto offset = get_store_offset_for_chunk(chunk);
     return cache_store->make_write_request((char *)buf, CACHE_CHUNK_SIZE,
                                            offset);
+}
+
+class sharded_cache : public read_cache
+{
+    const size_t num_shards = 16;
+
+    // TODO in-place obj instead of uptrs, don't understand why we can't have
+    // just a vector of the plain object
+    std::vector<uptr<shared_read_cache>> shards;
+
+    // centralise the reporter
+    std::thread cache_stats_reporter;
+    std::atomic<bool> stop_cache_stats_reporter = false;
+
+  public:
+    sharded_cache(std::string cache_dir, size_t cache_bytes,
+                  sptr<backend> obj_backend)
+    {
+        assert(cache_bytes % (num_shards * CACHE_CHUNK_SIZE) == 0);
+        log_info(
+            "Initialising read cache of size {} MiB in {} shards, {} MiB each",
+            cache_bytes / 1024 / 1024, num_shards,
+            cache_bytes / num_shards / 1024 / 1024);
+
+        for (size_t i = 0; i < num_shards; i++) {
+            auto shard_file =
+                cache_dir + "/read_cache_shard_" + std::to_string(i);
+            auto shard = std::make_unique<shared_read_cache>(
+                shard_file, cache_bytes / num_shards / CACHE_CHUNK_SIZE,
+                obj_backend);
+
+            shards.push_back(std::move(shard));
+        }
+
+        cache_stats_reporter =
+            std::thread(&sharded_cache::report_cache_stats, this);
+    }
+
+    ~sharded_cache() override
+    {
+        stop_cache_stats_reporter.store(true);
+        cache_stats_reporter.join();
+    }
+
+    shared_read_cache &get_shard(chunk_key key)
+    {
+        auto shard_num = chunk_key_hash{}(key) % num_shards;
+        return *shards.at(shard_num).get();
+    }
+
+    bool should_bypass_cache(std::string img_prefix, uint64_t seqnum,
+                             size_t offset) override
+    {
+        auto key = std::make_tuple(img_prefix, seqnum, offset);
+        // TODO aggregate stats from all the shards
+        return get_shard(key).should_bypass_cache();
+    }
+
+    void served_bypass_request(std::string img_prefix, uint64_t seqnum,
+                               size_t offset, size_t bytes) override
+    {
+        auto key = std::make_tuple(img_prefix, seqnum, offset);
+        get_shard(key).served_bypass_request(bytes);
+    }
+
+    request *make_read_req(std::string img_prefix, uint64_t seqnum,
+                           size_t offset, size_t adjust,
+                           smartiov &dest) override
+    {
+        auto key = std::make_tuple(img_prefix, seqnum, offset);
+        return get_shard(key).make_read_req(img_prefix, seqnum, offset, adjust,
+                                            dest);
+    }
+
+    void insert_object(std::string img_prefix, uint64_t seqnum, size_t obj_size,
+                       void *obj_data) override
+    {
+        // The incoming object is the raw object that's going to the backend; we
+        // need to first chop it up into cache chunks before we can store it
+        size_t processed_bytes = 0;
+        size_t chunks = 0;
+        while (processed_bytes < obj_size) {
+            auto data = malloc(CACHE_CHUNK_SIZE);
+            auto to_copy =
+                std::min(obj_size - processed_bytes, CACHE_CHUNK_SIZE);
+            memcpy(data, (char *)obj_data + processed_bytes, to_copy);
+
+            auto key = std::make_tuple(img_prefix, seqnum, processed_bytes);
+            get_shard(key).insert_object(key, data);
+
+            processed_bytes += to_copy;
+            chunks++;
+        }
+
+        trace("Inserting obj {}: {} bytes/{} chunks", seqnum, obj_size, chunks);
+    }
+
+    void report_cache_stats()
+    {
+        pthread_setname_np(pthread_self(), "rcache_stats");
+        static size_t last_total_reqs = 0;
+
+        auto wakes = 0;
+        while (!stop_cache_stats_reporter.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1'000));
+            if (wakes++ % 20 != 0)
+                continue;
+
+            size_t frontend = 0;
+            size_t backend = 0;
+            size_t hits = 0;
+            size_t count = 0;
+            size_t total_requests = 0;
+
+            for (auto &shard : shards) {
+                auto [user_bytes, backend_bytes, shard_hits, shard_count,
+                      shard_total_requests] = shard->get_stats();
+
+                frontend += user_bytes;
+                backend += backend_bytes;
+                hits += shard_hits;
+                count += shard_count;
+                total_requests += shard_total_requests;
+            }
+
+            // Don't report anything if there were no new requests
+            if (total_requests == last_total_reqs)
+                continue;
+
+            last_total_reqs = total_requests;
+
+            double readamp =
+                frontend == 0 ? -1 : (double)backend / (double)frontend;
+
+            debug("{}/{} hits, {} MiB read, {:.3f} read amp, {} total", hits,
+                  count, frontend / 1024 / 1024, readamp, total_requests);
+        }
+
+        debug("cache stats reporter exiting");
+    }
+};
+
+sptr<read_cache> get_read_cache_instance(std::string cache_dir,
+                                         size_t cache_bytes,
+                                         sptr<backend> obj_backend)
+{
+    auto static singleton = std::weak_ptr<read_cache>();
+    if (auto ret = singleton.lock())
+        return ret;
+
+    auto new_instance =
+        std::make_shared<sharded_cache>(cache_dir, cache_bytes, obj_backend);
+    singleton = new_instance;
+    return new_instance;
 }

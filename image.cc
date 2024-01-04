@@ -51,9 +51,8 @@ int rbd_image::image_open(rados_ioctx_t io, const char *name)
         throw std::runtime_error("Failed to read config");
 
     objstore = get_backend(&cfg, io, name);
-    auto shared_cache_path = cfg.shared_read_cache_path;
-    shared_cache = shared_read_cache::get_instance(
-        shared_cache_path, cfg.cache_size / CACHE_CHUNK_SIZE, objstore);
+    shared_cache =
+        get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
 
     /* read superblock and initialize translation layer
      */
