@@ -20,7 +20,7 @@ client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
 wlog=/mnt/nvme-remote/
 cache_size_gb=$(($cache_size / 1024 / 1024 / 1024))
-outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-$cache_size_gb.$pool_name.txt
+outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-multi.$pool_name.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
@@ -60,6 +60,5 @@ add_rbd_img $pool_name $imgname.multi.2
 add_rbd_img $pool_name $imgname.multi.3
 add_rbd_img $pool_name $imgname.multi.4
 
-trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
-
+trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 run_client_bench $client_ip $outfile client-bench-multi.bash "read_entire_img=1"
