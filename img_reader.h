@@ -36,6 +36,6 @@ extern img_reader *make_reader(uint32_t blkno, translate *_be,
                                lsvd_config *cfg, extmap::objmap *map,
                                extmap::bufmap *bufmap, std::shared_mutex *m,
                                std::mutex *bufmap_m, sptr<backend> _io,
-                               sptr<shared_read_cache> shared_cache);
+                               sptr<read_cache> shared_cache);
 
 #endif

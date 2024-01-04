@@ -20,6 +20,7 @@ trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1
 # fi
 
 modprobe nvme-fabrics
+nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true
 
 gw_ip=${gw_ip:-10.1.0.5}
 # see that it's there
@@ -103,7 +104,6 @@ run_fio read 60 256 64k
 run_fio randread 60 256 4k
 run_fio randread 60 256 16k
 run_fio randread 60 256 64k
-
 
 run_fio randwrite 60 1 4k
 # run_fio randwrite 60 32 4k

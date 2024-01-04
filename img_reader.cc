@@ -56,7 +56,7 @@ class reader_impl : public img_reader
     sptr<backend> io;
     lsvd_config *cfg;
 
-    sptr<shared_read_cache> backing_cache;
+    sptr<read_cache> backing_cache;
 
     friend class direct_read_req;
 
@@ -64,7 +64,7 @@ class reader_impl : public img_reader
     reader_impl(uint32_t blkno, translate *be_, lsvd_config *cfg_,
                 extmap::objmap *omap, extmap::bufmap *bmap,
                 std::shared_mutex *maplock, std::mutex *bmap_lock,
-                sptr<backend> io_, sptr<shared_read_cache> backing_cache)
+                sptr<backend> io_, sptr<read_cache> backing_cache)
         : backing_cache(backing_cache)
     {
         backend_objmap = omap;
@@ -88,7 +88,7 @@ img_reader *make_reader(uint32_t blkno, translate *_be,
                         lsvd_config *cfg, extmap::objmap *map,
                         extmap::bufmap *bufmap, std::shared_mutex *m,
                         std::mutex *bufmap_m, sptr<backend> _io,
-                        sptr<shared_read_cache> backing_cache)
+                        sptr<read_cache> backing_cache)
 {
     return new reader_impl(blkno, _be, cfg, map, bufmap, m, bufmap_m, _io,
                            backing_cache);
@@ -253,7 +253,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
         // if (backing_cache->should_bypass_cache()) {
         if (false) {
             sector_t sectors = limit2 - start_sector;
-            backing_cache->served_bypass_request(sectors * 512L);
+            // backing_cache->served_bypass_request(sectors * 512L);
             auto slice = iovs->slice(_offset, _offset + sectors * 512L);
             auto req = new direct_read_req(this, objptr, slice);
             requests.push_back(req);
@@ -270,7 +270,7 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
 
         // standard cache miss path - fetch and insert
         // This file was formerly the image-specific read_cache, but I
-        // implemented the shared_read_cache by ripping out all the caching
+        // implemented the read_cache by ripping out all the caching
         // portions of this class and just pretending like the cache is the
         // backend. What this does here is just pretend like the cache is the
         // backend and the cache will handle the rest

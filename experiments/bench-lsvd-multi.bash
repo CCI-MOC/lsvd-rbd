@@ -11,7 +11,7 @@ fi
 # pool must already exist
 pool_name=$1
 cur_time=$(date +"%FT%T")
-default_cache_size=$((20 * 1024 * 1024 * 1024))
+default_cache_size=$((120 * 1024 * 1024 * 1024))
 cache_size=${lsvd_cache_size:-$default_cache_size}
 
 lsvd_dir=$(git rev-parse --show-toplevel)
@@ -20,12 +20,12 @@ client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
 wlog=/mnt/nvme-remote/
 cache_size_gb=$(($cache_size / 1024 / 1024 / 1024))
-outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-$cache_size_gb.$pool_name.txt
+outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-multi.$pool_name.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-benchmark
-imgsize=80g
+imgsize=20g
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
@@ -42,14 +42,23 @@ mkdir -p $lsvd_dir/test/baklibs/
 cp $lsvd_dir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
 
 # create_lsvd_thin $pool_name $imgname $imgsize
-create_lsvd_thick $pool_name $imgname $imgsize
+create_lsvd_thick $pool_name $imgname.multi.1 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.2 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.3 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.4 $imgsize &
+
+wait
 
 kill_nvmf
 
 fstrim /mnt/nvme
 launch_lsvd_gw_background $rcache $wlog $cache_size
 configure_nvmf_common $gw_ip
-add_rbd_img $pool_name $imgname
-trap "cleanup_nvmf_rbd bdev_$imgname; cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 
-run_client_bench $client_ip $outfile client-bench.bash "read_entire_img=1"
+add_rbd_img $pool_name $imgname.multi.1
+add_rbd_img $pool_name $imgname.multi.2
+add_rbd_img $pool_name $imgname.multi.3
+add_rbd_img $pool_name $imgname.multi.4
+
+trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
+run_client_bench $client_ip $outfile client-bench-multi.bash "read_entire_img=1"

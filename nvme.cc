@@ -52,7 +52,7 @@ class nvme_uring : public nvme
         // debug("io_uring queue initialised");
 
         uring_cqe_worker =
-            std::thread(&nvme_uring::uring_completion_worker, this);
+            std::thread(&nvme_uring::uring_completion_worker, this, name);
     }
 
     ~nvme_uring()
@@ -106,11 +106,9 @@ class nvme_uring : public nvme
                                                  this);
     }
 
-    void uring_completion_worker()
+    void uring_completion_worker(const char *name)
     {
-        auto thread_name =
-            fmt::format("nvme_uring_worker, fd={}, {}", fd, name);
-        pthread_setname_np(pthread_self(), thread_name.c_str());
+        pthread_setname_np(pthread_self(), name);
 
         __kernel_timespec timeout = {0, 1000 * 100}; // 100 microseconds
         while (cqe_worker_should_continue.load(std::memory_order_seq_cst)) {
@@ -190,7 +188,7 @@ class nvme_uring : public nvme
         void on_complete(int result)
         {
             // TODO figure out error handling
-            if(result != iovs_.bytes())
+            if (result != iovs_.bytes())
                 log_error("nvme uring request completed with partial result");
 
             parent_->notify(this);

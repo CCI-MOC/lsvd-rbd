@@ -60,7 +60,7 @@ function launch_lsvd_gw_background {
 
 function launch_gw_background {
 	cd $lsvd_dir/spdk
-	./build/bin/nvmf_tgt &
+	./build/bin/nvmf_tgt -m '[0,1,2,3]' &
 
 	sleep 5
 }
