@@ -159,6 +159,10 @@ void run_test()
 
 int main(int argc, char *argv[])
 {
+    // config options
+    setenv("LSVD_RCACHE_DIR", "/mnt/nvme/lsvd-read/", 1);
+    setenv("LSVD_CACHE_SIZE", "2147483648", 1);
+
     std::string pool_name = "pone";
     std::string img_name = "random-test-img";
 

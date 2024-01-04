@@ -249,7 +249,7 @@ class translate_impl : public translate
 
     object_reader *parser;
 
-    std::shared_ptr<shared_read_cache> rcache;
+    std::shared_ptr<read_cache> rcache;
 
     void write_checkpoint(int seq, translate_req *req);
     void process_batch(int seq, translate_req *req);
@@ -271,7 +271,7 @@ class translate_impl : public translate
     translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
                    extmap::objmap *map, extmap::bufmap *bufmap,
                    std::shared_mutex *m, std::mutex *buf_m,
-                   sptr<shared_read_cache> rcache);
+                   sptr<read_cache> rcache);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
@@ -305,7 +305,7 @@ const char *translate_impl::prefix(int seq)
 translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
                                extmap::objmap *map_, extmap::bufmap *bufmap_,
                                std::shared_mutex *m_, std::mutex *buf_m,
-                               sptr<shared_read_cache> rcache)
+                               sptr<read_cache> rcache)
     : rcache(rcache)
 {
     misc_threads = new thread_pool<int>(&m);
@@ -322,7 +322,7 @@ translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
 translate *make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
                           extmap::objmap *map, extmap::bufmap *bufmap,
                           std::shared_mutex *m, std::mutex *buf_m,
-                          sptr<shared_read_cache> rcache)
+                          sptr<read_cache> rcache)
 {
     return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m,
                                            rcache);
