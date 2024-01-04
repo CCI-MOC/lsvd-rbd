@@ -181,7 +181,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
 
         std::vector<pending_read_request *> reqs;
         {
-            std::lock_guard lock(cache.get_state_lock(chunk));
+            std::unique_lock<std::shared_mutex> lock(cache.global_cache_lock);
 
             auto &entry = cache.cache_state[chunk];
             entry.status = entry_status::FILLING;
@@ -308,10 +308,6 @@ shared_read_cache::shared_read_cache(std::string cache_path,
 
     cache_stats_reporter =
         std::thread(&shared_read_cache::report_cache_stats, this);
-
-    cache_map_shards = std::vector<cache_map_t>(num_shards);
-    key_shard_locks = std::vector<std::mutex>(num_shards);
-    cache_state_shard_locks = std::vector<std::mutex>(num_shards);
 }
 
 shared_read_cache::~shared_read_cache()
@@ -323,55 +319,19 @@ shared_read_cache::~shared_read_cache()
     cache_stats_reporter.join();
     close(fd);
 }
-std::pair<chunk_idx, std::unique_lock<std::mutex>>
-shared_read_cache::allocate_chunk()
+
+chunk_idx shared_read_cache::allocate_chunk()
 {
-    // multiple simultaneous allocators is probably bad news
-    std::lock_guard allocate_lock(allocate_mtx);
+    // assumes that lock is held by the caller
 
     // search for the first empty or evictable entry
     int searched_entries = 0;
     while (true) {
-        std::lock_guard lock(get_state_lock(clock_idx));
         auto &entry = cache_state[clock_idx];
 
-        // We must treat empty entries separately with present entries that
-        // we're going to evict. Empty entries can be directly used, but
-        // eviction requires more work to maintain the cache map
-
-        if (entry.status == entry_status::EMPTY) {
-            // Found an empty entry, we can just directly use it
-            auto ret = clock_idx;
-            clock_idx = (clock_idx + 1) % size_in_chunks;
-            return std::make_pair(ret, std::unique_lock<std::mutex>());
-        }
-
-        if (entry.refcount == 0 && entry.accessed == false) {
-            // Found a possible candidate for eviction
-            auto &key = entry.key;
-            auto ks = get_key_shard(key);
-            auto &kmtx = key_shard_locks.at(ks);
-
-            // we're inverting lock order here, so if we can't grab the lock,
-            // just move on to prevent deadlocks
-            std::unique_lock entry_lock(kmtx, std::try_to_lock);
-            if (!entry_lock.owns_lock()) {
-                clock_idx = (clock_idx + 1) % size_in_chunks;
-                searched_entries++;
-                continue;
-            }
-
-            // we got the lock, now evict the entry and return idx
-            assert(entry.pending_fill_data == nullptr);
-            assert(entry.pending_reads.empty());
-
-            cache_map_shards.at(ks).erase(key);
-            entry.status = entry_status::EMPTY;
-
-            auto ret = clock_idx;
-            clock_idx = (clock_idx + 1) % size_in_chunks;
-            return std::make_pair(ret, std::move(entry_lock));
-        }
+        if (entry.status == entry_status::EMPTY ||
+            (entry.refcount == 0 && entry.accessed == false))
+            break;
 
         // only clear abit if the entry is not in use
         if (entry.refcount == 0)
@@ -381,20 +341,21 @@ shared_read_cache::allocate_chunk()
         searched_entries++;
     }
 
-    // unreachable
-    assert(false);
-}
+    // trace("allocate chunk: searched {} entries", searched_entries);
 
-inline size_t shared_read_cache::get_key_shard(chunk_key key)
-{
-    auto key_hash = chunk_key_hash{}(key);
-    return key_hash % num_shards;
-}
+    // evict the entry
+    auto &entry = cache_state[clock_idx];
+    assert(entry.pending_fill_data == nullptr);
+    assert(entry.pending_reads.empty());
 
-inline std::mutex &shared_read_cache::get_state_lock(chunk_idx idx)
-{
-    auto shard = idx % num_shards;
-    return cache_state_shard_locks.at(shard);
+    auto key = entry.key;
+    cache_map.erase(key);
+
+    entry.status = entry_status::EMPTY;
+
+    auto ret = clock_idx;
+    clock_idx = (clock_idx + 1) % size_in_chunks;
+    return ret;
 }
 
 request *shared_read_cache::make_read_req(std::string img_prefix,
@@ -409,24 +370,13 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     // trace("request: {} {} {} {}", img_prefix, seqnum, obj_offset, adjust);
     total_requests++;
 
-    auto key = std::make_tuple(img_prefix, seqnum, obj_offset);
-    auto key_shard = get_key_shard(key);
-    auto &map_shard = cache_map_shards.at(key_shard);
-
-    // This lock serves two purposes: it prevents two queries for the same key
-    // from running simultaneously, and it also guards the sharded cache map
-    // from simultaneous access
-    std::lock_guard<std::mutex> key_lock(key_shard_locks.at(key_shard));
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // Check if it's in the cache. If so, great, fetch it and return
-    auto r = map_shard.find(key);
-    if (r != map_shard.end()) {
+    auto r = cache_map.find(std::make_tuple(img_prefix, seqnum, obj_offset));
+    if (r != cache_map.end()) {
         auto idx = r->second;
         // trace("cache hit {}", idx);
-
-        // This lock guards the entry for the chunk from simultaneous access
-        std::lock_guard<std::mutex> entry_lock(get_state_lock(idx));
-
         {
             std::lock_guard guard(cache_stats_lock);
             user_bytes(req_size);
@@ -467,6 +417,8 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         }
     }
 
+    // lock.unlock();
+
     // Cache miss path: allocate a chunk, fetch from backend, and then fill
     // the chunk in
     {
@@ -476,21 +428,26 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
         hitrate_stats(0);
     }
 
-    auto buf = malloc(CACHE_CHUNK_SIZE);
+    // upgrade to write lock
+    // TODO verify safety? the only person to read the abit is the allocator,
+    // and it is protected by an exclusive lock, so it should be fine
+    auto buf = aligned_alloc(CACHE_CHUNK_SIZE, CACHE_CHUNK_SIZE);
+    auto cache_key = std::make_tuple(img_prefix, seqnum, obj_offset);
+    // std::unique_lock<std::shared_mutex> ulock(global_cache_lock);
 
-    auto [idx, guard] = allocate_chunk();
+    auto idx = allocate_chunk();
     auto &entry = cache_state[idx];
     entry.pending_fill_data = buf;
     entry.refcount++;
     entry.status = entry_status::FETCHING;
-    entry.key = key;
+    entry.key = cache_key;
 
     objname obj_name(img_prefix, seqnum);
     auto backend_req = obj_backend->make_read_req(
         obj_name.c_str(), obj_offset, (char *)buf, CACHE_CHUNK_SIZE);
-    map_shard[key] = idx;
-    auto req =
-        new cache_miss_request(*this, idx, key, buf, adjust, dest, backend_req);
+    cache_map.insert(std::make_pair(cache_key, idx));
+    auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
+                                      backend_req);
     return req;
 }
 
@@ -513,6 +470,7 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
           chunks.size());
 
     std::vector<cache_insert_request *> reqs;
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     // ASSUMPTION: we have more cache blocks without abit set than the number
     // of blocks we're inserting. If not, allocate_chunk will infinite loop as
@@ -522,12 +480,8 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
     // we only insert if we can allocate a chunk. This also limits the time
     // that we hold locks and spend time searching for space
     for (auto &[ooffset, odata] : chunks) {
+        auto idx = allocate_chunk();
         auto key = std::make_tuple(img_prefix, seqnum, ooffset);
-        auto key_shard = get_key_shard(key);
-
-        std::lock_guard lock(key_shard_locks.at(key_shard));
-        auto [idx, guard] = allocate_chunk();
-
         auto req = new cache_insert_request(*this, idx, key, odata);
         reqs.push_back(req);
 
@@ -538,8 +492,10 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
         entry.pending_fill_data = odata;
         entry.key = key;
 
-        cache_map_shards.at(key_shard).insert(std::make_pair(key, idx));
+        cache_map.insert(std::make_pair(key, idx));
     }
+
+    lock.unlock();
 
     for (auto &req : reqs)
         req->run(nullptr);
@@ -547,7 +503,7 @@ void shared_read_cache::insert_object(std::string img_prefix, uint64_t seqnum,
 
 void shared_read_cache::on_store_done(chunk_idx chunk)
 {
-    std::lock_guard<std::mutex> lock(get_state_lock(chunk));
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
 
     auto &entry = cache_state[chunk];
     entry.status = entry_status::VALID;
@@ -614,7 +570,7 @@ void shared_read_cache::served_bypass_request(size_t bytes)
 
 void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 {
-    std::lock_guard<std::mutex> lock(get_state_lock(chunk));
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
     auto &entry = cache_state[chunk];
     assert(entry.refcount > 0);
     entry.refcount--;
@@ -623,13 +579,13 @@ void shared_read_cache::dec_chunk_refcount(chunk_idx chunk)
 shared_read_cache::entry_status
 shared_read_cache::get_chunk_status(chunk_idx chunk)
 {
-    std::lock_guard<std::mutex> lock(get_state_lock(chunk));
+    std::shared_lock<std::shared_mutex> lock(global_cache_lock);
     return cache_state[chunk].status;
 }
 
 void shared_read_cache::set_chunk_status(chunk_idx chunk, entry_status status)
 {
-    std::lock_guard<std::mutex> lock(get_state_lock(chunk));
+    std::unique_lock<std::shared_mutex> lock(global_cache_lock);
     cache_state[chunk].status = status;
 }
 
