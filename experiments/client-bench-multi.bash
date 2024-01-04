@@ -38,7 +38,7 @@ read_entire_img=${read_entire_img:-0}
 if [[ $read_entire_img -eq 1 ]]; then
 	printf "\n\n===Reading entire image to warm cache===\n\n"
 	for dev_name in $lsvd_devs; do
-		dd if=$dev_name of=/dev/null bs=1048576 count=20475 status=progress &
+		dd if=$dev_name of=/dev/null bs=1048576 count=20479 status=progress &
 	done
 	wait
 fi
@@ -80,9 +80,8 @@ function run_fio {
 # This is a hack; we need to figure out a better solution later
 
 run_fio randread 60 256 4k
+run_fio randread 60 256 4k
 run_fio read 60 256 4k
-
-exit
 
 run_fio randread 60 1 4k
 # run_fio randread 60 32 4k
@@ -101,6 +100,8 @@ run_fio read 60 256 64k
 run_fio randread 60 256 4k
 run_fio randread 60 256 16k
 run_fio randread 60 256 64k
+
+exit
 
 run_fio randwrite 60 1 4k
 # run_fio randwrite 60 32 4k
