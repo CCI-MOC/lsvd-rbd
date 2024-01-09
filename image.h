@@ -8,6 +8,10 @@
 #include "lsvd_types.h"
 #include "objects.h"
 #include "shared_read_cache.h"
+#include "backend.h"
+#include "write_cache.h"
+#include "translate.h"
+#include "img_reader.h"
 
 struct event_socket {
     int socket;
@@ -45,11 +49,6 @@ struct event_socket {
     }
 };
 
-class img_reader;
-class write_cache;
-class backend;
-class translate;
-
 struct rbd_image {
     std::string image_name;
 
@@ -63,7 +62,7 @@ struct rbd_image {
     std::map<int, char *> buffers;
 
     std::shared_ptr<backend> objstore;
-    std::shared_ptr<shared_read_cache> shared_cache;
+    std::shared_ptr<read_cache> shared_cache;
     translate *xlate;
     write_cache *wcache;
     img_reader *reader;
@@ -79,7 +78,7 @@ struct rbd_image {
     bool done = false;
 
     rbd_image() {}
-    ~rbd_image() {}
+    ~rbd_image();
 
     int image_open(rados_ioctx_t io, const char *name);
     int image_close(void);

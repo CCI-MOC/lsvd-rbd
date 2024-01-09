@@ -11,6 +11,8 @@
 #ifndef WRITE_CACHE_H
 #define WRITE_CACHE_H
 
+#include "translate.h"
+
 /* all addresses are in units of 4KB blocks
  */
 class write_cache
