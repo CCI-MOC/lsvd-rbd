@@ -15,7 +15,7 @@ default_cache_size=$((20 * 1024 * 1024 * 1024))
 cache_size=${lsvd_cache_size:-$default_cache_size}
 
 lsvd_dir=$(git rev-parse --show-toplevel)
-gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
+gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10\.1\.[0-9.]+)\/24/' | head -n 1)
 client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
 wlog=/mnt/nvme-remote/

@@ -35,6 +35,16 @@ printf "\n\n\n===New Experiment===\n\n\n"
 export lsvd_cache_size=$((20 * 1024 * 1024 * 1024))
 ./bench-lsvd.bash triple-hdd |& tee -a $all_out
 
+printf "\n\n\n===New Experiment===\n\n\n"
+export lsvd_cache_size=$((20 * 1024 * 1024 * 1024))
+./bench-lsvd-multi.bash rssd2 |& tee -a $all_out
+printf "\n\n\n===New Experiment===\n\n\n"
+export lsvd_cache_size=$((20 * 1024 * 1024 * 1024))
+./bench-lsvd-multi.bash triple-hdd |& tee -a $all_out
+
+printf "\n\n\n===New Experiment===\n\n\n"
+./bench-nvme-multi.bash |& tee -a $all_out
+
 # don't collect these over and over again
 exit
 
