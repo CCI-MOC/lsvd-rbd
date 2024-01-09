@@ -60,8 +60,14 @@ liblsvd.so: $(LSVD_OBJS)
 	@echo "LD $@"
 	@$(CXX) $(SOFLAGS) -o $@ $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
+paper:
+	@$(MAKE) -C atc2024
+
 clean:
 	@rm -rf liblsvd.so $(TARGET_EXECS) $(TEST_EXECS) $(BUILD_DIR)/*
+	@$(MAKE) -C atc2024 clean
+
+all: release paper
 
 install-deps:
 	sudo apt install libfmt-dev libaio-dev librados-dev mold
