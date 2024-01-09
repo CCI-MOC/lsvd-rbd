@@ -312,13 +312,13 @@ br2 = [x + barWidth for x in br1]
 # br4 = [x + barWidth for x in br3]
  
 
-plt.bar(br1, lsvd_ssd_bw, color ='r', width = barWidth, 
+plt.bar(br1, lsvd_ssd_bw, color ='lightseagreen', width = barWidth, 
         edgecolor ='grey', label ='lsvd') 
-plt.bar(br2, rbd_ssd_bw, color ='g', width = barWidth, 
+plt.bar(br2, rbd_ssd_bw, color ='orange', width = barWidth, 
         edgecolor ='grey', label ='rbd') 
-# plt.bar(br3, rbd_hdd_bw, color ='b', width = barWidth, 
+# plt.bar(br3, rbd_hdd_bw, color ='salmon', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_hdd')
-# plt.bar(br4, rbd_ssd_bw, color ='c', width = barWidth, 
+# plt.bar(br4, rbd_ssd_bw, color ='khaki', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 # Adding Xticks 
@@ -346,13 +346,13 @@ br2 = [x + barWidth for x in br1]
 # br4 = [x + barWidth for x in br3]
  
 # # Make the plot
-plt.bar(br1, lsvd_hdd_bw, color ='r', width = barWidth, 
+plt.bar(br1, lsvd_hdd_bw, color ='lightseagreen', width = barWidth, 
         edgecolor ='grey', label ='lsvd') 
-plt.bar(br2, rbd_hdd_bw, color ='g', width = barWidth, 
+plt.bar(br2, rbd_hdd_bw, color ='orange', width = barWidth, 
         edgecolor ='grey', label ='rbd') 
-# plt.bar(br3, rbd_hdd_bw, color ='b', width = barWidth, 
+# plt.bar(br3, rbd_hdd_bw, color ='salmon', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_hdd')
-# plt.bar(br4, rbd_ssd_bw, color ='c', width = barWidth, 
+# plt.bar(br4, rbd_ssd_bw, color ='khaki', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 # Adding Xticks 
@@ -639,13 +639,13 @@ br2 = [x + barWidth for x in br1]
 # br4 = [x + barWidth for x in br3]
  
 # # Make the plot
-plt.bar(br1, lsvd_ssd_bw, color ='r', width = barWidth, 
+plt.bar(br1, lsvd_ssd_bw, color ='lightseagreen', width = barWidth, 
         edgecolor ='grey', label ='lsvd') 
-plt.bar(br2, rbd_ssd_bw, color ='g', width = barWidth, 
+plt.bar(br2, rbd_ssd_bw, color ='orange', width = barWidth, 
         edgecolor ='grey', label ='rbd') 
-# plt.bar(br3, rbd_hdd_bw, color ='b', width = barWidth, 
+# plt.bar(br3, rbd_hdd_bw, color ='salmon', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_hdd')
-# plt.bar(br4, rbd_ssd_bw, color ='c', width = barWidth, 
+# plt.bar(br4, rbd_ssd_bw, color ='khaki', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
   
 plt.xlabel('Experiment', fontweight ='bold', fontsize = 20) 
@@ -671,13 +671,13 @@ br2 = [x + barWidth for x in br1]
 # br4 = [x + barWidth for x in br3]
  
 
-plt.bar(br1, lsvd_hdd_bw, color ='r', width = barWidth, 
+plt.bar(br1, lsvd_hdd_bw, color ='lightseagreen', width = barWidth, 
         edgecolor ='grey', label ='lsvd') 
-plt.bar(br2, rbd_hdd_bw, color ='g', width = barWidth, 
+plt.bar(br2, rbd_hdd_bw, color ='orange', width = barWidth, 
         edgecolor ='grey', label ='rbd') 
-# plt.bar(br3, rbd_hdd_bw, color ='b', width = barWidth, 
+# plt.bar(br3, rbd_hdd_bw, color ='salmon', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_hdd')
-# plt.bar(br4, rbd_ssd_bw, color ='c', width = barWidth, 
+# plt.bar(br4, rbd_ssd_bw, color ='khaki', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 plt.xlabel('Experiment', fontweight ='bold', fontsize = 20) 
@@ -732,13 +732,13 @@ br3 = [x + barWidth for x in br2]
 # br4 = [x + barWidth for x in br3]
  
 
-plt.bar(br1, lsvd_hdd, color ='r', width = barWidth, 
+plt.bar(br1, lsvd_hdd, color ='lightseagreen', width = barWidth, 
         edgecolor ='grey', label ='lsvd_hdd') 
-plt.bar(br2, lsvd_ssd, color ='g', width = barWidth, 
+plt.bar(br2, lsvd_ssd, color ='orange', width = barWidth, 
         edgecolor ='grey', label ='lsvd_ssd') 
-plt.bar(br3, rbd_ssd, color ='b', width = barWidth, 
+plt.bar(br3, rbd_ssd, color ='salmon', width = barWidth, 
         edgecolor ='grey', label ='rbd_ssd')
-# plt.bar(br4, rbd_ssd, color ='c', width = barWidth, 
+# plt.bar(br4, rbd_ssd, color ='khaki', width = barWidth, 
 #         edgecolor ='grey', label ='rbd_ssd') 
  
 # Adding Xticks 
@@ -791,13 +791,13 @@ br3 = [x + barWidth for x in br2]
 # br4 = [x + barWidth for x in br3]
  
 # Make the plot
-plt.bar(br1, lsvd_hdd, color ='r', width = barWidth, 
+plt.bar(br1, lsvd_hdd, color ='lightseagreen', width = barWidth, 
         edgecolor ='grey', label ='lsvd_hdd') 
-plt.bar(br2, lsvd_ssd, color ='g', width = barWidth, 
+plt.bar(br2, lsvd_ssd, color ='orange', width = barWidth, 
         edgecolor ='grey', label ='lsvd_ssd') 
-plt.bar(br3, rbd_ssd, color ='b', width = barWidth, 
+plt.bar(br3, rbd_ssd, color ='salmon', width = barWidth, 
         edgecolor ='grey', label ='rbd_ssd')
-# plt.bar(br4, lsvd_ssd, color ='c', width = barWidth, 
+# plt.bar(br4, lsvd_ssd, color ='khaki', width = barWidth, 
 #         edgecolor ='grey', label ='lsvd_ssd') 
  
 # Adding Xticks 
