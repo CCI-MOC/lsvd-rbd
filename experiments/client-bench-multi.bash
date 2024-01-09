@@ -45,7 +45,88 @@ fi
 
 # fio
 
-function run_fio {
+function run_fio_1 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 \
+		--runtime=$2 \
+		--iodepth=$3 \
+		--bs=$4 \
+		--ioengine=io_uring \
+		--time_based \
+		--randseed=42 \
+		--size=20g \
+		--eta-newline=1 \
+		--direct=1 \
+		--group_reporting \
+		--name=j1 \
+		--filename=/dev/nvme1n1 \
+		| tee /tmp/client-bench-results.txt
+
+	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+
+	sleep 2
+}
+
+function run_fio_1 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 \
+		--runtime=$2 \
+		--iodepth=$3 \
+		--bs=$4 \
+		--ioengine=io_uring \
+		--time_based \
+		--randseed=42 \
+		--size=20g \
+		--eta-newline=1 \
+		--direct=1 \
+		--group_reporting \
+		--name=j1 \
+		--filename=/dev/nvme1n1 \
+		--name=j2 \
+		--filename=/dev/nvme1n2 \
+		| tee /tmp/client-bench-results.txt
+
+	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+
+	sleep 2
+}
+
+function run_fio_3 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 \
+		--runtime=$2 \
+		--iodepth=$3 \
+		--bs=$4 \
+		--ioengine=io_uring \
+		--time_based \
+		--randseed=42 \
+		--size=20g \
+		--eta-newline=1 \
+		--direct=1 \
+		--group_reporting \
+		--name=j1 \
+		--filename=/dev/nvme1n1 \
+		--name=j2 \
+		--filename=/dev/nvme1n2 \
+		--name=j3 \
+		--filename=/dev/nvme1n3 \
+		| tee /tmp/client-bench-results.txt
+
+	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+
+	sleep 2
+}
+
+function run_fio_4 {
 	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
 	fio \
 		--name=global \
@@ -79,27 +160,51 @@ function run_fio {
 # We run all the read workloads first, then the writes, to preserve the cache
 # This is a hack; we need to figure out a better solution later
 
-run_fio randread 60 256 4k
-run_fio randread 60 256 4k
-run_fio read 60 256 4k
+# warmup? not sure why this is needed
+run_fio_4 randread 180 256 4ki
 
-run_fio randread 60 1 4k
-# run_fio randread 60 32 4k
-run_fio randread 60 64 4k
-# run_fio randread 60 128 4k
+# test scaling
+run_fio_1 randread 60 128 4ki
+run_fio_2 randread 60 128 4ki
+run_fio_3 randread 60 128 4ki
+run_fio_4 randread 60 128 4ki
+run_fio_1 read 60 128 4ki
+run_fio_2 read 60 128 4ki
+run_fio_3 read 60 128 4ki
+run_fio_4 read 60 128 4ki
 
-run_fio read 60 1 4k
-# run_fio read 60 32 4k
-run_fio read 60 64 4k
-# run_fio read 60 128 4k
+# test block sizes (are we still iops limited?)
+run_fio_4 randread 30 128 4ki
+run_fio_4 randread 30 128 8ki
+run_fio_4 randread 30 128 16ki
+run_fio_4 randread 30 128 32ki
+run_fio_4 randread 30 128 64ki
+run_fio_4 read 30 128 4ki
+run_fio_4 read 30 128 8ki
+run_fio_4 read 30 128 16ki
+run_fio_4 read 30 128 32ki
+run_fio_4 read 30 128 64ki
 
-run_fio read 60 256 4k
-run_fio read 60 256 16k
-run_fio read 60 256 64k
+run_fio_4 randread 60 256 4k
+run_fio_4 read 60 256 4k
 
-run_fio randread 60 256 4k
-run_fio randread 60 256 16k
-run_fio randread 60 256 64k
+run_fio_4 randread 60 1 4k
+run_fio_4 randread 60 32 4k
+run_fio_4 randread 60 64 4k
+run_fio_4 randread 60 128 4k
+
+run_fio_4 read 60 1 4k
+run_fio_4 read 60 32 4k
+run_fio_4 read 60 64 4k
+run_fio_4 read 60 128 4k
+
+run_fio_4 read 60 256 4k
+run_fio_4 read 60 256 16k
+run_fio_4 read 60 256 64k
+
+run_fio_4 randread 60 256 4k
+run_fio_4 randread 60 256 16k
+run_fio_4 randread 60 256 64k
 
 exit
 

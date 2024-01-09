@@ -5,7 +5,7 @@ ulimit -c
 
 cur_time=$(date +"%FT%T")
 lsvd_dir=$(git rev-parse --show-toplevel)
-gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/')
+gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10.1.[0-9.]+)\/24/' | head -n 1)
 client_ip=${client_ip:-10.1.0.6}
 outfile=$lsvd_dir/experiments/results/$cur_time.nvme-multi.txt
 
@@ -19,10 +19,10 @@ source $lsvd_dir/experiments/common.bash
 
 fstrim /mnt/nvme
 
-dd if=/dev/random of=/mnt/nvme/$imgname.multi.1 bs=1M count=20480 status=progress &
-dd if=/dev/random of=/mnt/nvme/$imgname.multi.2 bs=1M count=20480 status=progress &
-dd if=/dev/random of=/mnt/nvme/$imgname.multi.3 bs=1M count=20480 status=progress &
-dd if=/dev/random of=/mnt/nvme/$imgname.multi.4 bs=1M count=20480 status=progress &
+# dd if=/dev/random of=/mnt/nvme/$imgname.multi.1 bs=1M count=20480 status=progress &
+# dd if=/dev/random of=/mnt/nvme/$imgname.multi.2 bs=1M count=20480 status=progress &
+# dd if=/dev/random of=/mnt/nvme/$imgname.multi.3 bs=1M count=20480 status=progress &
+# dd if=/dev/random of=/mnt/nvme/$imgname.multi.4 bs=1M count=20480 status=progress &
 
 wait
 

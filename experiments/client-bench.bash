@@ -37,7 +37,7 @@ printf "Using device $dev_name\n"
 
 #num_fio_processes=4
 num_fio_processes=1
-fio_size="80GB"
+fio_size="80GiB"
 
 read_entire_img=${read_entire_img:-0}
 
@@ -59,23 +59,49 @@ fi
 function run_fio {
 	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
 	fio \
-		--name=fio-"$1" \
+		--name=global \
 		--rw=$1 \
-		--filename=$dev_name \
-		--size=$fio_size \
-		--direct=1 \
+		--runtime=$2 \
+		--iodepth=$3 \
 		--bs=$4 \
 		--ioengine=io_uring \
-		--iodepth=$3 \
-		--runtime=$2 \
 		--time_based \
-		--numjobs=$num_fio_processes \
-		--group_reporting \
 		--randseed=42 \
-		--output-format=normal,terse \
-		--eta-newline=1 | tee /tmp/client-bench-results.txt
+		--size=$fio_size \
+		--eta-newline=1 \
+		--direct=1 \
+		--group_reporting \
+		--name=j1 \
+		--filename=$dev_name \
+		| tee /tmp/client-bench-results.txt
 
 	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+
+	sleep 2
+}
+
+function run_fio_limit_iops {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, iops_limit=$5===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 \
+		--runtime=$2 \
+		--iodepth=$3 \
+		--bs=$4 \
+		--rate_iops=$5 \
+		--ioengine=io_uring \
+		--time_based \
+		--randseed=42 \
+		--size=$fio_size \
+		--eta-newline=1 \
+		--direct=1 \
+		--group_reporting \
+		--name=j1 \
+		--filename=$dev_name \
+		| tee /tmp/client-bench-results.txt
+
+	printf "\nRESULT: Fio (iodepth=$3; bs=$4, iops_limit=$5) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
@@ -84,45 +110,135 @@ function run_fio {
 # We run all the read workloads first, then the writes, to preserve the cache
 # This is a hack; we need to figure out a better solution later
 
-run_fio randread 60 256 4k
-run_fio read 60 256 4k
+run_fio randread 60 128 4ki
+run_fio read 60 128 4ki
 
-run_fio randread 60 1 4k
-# run_fio randread 60 32 4k
-run_fio randread 60 64 4k
-# run_fio randread 60 128 4k
+# Limit iops and see latency
 
-run_fio read 60 1 4k
-# run_fio read 60 32 4k
-run_fio read 60 64 4k
-# run_fio read 60 128 4k
+run_fio_limit_iops randread 30 128 4ki 10000
+run_fio_limit_iops randread 30 128 4ki 20000
+run_fio_limit_iops randread 30 128 4ki 30000
+run_fio_limit_iops randread 30 128 4ki 40000
+run_fio_limit_iops randread 30 128 4ki 50000
+run_fio_limit_iops randread 30 128 4ki 60000
+run_fio_limit_iops randread 30 128 4ki 70000
+run_fio_limit_iops randread 30 128 4ki 80000
+run_fio_limit_iops randread 30 128 4ki 90000
+run_fio_limit_iops randread 30 128 4ki 100000
 
-run_fio read 60 256 4k
-run_fio read 60 256 16k
-run_fio read 60 256 64k
+run_fio_limit_iops read 30 128 4ki 10000
+run_fio_limit_iops read 30 128 4ki 20000
+run_fio_limit_iops read 30 128 4ki 30000
+run_fio_limit_iops read 30 128 4ki 40000
+run_fio_limit_iops read 30 128 4ki 50000
+run_fio_limit_iops read 30 128 4ki 60000
+run_fio_limit_iops read 30 128 4ki 70000
+run_fio_limit_iops read 30 128 4ki 80000
+run_fio_limit_iops read 30 128 4ki 90000
+run_fio_limit_iops read 30 128 4ki 100000
 
-run_fio randread 60 256 4k
-run_fio randread 60 256 16k
-run_fio randread 60 256 64k
+# Test different queue depths
 
-run_fio randwrite 60 1 4k
-# run_fio randwrite 60 32 4k
-run_fio randwrite 60 64 4k
-# run_fio randwrite 60 128 4k
+run_fio randread 30 1 4ki
+run_fio randread 30 16 4ki
+run_fio randread 30 32 4ki
+run_fio randread 30 64 4ki
+run_fio randread 30 80 4ki
+run_fio randread 30 96 4ki
+run_fio randread 30 112 4ki
+run_fio randread 30 128 4ki
+run_fio randread 30 192 4ki
+run_fio randread 30 256 4ki
 
-run_fio write 60 1 4k
-# run_fio write 60 32 4k
-run_fio write 60 64 4k
-# run_fio write 60 128 4k
+run_fio read 30 1 4ki
+run_fio read 30 16 4ki
+run_fio read 30 32 4ki
+run_fio read 30 64 4ki
+run_fio read 30 80 4ki
+run_fio read 30 96 4ki
+run_fio read 30 112 4ki
+run_fio read 30 128 4ki
+run_fio read 30 192 4ki
+run_fio read 30 256 4ki
 
-run_fio write 60 256 16k
-run_fio write 60 256 64k
+# Test different block sizes
 
-run_fio randwrite 60 256 16k
-run_fio randwrite 60 256 64k
+run_fio randread 30 256 4ki
+run_fio randread 30 256 8ki
+run_fio randread 30 256 16ki
+run_fio randread 30 256 32ki
+run_fio randread 30 256 64ki
 
-run_fio randwrite 60 256 4k
-run_fio write 60 256 4k
+run_fio read 30 256 4ki
+run_fio read 30 256 8ki
+run_fio read 30 256 16ki
+run_fio read 30 256 32ki
+run_fio read 30 256 64ki
+
+# === Writes ===
+
+run_fio randwrite 60 128 4ki
+run_fio write 60 128 4ki
+
+run_fio_limit_iops randwrite 30 128 4ki 10000
+run_fio_limit_iops randwrite 30 128 4ki 20000
+run_fio_limit_iops randwrite 30 128 4ki 30000
+run_fio_limit_iops randwrite 30 128 4ki 40000
+run_fio_limit_iops randwrite 30 128 4ki 50000
+run_fio_limit_iops randwrite 30 128 4ki 60000
+run_fio_limit_iops randwrite 30 128 4ki 70000
+run_fio_limit_iops randwrite 30 128 4ki 80000
+run_fio_limit_iops randwrite 30 128 4ki 90000
+run_fio_limit_iops randwrite 30 128 4ki 100000
+
+run_fio_limit_iops write 30 128 4ki 10000
+run_fio_limit_iops write 30 128 4ki 20000
+run_fio_limit_iops write 30 128 4ki 30000
+run_fio_limit_iops write 30 128 4ki 40000
+run_fio_limit_iops write 30 128 4ki 50000
+run_fio_limit_iops write 30 128 4ki 60000
+run_fio_limit_iops write 30 128 4ki 70000
+run_fio_limit_iops write 30 128 4ki 80000
+run_fio_limit_iops write 30 128 4ki 90000
+run_fio_limit_iops write 30 128 4ki 100000
+
+# Test different queue depths
+
+run_fio randwrite 30 1 4ki
+run_fio randwrite 30 16 4ki
+run_fio randwrite 30 32 4ki
+run_fio randwrite 30 64 4ki
+run_fio randwrite 30 80 4ki
+run_fio randwrite 30 96 4ki
+run_fio randwrite 30 112 4ki
+run_fio randwrite 30 128 4ki
+run_fio randwrite 30 192 4ki
+run_fio randwrite 30 256 4ki
+
+run_fio write 30 1 4ki
+run_fio write 30 16 4ki
+run_fio write 30 32 4ki
+run_fio write 30 64 4ki
+run_fio write 30 80 4ki
+run_fio write 30 96 4ki
+run_fio write 30 112 4ki
+run_fio write 30 128 4ki
+run_fio write 30 192 4ki
+run_fio write 30 256 4ki
+
+# Test different block sizes
+
+run_fio randwrite 30 256 4ki
+run_fio randwrite 30 256 8ki
+run_fio randwrite 30 256 16ki
+run_fio randwrite 30 256 32ki
+run_fio randwrite 30 256 64ki
+
+run_fio write 30 256 4ki
+run_fio write 30 256 8ki
+run_fio write 30 256 16ki
+run_fio write 30 256 32ki
+run_fio write 30 256 64ki
 
 # filesystem benchmarks
 
