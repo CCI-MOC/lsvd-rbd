@@ -480,7 +480,7 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
 
     _hdrbuf = (char *)aligned_alloc(4096, 4096);
 
-    const char *name = "write_cache_cb";
+    const char *name = "wlog_uring";
     nvme_w = make_nvme_uring(fd, name);
 
     char *buf = (char *)aligned_alloc(4096, 4096);
