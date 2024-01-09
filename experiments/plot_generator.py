@@ -27,7 +27,7 @@ git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().de
 # directory = '/home/sumatrad/lsvd-rbd/experiments/'
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
-result_dir = os.path.join(directory, 'results')
+result_dir = os.path.join(directory, 'results/28_dec_res')
 graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
     os.makedirs(graph_dir)
@@ -330,8 +330,8 @@ plt.xticks([r + barWidth for r in range(len(lsvd_hdd_bw))],
  
 plt.legend()
 description = f"FIO performance LSVD vs RBD for SSD backend. 80GB volume, 20GB cache, 4K blocksize, queue depth of 256"
-#plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
-#plt.subplots_adjust(bottom=0.2) 
+# plt.text(0.5, -0.15, description, ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9), transform=plt.gca().transAxes)
+# plt.subplots_adjust(bottom=0.2) 
 plt.savefig(os.path.join(graph_dir, 'request_bw_ssd_20gb.png'))
 plt.show()
 

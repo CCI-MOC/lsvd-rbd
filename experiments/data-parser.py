@@ -27,7 +27,8 @@ git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().de
 # directory = '/home/sumatrad/lsvd-rbd/experiments/'
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
-result_dir = os.path.join(directory, 'results/writec_results')
+result_dir = os.path.join(directory, 'results/28_dec_res/')
+print("result_dir: " + result_dir)
 graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
     os.makedirs(graph_dir)
@@ -68,6 +69,7 @@ if filebench_output.tell() == 0:
 n_rbd=0
 n_lvsd=0
 n_ram=0
+n_nvme=0
 
 keywords = ['rbd', 'lsvd']
 files = [file for file in os.listdir(result_dir) if any(keyword in file for keyword in keywords)]
@@ -95,12 +97,23 @@ for file_name in files:
         disk_type='rbd'
         cache_size='none'
         n_rbd=n_rbd+1
-    elif file_split[1]=='lsvd':
+    elif file_split[1]=='lsvd-240':
         disk_type='lsvd'
-        cache_size=file_split[3]
+        cache_size='240gb'
         n_lvsd=n_lvsd+1
+    elif file_split[1]=='lsvd-20':
+        disk_type='lsvd'
+        cache_size='20gb'
+        n_lvsd=n_lvsd+1
+    elif file_split[1]=='nvme':
+        disk_type='nvme'
+        cache_size='none'
+        pool_type='none'
+        n_nvme=n_nvme+1
     else:
         disk_type='ramdisk'
+        cache_size='none'
+        pool_type='none'
         n_ram=n_ram+1
         #print("else: " +file_name)
 
