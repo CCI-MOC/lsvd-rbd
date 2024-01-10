@@ -25,7 +25,7 @@ outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-multi.$pool_name.txt
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-benchmark
-imgsize=20g
+imgsize=10g
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
@@ -42,10 +42,10 @@ mkdir -p $lsvd_dir/test/baklibs/
 cp $lsvd_dir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
 
 # create_lsvd_thin $pool_name $imgname $imgsize
-create_lsvd_thick $pool_name $imgname.multi.1 $imgsize &
-create_lsvd_thick $pool_name $imgname.multi.2 $imgsize &
-create_lsvd_thick $pool_name $imgname.multi.3 $imgsize &
-create_lsvd_thick $pool_name $imgname.multi.4 $imgsize &
+# create_lsvd_thick $pool_name $imgname.multi.1 $imgsize &
+# create_lsvd_thick $pool_name $imgname.multi.2 $imgsize &
+# create_lsvd_thick $pool_name $imgname.multi.3 $imgsize &
+# create_lsvd_thick $pool_name $imgname.multi.4 $imgsize &
 
 wait
 
