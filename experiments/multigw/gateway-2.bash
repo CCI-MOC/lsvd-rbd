@@ -35,7 +35,11 @@ wait
 kill_nvmf
 
 launch_lsvd_gw_background /mnt/nvme /mnt/nvme-remote $((120 * 1024 * 1024 * 1024)))
-configure_nvmf_common $gw_ip
+
+scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
+scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
+scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000002 -d SPDK_Controller1
+scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gw_ip -s 9922
 
 add_rbd_img $pool_name $imgname.multigw.5
 add_rbd_img $pool_name $imgname.multigw.6
