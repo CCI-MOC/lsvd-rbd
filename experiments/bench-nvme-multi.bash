@@ -19,10 +19,10 @@ source $lsvd_dir/experiments/common.bash
 
 fstrim /mnt/nvme
 
-# dd if=/dev/random of=/mnt/nvme/$imgname.multi.1 bs=1M count=20480 status=progress &
-# dd if=/dev/random of=/mnt/nvme/$imgname.multi.2 bs=1M count=20480 status=progress &
-# dd if=/dev/random of=/mnt/nvme/$imgname.multi.3 bs=1M count=20480 status=progress &
-# dd if=/dev/random of=/mnt/nvme/$imgname.multi.4 bs=1M count=20480 status=progress &
+dd if=/dev/random of=/mnt/nvme/$imgname.multi.1 bs=1M count=20480 status=progress &
+dd if=/dev/random of=/mnt/nvme/$imgname.multi.2 bs=1M count=20480 status=progress &
+dd if=/dev/random of=/mnt/nvme/$imgname.multi.3 bs=1M count=20480 status=progress &
+dd if=/dev/random of=/mnt/nvme/$imgname.multi.4 bs=1M count=20480 status=progress &
 
 wait
 

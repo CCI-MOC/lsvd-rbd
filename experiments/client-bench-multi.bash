@@ -46,7 +46,7 @@ fi
 # fio
 
 function run_fio_1 {
-	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=1 ===\n\n"
 	fio \
 		--name=global \
 		--rw=$1 \
@@ -64,14 +64,14 @@ function run_fio_1 {
 		--filename=/dev/nvme1n1 \
 		| tee /tmp/client-bench-results.txt
 
-	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	printf "\nRESULT: Fio (disks=1, iodepth=$3; bs=$4) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
 }
 
-function run_fio_1 {
-	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+function run_fio_2 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=2 ===\n\n"
 	fio \
 		--name=global \
 		--rw=$1 \
@@ -91,14 +91,14 @@ function run_fio_1 {
 		--filename=/dev/nvme1n2 \
 		| tee /tmp/client-bench-results.txt
 
-	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	printf "\nRESULT: Fio (disks=2, iodepth=$3; bs=$4) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
 }
 
 function run_fio_3 {
-	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=3 ===\n\n"
 	fio \
 		--name=global \
 		--rw=$1 \
@@ -120,14 +120,14 @@ function run_fio_3 {
 		--filename=/dev/nvme1n3 \
 		| tee /tmp/client-bench-results.txt
 
-	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	printf "\nRESULT: Fio (disks=3, iodepth=$3; bs=$4) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
 }
 
 function run_fio_4 {
-	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=4 ===\n\n"
 	fio \
 		--name=global \
 		--rw=$1 \
@@ -151,7 +151,7 @@ function run_fio_4 {
 		--filename=/dev/nvme1n4 \
 		| tee /tmp/client-bench-results.txt
 
-	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
+	printf "\nRESULT: Fio (disks=4, iodepth=$3; bs=$4) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
