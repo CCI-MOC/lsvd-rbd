@@ -49,14 +49,18 @@ function launch_lsvd_gw_background {
 	export LSVD_GC_THRESHOLD=40
 	export LSVD_CACHE_SIZE=$cache_size
 	# LD_PRELOAD="/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so $lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
-	LD_PRELOAD="$lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
+
+	# clear out write log directory
+	rm -rf $wlog_root/lsvd-write/*
+
+	LD_PRELOAD="$lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt -m '[0,1,2,3]' &
 
 	sleep 5
 }
 
 function launch_gw_background {
 	cd $lsvd_dir/spdk
-	./build/bin/nvmf_tgt &
+	./build/bin/nvmf_tgt -m '[0,1,2,3]' &
 
 	sleep 5
 }
@@ -110,11 +114,12 @@ function run_client_bench {
 	local client_ip=$1
 	local outfile=$2
 	local benchscript=${3:-client-bench.bash}
+	local additional_args=${4:-""}
 
 	cd $lsvd_dir/experiments
 	ssh $client_ip 'mkdir -p /tmp/filebench; rm -rf /tmp/filebench/*'
 	scp ./filebench-workloads/*.f root@$client_ip:/tmp/filebench/
-	ssh $client_ip "bash -s gw_ip=$gw_ip" < $benchscript 2>&1 | tee -a $outfile
+	ssh $client_ip "bash -s gw_ip=$gw_ip $additional_args" < $benchscript 2>&1 | tee -a $outfile
 
 	perl -lane 'print if s/^RESULT: //' $outfile | tee -a $outfile
 }

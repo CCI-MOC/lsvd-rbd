@@ -1,70 +1,30 @@
+.idea/
+.vscode/
+__pycache__/
+sidetest/
+
+build/*
+experiments/results/*
+experiments/experiment-results.*
+test/baklibs/*
+
+*.o
+*.so
+*.qcow2
+*.iso
+*.img
+perf.*
+
+test-seq
+imgtool
+thick-image
 lsvd_rnd_test
 lsvd_crash_test
 
-# coverage
-*.gcov
-*.gcda
-*.gcno
-
-# Prerequisites
-*.d
-*.swp
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-*.save
-*.h#
-*.cc#
-*.1
-*.rej
-*.orig
-*.log
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-*.pyc
-.cache
-compile_commands.json
-
-thick-image
-imgtool
-.vscode
-
-# don't try to add results by default
-# manually add with -f
-experiments/results/
-
-sidetest/
-.idea/
-*.iso
-*.qcow2
-
-spdk/
-ceph/
-
 qemu/*.img
+bzImage
+
+perf.*
+experiment-results.*
+
+atc2024/build/

@@ -1,12 +1,21 @@
 #pragma once
+
+#include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
+#include <cstring>
 #include <errno.h>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <iostream>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <queue>
+#include <shared_mutex>
 #include <signal.h>
 #include <source_location>
 #include <span>
@@ -168,3 +177,61 @@ inline char *strip_poolname_prefix(char *s)
         return s;
     return idx + 1;
 }
+
+/**
+ * This is a thread safe, bounded, blocking, multi-producer multi-consumer,
+ * single-ended, FIFO queue. Push operations block until there's space, and pop
+ * blocks until there are entries in the queue to pop.
+ *
+ * It uses an underlying std::queue for the actual queue, and then just adds a
+ * single global lock to both pop and push. Readers are notified when there are
+ * entries via condition vars, same for writers.
+ *
+ * Based on CPython's queue implementation found at
+ * https://github.com/python/cpython/blob/main/Lib/queue.py
+ *
+ * This queue is neither movable nor copyable. Use smart pointers instead.
+ */
+template <typename T> class BlockingMPMC
+{
+  public:
+    BlockingMPMC(size_t size) : _buffer(), _max_capacity(size) {}
+    ~BlockingMPMC();
+
+    // TODO Change to take an rvalue to default move instead of copy
+    void push(T t)
+    {
+        {
+            std::unique_lock<std::mutex> lck(_mutex);
+            _can_push.wait(lck,
+                           [&]() { return _buffer.size() < _max_capacity; });
+            _buffer.push(std::move(t));
+        }
+        _can_pop.notify_one();
+    }
+
+    T pop()
+    {
+        T x;
+        {
+            std::unique_lock<std::mutex> lck(_mutex);
+            _can_pop.wait(lck, [&]() { return !_buffer.empty(); });
+            x = std::move(_buffer.front());
+            _buffer.pop();
+        }
+        _can_push.notify_one();
+        return x;
+    }
+
+  private:
+    BlockingMPMC(BlockingMPMC &src) = delete;
+    BlockingMPMC(BlockingMPMC &&src) = delete;
+    BlockingMPMC &operator=(BlockingMPMC &src) = delete;
+    BlockingMPMC &operator=(BlockingMPMC &&src) = delete;
+
+    std::queue<T> _buffer;
+    size_t _max_capacity;
+    std::mutex _mutex;
+    std::condition_variable _can_pop;
+    std::condition_variable _can_push;
+};

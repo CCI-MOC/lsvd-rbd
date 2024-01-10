@@ -249,6 +249,8 @@ class translate_impl : public translate
 
     object_reader *parser;
 
+    std::shared_ptr<read_cache> rcache;
+
     void write_checkpoint(int seq, translate_req *req);
     void process_batch(int seq, translate_req *req);
     void write_gc(int _seq, translate_req *req);
@@ -268,7 +270,8 @@ class translate_impl : public translate
   public:
     translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
                    extmap::objmap *map, extmap::bufmap *bufmap,
-                   std::shared_mutex *m, std::mutex *buf_m);
+                   std::shared_mutex *m, std::mutex *buf_m,
+                   sptr<read_cache> rcache);
     ~translate_impl();
 
     ssize_t init(const char *name, bool timedflush);
@@ -301,7 +304,9 @@ const char *translate_impl::prefix(int seq)
 
 translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
                                extmap::objmap *map_, extmap::bufmap *bufmap_,
-                               std::shared_mutex *m_, std::mutex *buf_m)
+                               std::shared_mutex *m_, std::mutex *buf_m,
+                               sptr<read_cache> rcache)
+    : rcache(rcache)
 {
     misc_threads = new thread_pool<int>(&m);
     workers = new thread_pool<translate_req *>(&m);
@@ -316,9 +321,11 @@ translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
 
 translate *make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
                           extmap::objmap *map, extmap::bufmap *bufmap,
-                          std::shared_mutex *m, std::mutex *buf_m)
+                          std::shared_mutex *m, std::mutex *buf_m,
+                          sptr<read_cache> rcache)
 {
-    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m);
+    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m,
+                                           rcache);
 }
 
 translate_impl::~translate_impl()
@@ -973,9 +980,14 @@ void translate_impl::process_batch(int _seq, translate_req *req)
     make_obj_hdr(hdr_ptr, _seq, hdr_sectors, data_sectors, dm_entries.data(),
                  dm_entries.size(), false);
 
-    objname name(prefix(_seq), _seq);
-    auto req2 = objstore->make_write_req(name.c_str(), hdr_ptr,
-                                         (hdr_sectors + data_sectors) * 512);
+    auto pf = prefix(_seq);
+    objname name(pf, _seq);
+    auto obj_size = (hdr_sectors + data_sectors) * 512;
+    auto obj_ptr = hdr_ptr;
+
+    rcache->insert_object(pf, _seq, obj_size, obj_ptr);
+
+    auto req2 = objstore->make_write_req(name.c_str(), obj_ptr, obj_size);
     outstanding_writes++;
     req2->run(req);
 }
@@ -1098,7 +1110,7 @@ struct _extent {
 void translate_impl::do_gc(bool *running)
 {
     gc_cycles++;
-    trace("Start GC cycle {}", gc_cycles);
+    // trace("Start GC cycle {}", gc_cycles);
     int max_obj = seq.load();
 
     std::shared_lock obj_r_lock(*map_lock);
