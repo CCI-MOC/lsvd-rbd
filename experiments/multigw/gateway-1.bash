@@ -34,7 +34,7 @@ wait
 
 kill_nvmf
 
-launch_lsvd_gw_background /mnt/nvme /mnt/nvme-remote $((120 * 1024 * 1024 * 1024)))
+launch_lsvd_gw_background /mnt/nvme /mnt/nvme-remote $((120 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 
 add_rbd_img $pool_name $imgname.multigw.1

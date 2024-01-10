@@ -3,6 +3,7 @@
 __pycache__/
 sidetest/
 venv/
+.ipynb_checkpoints/
 
 build/*
 experiments/results/*
