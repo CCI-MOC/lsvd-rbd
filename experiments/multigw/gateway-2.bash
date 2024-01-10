@@ -43,3 +43,4 @@ add_rbd_img $pool_name $imgname.multigw.7
 add_rbd_img $pool_name $imgname.multigw.8
 
 trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
+wait
