@@ -5,6 +5,9 @@ sidetest/
 venv/
 .ipynb_checkpoints/
 
+spdk/
+liburing/
+
 build/*
 experiments/results/*
 experiments/experiment-results.*
