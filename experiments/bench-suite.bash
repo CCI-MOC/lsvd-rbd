@@ -19,10 +19,16 @@ ulimit -c unlimited
 
 printf "\n\n\n===New Experiment===\n\n\n"
 export lsvd_cache_size=$((120 * 1024 * 1024 * 1024))
-./bench-lsvd-multi.bash rssd2 |& tee -a $all_out
+./multi-client/bench-lsvd-multi.bash rssd2 |& tee -a $all_out
 printf "\n\n\n===New Experiment===\n\n\n"
 export lsvd_cache_size=$((120 * 1024 * 1024 * 1024))
-./bench-lsvd-multi.bash triple-hdd |& tee -a $all_out
+./multi-client/bench-lsvd-multi.bash triple-hdd |& tee -a $all_out
+
+printf "\n\n\n===New Experiment===\n\n\n"
+./multi-client/bench-rbd-multi.bash rssd2 |& tee -a $all_out
+./multi-client/bench-rbd-multi.bash triple-hdd |& tee -a $all_out
+
+exit
 
 printf "\n\n\n===New Experiment===\n\n\n"
 export lsvd_cache_size=$((240 * 1024 * 1024 * 1024))

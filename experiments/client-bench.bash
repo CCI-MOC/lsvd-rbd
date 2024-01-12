@@ -21,6 +21,8 @@ trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1
 
 modprobe nvme-fabrics
 nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true
+nvme disconnect -n nqn.2016-06.io.spdk:cnode2 || true
+nvme disconnect -n nqn.2016-06.io.spdk:cnode3 || true
 
 gw_ip=${gw_ip:-10.1.0.5}
 # see that it's there
@@ -138,7 +140,6 @@ run_fio_limit_iops read 30 128 4ki 90000
 run_fio_limit_iops read 30 128 4ki 100000
 
 # Test different queue depths
-
 run_fio randread 30 1 4ki
 run_fio randread 30 16 4ki
 run_fio randread 30 32 4ki
@@ -147,8 +148,14 @@ run_fio randread 30 80 4ki
 run_fio randread 30 96 4ki
 run_fio randread 30 112 4ki
 run_fio randread 30 128 4ki
+run_fio randread 30 160 4ki
 run_fio randread 30 192 4ki
+run_fio randread 30 224 4ki
 run_fio randread 30 256 4ki
+run_fio randread 30 320 4ki
+run_fio randread 30 384 4ki
+run_fio randread 30 448 4ki
+run_fio randread 30 512 4ki
 
 run_fio read 30 1 4ki
 run_fio read 30 16 4ki
@@ -158,8 +165,14 @@ run_fio read 30 80 4ki
 run_fio read 30 96 4ki
 run_fio read 30 112 4ki
 run_fio read 30 128 4ki
+run_fio read 30 160 4ki
 run_fio read 30 192 4ki
+run_fio read 30 224 4ki
 run_fio read 30 256 4ki
+run_fio read 30 320 4ki
+run_fio read 30 384 4ki
+run_fio read 30 448 4ki
+run_fio read 30 512 4ki
 
 # Test different block sizes
 
@@ -212,8 +225,14 @@ run_fio randwrite 30 80 4ki
 run_fio randwrite 30 96 4ki
 run_fio randwrite 30 112 4ki
 run_fio randwrite 30 128 4ki
+run_fio randwrite 30 160 4ki
 run_fio randwrite 30 192 4ki
+run_fio randwrite 30 224 4ki
 run_fio randwrite 30 256 4ki
+run_fio randwrite 30 320 4ki
+run_fio randwrite 30 384 4ki
+run_fio randwrite 30 448 4ki
+run_fio randwrite 30 512 4ki
 
 run_fio write 30 1 4ki
 run_fio write 30 16 4ki
@@ -223,8 +242,15 @@ run_fio write 30 80 4ki
 run_fio write 30 96 4ki
 run_fio write 30 112 4ki
 run_fio write 30 128 4ki
+run_fio write 30 160 4ki
 run_fio write 30 192 4ki
+run_fio write 30 224 4ki
 run_fio write 30 256 4ki
+run_fio write 30 320 4ki
+run_fio write 30 384 4ki
+run_fio write 30 448 4ki
+run_fio write 30 512 4ki
+
 
 # Test different block sizes
 

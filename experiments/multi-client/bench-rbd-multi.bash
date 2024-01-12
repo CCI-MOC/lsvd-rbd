@@ -20,39 +20,32 @@ client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
 wlog=/mnt/nvme-remote/
 cache_size_gb=$(($cache_size / 1024 / 1024 / 1024))
-outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-multi.$pool_name.txt
+outfile=$lsvd_dir/experiments/results/$cur_time.rbd-multi.$pool_name.txt
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
-imgname=lsvd-benchmark
+imgname=rbd-benchmark
 imgsize=10g
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
 
-# Build LSVD
-echo '===Building LSVD...'
-cd $lsvd_dir
-make clean
-make -j20 release
-# make -j20 nosan
+rbd -p $pool_name rm $imgname.multi.1 || true
+rbd -p $pool_name rm $imgname.multi.2 || true
+rbd -p $pool_name rm $imgname.multi.3 || true
+rbd -p $pool_name rm $imgname.multi.4 || true
 
-# keep a copy of the library around to debug coredumps
-mkdir -p $lsvd_dir/test/baklibs/
-cp $lsvd_dir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
-
-# create_lsvd_thin $pool_name $imgname $imgsize
-# create_lsvd_thick $pool_name $imgname.multi.1 $imgsize &
-# create_lsvd_thick $pool_name $imgname.multi.2 $imgsize &
-# create_lsvd_thick $pool_name $imgname.multi.3 $imgsize &
-# create_lsvd_thick $pool_name $imgname.multi.4 $imgsize &
+rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.1 &
+rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.2 &
+rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.3 &
+rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.4 &
 
 wait
 
 kill_nvmf
 
 fstrim /mnt/nvme
-launch_lsvd_gw_background $rcache $wlog $cache_size
+launch_gw_background
 configure_nvmf_common $gw_ip
 
 add_rbd_img $pool_name $imgname.multi.1
@@ -61,4 +54,4 @@ add_rbd_img $pool_name $imgname.multi.3
 add_rbd_img $pool_name $imgname.multi.4
 
 trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
-run_client_bench $client_ip $outfile client-bench-multi.bash "read_entire_img=1"
+run_client_bench $client_ip $outfile multi-client/client-bench-multi.bash "read_entire_img=1"
