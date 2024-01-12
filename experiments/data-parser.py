@@ -64,7 +64,7 @@ if fio_output_2.tell() == 0:
         csv_writer_fio_2.writerow(['timestamp', 'hash_id', 'disk_type', 'pool_type', 'cache_size', 'workload', 'iodepth', 'blocksize', 'IOPS', 'ext_iops', 'throughput', 'bw'])
 
 if filebench_output.tell() == 0:
-        csv_writer_filebench.writerow(['timestamp', 'hash_id', 'disk_type', 'pool_type', 'cache_size', 'fileserver_IOPS', 'fileserver_throughput', 'fileserver-sync_IOPS', 'fileserver-sync_throughput',  'oltp_IOPS', 'oltp_throughput', 'varmail_IOPS', 'varmail_throughput', ])
+        csv_writer_filebench.writerow(['timestamp', 'hash_id', 'disk_type', 'pool_type', 'cache_size', 'fileserver_IOPS', 'fileserver_throughput', 'fileserver-sync_IOPS', 'fileserver-sync_throughput',  'oltp_IOPS', 'oltp_throughput', 'varmail_IOPS', 'varmail_throughput'])
 
 n_rbd=0
 n_lvsd=0
