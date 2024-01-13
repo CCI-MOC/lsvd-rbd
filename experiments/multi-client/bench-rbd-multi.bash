@@ -35,6 +35,11 @@ rbd -p $pool_name rm $imgname.multi.2 || true
 rbd -p $pool_name rm $imgname.multi.3 || true
 rbd -p $pool_name rm $imgname.multi.4 || true
 
+# rbd -p $pool_name create --size $imgsize $imgname.multi.1 &
+# rbd -p $pool_name create --size $imgsize $imgname.multi.2 &
+# rbd -p $pool_name create --size $imgsize $imgname.multi.3 &
+# rbd -p $pool_name create --size $imgsize $imgname.multi.4 &
+
 rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.1 &
 rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.2 &
 rbd -p $pool_name create --size $imgsize --thick-provision $imgname.multi.3 &
@@ -54,4 +59,4 @@ add_rbd_img $pool_name $imgname.multi.3
 add_rbd_img $pool_name $imgname.multi.4
 
 trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
-run_client_bench $client_ip $outfile multi-client/client-bench-multi.bash "read_entire_img=1"
+run_client_bench $client_ip $outfile multi-client/client-bench-multi.bash "read_entire_img=0"

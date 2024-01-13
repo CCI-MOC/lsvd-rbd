@@ -19,7 +19,7 @@ lsvd_dir=$(git rev-parse --show-toplevel)
 gw_ip=$(ip addr | perl -lane 'print $1 if /inet (10\.1\.[0-9.]+)\/24/' | head -n 1)
 client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
-wlog={lsvd_wlog_root:-/mnt/nvme-remote/}
+wlog=${lsvd_wlog_root:-/mnt/nvme-remote/}
 cache_size_gb=$(($cache_size / 1024 / 1024 / 1024))
 outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-$out_post.$cache_size_gb.$pool_name.txt
 
@@ -42,10 +42,10 @@ make -j20 release
 mkdir -p $lsvd_dir/test/baklibs/
 cp $lsvd_dir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
 
+kill_nvmf
+
 # create_lsvd_thin $pool_name $imgname $imgsize
 create_lsvd_thick $pool_name $imgname $imgsize
-
-kill_nvmf
 
 fstrim /mnt/nvme
 launch_lsvd_gw_background $rcache $wlog $cache_size
