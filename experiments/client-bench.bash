@@ -53,7 +53,7 @@ read_entire_img=${read_entire_img:-0}
 if [[ $read_entire_img -eq 1 ]]; then
 	printf "\n\n===Reading entire image to warm cache===\n\n"
 	# dd if=$dev_name of=/dev/null bs=1048576 status=progress
-	dd if=$dev_name of=/dev/null bs=1048576 count=81910 status=progress
+	dd if=$dev_name of=/dev/null bs=1048576 count=81910
 fi
 
 # fio

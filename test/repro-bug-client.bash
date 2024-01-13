@@ -39,7 +39,7 @@ echo 0 >/proc/sys/kernel/randomize_va_space
 
 # make the workloads smaller for abbreviated run
 # perl -pi -e 's/nfiles=200000/nfiles=50000/' /tmp/filebench/*.f
-perl -pi -e 's/run 300/run 60/' /tmp/filebench/*.f
+perl -pi -e 's/run 300/run 120/' /tmp/filebench/*.f
 
 function run_filebench {
 	printf "\n\n===Filebench: workload=$1===\n\n"

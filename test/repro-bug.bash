@@ -65,4 +65,4 @@ exit
 cd $lsvd_dir
 ssh $client_ip 'mkdir -p /tmp/filebench; rm -rf /tmp/filebench/*'
 scp ./experiments/filebench-workloads/*.f root@$client_ip:/tmp/filebench/
-ssh $client_ip "bash -s gw_ip=$gw_ip" <./test/client-repro-bug.bash 2>&1 | tee -a $outfile
+ssh $client_ip "bash -s gw_ip=$gw_ip" <./test/repro-bug-client.bash 2>&1 | tee -a $outfile

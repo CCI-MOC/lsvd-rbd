@@ -25,7 +25,7 @@ outfile=$lsvd_dir/experiments/results/$cur_time.rbd-multi.$pool_name.txt
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=rbd-benchmark
-imgsize=10g
+imgsize=10G
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
