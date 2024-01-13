@@ -4891,3 +4891,5 @@ createfile2          2269ops       13ops/s   0.0mb/s    0.823ms/op [0.040ms - 26
 deletefile1          2269ops       13ops/s   0.0mb/s    1.119ms/op [0.050ms - 4.983ms]
 322.555: IO Summary: 29367 ops 163.134 ops/s 25/25 rd/wr   0.8mb/s 45.214ms/op
 322.555: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/varmail.f:322.555: IO Summary: 29367 ops 163.134 ops/s 25/25 rd/wr 0.8mb/s 45.214ms/op

@@ -27,7 +27,7 @@ git_branch = check_output(['git', 'symbolic-ref', '--short', 'HEAD']).strip().de
 # directory = '/home/sumatrad/lsvd-rbd/experiments/'
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/lsvd-rbd/experiments/'
 script_path = os.path.join(directory, 'nightly.bash')
-result_dir = os.path.join(directory, 'results/28_dec_res')
+result_dir = os.path.join(directory, 'results/jan_11_res')
 graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
     os.makedirs(graph_dir)

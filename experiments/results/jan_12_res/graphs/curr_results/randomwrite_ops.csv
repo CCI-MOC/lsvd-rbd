@@ -1,0 +1,7 @@
+disk_type,pool_type,cache_size,file_type,operation_type,operation_iops,operation_iops_per_sec,operation_bw,operation_bw_per_op
+lsvd,ssd,240gb,randomwrite,rand-write1,26171334,145383,1135.8mb/s,0.005ms/op
+lsvd,hdd,240gb,randomwrite,rand-write1,26194224,145510,1136.8mb/s,0.005ms/op
+lsvd,ssd,20gb,randomwrite,rand-write1,26753661,148618,1161.1mb/s,0.005ms/op
+lsvd,hdd,20gb,randomwrite,rand-write1,25029714,139041,1086.3mb/s,0.005ms/op
+rbd,ssd,none,randomwrite,rand-write1,25202092,140000,1093.7mb/s,0.005ms/op
+rbd,hdd,none,randomwrite,rand-write1,27221988,151220,1181.4mb/s,0.005ms/op
