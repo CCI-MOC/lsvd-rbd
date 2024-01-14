@@ -17,7 +17,7 @@ client_ip=${client_ip:-10.1.0.6}
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-benchmark
-imgsize=10g
+imgsize=10G
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
