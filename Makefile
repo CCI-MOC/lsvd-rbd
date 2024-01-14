@@ -65,7 +65,6 @@ paper:
 
 clean:
 	@rm -rf liblsvd.so $(TARGET_EXECS) $(TEST_EXECS) $(BUILD_DIR)/*
-	@$(MAKE) -C atc2024 clean
 
 all: release paper
 
