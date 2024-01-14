@@ -1,0 +1,22 @@
++ for pair in $*
++ '[' 10.1.0.5 '!=' gw_ip=10.1.0.5 ']'
++ eval gw_ip=10.1.0.5
+++ gw_ip=10.1.0.5
++ for pair in $*
++ '[' 1 '!=' read_entire_img=1 ']'
++ eval read_entire_img=1
+++ read_entire_img=1
+===Starting client benchmark
+
++ printf '===Starting client benchmark\n\n'
++ trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM SIGHUP EXIT
++ modprobe nvme-fabrics
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode1
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 0 controller(s)
+Failed to open /sys/class/nvme/nvme1/delete_controller: No such file or directory
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode2
+NQN:nqn.2016-06.io.spdk:cnode2 disconnected 0 controller(s)
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode3
+NQN:nqn.2016-06.io.spdk:cnode3 disconnected 0 controller(s)
++ gw_ip=10.1.0.5
++ nvme connect -t tcp --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
