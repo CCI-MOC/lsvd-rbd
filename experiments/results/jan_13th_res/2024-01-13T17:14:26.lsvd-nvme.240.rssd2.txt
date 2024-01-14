@@ -1,0 +1,175 @@
++ for pair in $*
++ '[' 10.1.0.5 '!=' gw_ip=10.1.0.5 ']'
++ eval gw_ip=10.1.0.5
+++ gw_ip=10.1.0.5
++ for pair in $*
++ '[' 0 '!=' read_entire_img=0 ']'
++ eval read_entire_img=0
+++ read_entire_img=0
+===Starting client benchmark
+
++ printf '===Starting client benchmark\n\n'
++ trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM SIGHUP EXIT
++ modprobe nvme-fabrics
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode1
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 0 controller(s)
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode2
+NQN:nqn.2016-06.io.spdk:cnode2 disconnected 0 controller(s)
++ nvme disconnect -n nqn.2016-06.io.spdk:cnode3
+NQN:nqn.2016-06.io.spdk:cnode3 disconnected 0 controller(s)
++ gw_ip=10.1.0.5
++ nvme connect -t tcp --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+device: nvme1
++ sleep 5
++ nvme list
+Node                  SN                   Model                                    Namespace Usage                      Format           FW Rev  
+--------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+/dev/nvme0n1          PHM27522000B480BGN   INTEL SSDPE21D480GA                      1         480.10  GB / 480.10  GB    512   B +  0 B   E2010414
+/dev/nvme1n1          SPDK00000000000001   SPDK_Controller1                         1          85.90  GB /  85.90  GB      4 KiB +  0 B   23.09   
+++ nvme list
+++ perl -lane 'print @F[0] if /SPDK/'
++ dev_name=/dev/nvme1n1
+Using device /dev/nvme1n1
++ printf 'Using device /dev/nvme1n1\n'
++ num_fio_processes=1
++ fio_size=80GiB
++ read_entire_img=0
++ [[ 0 -eq 1 ]]
++ set +x
+100+0 records in
+100+0 records out
+104857600 bytes (105 MB, 100 MiB) copied, 0.354208 s, 296 MB/s
+umount: /mnt/fsbench: not mounted.
+
+==== Creating filesystem ====
+mke2fs 1.46.5 (30-Dec-2021)
+Creating filesystem with 20971520 4k blocks and 5242880 inodes
+Filesystem UUID: 6c9e3066-ecbe-4cb8-94d7-b0e38b72a342
+Superblock backups stored on blocks: 
+	32768, 98304, 163840, 229376, 294912, 819200, 884736, 1605632, 2654208, 
+	4096000, 7962624, 11239424, 20480000
+
+Allocating group tables:   0/640       done                            
+Writing inode tables:   0/640       done                            
+Creating journal (131072 blocks): done
+Writing superblocks and filesystem accounting information:   0/640       done
+
+
+
+=========================================
+=== Running filebench workloads       ===
+=========================================
+
+
+
+
+===Filebench: workload=/tmp/filebench/fileserver.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.004: File-server Version 3.0 personality successfully loaded
+0.005: Populating and pre-allocating filesets
+0.337: bigfileset populated: 200000 files, avg. dir. width = 20, avg. dir. depth = 4.1, 0 leafdirs, 25028.705MB total size
+0.337: Removing bigfileset tree (if exists)
+0.340: Pre-allocating directories in bigfileset tree
+0.745: Pre-allocating files in bigfileset tree
+35.892: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+35.892: Population and pre-allocation of filesets completed
+35.892: Starting 1 filereader instances
+36.900: Running...
+216.917: Run took 180 seconds...
+216.922: Per-Operation Breakdown
+statfile1            1014666ops     5637ops/s   0.0mb/s    0.012ms/op [0.003ms - 7.878ms]
+deletefile1          1014666ops     5637ops/s   0.0mb/s    0.181ms/op [0.030ms - 85.680ms]
+closefile3           1014667ops     5637ops/s   0.0mb/s    0.004ms/op [0.001ms - 2.070ms]
+readfile1            1014669ops     5637ops/s 741.2mb/s    0.098ms/op [0.005ms - 57.881ms]
+openfile2            1014669ops     5637ops/s   0.0mb/s    0.057ms/op [0.005ms - 68.148ms]
+closefile2           1014669ops     5637ops/s   0.0mb/s    0.004ms/op [0.001ms - 6.348ms]
+appendfilerand1      1014669ops     5637ops/s  44.1mb/s    0.531ms/op [0.001ms - 203.016ms]
+openfile1            1014669ops     5637ops/s   0.0mb/s    0.062ms/op [0.007ms - 34.108ms]
+closefile1           1014669ops     5637ops/s   0.0mb/s    0.006ms/op [0.001ms - 8.161ms]
+wrtfile1             1014675ops     5637ops/s 705.1mb/s    7.116ms/op [0.013ms - 208.003ms]
+createfile1          1014716ops     5637ops/s   0.0mb/s    0.127ms/op [0.025ms - 68.451ms]
+216.922: IO Summary: 11161404 ops 62002.352 ops/s 5637/11273 rd/wr 1490.4mb/s 0.745ms/op
+216.922: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/fileserver.f:216.922: IO Summary: 11161404 ops 62002.352 ops/s 5637/11273 rd/wr 1490.4mb/s 0.745ms/op
+
+
+===Filebench: workload=/tmp/filebench/oltp.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.003: OLTP Version 3.0  personality successfully loaded
+0.003: Populating and pre-allocating filesets
+0.003: logfile populated: 1 files, avg. dir. width = 1024, avg. dir. depth = 0.0, 0 leafdirs, 100.000MB total size
+0.003: Removing logfile tree (if exists)
+0.006: Pre-allocating directories in logfile tree
+0.006: Pre-allocating files in logfile tree
+0.134: datafiles populated: 250 files, avg. dir. width = 1024, avg. dir. depth = 0.8, 0 leafdirs, 25000.000MB total size
+0.134: Removing datafiles tree (if exists)
+0.137: Pre-allocating directories in datafiles tree
+0.138: Pre-allocating files in datafiles tree
+38.272: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+38.272: Population and pre-allocation of filesets completed
+38.272: Starting 200 shadow instances
+38.400: Starting 10 dbwr instances
+38.407: Starting 1 lgwr instances
+39.416: Running...
+219.483: Run took 180 seconds...
+219.503: Per-Operation Breakdown
+random-rate          0ops        0ops/s   0.0mb/s    0.000ms/op [0.000ms - 0.000ms]
+shadow-post-dbwr     4509000ops    25041ops/s   0.0mb/s    6.556ms/op [0.019ms - 393.177ms]
+shadow-post-lg       4509200ops    25042ops/s   0.0mb/s    0.069ms/op [0.002ms - 60.792ms]
+shadowhog            4509200ops    25042ops/s   0.0mb/s    0.314ms/op [0.091ms - 103.519ms]
+shadowread           4534800ops    25184ops/s  48.9mb/s    0.950ms/op [0.001ms - 118.982ms]
+dbwr-aiowait         45082ops      250ops/s   0.0mb/s    2.117ms/op [0.005ms - 56.948ms]
+dbwr-block           45085ops      250ops/s   0.0mb/s   17.807ms/op [0.003ms - 97.761ms]
+dbwr-hog             45092ops      250ops/s   0.0mb/s    0.011ms/op [0.004ms - 17.053ms]
+dbwrite-a            4510480ops    25049ops/s  48.9mb/s    0.003ms/op [0.000ms - 50.107ms]
+lg-block             1409ops        8ops/s   0.0mb/s  127.717ms/op [35.282ms - 909.972ms]
+lg-aiowait           1410ops        8ops/s   0.0mb/s    0.001ms/op [0.001ms - 0.028ms]
+lg-write             1411ops        8ops/s   2.0mb/s    0.009ms/op [0.001ms - 0.106ms]
+219.503: IO Summary: 9093183 ops 50499.498 ops/s 25184/25057 rd/wr  99.8mb/s 0.486ms/op
+219.503: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/oltp.f:219.503: IO Summary: 9093183 ops 50499.498 ops/s 25184/25057 rd/wr  99.8mb/s 0.486ms/op
+
+
+===Filebench: workload=/tmp/filebench/varmail.f===
+
+Filebench Version 1.5-alpha3
+0.000: Allocated 177MB of shared memory
+0.004: Varmail Version 3.0 personality successfully loaded
+0.004: Populating and pre-allocating filesets
+1.056: bigfileset populated: 900000 files, avg. dir. width = 1000000, avg. dir. depth = 1.0, 0 leafdirs, 28154.289MB total size
+1.056: Removing bigfileset tree (if exists)
+1.059: Pre-allocating directories in bigfileset tree
+1.059: Pre-allocating files in bigfileset tree
+76.363: Waiting for pre-allocation to finish (in case of a parallel pre-allocation)
+76.363: Population and pre-allocation of filesets completed
+76.363: Starting 1 filereader instances
+77.368: Running...
+257.383: Run took 180 seconds...
+257.384: Per-Operation Breakdown
+closefile4           363605ops     2020ops/s   0.0mb/s    0.003ms/op [0.001ms - 8.783ms]
+readfile4            363605ops     2020ops/s  52.4mb/s    0.571ms/op [0.004ms - 208.022ms]
+openfile4            363605ops     2020ops/s   0.0mb/s    0.022ms/op [0.005ms - 12.658ms]
+closefile3           363605ops     2020ops/s   0.0mb/s    0.006ms/op [0.001ms - 15.109ms]
+fsyncfile3           363610ops     2020ops/s   0.0mb/s    2.480ms/op [0.105ms - 210.746ms]
+appendfilerand3      363613ops     2020ops/s  15.8mb/s    0.101ms/op [0.007ms - 209.256ms]
+readfile3            363613ops     2020ops/s  52.4mb/s    0.611ms/op [0.004ms - 209.831ms]
+openfile3            363613ops     2020ops/s   0.0mb/s    0.022ms/op [0.005ms - 14.854ms]
+closefile2           363613ops     2020ops/s   0.0mb/s    0.006ms/op [0.001ms - 14.309ms]
+fsyncfile2           363616ops     2020ops/s   0.0mb/s    2.576ms/op [0.756ms - 210.794ms]
+appendfilerand2      363621ops     2020ops/s  15.7mb/s    0.237ms/op [0.001ms - 209.158ms]
+createfile2          363621ops     2020ops/s   0.0mb/s    0.499ms/op [0.030ms - 209.404ms]
+deletefile1          363621ops     2020ops/s   0.0mb/s    0.588ms/op [0.043ms - 210.924ms]
+257.384: IO Summary: 4726961 ops 26258.844 ops/s 4040/4040 rd/wr 136.3mb/s 0.594ms/op
+257.384: Shutting down processes
+
+RESULT: Filebench /tmp/filebench/varmail.f:257.384: IO Summary: 4726961 ops 26258.844 ops/s 4040/4040 rd/wr 136.3mb/s 0.594ms/op
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 1 controller(s)
+Filebench /tmp/filebench/fileserver.f:216.922: IO Summary: 11161404 ops 62002.352 ops/s 5637/11273 rd/wr 1490.4mb/s 0.745ms/op
+Filebench /tmp/filebench/oltp.f:219.503: IO Summary: 9093183 ops 50499.498 ops/s 25184/25057 rd/wr  99.8mb/s 0.486ms/op
+Filebench /tmp/filebench/varmail.f:257.384: IO Summary: 4726961 ops 26258.844 ops/s 4040/4040 rd/wr 136.3mb/s 0.594ms/op
