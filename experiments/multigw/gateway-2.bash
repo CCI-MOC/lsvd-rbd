@@ -26,25 +26,34 @@ cd $lsvd_dir
 make clean
 make -j20 release
 
-create_lsvd_thick $pool_name $imgname.multigw.5 $imgsize &
-create_lsvd_thick $pool_name $imgname.multigw.6 $imgsize &
-create_lsvd_thick $pool_name $imgname.multigw.7 $imgsize &
-create_lsvd_thick $pool_name $imgname.multigw.8 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.1 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.2 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.3 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.4 $imgsize &
 wait
 
 kill_nvmf
 
-launch_lsvd_gw_background /mnt/nvme /mnt/nvme-remote $((120 * 1024 * 1024 * 1024)))
+launch_lsvd_gw_background /mnt/nvme /mnt/nvme-malloc $((120 * 1024 * 1024 * 1024))
 
 scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
 scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
-scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000002 -d SPDK_Controller1
-scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gw_ip -s 9922
+scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:lsvd-gw2 -a -s SPDKMULTIGW0000002 -d SPDK_LSVD_GW2
+scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:lsvd-gw2 -t tcp -a $gw_ip -s 9922
 
-add_rbd_img $pool_name $imgname.multigw.5
-add_rbd_img $pool_name $imgname.multigw.6
-add_rbd_img $pool_name $imgname.multigw.7
-add_rbd_img $pool_name $imgname.multigw.8
+function add_rbd_img {
+  cd $lsvd_dir/spdk
+  local pool=$1
+  local img=$2
+  local bdev="bdev_$img"
+  scripts/rpc.py bdev_rbd_create $pool $img 4096 -c rbd_cluster -b $bdev
+  scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:lsvd-gw2 $bdev
+}
+
+add_rbd_img $pool_name $imgname.multigw.1
+add_rbd_img $pool_name $imgname.multigw.2
+add_rbd_img $pool_name $imgname.multigw.3
+add_rbd_img $pool_name $imgname.multigw.4
 
 trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 wait
