@@ -69,6 +69,5 @@ clean:
 all: release paper
 
 install-deps:
-	sudo apt install libfmt-dev libaio-dev librados-dev mold
-	# echo "You'll have to compile the latest version of liburing yourself"
+	sudo apt install libfmt-dev libaio-dev librados-dev mold libgoogle-perftools-dev libtcmalloc-minimal4
 

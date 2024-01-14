@@ -4,15 +4,15 @@ set -xeuo pipefail
 
 printf "===Starting client benchmark\n\n"
 
-trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true; exit' SIGINT SIGTERM SIGHUP EXIT
+trap 'umount /mnt/fsbench || true; nvme disconnect -n nqn.2016-06.io.spdk:lsvd-gw1 || true; nvme disconnect -n nqn.2016-06.io.spdk:lsvd-gw2 || true; exit' SIGINT SIGTERM SIGHUP EXIT
 
 modprobe nvme-fabrics
-nvme disconnect -n nqn.2016-06.io.spdk:cnode1 || true
-nvme disconnect -n nqn.2016-06.io.spdk:cnode3 || true
+nvme disconnect -n nqn.2016-06.io.spdk:lsvd-gw1 || true
+nvme disconnect -n nqn.2016-06.io.spdk:lsvd-gw2 || true
 
 # 2 gateways
-nvme connect -t tcp --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:cnode3 -o normal
-nvme connect -t tcp --traddr 10.1.0.8 -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+nvme connect -t tcp --traddr 10.1.0.5 -s 9922 -n nqn.2016-06.io.spdk:lsvd-gw1 -o normal
+nvme connect -t tcp --traddr 10.1.0.8 -s 9922 -n nqn.2016-06.io.spdk:lsvd-gw2 -o normal
 sleep 3
 
 nvme list
@@ -20,19 +20,19 @@ nvme list
 lsvd_devs=$(nvme list | perl -lane 'print @F[0] if /SPDK/')
 printf "Using device $lsvd_devs\n"
 
-set +x
-
 # === run the benchmarks ===
 
-# read_entire_img=${read_entire_img:-0}
-read_entire_img=1
+read_entire_img=${read_entire_img:-0}
+# read_entire_img=1
 if [[ $read_entire_img -eq 1 ]]; then
 	printf "\n\n===Reading entire image to warm cache===\n\n"
 	for dev_name in $lsvd_devs; do
-		dd if=$dev_name of=/dev/null bs=10485755 count=20479 status=progress &
+		dd if=$dev_name of=/dev/null bs=10485755 count=20479 &
 	done
 	wait
 fi
+
+set +x
 
 # fio
 

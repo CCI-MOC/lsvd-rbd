@@ -26,7 +26,7 @@ make -j20 release
 rados -p $pool_name stat $imgname
 
 kill_nvmf
-launch_lsvd_gw_background $rcache $wlog $((5 * 1024 * 1024 * 1024))
+launch_lsvd_gw_background $rcache $wlog $((20 * 1024 * 1024 * 1024))
 configure_nvmf_common $gw_ip
 add_rbd_img $pool_name $imgname
 
