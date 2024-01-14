@@ -26,10 +26,10 @@ cd $lsvd_dir
 make clean
 make -j20 release
 
-create_lsvd_thick $pool_name $imgname.multigw.1 $imgsize &
-create_lsvd_thick $pool_name $imgname.multigw.2 $imgsize &
-create_lsvd_thick $pool_name $imgname.multigw.3 $imgsize &
-create_lsvd_thick $pool_name $imgname.multigw.4 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.5 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.6 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.7 $imgsize &
+create_lsvd_thick $pool_name $imgname.multigw.8 $imgsize &
 wait
 
 kill_nvmf
@@ -50,10 +50,10 @@ function add_rbd_img {
   scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:lsvd-gw2 $bdev
 }
 
-add_rbd_img $pool_name $imgname.multigw.1
-add_rbd_img $pool_name $imgname.multigw.2
-add_rbd_img $pool_name $imgname.multigw.3
-add_rbd_img $pool_name $imgname.multigw.4
+add_rbd_img $pool_name $imgname.multigw.5
+add_rbd_img $pool_name $imgname.multigw.6
+add_rbd_img $pool_name $imgname.multigw.7
+add_rbd_img $pool_name $imgname.multigw.8
 
 trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 wait
