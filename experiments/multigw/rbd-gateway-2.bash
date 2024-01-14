@@ -36,7 +36,7 @@ wait
 
 kill_nvmf
 
-launch_lsvd_gw_background /mnt/nvme /mnt/nvme-malloc $((120 * 1024 * 1024 * 1024))
+launch_gw_background /mnt/nvme /mnt/nvme-malloc $((120 * 1024 * 1024 * 1024))
 
 scripts/rpc.py bdev_rbd_register_cluster rbd_cluster
 scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
