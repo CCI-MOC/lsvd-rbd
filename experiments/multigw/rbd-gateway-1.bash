@@ -23,8 +23,6 @@ blocksize=4096
 source $lsvd_dir/experiments/common.bash
 
 cd $lsvd_dir
-make clean
-make -j20 release
 
 rbd -p $pool_name rm $imgname.multigw.1 || true
 rbd -p $pool_name rm $imgname.multigw.2 || true
