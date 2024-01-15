@@ -15,12 +15,13 @@ import hashlib
 import numpy as np
 
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/lsvd-rbd/experiments/results/'
-result_folder= 'jan_12_res'
+result_folder= 'fusion_results'
 result_dir = os.path.join(directory, result_folder)
 graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
     os.makedirs(graph_dir)
 multi_fio_csv= os.path.join(graph_dir, 'multi_fio.csv')
+multi_gw_fio_csv= os.path.join(graph_dir, 'multi_gw_fio.csv')
 single_fio_csv= os.path.join(graph_dir, 'single_fio.csv')
 single_filebench_csv= os.path.join(graph_dir, 'single_filebench.csv')
 fileserver_ops_csv= os.path.join(graph_dir, 'fileserver_ops.csv')
@@ -30,6 +31,7 @@ varmail_ops_csv= os.path.join(graph_dir, 'varmail_ops.csv')
 
 
 multi_fio_file= open(multi_fio_csv, 'w', newline='')
+multi_gw_fio_file= open(multi_gw_fio_csv, 'w', newline='')
 single_fio_file= open(single_fio_csv, 'w', newline='')
 single_filebench_file= open(single_filebench_csv, 'w', newline='')
 fileserver_ops_file= open(fileserver_ops_csv, 'w', newline='')
@@ -38,6 +40,7 @@ randomwrite_ops_file= open(randomwrite_ops_csv, 'w', newline='')
 varmail_ops_file= open(varmail_ops_csv, 'w', newline='')
 
 multi_fio_csv_writer=csv.writer(multi_fio_file)
+multi_gw_fio_csv_writer=csv.writer(multi_gw_fio_file)
 single_fio_csv_writer=csv.writer(single_fio_file)
 single_filebench_csv_writer=csv.writer(single_filebench_file)
 fileserver_ops_csv_writer=csv.writer(fileserver_ops_file)
@@ -47,6 +50,9 @@ varmail_ops_csv_writer=csv.writer(varmail_ops_file)
 
 if multi_fio_file.tell() == 0:
         multi_fio_csv_writer.writerow(['disk_type', 'pool_type', 'cache_size', 'iops_min', 'iops_max', 'iops_avg', 'iops_std', 'iops_samples', 'bw_min', 'bw_max', 'bw_perc', 'bw_avg', 'bw_std', 'bw_samples', 'clat_min', 'clat_max', 'clat_avg', 'clat_std', 'iodepth', 'bs', 'disks', 'workload', 'request_type', 'iops', 'bw', 'bw_mb', 'total_bw', 'total_time', 'clat_1th', 'clat_50th', 'clat_90th', 'clat_99th'])
+
+if multi_gw_fio_file.tell() == 0:
+        multi_gw_fio_csv_writer.writerow(['disk_type', 'pool_type', 'cache_size', 'iops_min', 'iops_max', 'iops_avg', 'iops_std', 'iops_samples', 'bw_min', 'bw_max', 'bw_perc', 'bw_avg', 'bw_std', 'bw_samples', 'clat_min', 'clat_max', 'clat_avg', 'clat_std', 'iodepth', 'bs', 'gateways', 'workload', 'request_type', 'iops', 'bw', 'bw_mb', 'total_bw', 'total_time', 'clat_1th', 'clat_50th', 'clat_90th', 'clat_99th'])
 
 if single_fio_file.tell() == 0:
         single_fio_csv_writer.writerow(['disk_type', 'pool_type', 'cache_size', 'iops_min', 'iops_max', 'iops_avg', 'iops_std', 'iops_samples', 'bw_min', 'bw_max', 'bw_perc', 'bw_avg', 'bw_std', 'bw_samples', 'clat_min', 'clat_max', 'clat_avg', 'clat_std', 'iodepth', 'bs', 'iops_limit', 'workload', 'request_type', 'iops', 'bw', 'bw_mb', 'total_bw', 'total_time', 'clat_1th', 'clat_50th', 'clat_90th', 'clat_99th'])
@@ -81,19 +87,92 @@ for file_name in files:
     if file_split[1]=='rbd':
         disk_type='rbd'
         cache_size='none'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
     elif file_split[1]=='lsvd-240':
         disk_type='lsvd'
         cache_size='240gb'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
     elif file_split[1]=='lsvd-20':
         disk_type='lsvd'
         cache_size='20gb'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
     elif file_split[1]=='lsvd-multi':
-        disk_type='lsvd'
+        disk_type='lsvd-multi'
         cache_size='none'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
+    elif file_split[1]=='rbd-multi':
+        disk_type='rbd-multi'
+        cache_size='none'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
     elif file_split[1]=='nvme-multi':
-        disk_type='nvme'
+        disk_type='nvme-multi'
         cache_size='none'
         pool_type='none'
+    elif file_split[1]=='lsvd-multigw':
+        disk_type='lsvd-multigw'
+        cache_size='none'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
+    elif file_split[1]=='rbd-multigw':
+        disk_type='lsvd-multigw'
+        cache_size='none'
+        # pool_type=file_split[2]
+        if file_split[2]=='rssd2':
+            pool_type='ssd'
+        elif file_split[2]=='triple-hdd':
+            pool_type='hdd'
+    elif file_split[1]=='lsvd-malloc':
+        disk_type='lsvd-malloc'
+        if(file_split[2]=='20'):
+            cache_size='20gb'  
+        elif file_split[2]=='240':
+            cache_size='240gb' 
+        else:
+            cache_size='none'
+
+        if file_split[3]=='rssd2':
+            pool_type='ssd'
+        elif file_split[3]=='triple-hdd':
+            pool_type='hdd'
+        else:
+            cache_size='none'
+    elif file_split[1]=='lsvd-nvme':
+        disk_type='lsvd-nvme'
+        if(file_split[2]=='20'):
+            cache_size='20gb'  
+        elif file_split[2]=='240':
+            cache_size='240gb' 
+        else:
+            cache_size='none'
+
+        if file_split[3]=='rssd2':
+            pool_type='ssd'
+        elif file_split[3]=='triple-hdd':
+            pool_type='hdd'
+
     elif file_split[1]=='nvme':
         disk_type='nvme'
         cache_size='none'
@@ -104,10 +183,6 @@ for file_name in files:
         pool_type='none'
         print("else: " +file_name)
 
-    if file_split[2]=='rssd2':
-        pool_type='ssd'
-    elif file_split[2]=='triple-hdd':
-        pool_type='hdd'
     with open(file_path, 'r') as file:
         iops_min = ""
         iops_max = ""
@@ -131,6 +206,7 @@ for file_name in files:
         bs = ""
         iops_limit = ""
         disks = ""
+        gateways = ""
         workload= ""
         request_type= ""
         iops = ""
@@ -179,6 +255,11 @@ for file_name in files:
             multi_pattern_iops=r"iops\s*:\s*min=(\d+),\s*max=(\d+),\s*avg=([\d.]+),\s*stdev=([\d.]+),\s*samples=(\d+)"
             #multi_pattern_iops=r"iops\s+:\s+min=(\d+),\s+max=(\d+),\s+avg=([\d.]+),\s+stdev=([\d.]+),\s+samples=(\d+)"
             multi_pattern_clat_perc=r"(\d+\.\d{2}th)=\[\s*(\d+)\]"
+            multi_gw_pattern_sum=r"RESULT:\s*Fio\s*\(gateways=(\d+),\s*iodepth=(\d+);\s*bs=([\w]+)\)\s*([\w]+):\s*([\w]+):\s*IOPS=(\S+),\s*BW=(\S+)\s*\((\S+)\)\((\S+)/(\S+)\)"
+            multi_gw_pattern_clat=r"clat\s*\(usec\):\s*min=(\d+),\s*max=(\d+),\s*avg=([\d.]+),\s*stdev=([\d.]+)"
+            multi_gw_pattern_bw=r"bw\s*\(\s*KiB/s\):\s*min=(\d+),\s*max=(\d+),\s*per=([\d.]+)%,\s*avg=([\d.]+),\s*stdev=([\d.]+),\s*samples=(\d+)"
+            multi_gw_pattern_iops=r"iops\s*:\s*min=(\d+),\s*max=(\d+),\s*avg=([\d.]+),\s*stdev=([\d.]+),\s*samples=(\d+)"
+            multi_gw_pattern_clat_perc=r"(\d+\.\d{2}th)=\[\s*(\d+)\]"
 
             # multi_match_clat_perc = re.search(multi_pattern_clat_perc, line)
             # if multi_match_clat_perc:
@@ -284,7 +365,112 @@ for file_name in files:
                 # print("Total Bandwidth:", bw_mb)
                 # print("Total Size:", total_bw)
 
+
+
+            multi_gw_match_clat_perc = re.finditer(multi_gw_pattern_clat_perc, line)
+            if multi_gw_match_clat_perc:
+                fio=True
+                #print("Values extracted:")
+                for match in multi_gw_match_clat_perc:
+                    #print(f"{match.group(1)}th: {match.group(2)}")
+                    if match.group(1)=="1.00th":
+                        clat_1th= match.group(2)
+                    elif match.group(1)=="50.00th":
+                        clat_50th= match.group(2)
+                    elif match.group(1)=="90.00th":
+                        clat_90th= match.group(2)
+                    elif match.group(1)=="99.99th":
+                        clat_99th= match.group(2)
+
+            multi_gw_match_iops = re.search(multi_gw_pattern_iops, line)
+            if multi_gw_match_iops:
+                fio=True
+                iops_min = multi_gw_match_iops.group(1)
+                iops_max = multi_gw_match_iops.group(2)
+                iops_avg = multi_gw_match_iops.group(3)
+                iops_std = multi_gw_match_iops.group(4)
+                iops_samples = multi_gw_match_iops.group(5)
             
+                # print("iops_Min:", iops_min)
+                # print("iops_Max:", iops_max)
+                # print("iops_Avg:", iops_avg)
+                # print("iops_Stdev:", iops_std)
+                # print("iops_Samples:", iops_samples)
+
+
+            multi_gw_match_bw = re.search(multi_gw_pattern_bw, line)
+            if multi_gw_match_bw:
+                fio=True
+                #print(multi_gw_match_bw)
+                bw_min = multi_gw_match_bw.group(1)
+                bw_max = multi_gw_match_bw.group(2)
+                bw_perc = multi_gw_match_bw.group(3)
+                bw_avg = multi_gw_match_bw.group(4)
+                bw_std = multi_gw_match_bw.group(5)
+                bw_samples = multi_gw_match_bw.group(6)
+            
+                # print("bw_Min:", bw_min)
+                # print("bw_Max:", bw_max)
+                # print("bw_Per:", bw_perc)
+                # print("bw_Avg:", bw_avg)
+                # print("bw_Stdev:", bw_std)
+                # print("bw_Samples:", bw_samples)
+            
+
+            multi_gw_match_clat = re.search(multi_gw_pattern_clat, line)  
+            if multi_gw_match_clat:
+                fio=True
+                #print(multi_gw_match_clat)
+                clat_min = multi_gw_match_clat.group(1)
+                clat_max = multi_gw_match_clat.group(2)
+                clat_avg = multi_gw_match_clat.group(3)
+                clat_std = multi_gw_match_clat.group(4)
+            
+                # print("clat_Min:", clat_min)
+                # print("clat_Max:", clat_max)
+                # print("clat_Average:", clat_avg)
+                # print("clat_Standard_Deviation:", clat_std)
+
+
+            multi_gw_match_sum = re.search(multi_gw_pattern_sum, line)
+            if multi_gw_match_sum:
+                result=True
+                #print(multi_gw_match_sum) 
+                gateways = multi_gw_match_sum.group(1)
+                iodepth = multi_gw_match_sum.group(2)
+                bs = multi_gw_match_sum.group(3)
+                workload= multi_gw_match_sum.group(4)
+                request_type= multi_gw_match_sum.group(5)
+                iops = multi_gw_match_sum.group(6)
+                
+                bw = multi_gw_match_sum.group(7)
+                bw_mb = multi_gw_match_sum.group(8)
+                total_bw = multi_gw_match_sum.group(9)
+                total_time = multi_gw_match_sum.group(10)
+            
+                # print("Gateways:", gateway)
+                # print("Iodepth:", iodepth)
+                # print("Block Size:", bs)
+                # print("Workload:", workload)
+                # print("Operations:", request_type)
+                # print("IOPS:", iops)
+                # print("Bandwidth:", bw)
+                # print("Bandwidth Converted:", bw_mb)
+                # print("Total Size:", total_bw)
+                # print("Total Time:", total_time)
+                
+                # print("IOPS:", iops)
+                # print("Bandwidth:", bw)
+                # print("Total Bandwidth:", bw_mb)
+                # print("Total Size:", total_bw)
+
+            
+
+
+            
+
+
+
 
             match_clat_perc = re.finditer(pattern_clat_perc, line)
             if match_clat_perc:
@@ -461,7 +647,10 @@ for file_name in files:
 
             if(fio and result):
                 print("INSIDE FIO: " + workload)
-                if 'multi' in file_name:
+                if 'multigw' in file_name:
+                    print("INSIDE MULTIGW: " + workload)
+                    multi_gw_fio_csv_writer.writerow([disk_type, pool_type, cache_size, iops_min, iops_max, iops_avg, iops_std, iops_samples, bw_min, bw_max, bw_perc, bw_avg, bw_std, bw_samples, clat_min, clat_max, clat_avg, clat_std, iodepth, bs, gateways, workload, request_type, iops, bw, bw_mb, total_bw, total_time, clat_1th, clat_50th, clat_90th, clat_99th])  
+                elif ('multi'  in file_name and not 'gw' in file_name):
                     print("INSIDE MULTI: " + workload)
                     multi_fio_csv_writer.writerow([disk_type, pool_type, cache_size, iops_min, iops_max, iops_avg, iops_std, iops_samples, bw_min, bw_max, bw_perc, bw_avg, bw_std, bw_samples, clat_min, clat_max, clat_avg, clat_std, iodepth, bs, disks, workload, request_type, iops, bw, bw_mb, total_bw, total_time, clat_1th, clat_50th, clat_90th, clat_99th])
                 else:
@@ -484,6 +673,7 @@ for file_name in files:
                 file_bool=False
 
 multi_fio_file.close()
+multi_gw_fio_file.close()
 single_fio_file.close()
 single_filebench_file.close()
 fileserver_ops_file.close()
