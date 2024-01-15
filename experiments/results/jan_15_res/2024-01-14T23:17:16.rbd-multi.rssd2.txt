@@ -1,0 +1,226 @@
+===Starting client benchmark
+
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 0 controller(s)
+device: nvme1
+Node                  SN                   Model                                    Namespace Usage                      Format           FW Rev  
+--------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+/dev/nvme0n1          PHM27522000B480BGN   INTEL SSDPE21D480GA                      1         480.10  GB / 480.10  GB    512   B +  0 B   E2010414
+/dev/nvme1n1          SPDK00000000000001   SPDK_Controller1                         1          10.74  GB /  10.74  GB      4 KiB +  0 B   23.09   
+/dev/nvme1n2          SPDK00000000000001   SPDK_Controller1                         2          10.74  GB /  10.74  GB      4 KiB +  0 B   23.09   
+/dev/nvme1n3          SPDK00000000000001   SPDK_Controller1                         3          10.74  GB /  10.74  GB      4 KiB +  0 B   23.09   
+/dev/nvme1n4          SPDK00000000000001   SPDK_Controller1                         4          10.74  GB /  10.74  GB      4 KiB +  0 B   23.09   
+Using device /dev/nvme1n1
+/dev/nvme1n2
+/dev/nvme1n3
+/dev/nvme1n4
+
+
+===Fio: workload=randread, time=60, iodepth=256, bs=4ki, disks=4 ===
+
+j1: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+j2: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+j3: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+j4: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=256
+fio-3.28
+Starting 4 processes
+
+j1: (groupid=0, jobs=4): err= 0: pid=4244: Sun Jan 14 23:19:43 2024
+  read: IOPS=64.5k, BW=252MiB/s (264MB/s)(14.8GiB/60004msec)
+    slat (usec): min=4, max=5467, avg=59.31, stdev=75.48
+    clat (usec): min=2839, max=85327, avg=15815.36, stdev=3261.54
+     lat (usec): min=2946, max=85343, avg=15875.05, stdev=3270.28
+    clat percentiles (usec):
+     |  1.00th=[ 8848],  5.00th=[11338], 10.00th=[12649], 20.00th=[13698],
+     | 30.00th=[14353], 40.00th=[14877], 50.00th=[15401], 60.00th=[16057],
+     | 70.00th=[16712], 80.00th=[17695], 90.00th=[19268], 95.00th=[21103],
+     | 99.00th=[26084], 99.50th=[29230], 99.90th=[41681], 99.95th=[47449],
+     | 99.99th=[60556]
+   bw (  KiB/s): min=172128, max=355200, per=100.00%, avg=258301.91, stdev=8084.55, samples=476
+   iops        : min=43032, max=88800, avg=64574.98, stdev=2021.15, samples=476
+  lat (msec)   : 4=0.01%, 10=1.95%, 20=90.65%, 50=7.36%, 100=0.04%
+  cpu          : usr=6.58%, sys=17.54%, ctx=2584127, majf=0, minf=1450
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=3869293,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=256
+
+Run status group 0 (all jobs):
+   READ: bw=252MiB/s (264MB/s), 252MiB/s-252MiB/s (264MB/s-264MB/s), io=14.8GiB (15.8GB), run=60004-60004msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n3: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n4: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (disks=4, iodepth=256; bs=4ki) randread:  read: IOPS=64.5k, BW=252MiB/s (264MB/s)(14.8GiB/60004msec)
+
+
+===Fio: workload=randread, time=60, iodepth=128, bs=4ki, disks=1 ===
+
+j1: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+fio-3.28
+Starting 1 process
+
+j1: (groupid=0, jobs=1): err= 0: pid=4297: Sun Jan 14 23:20:46 2024
+  read: IOPS=65.6k, BW=256MiB/s (269MB/s)(15.0GiB/60002msec)
+    slat (usec): min=4, max=2091, avg=12.67, stdev=18.12
+    clat (usec): min=460, max=29876, avg=1935.31, stdev=891.46
+     lat (usec): min=467, max=29917, avg=1948.27, stdev=891.92
+    clat percentiles (usec):
+     |  1.00th=[  979],  5.00th=[ 1139], 10.00th=[ 1237], 20.00th=[ 1369],
+     | 30.00th=[ 1483], 40.00th=[ 1598], 50.00th=[ 1713], 60.00th=[ 1844],
+     | 70.00th=[ 2024], 80.00th=[ 2278], 90.00th=[ 2802], 95.00th=[ 3556],
+     | 99.00th=[ 5407], 99.50th=[ 6194], 99.90th=[ 9503], 99.95th=[11469],
+     | 99.99th=[15926]
+   bw (  KiB/s): min=214456, max=298424, per=100.00%, avg=262558.72, stdev=20851.00, samples=119
+   iops        : min=53614, max=74606, avg=65639.68, stdev=5212.71, samples=119
+  lat (usec)   : 500=0.01%, 750=0.04%, 1000=1.19%
+  lat (msec)   : 2=67.58%, 4=27.76%, 10=3.35%, 20=0.08%, 50=0.01%
+  cpu          : usr=19.97%, sys=57.89%, ctx=289431, majf=0, minf=139
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=3938215,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=128
+
+Run status group 0 (all jobs):
+   READ: bw=256MiB/s (269MB/s), 256MiB/s-256MiB/s (269MB/s-269MB/s), io=15.0GiB (16.1GB), run=60002-60002msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (disks=1, iodepth=128; bs=4ki) randread:  read: IOPS=65.6k, BW=256MiB/s (269MB/s)(15.0GiB/60002msec)
+
+
+===Fio: workload=randread, time=60, iodepth=128, bs=4ki, disks=2 ===
+
+j1: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+j2: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+fio-3.28
+Starting 2 processes
+
+j1: (groupid=0, jobs=2): err= 0: pid=4344: Sun Jan 14 23:21:48 2024
+  read: IOPS=68.4k, BW=267MiB/s (280MB/s)(15.6GiB/60005msec)
+    slat (usec): min=4, max=2721, avg=26.30, stdev=40.31
+    clat (usec): min=460, max=39449, avg=3715.84, stdev=1983.78
+     lat (usec): min=476, max=39497, avg=3742.50, stdev=1988.02
+    clat percentiles (usec):
+     |  1.00th=[  988],  5.00th=[ 1270], 10.00th=[ 1549], 20.00th=[ 2507],
+     | 30.00th=[ 2966], 40.00th=[ 3195], 50.00th=[ 3425], 60.00th=[ 3687],
+     | 70.00th=[ 4047], 80.00th=[ 4555], 90.00th=[ 5669], 95.00th=[ 7046],
+     | 99.00th=[11338], 99.50th=[13435], 99.90th=[19268], 99.95th=[21627],
+     | 99.99th=[26346]
+   bw (  KiB/s): min=149648, max=398016, per=100.00%, avg=273593.01, stdev=29345.24, samples=238
+   iops        : min=37412, max=99504, avg=68398.25, stdev=7336.31, samples=238
+  lat (usec)   : 500=0.01%, 750=0.03%, 1000=1.05%
+  lat (msec)   : 2=14.72%, 4=53.32%, 10=29.23%, 20=1.57%, 50=0.08%
+  cpu          : usr=12.44%, sys=35.47%, ctx=1184735, majf=0, minf=430
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=4102088,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=128
+
+Run status group 0 (all jobs):
+   READ: bw=267MiB/s (280MB/s), 267MiB/s-267MiB/s (280MB/s-280MB/s), io=15.6GiB (16.8GB), run=60005-60005msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (disks=2, iodepth=128; bs=4ki) randread:  read: IOPS=68.4k, BW=267MiB/s (280MB/s)(15.6GiB/60005msec)
+
+
+===Fio: workload=randread, time=60, iodepth=128, bs=4ki, disks=3 ===
+
+j1: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+j2: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+j3: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+fio-3.28
+Starting 3 processes
+
+j1: (groupid=0, jobs=3): err= 0: pid=4392: Sun Jan 14 23:22:51 2024
+  read: IOPS=69.2k, BW=270MiB/s (283MB/s)(15.8GiB/60003msec)
+    slat (usec): min=4, max=7034, avg=40.77, stdev=59.66
+    clat (usec): min=448, max=54395, avg=5506.40, stdev=3156.63
+     lat (usec): min=489, max=54418, avg=5547.50, stdev=3162.99
+    clat percentiles (usec):
+     |  1.00th=[ 1029],  5.00th=[ 1418], 10.00th=[ 1958], 20.00th=[ 3490],
+     | 30.00th=[ 3916], 40.00th=[ 4359], 50.00th=[ 5014], 60.00th=[ 5669],
+     | 70.00th=[ 6325], 80.00th=[ 7111], 90.00th=[ 8979], 95.00th=[11207],
+     | 99.00th=[17171], 99.50th=[20055], 99.90th=[26870], 99.95th=[30278],
+     | 99.99th=[37487]
+   bw (  KiB/s): min=157145, max=462475, per=100.00%, avg=277197.19, stdev=22597.46, samples=357
+   iops        : min=39285, max=115618, avg=69298.92, stdev=5649.37, samples=357
+  lat (usec)   : 500=0.01%, 750=0.04%, 1000=0.78%
+  lat (msec)   : 2=9.47%, 4=22.15%, 10=60.36%, 20=6.71%, 50=0.49%
+  lat (msec)   : 100=0.01%
+  cpu          : usr=8.44%, sys=22.68%, ctx=2046138, majf=0, minf=577
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=4151938,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=128
+
+Run status group 0 (all jobs):
+   READ: bw=270MiB/s (283MB/s), 270MiB/s-270MiB/s (283MB/s-283MB/s), io=15.8GiB (17.0GB), run=60003-60003msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n3: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (disks=3, iodepth=128; bs=4ki) randread:  read: IOPS=69.2k, BW=270MiB/s (283MB/s)(15.8GiB/60003msec)
+
+
+===Fio: workload=randread, time=60, iodepth=128, bs=4ki, disks=4 ===
+
+j1: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+j2: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+j3: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+j4: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=io_uring, iodepth=128
+fio-3.28
+Starting 4 processes
+
+j1: (groupid=0, jobs=4): err= 0: pid=4441: Sun Jan 14 23:23:53 2024
+  read: IOPS=65.4k, BW=255MiB/s (268MB/s)(15.0GiB/60004msec)
+    slat (usec): min=4, max=9762, avg=58.46, stdev=80.57
+    clat (usec): min=613, max=50485, avg=7770.07, stdev=2004.42
+     lat (usec): min=627, max=50552, avg=7828.87, stdev=2011.87
+    clat percentiles (usec):
+     |  1.00th=[ 4113],  5.00th=[ 5211], 10.00th=[ 5735], 20.00th=[ 6390],
+     | 30.00th=[ 6849], 40.00th=[ 7242], 50.00th=[ 7504], 60.00th=[ 7898],
+     | 70.00th=[ 8291], 80.00th=[ 8848], 90.00th=[ 9896], 95.00th=[11207],
+     | 99.00th=[15139], 99.50th=[16909], 99.90th=[20841], 99.95th=[23200],
+     | 99.99th=[29492]
+   bw (  KiB/s): min=174432, max=367640, per=100.00%, avg=261748.57, stdev=8797.81, samples=476
+   iops        : min=43608, max=91910, avg=65437.13, stdev=2199.45, samples=476
+  lat (usec)   : 750=0.01%, 1000=0.01%
+  lat (msec)   : 2=0.05%, 4=0.76%, 10=89.84%, 20=9.21%, 50=0.14%
+  lat (msec)   : 100=0.01%
+  cpu          : usr=6.33%, sys=17.55%, ctx=2429365, majf=0, minf=564
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
+     issued rwts: total=3923077,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=128
+
+Run status group 0 (all jobs):
+   READ: bw=255MiB/s (268MB/s), 255MiB/s-255MiB/s (268MB/s-268MB/s), io=15.0GiB (16.1GB), run=60004-60004msec
+
+Disk stats (read/write):
+  nvme1n1: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n2: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n3: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+  nvme1n4: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=0.00%
+
+RESULT: Fio (disks=4, iodepth=128; bs=4ki) randread:  read: IOPS=65.4k, BW=255MiB/s (268MB/s)(15.0GiB/60004msec)
+umount: /mnt/fsbench: not mounted.
+NQN:nqn.2016-06.io.spdk:cnode1 disconnected 1 controller(s)
+Fio (disks=4, iodepth=256; bs=4ki) randread:  read: IOPS=64.5k, BW=252MiB/s (264MB/s)(14.8GiB/60004msec)
+Fio (disks=1, iodepth=128; bs=4ki) randread:  read: IOPS=65.6k, BW=256MiB/s (269MB/s)(15.0GiB/60002msec)
+Fio (disks=2, iodepth=128; bs=4ki) randread:  read: IOPS=68.4k, BW=267MiB/s (280MB/s)(15.6GiB/60005msec)
+Fio (disks=3, iodepth=128; bs=4ki) randread:  read: IOPS=69.2k, BW=270MiB/s (283MB/s)(15.8GiB/60003msec)
+Fio (disks=4, iodepth=128; bs=4ki) randread:  read: IOPS=65.4k, BW=255MiB/s (268MB/s)(15.0GiB/60004msec)
