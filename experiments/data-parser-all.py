@@ -15,7 +15,7 @@ import hashlib
 import numpy as np
 
 directory = '/Users/sumatradhimoyee/Documents/PhDResearch/LSVD/lsvd-rbd/experiments/results/'
-result_folder= 'fusion_results'
+result_folder= 'jan_15_res'
 result_dir = os.path.join(directory, result_folder)
 graph_dir = os.path.join(result_dir, 'graphs')
 if not os.path.exists(graph_dir):
@@ -144,23 +144,23 @@ for file_name in files:
             pool_type='ssd'
         elif file_split[2]=='triple-hdd':
             pool_type='hdd'
-    elif file_split[1]=='lsvd-malloc':
-        disk_type='lsvd-malloc'
-        if(file_split[2]=='20'):
-            cache_size='20gb'  
-        elif file_split[2]=='240':
-            cache_size='240gb' 
-        else:
-            cache_size='none'
+    # elif file_split[1]=='lsvd-malloc':
+    #     disk_type='lsvd-malloc'
+    #     if(file_split[2]=='20'):
+    #         cache_size='20gb'  
+    #     elif file_split[2]=='240':
+    #         cache_size='240gb' 
+    #     else:
+    #         cache_size='none'
 
-        if file_split[3]=='rssd2':
-            pool_type='ssd'
-        elif file_split[3]=='triple-hdd':
-            pool_type='hdd'
-        else:
-            cache_size='none'
+    #     if file_split[3]=='rssd2':
+    #         pool_type='ssd'
+    #     elif file_split[3]=='triple-hdd':
+    #         pool_type='hdd'
+    #     else:
+    #         cache_size='none'
     elif file_split[1]=='lsvd-nvme':
-        disk_type='lsvd-nvme'
+        disk_type='lsvd'
         if(file_split[2]=='20'):
             cache_size='20gb'  
         elif file_split[2]=='240':
