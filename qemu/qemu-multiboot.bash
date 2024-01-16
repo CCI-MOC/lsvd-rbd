@@ -25,6 +25,7 @@ make -j20 release
 # make sure image exists
 rados -p $pool_name stat $basename
 
+./remove_objs.py $pool_name clonetest
 python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-1
 python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-2
 python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-3

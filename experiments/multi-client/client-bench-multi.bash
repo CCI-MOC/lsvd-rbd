@@ -107,64 +107,38 @@ function run_fio_4 {
 	sleep 2
 }
 
-# We run all the read workloads first, then the writes, to preserve the cache
-# This is a hack; we need to figure out a better solution later
-
 # warmup? not sure why this is needed
 run_fio_4 randread 60 256 4ki
 
 # test scaling
-run_fio_1 randread 30 128 4ki
-run_fio_2 randread 30 128 4ki
-run_fio_3 randread 30 128 4ki
-run_fio_4 randread 30 128 4ki
-run_fio_1 read 30 128 4ki
-run_fio_2 read 30 128 4ki
-run_fio_3 read 30 128 4ki
-run_fio_4 read 30 128 4ki
+run_fio_1 randread 60 128 4ki
+run_fio_2 randread 60 128 4ki
+run_fio_3 randread 60 128 4ki
+run_fio_4 randread 60 128 4ki
 
-# test block sizes (are we still iops limited?)
-run_fio_4 randread 30 128 4ki
-run_fio_4 randread 30 128 8ki
-run_fio_4 randread 30 128 16ki
-run_fio_4 randread 30 128 32ki
-run_fio_4 randread 30 128 64ki
-run_fio_4 read 30 128 4ki
-run_fio_4 read 30 128 8ki
-run_fio_4 read 30 128 16ki
-run_fio_4 read 30 128 32ki
-run_fio_4 read 30 128 64ki
+# run_fio_1 read 60 128 4ki
+# run_fio_2 read 60 128 4ki
+# run_fio_3 read 60 128 4ki
+# run_fio_4 read 60 128 4ki
 
-# test queue depth
-run_fio_4 randread 30 1 4k
-run_fio_4 randread 30 32 4k
-run_fio_4 randread 30 64 4k
-run_fio_4 randread 30 128 4k
-run_fio_4 read 30 1 4k
-run_fio_4 read 30 32 4k
-run_fio_4 read 30 64 4k
-run_fio_4 read 30 128 4k
+# # test queue depth
+# run_fio_4 randread 60 1 4k
+# run_fio_4 randread 60 32 4k
+# run_fio_4 randread 60 64 4k
+# run_fio_4 randread 60 128 4k
+# run_fio_4 read 60 1 4k
+# run_fio_4 read 60 32 4k
+# run_fio_4 read 60 64 4k
+# run_fio_4 read 60 128 4k
 
-exit
-
-run_fio randwrite 60 1 4k
-# run_fio randwrite 60 32 4k
-run_fio randwrite 60 64 4k
-# run_fio randwrite 60 128 4k
-
-run_fio write 60 1 4k
-# run_fio write 60 32 4k
-run_fio write 60 64 4k
-# run_fio write 60 128 4k
-
-run_fio write 60 256 16k
-run_fio write 60 256 64k
-
-run_fio randwrite 60 256 16k
-run_fio randwrite 60 256 64k
-
-run_fio randwrite 60 256 4k
-run_fio write 60 256 4k
-
-# === disconnect and cleanup ===
-# in the trap SIGTERM above
+# # test block sizes (are we still iops limited?)
+# run_fio_4 randread 60 128 4ki
+# run_fio_4 randread 60 128 8ki
+# run_fio_4 randread 60 128 16ki
+# run_fio_4 randread 60 128 32ki
+# run_fio_4 randread 60 128 64ki
+# run_fio_4 read 60 128 4ki
+# run_fio_4 read 60 128 8ki
+# run_fio_4 read 60 128 16ki
+# run_fio_4 read 60 128 32ki
+# run_fio_4 read 60 128 64ki

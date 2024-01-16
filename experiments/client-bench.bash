@@ -65,48 +65,13 @@ function run_fio {
 	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4===\n\n"
 	fio \
 		--name=global \
-		--rw=$1 \
-		--runtime=$2 \
-		--iodepth=$3 \
-		--bs=$4 \
-		--ioengine=io_uring \
-		--time_based \
-		--randseed=42 \
-		--size=$fio_size \
-		--eta-newline=1 \
-		--direct=1 \
-		--group_reporting \
-		--name=j1 \
-		--filename=$dev_name \
+		--rw=$1 --runtime=$2 --iodepth=$3 --bs=$4 \
+		--ioengine=io_uring --time_based --randseed=42 \
+		--size=$fio_size --eta-newline=1 --direct=1 --group_reporting \
+		--name=j1 --filename=$dev_name \
 		| tee /tmp/client-bench-results.txt
 
 	printf "\nRESULT: Fio (iodepth=$3; bs=$4) $1:"
-	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
-
-	sleep 2
-}
-
-function run_fio_limit_iops {
-	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, iops_limit=$5===\n\n"
-	fio \
-		--name=global \
-		--rw=$1 \
-		--runtime=$2 \
-		--iodepth=$3 \
-		--bs=$4 \
-		--rate_iops=$5 \
-		--ioengine=io_uring \
-		--time_based \
-		--randseed=42 \
-		--size=$fio_size \
-		--eta-newline=1 \
-		--direct=1 \
-		--group_reporting \
-		--name=j1 \
-		--filename=$dev_name \
-		| tee /tmp/client-bench-results.txt
-
-	printf "\nRESULT: Fio (iodepth=$3; bs=$4, iops_limit=$5) $1:"
 	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
 
 	sleep 2
@@ -118,159 +83,83 @@ function run_fio_limit_iops {
 run_fio randread 60 128 4ki
 run_fio read 60 128 4ki
 
-# Limit iops and see latency
-
-# run_fio_limit_iops randread 30 128 4ki 10000
-# run_fio_limit_iops randread 30 128 4ki 20000
-# run_fio_limit_iops randread 30 128 4ki 30000
-# run_fio_limit_iops randread 30 128 4ki 40000
-# run_fio_limit_iops randread 30 128 4ki 50000
-# run_fio_limit_iops randread 30 128 4ki 60000
-# run_fio_limit_iops randread 30 128 4ki 70000
-# run_fio_limit_iops randread 30 128 4ki 80000
-# run_fio_limit_iops randread 30 128 4ki 90000
-# run_fio_limit_iops randread 30 128 4ki 100000
-
-# run_fio_limit_iops read 30 128 4ki 10000
-# run_fio_limit_iops read 30 128 4ki 20000
-# run_fio_limit_iops read 30 128 4ki 30000
-# run_fio_limit_iops read 30 128 4ki 40000
-# run_fio_limit_iops read 30 128 4ki 50000
-# run_fio_limit_iops read 30 128 4ki 60000
-# run_fio_limit_iops read 30 128 4ki 70000
-# run_fio_limit_iops read 30 128 4ki 80000
-# run_fio_limit_iops read 30 128 4ki 90000
-# run_fio_limit_iops read 30 128 4ki 100000
+# === Reads ===
 
 # Test different queue depths
 
-run_fio randread 20 1 4ki
-run_fio randread 20 4 4ki
-run_fio randread 20 8 4ki
-run_fio randread 20 16 4ki
-run_fio randread 20 32 4ki
-run_fio randread 20 48 4ki
-run_fio randread 20 64 4ki
-run_fio randread 20 80 4ki
-run_fio randread 20 96 4ki
-run_fio randread 20 112 4ki
-run_fio randread 20 128 4ki
-run_fio randread 20 192 4ki
-run_fio randread 20 256 4ki
-run_fio randread 20 384 4ki
-run_fio randread 20 512 4ki
-run_fio read 20 1 4ki
-run_fio read 20 4 4ki
-run_fio read 20 8 4ki
-run_fio read 20 16 4ki
-run_fio read 20 32 4ki
-run_fio read 20 48 4ki
-run_fio read 20 64 4ki
-run_fio read 20 80 4ki
-run_fio read 20 96 4ki
-run_fio read 20 112 4ki
-run_fio read 20 128 4ki
-run_fio read 20 192 4ki
-run_fio read 20 256 4ki
-run_fio read 20 384 4ki
-run_fio read 20 512 4ki
+run_fio randread 60 1 4ki
+run_fio randread 60 4 4ki
+run_fio randread 60 8 4ki
+run_fio randread 60 16 4ki
+run_fio randread 60 32 4ki
+run_fio randread 60 64 4ki
+run_fio randread 60 128 4ki
+run_fio randread 60 256 4ki
+run_fio randread 60 512 4ki
 
+# run_fio read 60 1 4ki
+# run_fio read 60 4 4ki
+# run_fio read 60 8 4ki
+# run_fio read 60 16 4ki
+run_fio read 60 32 4ki
+# run_fio read 60 64 4ki
+run_fio read 60 128 4ki
+# run_fio read 60 256 4ki
+# run_fio read 60 512 4ki
 
 # Test different block sizes
 
-run_fio randread 30 256 4ki
-run_fio randread 30 256 8ki
-run_fio randread 30 256 16ki
-run_fio randread 30 256 32ki
-run_fio randread 30 256 64ki
+run_fio randread 60 128 4ki
+run_fio randread 60 128 8ki
+run_fio randread 60 128 16ki
+run_fio randread 60 128 32ki
+run_fio randread 60 128 64ki
 
-run_fio read 30 256 4ki
-run_fio read 30 256 8ki
-run_fio read 30 256 16ki
-run_fio read 30 256 32ki
-run_fio read 30 256 64ki
+run_fio read 60 128 4ki
+run_fio read 60 128 8ki
+run_fio read 60 128 16ki
+run_fio read 60 128 32ki
+run_fio read 60 128 64ki
 
 # === Writes ===
 
+run_fio randwrite 60 1 4ki
+run_fio randwrite 60 4 4ki
+run_fio randwrite 60 8 4ki
+run_fio randwrite 60 16 4ki
+run_fio randwrite 60 32 4ki
+run_fio randwrite 60 64 4ki
 run_fio randwrite 60 128 4ki
+run_fio randwrite 60 256 4ki
+run_fio randwrite 60 512 4ki
+
+# run_fio write 60 1 4ki
+# run_fio write 60 4 4ki
+# run_fio write 60 8 4ki
+# run_fio write 60 16 4ki
+run_fio write 60 32 4ki
+# run_fio write 60 64 4ki
 run_fio write 60 128 4ki
-
-# run_fio_limit_iops randwrite 30 128 4ki 10000
-# run_fio_limit_iops randwrite 30 128 4ki 20000
-# run_fio_limit_iops randwrite 30 128 4ki 30000
-# run_fio_limit_iops randwrite 30 128 4ki 40000
-# run_fio_limit_iops randwrite 30 128 4ki 50000
-# run_fio_limit_iops randwrite 30 128 4ki 60000
-# run_fio_limit_iops randwrite 30 128 4ki 70000
-# run_fio_limit_iops randwrite 30 128 4ki 80000
-# run_fio_limit_iops randwrite 30 128 4ki 90000
-# run_fio_limit_iops randwrite 30 128 4ki 100000
-
-# run_fio_limit_iops write 30 128 4ki 10000
-# run_fio_limit_iops write 30 128 4ki 20000
-# run_fio_limit_iops write 30 128 4ki 30000
-# run_fio_limit_iops write 30 128 4ki 40000
-# run_fio_limit_iops write 30 128 4ki 50000
-# run_fio_limit_iops write 30 128 4ki 60000
-# run_fio_limit_iops write 30 128 4ki 70000
-# run_fio_limit_iops write 30 128 4ki 80000
-# run_fio_limit_iops write 30 128 4ki 90000
-# run_fio_limit_iops write 30 128 4ki 100000
-
-# Test different queue depths
-
-run_fio randwrite 20 1 4ki
-run_fio randwrite 20 4 4ki
-run_fio randwrite 20 8 4ki
-run_fio randwrite 20 16 4ki
-run_fio randwrite 20 32 4ki
-run_fio randwrite 20 48 4ki
-run_fio randwrite 20 64 4ki
-run_fio randwrite 20 80 4ki
-run_fio randwrite 20 96 4ki
-run_fio randwrite 20 112 4ki
-run_fio randwrite 20 128 4ki
-run_fio randwrite 20 192 4ki
-run_fio randwrite 20 256 4ki
-run_fio randwrite 20 384 4ki
-run_fio randwrite 20 512 4ki
-run_fio write 20 1 4ki
-run_fio write 20 4 4ki
-run_fio write 20 8 4ki
-run_fio write 20 16 4ki
-run_fio write 20 32 4ki
-run_fio write 20 48 4ki
-run_fio write 20 64 4ki
-run_fio write 20 80 4ki
-run_fio write 20 96 4ki
-run_fio write 20 112 4ki
-run_fio write 20 128 4ki
-run_fio write 20 192 4ki
-run_fio write 20 256 4ki
-run_fio write 20 384 4ki
-run_fio write 20 512 4ki
-
+# run_fio write 60 256 4ki
+# run_fio write 60 512 4ki
 
 # Test different block sizes
 
-run_fio randwrite 30 256 4ki
-run_fio randwrite 30 256 8ki
-run_fio randwrite 30 256 16ki
-run_fio randwrite 30 256 32ki
-run_fio randwrite 30 256 64ki
+run_fio randwrite 60 128 4ki
+run_fio randwrite 60 128 8ki
+run_fio randwrite 60 128 16ki
+run_fio randwrite 60 128 32ki
+run_fio randwrite 60 128 64ki
 
-run_fio write 30 256 4ki
-run_fio write 30 256 8ki
-run_fio write 30 256 16ki
-run_fio write 30 256 32ki
-run_fio write 30 256 64ki
+run_fio write 60 128 4ki
+run_fio write 60 128 8ki
+run_fio write 60 128 16ki
+run_fio write 60 128 32ki
+run_fio write 60 128 64ki
 
-# filesystem benchmarks
+# === Filesystem benchmarks ===
 
-# make sure old filesystem and mounts are gone
-# wipefs -a $dev_name
 dd if=/dev/zero of=$dev_name bs=1M count=100
-#umount $dev_name || true
 umount /mnt/fsbench || true
 
 printf "\n==== Creating filesystem ====\n"
@@ -294,6 +183,11 @@ echo 0 >/proc/sys/kernel/randomize_va_space
 function run_filebench {
 	printf "\n\n===Filebench: workload=$1===\n\n"
 	rm -rf /mnt/fsbench/*
+
+	# clear caches
+	sync
+	echo 3 > /proc/sys/vm/drop_caches
+
 	filebench -f $1 | tee /tmp/client-bench-results.txt
 
 	printf "\nRESULT: Filebench $1:"

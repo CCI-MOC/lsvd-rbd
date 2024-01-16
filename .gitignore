@@ -10,6 +10,7 @@ liburing/
 
 build/*
 experiments/results/*
+experiments/results-cpu/*
 experiments/experiment-results.*
 test/baklibs/*
 

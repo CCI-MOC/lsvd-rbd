@@ -89,10 +89,10 @@ run_fio_8 randread 120 128 4ki
 run_fio_4 read 120 128 4ki
 run_fio_8 read 120 128 4ki
 
-run_fio_4 randwrite 120 128 4ki
-run_fio_8 randwrite 120 128 4ki
-run_fio_4 write 120 128 4ki
-run_fio_8 write 120 128 4ki
+# run_fio_4 randwrite 120 128 4ki
+# run_fio_8 randwrite 120 128 4ki
+# run_fio_4 write 120 128 4ki
+# run_fio_8 write 120 128 4ki
 
 exit
 
