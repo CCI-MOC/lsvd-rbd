@@ -27,6 +27,7 @@ for host in $osd_hosts
 end
 
 mkdir -p ./experiments/results-cpu
+rm -rf ./experiments/results-cpu/*
 for host in $osd_hosts
 	scp $host:/tmp/osd-cpu-stats.txt ./experiments/results-cpu/$prefix-$host-osd-cpu-stats.txt
 end

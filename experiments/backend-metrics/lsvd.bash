@@ -21,7 +21,7 @@ client_ip=${client_ip:-10.1.0.6}
 rcache=/mnt/nvme/
 wlog=${lsvd_wlog_root:-/mnt/nvme-remote/}
 cache_size_gb=$(($cache_size / 1024 / 1024 / 1024))
-outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-$out_post.$cache_size_gb.$pool_name.txt
+outfile=$lsvd_dir/experiments/results/debug.out
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
