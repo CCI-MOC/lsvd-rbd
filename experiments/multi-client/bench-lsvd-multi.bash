@@ -25,7 +25,7 @@ outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-multi.$pool_name.txt
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 imgname=lsvd-benchmark
-imgsize=10g
+imgsize=5g
 blocksize=4096
 
 source $lsvd_dir/experiments/common.bash
@@ -45,6 +45,10 @@ create_lsvd_thick $pool_name $imgname.multi.1 $imgsize &
 create_lsvd_thick $pool_name $imgname.multi.2 $imgsize &
 create_lsvd_thick $pool_name $imgname.multi.3 $imgsize &
 create_lsvd_thick $pool_name $imgname.multi.4 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.5 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.6 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.7 $imgsize &
+create_lsvd_thick $pool_name $imgname.multi.8 $imgsize &
 
 wait
 
@@ -58,6 +62,10 @@ add_rbd_img $pool_name $imgname.multi.1
 add_rbd_img $pool_name $imgname.multi.2
 add_rbd_img $pool_name $imgname.multi.3
 add_rbd_img $pool_name $imgname.multi.4
+add_rbd_img $pool_name $imgname.multi.5
+add_rbd_img $pool_name $imgname.multi.6
+add_rbd_img $pool_name $imgname.multi.7
+add_rbd_img $pool_name $imgname.multi.8
 
 trap "cleanup_nvmf; exit" SIGINT SIGTERM EXIT
 run_client_bench $client_ip $outfile multi-client/client-bench-multi.bash "read_entire_img=1"

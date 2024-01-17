@@ -34,6 +34,16 @@ function add_rbd_img {
   scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $bdev
 }
 
+function add_rbd_img_new_cluster {
+  cd $lsvd_dir/spdk
+  local pool=$1
+  local img=$2
+  local bdev="bdev_$img"
+  scripts/rpc.py bdev_rbd_create $pool $img 4096 -b $bdev
+  scripts/rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $bdev
+}
+
+
 function launch_lsvd_gw_background {
 	local rcache_root=$1
 	local wlog_root=$2
@@ -60,7 +70,7 @@ function launch_lsvd_gw_background {
 
 function launch_gw_background {
 	cd $lsvd_dir/spdk
-	./build/bin/nvmf_tgt -m '[0,1,2,3]' &
+	./build/bin/nvmf_tgt -m '[0,1,2,3,4,5,6,7]' &
 
 	sleep 5
 }

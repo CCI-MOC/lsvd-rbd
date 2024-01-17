@@ -107,6 +107,84 @@ function run_fio_4 {
 	sleep 2
 }
 
+function run_fio_5 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=5 ===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 --runtime=$2 --iodepth=$3 --bs=$4 \
+		--ioengine=io_uring --time_based --randseed=42 --size=20g \
+		--eta-newline=1 --direct=1 --group_reporting \
+		--name=j1 --filename=/dev/nvme1n1 \
+		--name=j2 --filename=/dev/nvme1n2 \
+		--name=j3 --filename=/dev/nvme1n3 \
+		--name=j4 --filename=/dev/nvme1n4 \
+		--name=j4 --filename=/dev/nvme1n5 \
+		| tee /tmp/client-bench-results.txt
+	printf "\nRESULT: Fio (disks=5, iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+	sleep 2
+}
+
+function run_fio_6 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=6 ===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 --runtime=$2 --iodepth=$3 --bs=$4 \
+		--ioengine=io_uring --time_based --randseed=42 --size=20g \
+		--eta-newline=1 --direct=1 --group_reporting \
+		--name=j1 --filename=/dev/nvme1n1 \
+		--name=j2 --filename=/dev/nvme1n2 \
+		--name=j3 --filename=/dev/nvme1n3 \
+		--name=j4 --filename=/dev/nvme1n4 \
+		--name=j4 --filename=/dev/nvme1n5 \
+		--name=j4 --filename=/dev/nvme1n6 \
+		| tee /tmp/client-bench-results.txt
+	printf "\nRESULT: Fio (disks=6, iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+	sleep 2
+}
+
+function run_fio_7 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=7 ===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 --runtime=$2 --iodepth=$3 --bs=$4 \
+		--ioengine=io_uring --time_based --randseed=42 --size=20g \
+		--eta-newline=1 --direct=1 --group_reporting \
+		--name=j1 --filename=/dev/nvme1n1 \
+		--name=j2 --filename=/dev/nvme1n2 \
+		--name=j3 --filename=/dev/nvme1n3 \
+		--name=j4 --filename=/dev/nvme1n4 \
+		--name=j4 --filename=/dev/nvme1n5 \
+		--name=j4 --filename=/dev/nvme1n6 \
+		--name=j4 --filename=/dev/nvme1n7 \
+		| tee /tmp/client-bench-results.txt
+	printf "\nRESULT: Fio (disks=7, iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+	sleep 2
+}
+
+function run_fio_8 {
+	printf "\n\n===Fio: workload=$1, time=$2, iodepth=$3, bs=$4, disks=8 ===\n\n"
+	fio \
+		--name=global \
+		--rw=$1 --runtime=$2 --iodepth=$3 --bs=$4 \
+		--ioengine=io_uring --time_based --randseed=42 --size=20g \
+		--eta-newline=1 --direct=1 --group_reporting \
+		--name=j1 --filename=/dev/nvme1n1 \
+		--name=j2 --filename=/dev/nvme1n2 \
+		--name=j3 --filename=/dev/nvme1n3 \
+		--name=j4 --filename=/dev/nvme1n4 \
+		--name=j4 --filename=/dev/nvme1n5 \
+		--name=j4 --filename=/dev/nvme1n6 \
+		--name=j4 --filename=/dev/nvme1n7 \
+		--name=j4 --filename=/dev/nvme1n8 \
+		| tee /tmp/client-bench-results.txt
+	printf "\nRESULT: Fio (disks=8, iodepth=$3; bs=$4) $1:"
+	perl -lane 'print if /IOPS/' /tmp/client-bench-results.txt
+	sleep 2
+}
+
 # warmup? not sure why this is needed
 run_fio_4 randread 60 256 4ki
 
@@ -115,6 +193,10 @@ run_fio_1 randread 60 128 4ki
 run_fio_2 randread 60 128 4ki
 run_fio_3 randread 60 128 4ki
 run_fio_4 randread 60 128 4ki
+run_fio_5 randread 60 128 4ki
+run_fio_6 randread 60 128 4ki
+run_fio_7 randread 60 128 4ki
+run_fio_8 randread 60 128 4ki
 
 # run_fio_1 read 60 128 4ki
 # run_fio_2 read 60 128 4ki
