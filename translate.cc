@@ -577,6 +577,7 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
     size_t bytes = siov.bytes();
     sector_t base = offset / 512, limit = (offset + bytes) / 512;
 
+    // maintain counter of writes
     static std::atomic_int counter = 0;
     static std::atomic_size_t user_write_bytes = 0;
     counter++;
@@ -585,17 +586,26 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
         trace("{} write reqs, {} MiB total", counter,
               user_write_bytes / 1024 / 1024);
 
+    // TODO lock granularity, we can just allocate space for the write here
+    // and leave the actual memcpy to outside the lock
+    // Break this apart into the critical allocation region and the non-critical
+    // memcpy region, this preserves ordering between remote write log and
+    // in-memory
+    // To prevent a race condition on writing the object out before the memcpy
+    // we need to pin it in memory, probably a refcount is sufficient.
+
+    // roll-over in-memory log if necessary
     std::unique_lock lk(m);
     if (!current->room(bytes)) {
         workers->put_locked(current);
         current = new translate_req(REQ_PUT, cfg->batch_size, this);
     }
 
-    /* save extent and pointer into bufmap.
-     */
+    // write the data into the in-memory log
     auto ptr = current->append(base, &siov);
-    std::unique_lock obj_w_lock(*bufmap_lock);
 
+    // update the bufmap (lba -> in-memory buffer) with the extent
+    std::unique_lock obj_w_lock(*bufmap_lock);
     assert(ptr >= current->local_buf_base &&
            ptr + (limit - base) * 512 <= current->local_buf_limit);
     assert(ptr != NULL);
@@ -638,6 +648,12 @@ ssize_t translate_impl::trim(size_t offset, size_t len)
     return 0;
 }
 
+/**
+ * Backpressure for backend writes
+ *
+ * TODO measure how long this takes us, likely to be bottleneck on high
+ * write throughput scenarios
+ */
 void translate_impl::wait_for_room(void)
 {
     std::unique_lock lk(m);
@@ -1010,6 +1026,7 @@ void translate_impl::worker_thread(thread_pool<translate_req *> *p)
             req->done = true;
             req->cv.notify_all();
         }
+
         /* request and batch will be deleted on completion
          * map is updated before any following requests are processed
          */
@@ -1018,17 +1035,22 @@ void translate_impl::worker_thread(thread_pool<translate_req *> *p)
             lk.unlock();
             process_batch(_seq, req);
         }
-        /* generate a checkpoint before any following requests processed
-         */
+
+        // generate a checkpoint before any following requests processed
         else if (req->op == REQ_CKPT) {
             auto _seq = seq++;
             lk.unlock();
             write_checkpoint(_seq, req);
-        } else if (req->op == REQ_GC) {
+        }
+
+        // handle output of GC thread
+        else if (req->op == REQ_GC) {
             auto _seq = seq++;
             lk.unlock();
             write_gc(_seq, req);
-        } else
+        }
+
+        else
             assert(false);
     }
 }

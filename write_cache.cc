@@ -231,8 +231,12 @@ void wcache_write_req::run(request *parent_)
 
 /* --------------- Write Cache ------------- */
 
-/* stall write requests using window of max_write_blocks, which should
- * be <= 0.5 * write cache size.
+/**
+ * stall write requests using window of max_write_blocks, which should
+ * be <= 0.5 * write cache size. Backpressure for the write journal, also
+ * prevents wraparound
+ * 
+ * TODO record how long this takes per request, unlikely to be bottleneck though
  */
 void write_cache_impl::get_room(sector_t sectors)
 {
@@ -530,14 +534,20 @@ request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
     page_t pages = div_round_up(bytes, 4096);
     page_t pad, n_pad, prev = 0;
 
+    // Ordering: we hold the lock to maintain the same ordering between the
+    // write journal and the in-memory/backend data structures
+
     std::unique_lock lk(m);
     page_t page = allocate(pages + 1, pad, n_pad, prev);
     auto req = new wcache_write_req(lba, iovs, pages, page, n_pad - 1, pad,
                                     prev, this);
     auto [iov, iovcnt] = iovs->c_iov();
     outstanding_writes++;
+
+    // this unlock may not be in the right place, move it to below writev?
     lk.unlock();
 
+    // writing to in-memory buffer (translation layer)
     be->writev(req->seq, lba * 512, iov, iovcnt);
 
     return req;

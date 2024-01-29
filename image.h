@@ -2,16 +2,16 @@
 
 #include <queue>
 
+#include "backend.h"
 #include "config.h"
 #include "extent.h"
 #include "fake_rbd.h"
+#include "img_reader.h"
 #include "lsvd_types.h"
 #include "objects.h"
 #include "shared_read_cache.h"
-#include "backend.h"
-#include "write_cache.h"
 #include "translate.h"
-#include "img_reader.h"
+#include "write_cache.h"
 
 struct event_socket {
     int socket;
@@ -55,10 +55,18 @@ struct rbd_image {
     lsvd_config cfg;
     ssize_t size; // bytes
 
-    std::shared_mutex map_lock;
+    // LBA -> object id, object offset
     extmap::objmap map;
-    std::mutex bufmap_lock;
+    std::shared_mutex map_lock;
+
+    // LBA -> in-memory, higher priority than the object map
+    // We potentially want to consolidate this with the object map, but
+    // this is currently not possible as we don't assign object IDs until the
+    // objects are queued for dispatch to the backend
+    // NOTE potential fix: use magic IDs that are in-memory
     extmap::bufmap bufmap;
+    std::mutex bufmap_lock;
+
     std::map<int, char *> buffers;
 
     std::shared_ptr<backend> objstore;
