@@ -319,13 +319,13 @@ translate_impl::translate_impl(std::shared_ptr<backend> _io, lsvd_config *cfg_,
     cfg = cfg_;
 }
 
-translate *make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
-                          extmap::objmap *map, extmap::bufmap *bufmap,
-                          std::shared_mutex *m, std::mutex *buf_m,
-                          sptr<read_cache> rcache)
+uptr<translate> make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
+                               extmap::objmap *map, extmap::bufmap *bufmap,
+                               std::shared_mutex *m, std::mutex *buf_m,
+                               sptr<read_cache> rcache)
 {
-    return (translate *)new translate_impl(_io, cfg, map, bufmap, m, buf_m,
-                                           rcache);
+    return std::make_unique<translate_impl>(_io, cfg, map, bufmap, m, buf_m,
+                                            rcache);
 }
 
 translate_impl::~translate_impl()
@@ -1554,6 +1554,22 @@ int translate_remove_image(sptr<backend> objstore, const char *name)
      */
     objstore->delete_object(name);
     return 0;
+}
+
+using ckpt_id = uint32_t;
+
+inline std::vector<ckpt_id> deserialise_checkpoint_ids(char *buf)
+{
+    auto obj = (obj_hdr *)buf;
+    auto super = (super_hdr *)(buf + 1);
+
+    assert(obj->magic == LSVD_MAGIC);
+    assert(obj->type == LSVD_SUPER);
+
+    std::vector<ckpt_id> checkpoint_ids;
+    decode_offset_len<ckpt_id>(buf, super->ckpts_offset, super->ckpts_len,
+                               checkpoint_ids);
+    return checkpoint_ids;
 }
 
 int translate_clone_image(sptr<backend> objstore, const char *source,

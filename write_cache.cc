@@ -235,7 +235,7 @@ void wcache_write_req::run(request *parent_)
  * stall write requests using window of max_write_blocks, which should
  * be <= 0.5 * write cache size. Backpressure for the write journal, also
  * prevents wraparound
- * 
+ *
  * TODO record how long this takes per request, unlikely to be bottleneck though
  */
 void write_cache_impl::get_room(sector_t sectors)
@@ -513,10 +513,10 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
     misc_threads = new thread_pool<int>(&m);
 }
 
-write_cache *make_write_cache(uint32_t blkno, int fd, translate *be,
-                              lsvd_config *cfg)
+uptr<write_cache> make_write_cache(uint32_t blkno, int fd, translate *be,
+                                   lsvd_config *cfg)
 {
-    return new write_cache_impl(blkno, fd, be, cfg);
+    return std::make_unique<write_cache_impl>(blkno, fd, be, cfg);
 }
 
 write_cache_impl::~write_cache_impl()

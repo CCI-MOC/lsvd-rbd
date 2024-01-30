@@ -29,7 +29,7 @@ class write_cache
     virtual void do_write_checkpoint(void) = 0;
 };
 
-extern write_cache *make_write_cache(uint32_t blkno, int fd, translate *be,
-                                     lsvd_config *cfg);
+uptr<write_cache> make_write_cache(uint32_t blkno, int fd, translate *be,
+                                   lsvd_config *cfg);
 
 #endif

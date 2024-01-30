@@ -10,46 +10,17 @@
 #include "lsvd_types.h"
 #include "objects.h"
 #include "shared_read_cache.h"
+#include "spdk_wrap.h"
 #include "translate.h"
 #include "write_cache.h"
 
-struct event_socket {
-    int socket;
-    int type;
-
+/**
+ * Core LSVD image class. An LSVD image supports 4 operations: read, write,
+ * trim, and flush. All are async to prevent function colour issues.
+ */
+class lsvd_image
+{
   public:
-    event_socket() : socket(-1), type(0) {}
-    bool is_valid() const { return socket != -1; }
-    int init(int fd, int t)
-    {
-        socket = fd;
-        type = t;
-        return 0;
-    }
-    int notify()
-    {
-        int rv;
-        switch (type) {
-        case EVENT_TYPE_PIPE: {
-            char buf[1] = {'i'}; // why 'i'???
-            rv = write(socket, buf, 1);
-            rv = (rv < 0) ? -errno : 0;
-            break;
-        }
-        case EVENT_TYPE_EVENTFD: {
-            uint64_t value = 1;
-            rv = write(socket, &value, sizeof(value));
-            rv = (rv < 0) ? -errno : 0;
-            break;
-        }
-        default:
-            rv = -1;
-        }
-        return rv;
-    }
-};
-
-struct rbd_image {
     std::string image_name;
 
     lsvd_config cfg;
@@ -71,41 +42,43 @@ struct rbd_image {
 
     std::shared_ptr<backend> objstore;
     std::shared_ptr<read_cache> shared_cache;
-    translate *xlate;
-    write_cache *wcache;
-    img_reader *reader;
+    std::unique_ptr<translate> xlate;
+    std::unique_ptr<write_cache> wcache;
+    std::unique_ptr<img_reader> reader;
     int write_fd; /* write cache file */
-
-    std::mutex m; /* protects completions */
-    event_socket ev;
-    std::queue<rbd_completion_t> completions;
 
     int refcount = 0;
 
     std::thread dbg;
     bool done = false;
 
-    rbd_image() {}
-    ~rbd_image();
+    lsvd_image() {}
+    ~lsvd_image();
 
-    int image_open(rados_ioctx_t io, const char *name);
-    int image_close(void);
-    int poll_io_events(rbd_completion_t *comps, int numcomp);
-    void notify(rbd_completion_t c);
+    int try_open(std::string name, rados_ioctx_t io);
+
+    class aio_request;
+    class trivial_request;
+    class read_request;
+    class write_request;
+    request *read(size_t offset, smartiov iov, spdk_completion *c);
+    request *write(size_t offset, smartiov iov, spdk_completion *c);
+    request *trim(size_t offset, size_t len, spdk_completion *c);
+    request *flush(spdk_completion *c);
 };
 
-using ckpt_id = uint32_t;
-
-inline std::vector<ckpt_id> deserialise_checkpoint_ids(char *buf)
+/**
+ * Striped image. This improves concurrency by striping the image across
+ * multiple independent images.
+ */
+class striped_image
 {
-    auto obj = (obj_hdr *)buf;
-    auto super = (super_hdr *)(buf + 1);
+  private:
+    std::vector<lsvd_image> imgs;
 
-    assert(obj->magic == LSVD_MAGIC);
-    assert(obj->type == LSVD_SUPER);
-
-    std::vector<ckpt_id> checkpoint_ids;
-    decode_offset_len<ckpt_id>(buf, super->ckpts_offset, super->ckpts_len,
-                               checkpoint_ids);
-    return checkpoint_ids;
-}
+  public:
+    request *read(size_t offset, smartiov iov, spdk_completion *c);
+    request *write(size_t offset, smartiov iov, spdk_completion *c);
+    request *trim(size_t offset, size_t len, spdk_completion *c);
+    request *flush(spdk_completion *c);
+};

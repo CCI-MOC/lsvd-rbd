@@ -23,7 +23,9 @@ class request
     virtual void wait() = 0;
     virtual void run(request *parent) = 0;
     virtual void notify(request *child) = 0;
+    // virtual void notify_fail(request *child) = 0;
     virtual void release() = 0;
+
     virtual ~request() {}
     request() {}
 };

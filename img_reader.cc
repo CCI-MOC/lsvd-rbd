@@ -84,14 +84,13 @@ class reader_impl : public img_reader
 
 /* factory function so we can hide implementation
  */
-img_reader *make_reader(uint32_t blkno, translate *_be,
-                        lsvd_config *cfg, extmap::objmap *map,
-                        extmap::bufmap *bufmap, std::shared_mutex *m,
-                        std::mutex *bufmap_m, sptr<backend> _io,
-                        sptr<read_cache> backing_cache)
+uptr<img_reader> make_reader(uint32_t blkno, translate *_be, lsvd_config *cfg,
+                             extmap::objmap *map, extmap::bufmap *bufmap,
+                             std::shared_mutex *m, std::mutex *bufmap_m,
+                             sptr<backend> _io, sptr<read_cache> backing_cache)
 {
-    return new reader_impl(blkno, _be, cfg, map, bufmap, m, bufmap_m, _io,
-                           backing_cache);
+    return std::make_unique<reader_impl>(blkno, _be, cfg, map, bufmap, m,
+                                         bufmap_m, _io, backing_cache);
 }
 
 /* cache bypass - read directly from backend object
@@ -141,6 +140,9 @@ void reader_impl::handle_read(size_t offset, smartiov *iovs,
     sector_t start_sector = offset / 512;
     sector_t end_sector = start_sector + iovs->bytes() / 512;
 
+    /**
+     * These locks are too coarse, they block everything
+     */
     std::unique_lock lk(m);
     std::shared_lock lk2(*obj_lock);
     std::unique_lock lk3(*bufmap_lock);

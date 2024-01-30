@@ -15,9 +15,9 @@
 #include <stdint.h>
 #include <vector>
 
-#include "shared_read_cache.h"
 #include "config.h"
 #include "extent.h"
+#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "utils.h"
 
@@ -32,10 +32,9 @@ class img_reader
                              std::vector<request *> &requests) = 0;
 };
 
-extern img_reader *make_reader(uint32_t blkno, translate *_be,
-                               lsvd_config *cfg, extmap::objmap *map,
-                               extmap::bufmap *bufmap, std::shared_mutex *m,
-                               std::mutex *bufmap_m, sptr<backend> _io,
-                               sptr<read_cache> shared_cache);
+uptr<img_reader> make_reader(uint32_t blkno, translate *_be, lsvd_config *cfg,
+                             extmap::objmap *map, extmap::bufmap *bufmap,
+                             std::shared_mutex *m, std::mutex *bufmap_m,
+                             sptr<backend> _io, sptr<read_cache> shared_cache);
 
 #endif

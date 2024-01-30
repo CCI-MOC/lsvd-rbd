@@ -44,353 +44,118 @@
 #include "utils.h"
 #include "write_cache.h"
 
-struct lsvd_completion {
-  public:
-    int magic = LSVD_MAGIC;
-
-  private:
-    std::atomic_int refcount = 2;
-    std::atomic_flag done = ATOMIC_FLAG_INIT;
-
-    rbd_callback_t cb;
-    void *cb_arg;
-
-    rbd_image *img = nullptr;
-    int retval = -1;
-
-    request *req = nullptr;
-
-  public:
-    lsvd_completion(rbd_callback_t cb, void *cb_arg) : cb(cb), cb_arg(cb_arg) {}
-    ~lsvd_completion()
-    {
-        if (req)
-            req->release();
-    }
-
-    void delayed_init(rbd_image *img, request *req)
-    {
-        this->img = img;
-        this->req = req;
-    }
-
-    int get_retval() { return retval; }
-    void *get_cb_arg() { return cb_arg; }
-
-    void run()
-    {
-        assert(req != nullptr);
-        // refcount++;
-        this->req->run(nullptr);
-    }
-
-    /* see Ceph AioCompletion::complete
-     */
-    void complete(int val)
-    {
-        retval = val;
-        if (cb)
-            cb((rbd_completion_t)this, cb_arg);
-        img->notify((rbd_completion_t)this);
-
-        done.test_and_set();
-        done.notify_all();
-        dec_and_free();
-    }
-
-    void release() { dec_and_free(); }
-
-    void wait()
-    {
-        refcount++;
-        done.wait(false, std::memory_order_seq_cst);
-        refcount--;
-    }
-
-  private:
-    inline void dec_and_free()
-    {
-        auto old = refcount.fetch_sub(1, std::memory_order_seq_cst);
-        if (old == 1)
-            delete this;
-    }
-};
-
-/**
- * This is the base for aio read and write requests. It's copied from
- * the old rbd_aio_req omniclass, with the read and write paths split out and
- * the common completion handling moved here.
- */
-class aio_request : public self_refcount_request
-{
-  private:
-    lsvd_completion *p;
-    std::atomic_flag done = false;
-
-  protected:
-    rbd_image *img = nullptr;
-    smartiov iovs;
-
-    size_t req_offset;
-    size_t req_bytes;
-
-    aio_request(rbd_image *img, size_t offset, smartiov iovs,
-                lsvd_completion *p)
-        : p(p), img(img), iovs(iovs), req_offset(offset)
-    {
-        req_bytes = iovs.bytes();
-    }
-
-    void complete_request(int val)
-    {
-        if (p)
-            p->complete(val);
-
-        done.test_and_set(std::memory_order_seq_cst);
-        done.notify_all();
-        dec_and_free();
-    }
-
-  public:
-    inline virtual void wait() override
-    {
-        refcount++;
-        done.wait(false, std::memory_order_seq_cst);
-        dec_and_free();
-    }
-};
-
-class read_request : public aio_request
-{
-  private:
-    std::atomic_int num_subreqs = 0;
-
-  public:
-    read_request(rbd_image *img, size_t offset, smartiov iovs,
-                 lsvd_completion *p)
-        : aio_request(img, offset, iovs, p)
-    {
-    }
-
-    void run(request *parent) override
-    {
-        assert(parent == nullptr);
-
-        std::vector<request *> requests;
-        img->reader->handle_read(req_offset, &iovs, requests);
-        num_subreqs = requests.size();
-
-        // We might sometimes instantly complete; in that case, there will be
-        // no notifiers, we must notify ourselves.
-        // NOTE lookout for self-deadlock
-        if (num_subreqs == 0) {
-            notify(nullptr);
-        } else {
-            for (auto const &r : requests)
-                r->run(this);
-        }
-    }
-
-    void notify(request *child) override
-    {
-        free_child(child);
-
-        auto old = num_subreqs.fetch_sub(1, std::memory_order_seq_cst);
-        if (old > 1)
-            return;
-
-        complete_request(req_bytes);
-    }
-};
-
-class write_request : public aio_request
-{
-  private:
-    std::atomic_int n_req = 0;
-    /**
-     * Not quite sure we own these iovs; we should transfer ownership to writev
-     * and be done with it. The old code had these as pointers, but changed
-     * them to be in the vectwor.
-     */
-    std::vector<smartiov> sub_iovs;
-
-  public:
-    write_request(rbd_image *img, size_t offset, smartiov iovs,
-                  lsvd_completion *p)
-        : aio_request(img, offset, iovs, p)
-    {
-    }
-
-    void notify(request *req) override
-    {
-        free_child(req);
-        auto old = n_req.fetch_sub(1, std::memory_order_seq_cst);
-        if (old > 1)
-            return;
-
-        img->wcache->release_room(req_bytes / 512);
-        complete_request(0); // TODO shouldn't we return bytes written?
-    }
-
-    void run(request *parent) override
-    {
-        assert(parent == nullptr);
-
-        img->wcache->get_room(req_bytes / 512);
-        img->xlate->wait_for_room();
-
-        sector_t size_sectors = req_bytes / 512;
-
-        // split large requests into 2MB (default) chunks
-        sector_t max_sectors = img->cfg.wcache_chunk / 512;
-        n_req += div_round_up(req_bytes / 512, max_sectors);
-        // TODO: this is horribly ugly
-
-        std::vector<request *> requests;
-        auto cur_offset = req_offset;
-
-        for (sector_t s_offset = 0; s_offset < size_sectors;
-             s_offset += max_sectors) {
-            auto _sectors = std::min(size_sectors - s_offset, max_sectors);
-            smartiov tmp =
-                iovs.slice(s_offset * 512L, s_offset * 512L + _sectors * 512L);
-            smartiov _iov(tmp.data(), tmp.size());
-            sub_iovs.push_back(_iov);
-            auto req = img->wcache->writev(cur_offset / 512, &_iov);
-            requests.push_back(req);
-
-            cur_offset += _sectors * 512L;
-        }
-
-        for (auto r : requests)
-            r->run(this);
-    }
-};
-
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
                         const char *snap_name)
 {
-    auto img = new rbd_image;
-    if (img->image_open(io, name) < 0) {
+    auto img = lsvd_spdk::open_image(io, name);
+    if (img == nullptr) {
         log_error("Failed to open image {}", name);
-        delete img;
         return -1;
     }
     *image = (void *)img;
-    log_info("Opened image: {}, size {}", name, img->size);
+    log_info("Opened image: {}, size {}", name, img->get_img().size);
     return 0;
 }
 
 extern "C" int rbd_close(rbd_image_t image)
 {
-    rbd_image *img = (rbd_image *)image;
-    log_info("Closing image {}", img->image_name);
-    img->image_close();
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    log_info("Closing image {}", img->get_img().image_name);
 
     // poor man's race prevention. wait for in-flight requests
     sleep(2);
+    img->close_image();
 
-    delete img;
     return 0;
 }
 
 extern "C" int rbd_poll_io_events(rbd_image_t image, rbd_completion_t *comps,
                                   int numcomp)
 {
-    rbd_image *img = (rbd_image *)image;
-    int rv = img->poll_io_events(comps, numcomp);
-    return rv;
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    return img->poll_io_events(reinterpret_cast<spdk_completion **>(comps),
+                               numcomp);
 }
 
 extern "C" int rbd_set_image_notification(rbd_image_t image, int fd, int type)
 {
-    rbd_image *img = (rbd_image *)image;
+    lsvd_spdk *img = (lsvd_spdk *)image;
     assert(type == EVENT_TYPE_EVENTFD);
-    return img->ev.init(fd, type);
+
+    event_socket ev(fd, EVENT_TYPE_EVENTFD);
+    return img->switch_to_poll(std::move(ev));
 }
 
 extern "C" int rbd_aio_create_completion(void *cb_arg,
                                          rbd_callback_t complete_cb,
                                          rbd_completion_t *c)
 {
-    lsvd_completion *p = new lsvd_completion(complete_cb, cb_arg);
-    *c = (rbd_completion_t)p;
+    auto c = lsvd_spdk::create_completion(complete_cb, cb_arg);
+    *c = (rbd_completion_t)c;
     return 0;
 }
 
 extern "C" void rbd_aio_release(rbd_completion_t c)
 {
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-    p->release();
+    lsvd_spdk::release_completion((spdk_completion *)c);
 }
 
 extern "C" int rbd_discard(rbd_image_t image, uint64_t ofs, uint64_t len)
 {
-    auto img = (rbd_image *)image;
-    img->xlate->trim(ofs, len);
+    auto img = (lsvd_spdk *)image;
+    auto req = img->trim(ofs, len, nullptr);
+    req->run(nullptr);
+    req->wait();
     return 0;
 }
 
 extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
                                rbd_completion_t c)
 {
-    auto p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-
-    auto img = (rbd_image *)image;
-    p->delayed_init(img, nullptr);
-    img->xlate->trim(off, len);
-    p->complete(0);
+    auto p = (spdk_completion *)c;
+    auto img = (lsvd_spdk *)image;
+    auto req = img->trim(off, len, p);
+    p->run();
+    p->wait();
     return 0;
 }
 
 extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-
-    auto img = (rbd_image *)image;
-    p->delayed_init(img, nullptr);
-
-    if (img->cfg.hard_sync)
-        img->xlate->flush();
-
-    p->complete(0); // TODO - make asynchronous
+    auto *p = (spdk_completion *)c;
+    auto img = (lsvd_spdk *)image;
+    auto req = img->flush(p);
+    p->run();
     return 0;
 }
 
 extern "C" int rbd_flush(rbd_image_t image)
 {
-    auto img = (rbd_image *)image;
-    if (img->cfg.hard_sync)
-        img->xlate->flush();
+    auto img = (lsvd_spdk *)image;
+    auto req = img->flush(nullptr);
+    req->run(nullptr);
+    req->wait();
     return 0;
 }
 
 extern "C" void *rbd_aio_get_arg(rbd_completion_t c)
 {
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-    return p->get_cb_arg();
+    auto *p = (spdk_completion *)c;
+    return p->cb_arg;
 }
 
 extern "C" ssize_t rbd_aio_get_return_value(rbd_completion_t c)
 {
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
+    auto *p = (spdk_completion *)c;
     return p->get_retval();
 }
 
 extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
                             char *buf, rbd_completion_t c)
 {
-    rbd_image *img = (rbd_image *)image;
-    auto p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-
-    auto req = new read_request(img, offset, smartiov(buf, len), p);
-    p->delayed_init(img, req);
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    auto p = (spdk_completion *)c;
+    auto req = img->read(offset, smartiov(buf, len), p);
     p->run();
     return 0;
 }
@@ -398,12 +163,9 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
 extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
                              uint64_t offset, rbd_completion_t c)
 {
-    rbd_image *img = (rbd_image *)image;
-    auto p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-
-    auto req = new read_request(img, offset, smartiov(iov, iovcnt), p);
-    p->delayed_init(img, req);
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    auto p = (spdk_completion *)c;
+    auto req = img->read(offset, smartiov(iov, iovcnt), p);
     p->run();
     return 0;
 }
@@ -411,12 +173,9 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
 extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
                               int iovcnt, uint64_t offset, rbd_completion_t c)
 {
-    rbd_image *img = (rbd_image *)image;
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-
-    auto req = new write_request(img, offset, smartiov(iov, iovcnt), p);
-    p->delayed_init(img, req);
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    auto *p = (spdk_completion *)c;
+    auto req = img->write(offset, smartiov(iov, iovcnt), p);
     p->run();
     return 0;
 }
@@ -424,14 +183,10 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
                              const char *buf, rbd_completion_t c)
 {
-    rbd_image *img = (rbd_image *)image;
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
-
-    auto req = new write_request(img, offset, smartiov((char *)buf, len), p);
-    p->delayed_init(img, req);
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    auto *p = (spdk_completion *)c;
+    auto req = img->write(offset, smartiov((char *)buf, len), p);
     p->run();
-
     return 0;
 }
 
@@ -439,10 +194,8 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
  */
 extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 {
-    rbd_image *img = (rbd_image *)image;
-    // auto req = new rbd_aio_req(OP_READ, img, NULL, off, REQ_WAIT, buf, len);
-    auto req = new read_request(img, off, smartiov(buf, len), NULL);
-
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    auto req = img->read(off, smartiov(buf, len), NULL);
     req->run(NULL);
     req->wait();
     req->release();
@@ -452,11 +205,8 @@ extern "C" int rbd_read(rbd_image_t image, uint64_t off, size_t len, char *buf)
 extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
                          const char *buf)
 {
-    rbd_image *img = (rbd_image *)image;
-    // auto req =
-    //     new rbd_aio_req(OP_WRITE, img, NULL, off, REQ_WAIT, (char *)buf,
-    //     len);
-    auto req = new write_request(img, off, smartiov((char *)buf, len), NULL);
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    auto req = img->write(off, smartiov((char *)buf, len), NULL);
     req->run(NULL);
     req->wait();
     req->release();
@@ -465,8 +215,7 @@ extern "C" int rbd_write(rbd_image_t image, uint64_t off, size_t len,
 
 extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 {
-    auto *p = (lsvd_completion *)c;
-    assert(p->magic == LSVD_MAGIC);
+    auto *p = (spdk_completion *)c;
     p->wait();
     return 0;
 }
@@ -477,19 +226,19 @@ extern "C" int rbd_aio_wait_for_complete(rbd_completion_t c)
 extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
                         size_t infosize)
 {
-    rbd_image *img = (rbd_image *)image;
+    lsvd_spdk *img = (lsvd_spdk *)image;
     memset(info, 0, sizeof(*info));
-    info->size = img->size;
+    info->size = img->get_img().size;
     info->obj_size = 1 << 22; // 2^21 bytes
     info->order = 22;         // 2^21 bytes
-    info->num_objs = img->size / info->obj_size;
+    info->num_objs = img->get_img().size / info->obj_size;
     return 0;
 }
 
 extern "C" int rbd_get_size(rbd_image_t image, uint64_t *size)
 {
-    rbd_image *img = (rbd_image *)image;
-    *size = img->size;
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    *size = img->get_img().size;
     return 0;
 }
 
@@ -551,8 +300,8 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
 
 extern "C" void rbd_uuid(rbd_image_t image, uuid_t *uuid)
 {
-    rbd_image *img = (rbd_image *)image;
-    memcpy(uuid, img->xlate->uuid, sizeof(uuid_t));
+    lsvd_spdk *img = (lsvd_spdk *)image;
+    memcpy(uuid, img->get_img().xlate->uuid, sizeof(uuid_t));
 }
 
 extern "C" int rbd_aio_writesame(rbd_image_t image, uint64_t off, size_t len,
