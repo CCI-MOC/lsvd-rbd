@@ -14,6 +14,10 @@ experiments/results-cpu/*
 experiments/experiment-results.*
 test/baklibs/*
 
+spdk/
+liburing/
+block_on_object/
+
 *.o
 *.so
 *.qcow2
