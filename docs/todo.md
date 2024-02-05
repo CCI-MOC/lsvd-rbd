@@ -1,3 +1,16 @@
+## Todos W6-1
+
+Current todos:
+
+- Refactor top-lv requests into lsvd class
+- Image striping
+	- Make sure ordering is preserved between stripes
+- SPDK fork for new LSVD backend
+- Potential switch of backend to RBD instead of s3/rados
+- General production ready testing
+
+Question: how to prioritise the above? who works on what?
+
 ## Todos W49-2
 
 - RDB and LSVD on both HDD and SSDs, all 4 configurations
