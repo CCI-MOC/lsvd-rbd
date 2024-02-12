@@ -6,7 +6,6 @@
 #include "image.h"
 #include "journal.h"
 #include "lsvd_types.h"
-#include "spdk_wrap.h"
 
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 
@@ -90,7 +89,7 @@ int lsvd_image::try_open(std::string name, rados_ioctx_t io)
 class lsvd_image::aio_request : public self_refcount_request
 {
   private:
-    spdk_completion *p;
+    std::function<void(int)> cb;
     std::atomic_flag done = false;
 
   protected:
@@ -101,17 +100,15 @@ class lsvd_image::aio_request : public self_refcount_request
     size_t req_bytes;
 
     aio_request(lsvd_image *img, size_t offset, smartiov iovs,
-                spdk_completion *c)
-        : p(c), img(img), iovs(iovs), req_offset(offset)
+                std::function<void(int)> cb)
+        : cb(cb), img(img), iovs(iovs), req_offset(offset)
     {
         req_bytes = iovs.bytes();
     }
 
     void complete_request(int val)
     {
-        if (p)
-            p->complete(val);
-
+        cb(val);
         done.test_and_set(std::memory_order_seq_cst);
         done.notify_all();
         dec_and_free();
@@ -133,8 +130,8 @@ class lsvd_image::read_request : public lsvd_image::aio_request
 
   public:
     read_request(lsvd_image *img, size_t offset, smartiov iovs,
-                 spdk_completion *c)
-        : aio_request(img, offset, iovs, c)
+                 std::function<void(int)> cb)
+        : aio_request(img, offset, iovs, cb)
     {
     }
 
@@ -182,8 +179,8 @@ class lsvd_image::write_request : public lsvd_image::aio_request
 
   public:
     write_request(lsvd_image *img, size_t offset, smartiov iovs,
-                  spdk_completion *c)
-        : aio_request(img, offset, iovs, c)
+                  std::function<void(int)> cb)
+        : aio_request(img, offset, iovs, cb)
     {
     }
 
@@ -236,8 +233,9 @@ class lsvd_image::write_request : public lsvd_image::aio_request
 class trim_request : public lsvd_image::aio_request
 {
   public:
-    trim_request(lsvd_image *img, size_t offset, size_t len, spdk_completion *c)
-        : aio_request(img, offset, smartiov(), c)
+    trim_request(lsvd_image *img, size_t offset, size_t len,
+                 std::function<void(int)> cb)
+        : aio_request(img, offset, smartiov(), cb)
     {
         req_bytes = len;
     }
@@ -255,8 +253,8 @@ class trim_request : public lsvd_image::aio_request
 class flush_request : public lsvd_image::aio_request
 {
   public:
-    flush_request(lsvd_image *img, spdk_completion *c)
-        : aio_request(img, 0, smartiov(), c)
+    flush_request(lsvd_image *img, std::function<void(int)> cb)
+        : aio_request(img, 0, smartiov(), cb)
     {
     }
 
@@ -270,22 +268,25 @@ class flush_request : public lsvd_image::aio_request
     void notify(request *req) override { UNIMPLEMENTED(); }
 };
 
-request *lsvd_image::read(size_t offset, smartiov iov, spdk_completion *c)
+request *lsvd_image::read(size_t offset, smartiov iov,
+                          std::function<void(int)> cb)
 {
-    return new read_request(this, offset, iov, c);
+    return new read_request(this, offset, iov, cb);
 }
 
-request *lsvd_image::write(size_t offset, smartiov iov, spdk_completion *c)
+request *lsvd_image::write(size_t offset, smartiov iov,
+                           std::function<void(int)> cb)
 {
-    return new write_request(this, offset, iov, c);
+    return new write_request(this, offset, iov, cb);
 }
 
-request *lsvd_image::trim(size_t offset, size_t len, spdk_completion *c)
+request *lsvd_image::trim(size_t offset, size_t len,
+                          std::function<void(int)> cb)
 {
-    return new trim_request(this, offset, len, c);
+    return new trim_request(this, offset, len, cb);
 }
 
-request *lsvd_image::flush(spdk_completion *c)
+request *lsvd_image::flush(std::function<void(int)> cb)
 {
-    return new flush_request(this, c);
+    return new flush_request(this, cb);
 }

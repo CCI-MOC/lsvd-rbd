@@ -15,7 +15,7 @@ TARGET_EXECS = imgtool thick-image
 TEST_EXECS = lsvd_crash_test lsvd_rnd_test test-rados test-seq unit-test 
 LSVD_DEPS = objects.o translate.o io.o img_reader.o config.o mkcache.o \
 	nvme.o write_cache.o file_backend.o shared_read_cache.o \
-	rados_backend.o lsvd_debug.o liblsvd.o image.o
+	rados_backend.o lsvd_debug.o liblsvd.o image.o spdk_wrap.o
 
 debug: CXXFLAGS += -fsanitize=undefined -fsanitize=float-divide-by-zero -fsanitize=local-bounds 
 debug: CXXFLAGS += -fsanitize=implicit-conversion -fsanitize=nullability -fsanitize=integer
@@ -43,11 +43,11 @@ LSVD_OBJS = $(LSVD_DEPS:%.o=$(BUILD_DIR)/%.o)
 
 include $(wildcard $(BUILD_DIR)/*.d)
 
-$(TARGET_EXECS): %: $(BUILD_DIR)/%.o $(LSVD_OBJS) liblsvd.so
+$(TARGET_EXECS): %: $(BUILD_DIR)/%.o liblsvd.so
 	@echo "LD $@"
 	@$(CXX) -o $@ $< $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 
-$(TEST_EXECS): %: $(BUILD_DIR)/test/%.o $(LSVD_OBJS) liblsvd.so
+$(TEST_EXECS): %: $(BUILD_DIR)/test/%.o liblsvd.so
 	@echo "LD $@"
 	@$(CXX) -o $@ $< $(LSVD_OBJS) $(CXXFLAGS) $(LDFLAGS)
 

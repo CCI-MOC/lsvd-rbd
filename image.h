@@ -10,7 +10,6 @@
 #include "lsvd_types.h"
 #include "objects.h"
 #include "shared_read_cache.h"
-#include "spdk_wrap.h"
 #include "translate.h"
 #include "write_cache.h"
 
@@ -61,24 +60,8 @@ class lsvd_image
     class trivial_request;
     class read_request;
     class write_request;
-    request *read(size_t offset, smartiov iov, spdk_completion *c);
-    request *write(size_t offset, smartiov iov, spdk_completion *c);
-    request *trim(size_t offset, size_t len, spdk_completion *c);
-    request *flush(spdk_completion *c);
-};
-
-/**
- * Striped image. This improves concurrency by striping the image across
- * multiple independent images.
- */
-class striped_image
-{
-  private:
-    std::vector<lsvd_image> imgs;
-
-  public:
-    request *read(size_t offset, smartiov iov, spdk_completion *c);
-    request *write(size_t offset, smartiov iov, spdk_completion *c);
-    request *trim(size_t offset, size_t len, spdk_completion *c);
-    request *flush(spdk_completion *c);
+    request *read(size_t offset, smartiov iov, std::function<void(int)> cb);
+    request *write(size_t offset, smartiov iov, std::function<void(int)> cb);
+    request *trim(size_t offset, size_t len, std::function<void(int)> cb);
+    request *flush(std::function<void(int)> cb);
 };

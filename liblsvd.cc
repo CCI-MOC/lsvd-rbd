@@ -40,6 +40,7 @@
 #include "request.h"
 #include "shared_read_cache.h"
 #include "smartiov.h"
+#include "spdk_wrap.h"
 #include "translate.h"
 #include "utils.h"
 #include "write_cache.h"
@@ -90,8 +91,8 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
                                          rbd_callback_t complete_cb,
                                          rbd_completion_t *c)
 {
-    auto c = lsvd_spdk::create_completion(complete_cb, cb_arg);
-    *c = (rbd_completion_t)c;
+    auto nc = lsvd_spdk::create_completion(complete_cb, cb_arg);
+    *c = (rbd_completion_t)nc;
     return 0;
 }
 
@@ -116,7 +117,6 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
     auto img = (lsvd_spdk *)image;
     auto req = img->trim(off, len, p);
     p->run();
-    p->wait();
     return 0;
 }
 
@@ -135,6 +135,7 @@ extern "C" int rbd_flush(rbd_image_t image)
     auto req = img->flush(nullptr);
     req->run(nullptr);
     req->wait();
+    req->release();
     return 0;
 }
 

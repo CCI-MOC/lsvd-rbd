@@ -4,6 +4,7 @@ spdk_completion::spdk_completion(rbd_callback_t cb, void *cb_arg)
     : cb(cb), cb_arg(cb_arg)
 {
 }
+
 spdk_completion::~spdk_completion()
 {
     if (req)
@@ -108,30 +109,44 @@ int lsvd_spdk::poll_io_events(spdk_completion **comps, int numcomp)
     return i;
 }
 
+std::function<void(int)> make_cb(spdk_completion *c)
+{
+    if (c == nullptr)
+        return [](int rv) { return; };
+    else
+        return [c](int rv) { c->complete(rv); };
+}
+
+void init_completion(spdk_completion *c, lsvd_spdk *img, request *req)
+{
+    if (c != nullptr)
+        c->delayed_init(img, req);
+}
+
 request *lsvd_spdk::read(size_t offset, smartiov iov, spdk_completion *c)
 {
-    auto req = img.read(offset, iov, c);
-    c->delayed_init(this, req);
+    auto req = img.read(offset, iov, make_cb(c));
+    init_completion(c, this, req);
     return req;
 }
 
 request *lsvd_spdk::write(size_t offset, smartiov iov, spdk_completion *c)
 {
-    auto req = img.write(offset, iov, c);
-    c->delayed_init(this, req);
+    auto req = img.write(offset, iov, make_cb(c));
+    init_completion(c, this, req);
     return req;
 }
 
 request *lsvd_spdk::trim(size_t offset, size_t len, spdk_completion *c)
 {
-    auto req = img.trim(offset, len, c);
-    c->delayed_init(this, req);
+    auto req = img.trim(offset, len, make_cb(c));
+    init_completion(c, this, req);
     return req;
 }
 
 request *lsvd_spdk::flush(spdk_completion *c)
 {
-    auto req = img.flush(c);
-    c->delayed_init(this, req);
+    auto req = img.flush(make_cb(c));
+    init_completion(c, this, req);
     return req;
 }

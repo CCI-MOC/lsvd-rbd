@@ -2,6 +2,9 @@
 
 #include "image.h"
 
+class lsvd_spdk;
+class lsvd_image;
+
 class spdk_completion
 {
   public:
@@ -22,7 +25,7 @@ class spdk_completion
   public:
     void *cb_arg;
 
-    spdk_completion(rbd_callback_t cb, void *cb_arg) : cb(cb), cb_arg(cb_arg) {}
+    spdk_completion(rbd_callback_t cb, void *cb_arg);
     ~spdk_completion();
 
     void delayed_init(lsvd_spdk *img, request *req);
