@@ -1,30 +1,41 @@
 # LSVD - Log-Structured Virtual Disk
 
 Original paper [here](https://dl.acm.org/doi/10.1145/3492321.3524271)
+ATC2024 submission is in the atc2024 submodule.
 
-This is a re-write with a number of differences:
-- supported backends are RADOS and local files (for debugging), no S3 support yet
-- user-space implementation, with no kernel component. Among other things, no need for individual partitions for the cache, since you can use a regular file
-- reasonable metadata with versions, IDs, extensibility - the previous version was grad student code...
+It's not quite as fast as the the version in the paper, but on my old machines
+(IvyBridge) and Ceph 17.2.0 I'm getting about 100K write IOPS against an
+erasure-coded pool on SATA SSDs with moderate CPU load on the backend (~30% CPU
+* 32 OSDs) vs maybe 5x that for half as many IOPS with straight RBD and a
+replicated pool.
 
-It's not quite as fast as the the version in the paper, but on my old machines (IvyBridge) and Ceph 17.2.0 I'm getting about 100K write IOPS against an erasure-coded pool on SATA SSDs with moderate CPU load on the backend (~30% CPU * 32 OSDs) vs maybe 5x that for half as many IOPS with straight RBD and a replicated pool.
-
-Note that although individual disk performance is important, the main goal is to be able to support higher aggregate client IOPS against a given backend OSD pool.
+Note that although individual disk performance is important, the main goal is to
+be able to support higher aggregate client IOPS against a given backend OSD
+pool.
 
 ## what's here
 
-This builds `liblsvd.so`, which provides most of the basic RBD API; you can use `LD_PRELOAD` to use this in place of RBD with `fio`, KVM/QEMU, and a few other tools. It also includes some tests and tools described below.
+This builds `liblsvd.so`, which provides most of the basic RBD API; you can use
+`LD_PRELOAD` to use this in place of RBD with `fio`, KVM/QEMU, and a few other
+tools. It also includes some tests and tools described below.
 
-## stability
+The repository also includes scripts to setup a SPDK NVMeoF target.
 
-[fixed] As of Dec 22 it still suffers from occasional lost completions - I did a download and full build of Ceph on a 16-VCPU VM, and I had to restart QEMU half a dozen times when dropped I/Os caused hung processes.
+## Stability
 
-Full Ceph compile runs without incident.
+This is NOT production-ready code; it still occasionally crashes, and some
+configurations cause runaway memory leaks.
+
+It is able to install and boot Ubuntu 22.04 (see `qemu/`) and is stable under
+most of our tests, but there are likely regressions around crash recovery and
+other less well-trodden paths.
 
 ## Configuration
 
-LSVD is not yet merged into the Ceph configuration framework, and uses its own system. 
-It reads from a configuration file (`lsvd.conf` or `/usr/local/etc/lsvd.conf`) or from environment variables of the form `LSVD_<NAME>`, where NAME is the upper-case version of the config file variable.
+LSVD is not yet merged into the Ceph configuration framework, and uses its own
+system.  It reads from a configuration file (`lsvd.conf` or
+`/usr/local/etc/lsvd.conf`) or from environment variables of the form
+`LSVD_<NAME>`, where NAME is the upper-case version of the config file variable.
 Default values can be found in `config.h`
 
 Parameters are:
@@ -42,79 +53,42 @@ Parameters are:
 - `flush_msec`: timeout for flushing batched writes
 - `gc_threshold` (percent): described below
 
-Typically the only parameters that need to be set are `cache_dir` and `cache_size`.
-Parameters may be added or removed as we tune things and/or figure out how to optimize at runtime instead of bothering the user for a value.
+Typically the only parameters that need to be set are `cache_dir` and
+`cache_size`.  Parameters may be added or removed as we tune things and/or
+figure out how to optimize at runtime instead of bothering the user for a value.
 
 ## Using LSVD with fio and QEMU
 
 First create a volume:
 ```
-build$ sudo bin/lsvd_imgtool --create --rados \
-	--cache-dir=/mnt/nvme/lsvd --size=20g ec83b_pool/ubuntu_3
+build$ sudo bin/lsvd_imgtool --create --rados --size=20g pool/imgname
 ```
 
-Then you can start QEMU:
+Then you can start a SPDK NVMe-oF gateway:
 ```
-build$ sudo env LSVD_RCACHE_DIR=/mnt/nvme/lsvd \
-         LSVD_WCACHE_DIR=/mnt/nvme/lsvd \
-         LSVD_CACHE_SIZE=1000m \
-         LD_PRELOAD=$PWD/lib/liblsvd.so \
-		 LD_LIBRARY_PATH=$PWD/lib \
-         XAUTHORITY=$HOME/.Xauthority \
-   qemu-system-x86_64 -m 1024 -cdrom whatever.iso \
-    -blockdev '{"driver":"rbd","pool":"ec83b_pool",
-	           "image":"ec83b_pool/ubuntu_3",
-               "server":[{"host":"10.1.0.4","port":"6789"}],
-               "node-name":"libvirt-2-storage","auto-read-only":true,
-                "discard":"unmap"}' \
-	-device virtio-blk,drive=libvirt-2-storage \
-    -device e1000,netdev=net0 \
-	-netdev user,id=net0,hostfwd=tcp::5555-:22 \
-    -k en-us -machine accel=kvm -smp 2 -m 1024
+./qemu/qemu-gateway.sh pool imgname
 ```
 
-Or you can fun `fio` like this:
+Then connect to the NVMe-oF gateway:
+
 ```
-build$ cat > rbd-w.fio <<EOF
-[global]
-ioengine=rbd
-clientname=admin
-pool=ec83b_pool
-rbdname=ec83b_pool/fio-target
-busy_poll=0
-
-rw=randwrite
-#rw=randread
-bs=4k
-runtime=100
-time_based
-direct=1
-
-[rbd_lsvd]
-iodepth=128
-EOF
-
-build$ sudo bin/lsvd_imgtool --create --rados \
-	--cache-dir=/mnt/nvme/lsvd --size=10g ec83b_pool/fio-target
-
-build$ sudo env LD_PRELOAD=$PWD/lib/liblsvd.so \
-    LSVD_RCACHE_DIR=/mnt/nvme/test LSVD_WCACHE_DIR=/mnt/nvme/test fio rbd-w.fio
+nvme connect -t tcp -n nqn.2016-06.io.spdk:cnode1 -a
 ```
 
-Note that FIO random write throughput varies widely depending on which version you use.
-The 2.38-1 package in Ubuntu 22.04 performs fairly poorly; when compiled with default options it does a lot better, and better still if you build it without `rbd_poll` support. 
-(it's not a config option, so you have to hack things)
+You should now have just a plain old NVMe device, with which you can use just
+like any other NVMe device.
 
-Do not use multiple fio jobs on the same image - currently there's no protection and they'll stomp all over each other. 
-RBD performs horribly in that case, but AFAIK it doesn't compromise correctness.
-
-[TODO - use RADOS locking to prevent multiple opens, maybe use refcounts to allow multiple threads to "open" and access the same image]
+Do not use multiple fio jobs on the same image - currently there's no protection
+and they'll stomp all over each other.  RBD performs horribly in that case, but
+AFAIK it doesn't compromise correctness.
 
 ## Image and object names
 
-Currently the name of an image is *pool/name*; LSVD will ignore the ioctx passed in the API and open the pool named in the image name. [TODO]
+Currently the name of an image is *pool/name*.
 
-Given an image name of `mypool/disk_x`, LSVD stores a *superblock* in the object `disk_x`, and a series of *data objects* and *checkpoint objects* in `disk_x.00000001`, etc. using hexadecimal 32-bit sequence numbers. 
+Given an image name of `mypool/disk_x`, LSVD stores a *superblock* in the object
+`disk_x`, and a series of *data objects* and *checkpoint objects* in
+`disk_x.00000001`, etc. using hexadecimal 32-bit sequence numbers. 
 
 - superblock - holds volume size, clone linkage, [TBD snapshot info], and clean shutdown info / pointer to roll-forward point.
 - data objects - data blocks and metadata (i.e. list of LBAs) for log recovery
