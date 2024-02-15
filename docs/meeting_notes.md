@@ -1,3 +1,14 @@
+## W7-4
+
+- Kristi 
+	- get CI working, try to build a single nvmeof gateway artefact
+	- move clone.py back into translate.cc
+- Sumatra 
+	- readahead in read cache
+- Isaac
+	- image striping
+- Timothy
+
 ## Todos W6-1
 
 Current todos:
