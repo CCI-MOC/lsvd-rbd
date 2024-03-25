@@ -6,11 +6,13 @@
 #include <condition_variable>
 #include <cstring>
 #include <errno.h>
+#include <filesystem>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <iostream>
+#include <linux/fs.h>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -20,8 +22,11 @@
 #include <source_location>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <stdio.h>
 #include <string>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <vector>
 
 #ifndef LOGLV
@@ -176,6 +181,21 @@ inline char *strip_poolname_prefix(char *s)
     if (idx == nullptr)
         return s;
     return idx + 1;
+}
+
+inline size_t getsize64(int fd)
+{
+    struct stat sb;
+    size_t size;
+
+    if (fstat(fd, &sb) < 0)
+        throw std::runtime_error("fstat");
+    if (S_ISBLK(sb.st_mode)) {
+        if (ioctl(fd, BLKGETSIZE64, &size) < 0)
+            throw std::runtime_error("ioctl");
+    } else
+        size = sb.st_size;
+    return size;
 }
 
 /**
