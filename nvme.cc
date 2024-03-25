@@ -19,7 +19,6 @@
 
 #include "backend.h"
 #include "extent.h"
-#include "io.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "request.h"
