@@ -39,27 +39,6 @@ options:
   --uuid UUID  volume UUID
 ```
 
-## dumpobj
-
-Translate backend objects to/from text. Note that this includes the structure definitions, rather than importing them from `lsvd_types.py`, so that it can be extended to handle different versions.
-
-```
-usage: dumpobj.py [-h] [--rados] [--encode] [--decode] src [dst]
-
-LSVD object to/from text
-
-positional arguments:
-  src         source
-  dst         destination
-
-options:
-  -h, --help  show this help message and exit
-  --rados     use RADOS
-  --encode    text -> binary
-  --decode    binary -> text
-
-```
-
 ## parse.py - parse and pretty-print backend objects
 ```
 usage: parse.py [-h] [--rados] [--nowrap] object
@@ -74,7 +53,3 @@ options:
   --rados     fetch from RADOS
   --nowrap    one entry per line
 ```
-
-## mkcache.py, mkdisk.py - historic use only
-
-These should be superceded by imgtool, which uses the RBD API plus an extension or two.

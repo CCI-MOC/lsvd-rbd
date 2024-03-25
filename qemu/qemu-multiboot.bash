@@ -25,10 +25,10 @@ make -j20 release
 # make sure image exists
 rados -p $pool_name stat $basename
 
-./remove_objs.py $pool_name clonetest
-python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-1
-python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-2
-python3 clone.py --rados $pool_name/$basename $pool_name/clonetest-3
+./tools/remove_objs.py $pool_name clonetest
+python3 tools/clone.py --rados $pool_name/$basename $pool_name/clonetest-1
+python3 tools/clone.py --rados $pool_name/$basename $pool_name/clonetest-2
+python3 tools/clone.py --rados $pool_name/$basename $pool_name/clonetest-3
 
 kill_nvmf
 export LSVD_NO_GC=1

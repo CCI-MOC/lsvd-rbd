@@ -8,7 +8,7 @@ cd $lsvd_dir
 make clean
 make -j$(nproc) release
 
-./remove_objs.py pone perf-fio
+./tools/remove_objs.py pone perf-fio
 # ./imgtool --rados --create --size=1G pone/perf-fio
 ./thick-image --size=10G pone/perf-fio
 
