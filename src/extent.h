@@ -27,9 +27,7 @@
 
 #include <cassert>
 #include <cstddef>
-#include <set>
 #include <stdint.h>
-#include <stdlib.h>
 #include <tuple>
 #include <vector>
 
@@ -125,8 +123,8 @@ struct _obj2lba {
 };
 
 struct _lba2lba { // TODO: any way to do this in 12 bytes?
-    int64_t a : 1;
-    int64_t d : 1;
+    uint64_t a : 1;
+    uint64_t d : 1;
     int64_t base : 38; // LBA
     int64_t len : 24;
     int64_t ptr : 40; // LBA
@@ -134,8 +132,8 @@ struct _lba2lba { // TODO: any way to do this in 12 bytes?
 };
 
 struct _lba2obj {
-    int64_t a : 1;
-    int64_t d : 1;
+    uint64_t a : 1;
+    uint64_t d : 1;
     int64_t base : 38; // 128TB max
     int64_t len : 24;
     obj_offset ptr;
