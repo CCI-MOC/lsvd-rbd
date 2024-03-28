@@ -1,6 +1,0 @@
-{
-   s1
-   Memcheck:Free
-   fun:free
-   obj:*
-}
