@@ -4,11 +4,11 @@
 #include <random>
 #include <vector>
 
-#include "../fake_rbd.h"
-#include "../utils.h"
+#include "fake_rbd.h"
+#include "utils.h"
 
-const size_t BLOCK_SIZE = 4096;
-using comp_buf = std::array<uint8_t, BLOCK_SIZE>;
+const size_t LSVD_BLOCK_SIZE = 4096;
+using comp_buf = std::array<uint8_t, LSVD_BLOCK_SIZE>;
 namespace po = boost::program_options;
 
 /**
@@ -119,10 +119,10 @@ void run_test()
     // TODO use aio variants to ensure concurrency
 
     // write out the image
-    for (uint64_t i = 0; i < img_size / BLOCK_SIZE; i++) {
+    for (uint64_t i = 0; i < img_size / LSVD_BLOCK_SIZE; i++) {
         comp_buf buf;
         fill_buf_blocknum(i, buf);
-        ret = rbd_write(img, i * BLOCK_SIZE, BLOCK_SIZE,
+        ret = rbd_write(img, i * LSVD_BLOCK_SIZE, LSVD_BLOCK_SIZE,
                         reinterpret_cast<const char *>(buf.data()));
         check_cond(ret < 0, "Error writing to image");
 
@@ -130,12 +130,12 @@ void run_test()
             std::cout << "." << std::flush;
     }
 
-    fmt::print("\nWrote {} blocks\n", img_size / BLOCK_SIZE);
+    fmt::print("\nWrote {} blocks\n", img_size / LSVD_BLOCK_SIZE);
 
     // read back and make sure it's the same
-    for (uint64_t i = 0; i < img_size / BLOCK_SIZE; i++) {
+    for (uint64_t i = 0; i < img_size / LSVD_BLOCK_SIZE; i++) {
         comp_buf buf;
-        ret = rbd_read(img, i * BLOCK_SIZE, BLOCK_SIZE,
+        ret = rbd_read(img, i * LSVD_BLOCK_SIZE, LSVD_BLOCK_SIZE,
                        reinterpret_cast<char *>(buf.data()));
         check_cond(ret < 0, "Error reading from image");
 
@@ -146,7 +146,7 @@ void run_test()
             std::cout << "." << std::flush;
     }
 
-    fmt::print("\nVerified {} blocks\n", img_size / BLOCK_SIZE);
+    fmt::print("\nVerified {} blocks\n", img_size / LSVD_BLOCK_SIZE);
 
     // step 3: close the image
     ret = rbd_close(img);
