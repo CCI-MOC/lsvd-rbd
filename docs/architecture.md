@@ -1,5 +1,8 @@
 # LSVD/RBD Architecture
 
+THESE ARE FROM LONG AGO. They are probably wrong and are kept only for ease of
+access to historical decisions.
+
 ## Storage Format
 
 **Local storage** - the read and write caches are stored in a single fixed-length file in the local file system. At present the read and write caches don't share any data, so in theory they could be split in two; however we're trying to figure out how to unify them.

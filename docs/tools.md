@@ -3,6 +3,10 @@
 This is a bit of a mess right now, since it started out as a ctypes-based Python unit test framework for the library but that's all been stripped out.
 
 ## cache.py - read cache contents
+
+OUTDATED TOOL -- the read cache has been rewritten, but not the write cache.
+This tool will probably work with the write cache only.
+
 Note that you might need to parse the superblock with `parse.py` to find the cache file name - it's typically "<cache dir>/<uuid>.cache"
 
 ```
@@ -40,6 +44,7 @@ options:
 ```
 
 ## parse.py - parse and pretty-print backend objects
+
 ```
 usage: parse.py [-h] [--rados] [--nowrap] object
 
