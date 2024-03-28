@@ -1,4 +1,7 @@
-# new-lsvd
+# Notes on the design of LSVD
+
+THESE ARE FROM LONG AGO. They are probably wrong and are kept only for ease of
+access to historical decisions.
 
 ### 3/23/22
 
