@@ -15,8 +15,12 @@ if get_option('buildtype') == 'debug'
 	add_project_arguments('-DLOGLV=1', language: 'cpp')
 
 	# add sanitizers for debug builds
-	add_project_arguments('-fsanitize=address,undefined', language: 'cpp')
-	add_project_link_arguments('-fsanitize=address,undefined', '-Wl,--unresolved-symbols=ignore-in-object-files', language: 'cpp')
+	add_project_arguments(
+		'-fsanitize=address,undefined,nullability,implicit-conversion', language: 'cpp')
+	add_project_link_arguments(
+		'-fsanitize=address,undefined', 
+		'-Wl,--unresolved-symbols=ignore-in-object-files', 
+		language: 'cpp')
 endif
 
 subdir('src')
