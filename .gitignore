@@ -38,3 +38,5 @@ perf.*
 experiment-results.*
 
 atc2024/build/
+.cache/
+subprojects/
