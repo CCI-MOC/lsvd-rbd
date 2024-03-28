@@ -2,7 +2,7 @@ lpthread = dependency('threads')
 lz = dependency('zlib')
 lfmt = dependency('fmt')
 lboost = dependency('boost')
-luring = dependency('liburing')
+luring = dependency('liburing', static: true)
 luuid = dependency('uuid')
 
 cxx = meson.get_compiler('cpp')
