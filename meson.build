@@ -1,4 +1,12 @@
-project('lsvd-rbd', 'cpp', version: '0.1', default_options: ['cpp_std=c++20'])
+project('lsvd-rbd', 'cpp', 
+	version: '0.1', 
+	default_options: [
+		'cpp_std=c++20', 
+		'buildtype=debug',
+		'warning_level=2',
+		'b_sanitizers=address,undefined',
+		'b_colorout=always'
+		])
 
 cxx = meson.get_compiler('cpp')
 
@@ -19,6 +27,10 @@ libsrc = [
 	'write_cache.cc', 'lsvd_debug.cc']
 
 libdeps = [lpthread, lz, lfmt, lboost, luring, lrados, luuid]
+
+# Targets
 liblsvd = library('lsvd', libsrc, dependencies: libdeps, install: false)
-executable('imgtool', 'imgtool.cc', link_with: liblsvd, dependencies: libdeps)
-executable('thick-image', 'thick-image.cc', link_with: liblsvd, dependencies: libdeps)
+executable('imgtool', 'imgtool.cc', 
+	link_with: liblsvd, dependencies: libdeps)
+executable('thick-image', 'thick-image.cc', 
+	link_with: liblsvd, dependencies: libdeps)
