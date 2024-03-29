@@ -13,7 +13,7 @@ basename=$2
 
 lsvd_dir=$(git rev-parse --show-toplevel)
 source $lsvd_dir/.env
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 echo "Running with image $pool_name/$basename as the base"

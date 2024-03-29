@@ -20,7 +20,7 @@ imgname=lsvd-benchmark
 imgsize=10G
 blocksize=4096
 
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 cd $lsvd_dir
 
