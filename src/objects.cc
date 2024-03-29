@@ -11,11 +11,9 @@
 #include <sys/uio.h>
 #include <zlib.h>
 
-#include "backend.h"
 #include "lsvd_types.h"
 #include "objects.h"
-
-extern void do_log(const char *fmt, ...);
+#include "lsvd_debug.h"
 
 char *object_reader::read_object_hdr(const char *name, bool fast)
 {

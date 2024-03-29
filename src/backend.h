@@ -7,11 +7,10 @@
 #define BACKEND_H
 
 #include <memory>
-#include <string>
+#include <rados/librados.h>
 #include <sys/uio.h>
 
 #include "config.h"
-#include "fake_rbd.h"
 #include "request.h"
 
 class backend

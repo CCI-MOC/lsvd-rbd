@@ -25,8 +25,6 @@
 #include "request.h"
 #include "smartiov.h"
 
-extern void do_log(const char *, ...);
-
 bool __lsvd_dbg_be_delay = false;
 long __lsvd_dbg_be_seed = 1;
 int __lsvd_dbg_be_threads = 10;

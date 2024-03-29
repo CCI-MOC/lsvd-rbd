@@ -1,23 +1,10 @@
-/*
- * file:        objects.h
- * description: back-end object format definitions and helper functions
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
+#pragma once
 
-#ifndef OBJECTS_H
-#define OBJECTS_H
-
-#include <cassert>
-#include <cstddef>
-#include <memory>
 #include <stdint.h>
-#include <stdlib.h>
-#include <tuple>
 #include <uuid/uuid.h>
 #include <vector>
+
+#include "backend.h"
 
 #if __BYTE_ORDER != __LITTLE_ENDIAN
 #error "this code is little-endian only"
@@ -151,8 +138,6 @@ struct ckpt_mapentry {
 
 /* ------ helper functions -------- */
 
-class backend;
-
 class object_reader
 {
     std::shared_ptr<backend> objstore;
@@ -178,5 +163,3 @@ class object_reader
                             std::vector<deferred_delete> &deletes,
                             std::vector<ckpt_mapentry> &dmap);
 };
-
-#endif

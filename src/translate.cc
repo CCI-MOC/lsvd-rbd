@@ -31,10 +31,6 @@
 #include "request.h"
 #include "translate.h"
 
-void do_log(const char *, ...);
-void fp_log(const char *, ...);
-extern void log_time(uint64_t loc, uint64_t val); // debug
-
 /*
  * Architecture:
  *

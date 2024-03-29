@@ -31,8 +31,6 @@
 #include "smartiov.h"
 #include "translate.h"
 
-extern void do_log(const char *, ...);
-
 class reader_impl : public img_reader
 {
     std::mutex m;
