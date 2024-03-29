@@ -9,41 +9,26 @@
  */
 
 #include <algorithm>
-#include <atomic>
 #include <cassert>
-#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
-#include <map>
-#include <mutex>
-#include <queue>
-#include <shared_mutex>
-#include <stack>
 #include <string>
-#include <thread>
 #include <unistd.h>
 #include <uuid/uuid.h>
-#include <vector>
 
 #include "backend.h"
 #include "config.h"
-#include "extent.h"
 #include "fake_rbd.h"
 #include "image.h"
 #include "img_reader.h"
-#include "journal.h"
 #include "lsvd_debug.h"
 #include "lsvd_types.h"
-#include "misc_cache.h"
-#include "nvme.h"
 #include "request.h"
-#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "spdk_wrap.h"
 #include "translate.h"
 #include "utils.h"
-#include "write_cache.h"
 
 extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
                         const char *snap_name)
@@ -115,7 +100,7 @@ extern "C" int rbd_aio_discard(rbd_image_t image, uint64_t off, uint64_t len,
 {
     auto p = (spdk_completion *)c;
     auto img = (lsvd_spdk *)image;
-    auto req = img->trim(off, len, p);
+    img->trim(off, len, p);
     p->run();
     return 0;
 }
@@ -124,7 +109,7 @@ extern "C" int rbd_aio_flush(rbd_image_t image, rbd_completion_t c)
 {
     auto *p = (spdk_completion *)c;
     auto img = (lsvd_spdk *)image;
-    auto req = img->flush(p);
+    img->flush(p);
     p->run();
     return 0;
 }
@@ -156,7 +141,7 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t offset, size_t len,
 {
     lsvd_spdk *img = (lsvd_spdk *)image;
     auto p = (spdk_completion *)c;
-    auto req = img->read(offset, smartiov(buf, len), p);
+    img->read(offset, smartiov(buf, len), p);
     p->run();
     return 0;
 }
@@ -166,7 +151,7 @@ extern "C" int rbd_aio_readv(rbd_image_t image, const iovec *iov, int iovcnt,
 {
     lsvd_spdk *img = (lsvd_spdk *)image;
     auto p = (spdk_completion *)c;
-    auto req = img->read(offset, smartiov(iov, iovcnt), p);
+    img->read(offset, smartiov(iov, iovcnt), p);
     p->run();
     return 0;
 }
@@ -176,7 +161,7 @@ extern "C" int rbd_aio_writev(rbd_image_t image, const struct iovec *iov,
 {
     lsvd_spdk *img = (lsvd_spdk *)image;
     auto *p = (spdk_completion *)c;
-    auto req = img->write(offset, smartiov(iov, iovcnt), p);
+    img->write(offset, smartiov(iov, iovcnt), p);
     p->run();
     return 0;
 }
@@ -186,7 +171,7 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t offset, size_t len,
 {
     lsvd_spdk *img = (lsvd_spdk *)image;
     auto *p = (spdk_completion *)c;
-    auto req = img->write(offset, smartiov((char *)buf, len), p);
+    img->write(offset, smartiov((char *)buf, len), p);
     p->run();
     return 0;
 }

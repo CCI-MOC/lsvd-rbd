@@ -10,17 +10,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libaio.h>
-#include <sys/stat.h>
-#include <sys/uio.h>
-#include <unistd.h>
-
-#include <algorithm>
-#include <condition_variable>
-#include <map>
 #include <mutex>
 #include <queue>
 #include <random>
+#include <sys/stat.h>
+#include <sys/uio.h>
 #include <thread>
+#include <unistd.h>
 
 #include "backend.h"
 #include "lsvd_types.h"

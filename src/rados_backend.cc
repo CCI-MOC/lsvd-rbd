@@ -9,16 +9,7 @@
 
 #include <rados/librados.h>
 
-#include <iomanip>
-#include <sstream>
-#include <vector>
-
-#include <condition_variable>
-#include <queue>
-#include <thread>
-
 #include "backend.h"
-#include "extent.h"
 #include "lsvd_types.h"
 #include "request.h"
 #include "smartiov.h"

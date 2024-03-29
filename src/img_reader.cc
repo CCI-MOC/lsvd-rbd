@@ -12,9 +12,7 @@
  */
 
 #include <algorithm> // std::min
-#include <atomic>
 #include <cassert>
-#include <map>
 #include <mutex>
 #include <shared_mutex>
 #include <string.h>
@@ -26,16 +24,12 @@
 #include "config.h"
 #include "extent.h"
 #include "img_reader.h"
-#include "journal.h"
 #include "lsvd_types.h"
-#include "misc_cache.h"
-#include "nvme.h"
 #include "objname.h"
 #include "request.h"
 #include "shared_read_cache.h"
 #include "smartiov.h"
 #include "translate.h"
-#include "write_cache.h"
 
 extern void do_log(const char *, ...);
 

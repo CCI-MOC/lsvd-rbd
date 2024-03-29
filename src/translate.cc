@@ -11,12 +11,9 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
-#include <errno.h>
-#include <list>
 #include <map>
 #include <mutex>
 #include <shared_mutex>
-#include <stack>
 #include <string.h>
 #include <sys/uio.h>
 #include <thread>
@@ -26,7 +23,6 @@
 #include <zlib.h>
 
 #include "extent.h"
-#include "image.h"
 #include "lsvd_debug.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
@@ -863,7 +859,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
     auto data_ptr0 = data_ptr;
     auto in_ptr = req->gc_data;
 
-    int _data_sectors = 0; // actual sectors in GC write
+    // int _data_sectors = 0; // actual sectors in GC write
     std::vector<data_map> obj_extents;
 
     req->local_buf_base = data_ptr;
@@ -879,7 +875,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
                 continue;
 
             sector_t _sectors = _limit - _base;
-            _data_sectors += _sectors;
+            // _data_sectors += _sectors;
             int bytes = _sectors * 512;
 
             sector_t extent_offset = _base - base;
@@ -1184,7 +1180,7 @@ void translate_impl::do_gc(bool *running)
      * utilization, i.e. (live data) / (total size)
      */
     obj_r_lock.lock();
-    int calculated_total = 0;
+    // int calculated_total = 0;
     std::set<std::tuple<double, int, int>> utilization;
     for (auto p : object_info) {
         if (p.first > last_ckpt)
@@ -1192,7 +1188,7 @@ void translate_impl::do_gc(bool *running)
         auto [hdrlen, datalen, live] = p.second;
         double rho = 1.0 * live / datalen;
         sector_t sectors = hdrlen + datalen;
-        calculated_total += datalen;
+        // calculated_total += datalen;
         utilization.insert(std::make_tuple(rho, p.first, sectors));
     }
     obj_r_lock.unlock();
@@ -1456,7 +1452,8 @@ int translate_create_image(sptr<backend> objstore, const char *name,
                       LSVD_SUPER, // type
                       0,          // seq
                       8,          // hdr_sectors
-                      0};         // data_sectors
+                      0,          // data_sectors
+                      0};
     uuid_generate_random(_hdr->vol_uuid);
 
     auto _super = (super_hdr *)(_hdr + 1);
@@ -1575,29 +1572,5 @@ inline std::vector<ckpt_id> deserialise_checkpoint_ids(char *buf)
 int translate_clone_image(sptr<backend> objstore, const char *source,
                           const char *dest)
 {
-    // read superblock
-    char base_buf[4096];
-    int rv = objstore->read_object(source, base_buf, sizeof(base_buf), 0);
-    if (rv < 0)
-        throw std::runtime_error("failed to read superblock");
-
-    auto base_hdr = (obj_hdr *)base_buf;
-    auto base_super = (super_hdr *)(base_hdr + 1);
-
-    if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
-        throw std::runtime_error("corrupt superblock");
-
-    // get checkpoints
-    int seq = 1;
-    auto cp_ids = deserialise_checkpoint_ids(base_buf);
-    if (cp_ids.size() == 0) {
-        log_error("We need at least 1 checkpoint in the base image to clone");
-        throw std::runtime_error("no checkpoints found");
-    }
-
-    auto cp_name = fmt::format("{}.{:08x}", source, cp_ids.back());
-    char cp_buf[4096];
-    objstore->read_object(cp_name.c_str(), cp_buf, sizeof(cp_buf), 0);
-
     throw std::runtime_error("unimplemented");
 }

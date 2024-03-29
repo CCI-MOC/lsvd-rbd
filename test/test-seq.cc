@@ -1,15 +1,11 @@
 #include <boost/program_options.hpp>
-#include <iomanip>
 #include <iostream>
-#include <random>
-#include <vector>
 
 #include "fake_rbd.h"
 #include "utils.h"
 
 const size_t LSVD_BLOCK_SIZE = 4096;
 using comp_buf = std::array<uint8_t, LSVD_BLOCK_SIZE>;
-namespace po = boost::program_options;
 
 /**
  * Usage:

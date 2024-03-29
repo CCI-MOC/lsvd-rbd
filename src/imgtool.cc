@@ -10,7 +10,6 @@
 #include "backend.h"
 #include "config.h"
 #include "fake_rbd.h"
-#include "image.h"
 #include "lsvd_types.h"
 #include "objects.h"
 #include "translate.h"

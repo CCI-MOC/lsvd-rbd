@@ -4,9 +4,10 @@
 setup:
 	meson setup --native-file meson.ini build-rel --buildtype=release
 	meson setup --native-file meson.ini build-dbg --buildtype=debug
+	ln -s build-dbg builddir
 
 debug: setup
-	cd build; meson compile
+	cd build-dbg; meson compile
 
 paper:
 	@$(MAKE) -C atc2024
