@@ -13,16 +13,16 @@ imgsize=80g
 
 lsvd_dir=$(git rev-parse --show-toplevel)
 source $lsvd_dir/.env
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 
 cd $lsvd_dir
-make clean
-make -j20 nosan
-# make -j20 release
+meson setup --native-file meson.ini build-dbg --buildtype=debug
+cd build-dbg
+meson compile
 
-create_lsvd_thick $pool_name $imgname $imgsize
+create_lsvd_thin $pool_name $imgname $imgsize
 rados -p $pool_name stat $imgname
 
 kill_nvmf
