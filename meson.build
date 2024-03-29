@@ -2,7 +2,6 @@ project('lsvd-rbd', 'cpp',
 	version: '0.1', 
 	default_options: [
 		'cpp_std=c++20', 
-		'buildtype=debug',
 		'warning_level=2',
 		'b_colorout=always'
 		])
@@ -24,4 +23,8 @@ if get_option('buildtype') == 'debug'
 endif
 
 subdir('src')
+liblsvd = library('lsvd', lsvd_src, dependencies: lsvd_deps, install: false)
+executable('imgtool', 		'src/imgtool.cc', 		link_with: liblsvd, dependencies: lsvd_deps)
+executable('thick-image', 	'src/thick-image.cc', 	link_with: liblsvd, dependencies: lsvd_deps)
+
 subdir('test')

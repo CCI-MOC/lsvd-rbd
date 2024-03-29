@@ -16,9 +16,4 @@ lsvd_src = files(
 	'write_cache.cc', 'lsvd_debug.cc')
 
 lsvd_inc = include_directories('.')
-lsvd_deps = [lpthread, lz, lfmt, lboost, luring, lrados, luuid]
-
-liblsvd = library('lsvd', lsvd_src, dependencies: lsvd_deps, install: false)
-
-executable('imgtool', 		'imgtool.cc', 		link_with: liblsvd, dependencies: lsvd_deps)
-executable('thick-image', 	'thick-image.cc', 	link_with: liblsvd, dependencies: lsvd_deps)
+lsvd_deps = [lpthread, lz, lfmt, lboost, luring, lrados, luuid, ltcmalloc]
