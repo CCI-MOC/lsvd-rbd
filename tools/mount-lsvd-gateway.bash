@@ -13,14 +13,15 @@ imgname=$2
 
 lsvd_dir=$(git rev-parse --show-toplevel)
 source $lsvd_dir/.env
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 echo "Running gateway on $gw_ip, client on $client_ip"
 echo "Running with image $pool_name/$imgname"
 
-cd $lsvd_dir
-make clean
-make -j20 release
+cd $lsvd_dir/build-rel
+which meson
+meson compile
+cd ..
 
 # make sure image exists
 rados -p $pool_name stat $imgname

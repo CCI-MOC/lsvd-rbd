@@ -58,12 +58,12 @@ function launch_lsvd_gw_background {
 	export LSVD_WCACHE_DIR=$wlog_root/lsvd-write/
 	export LSVD_GC_THRESHOLD=40
 	export LSVD_CACHE_SIZE=$cache_size
-	# LD_PRELOAD="/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so $lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt &
+	# LD_PRELOAD="/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so $lsvd_dir/builddir/liblsvd.so" ./build/bin/nvmf_tgt &
 
 	# clear out write log directory
 	rm -rf $wlog_root/lsvd-write/*
 
-	LD_PRELOAD="$lsvd_dir/liblsvd.so" ./build/bin/nvmf_tgt -m '[0,1,2,3]' &
+	LD_PRELOAD="$lsvd_dir/builddir/liblsvd.so" ./build/bin/nvmf_tgt -m '[0,1,2,3]' &
 
 	sleep 5
 }
@@ -99,10 +99,10 @@ function create_lsvd_thin {
 	local size=$3
 
 	cd $lsvd_dir
-	# ./imgtool --delete --rados $pool/$img || true
+	# ./builddir/imgtool --delete --rados $pool/$img || true
 	./tools/remove_objs.py $pool $img
 
-	./imgtool --create --rados --size=$size $pool/$img
+	./builddir/imgtool --create --rados --size=$size $pool/$img
 
 	# make sure image exists
 	rados -p $pool stat $img
@@ -115,7 +115,7 @@ function create_lsvd_thick {
 
 	cd $lsvd_dir
 	./tools/remove_objs.py $pool $img
-	./thick-image --size=$size $pool/$img
+	./builddir/thick-image --size=$size $pool/$img
 
 	rados -p $pool stat $img
 }
