@@ -29,7 +29,7 @@ imgname=cpu-test
 imgsize=10g
 blocksize=4096
 
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 # Build LSVD
 echo '===Building LSVD...'

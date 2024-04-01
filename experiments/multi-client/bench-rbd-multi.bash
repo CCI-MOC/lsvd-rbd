@@ -28,7 +28,7 @@ imgname=rbd-benchmark
 imgsize=5G
 blocksize=4096
 
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 rbd -p $pool_name rm $imgname.multi.1 || true
 rbd -p $pool_name rm $imgname.multi.2 || true

@@ -23,7 +23,6 @@
 #include <thread>
 
 #include "backend.h"
-#include "io.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "objects.h"

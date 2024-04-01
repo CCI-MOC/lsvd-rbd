@@ -3,7 +3,7 @@
 set -xeuo pipefail
 
 lsvd_dir=$(git rev-parse --show-toplevel)
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 cur_time=$(date +"%FT%T")
 outfile=$lsvd_dir/experiments/results/$cur_time.lsvd-multigw.rssd2.txt

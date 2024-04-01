@@ -28,7 +28,7 @@ imgname=lsvd-benchmark
 imgsize=5g
 blocksize=4096
 
-source $lsvd_dir/experiments/common.bash
+source $lsvd_dir/tools/utils.bash
 
 # Build LSVD
 echo '===Building LSVD...'
@@ -39,7 +39,7 @@ make -j20 release
 
 # keep a copy of the library around to debug coredumps
 mkdir -p $lsvd_dir/test/baklibs/
-cp $lsvd_dir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
+cp $lsvd_dir/builddir/liblsvd.so $lsvd_dir/test/baklibs/liblsvd.so.$cur_time
 
 create_lsvd_thick $pool_name $imgname.multi.1 $imgsize &
 create_lsvd_thick $pool_name $imgname.multi.2 $imgsize &

@@ -10,7 +10,7 @@ make -j20 nosan
 lsvd_dir=$(git rev-parse --show-toplevel)
 cd $lsvd_dir
 
-LD_PRELOAD=$lsvd_dir/liblsvd.so \
+LD_PRELOAD=$lsvd_dir/builddir/liblsvd.so \
     qemu-img create -f raw rbd:triple-ssd/lsvd-qemu-debug 20G
 
 mkdir -p /mnt/nvme/lsvd-rcache /mnt/nvme/lsvd-wcache
@@ -18,7 +18,7 @@ export LSVD_RCACHE_DIR=/mnt/nvme/lsvd-rcache
 export LSVD_WCACHE_DIR=/mnt/nvme/lsvd-wcache
 export LSVD_GC_THRESHOLD=40
 
-LD_PRELOAD=$lsvd_dir/liblsvd.so \
+LD_PRELOAD=$lsvd_dir/builddir/liblsvd.so \
     qemu-system-x86_64 \
     -enable-kvm \
     -m 1024 \

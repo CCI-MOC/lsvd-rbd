@@ -30,6 +30,15 @@ It is able to install and boot Ubuntu 22.04 (see `qemu/`) and is stable under
 most of our tests, but there are likely regressions around crash recovery and
 other less well-trodden paths.
 
+## Build
+
+This project uses `meson` to manage the build system. Run `make setup` to
+generate the build files, then run `meson compile` in either `build-rel` or
+`build-dbg` to build the release or debug versions of the code.
+
+A makefile is also offered for convenience; `make` builds the debug version
+by default.
+
 ## Configuration
 
 LSVD is not yet merged into the Ceph configuration framework, and uses its own
