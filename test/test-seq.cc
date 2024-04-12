@@ -1,5 +1,7 @@
-#include <boost/program_options.hpp>
+#include <cassert>
+#include <array>
 #include <iostream>
+#include <rados/librados.h>
 
 #include "fake_rbd.h"
 #include "utils.h"
@@ -95,21 +97,25 @@ bool verify_buf(uint64_t block_num, const comp_buf &buf,
     return true;
 }
 
-void run_test()
+void run_test(rados_ioctx_t ctx)
 {
-    // delete existing image if it exists
-    rbd_remove(nullptr, "pone/random-test-img");
+    log_info("Starting sequential write then readback test");
+
+    log_info("Removing old image if one exists");
+    rbd_remove(ctx, "random-test-img");
 
     size_t img_size = 1 * 1024 * 1024 * 1024;
     // size_t img_size = 100 * 1024 * 1024;
 
     // create the image for our own use
-    auto ret = rbd_create(nullptr, "pone/random-test-img", img_size, 0);
+    log_info("Creating image {} of size {}", "random-test-img", img_size);
+    auto ret = rbd_create(ctx, "random-test-img", img_size, 0);
     check_cond(ret < 0, "Error creating image");
 
     // open the image
+    log_info("Opening image {}", "random-test-img");
     rbd_image_t img;
-    ret = rbd_open(nullptr, "pone/random-test-img", &img, nullptr);
+    ret = rbd_open(ctx, "random-test-img", &img, nullptr);
     check_cond(ret < 0, "Error opening image");
 
     // TODO use aio variants to ensure concurrency
@@ -149,7 +155,7 @@ void run_test()
     check_cond(ret < 0, "Error closing image");
 
     // step 4: delete the image
-    ret = rbd_remove(nullptr, "pone/random-test-img");
+    ret = rbd_remove(ctx, "random-test-img");
     check_cond(ret < 0, "Error deleting image");
 }
 
@@ -161,9 +167,24 @@ int main(int argc, char *argv[])
     setenv("LSVD_CACHE_SIZE", "2147483648", 1);
 
     std::string pool_name = "pone";
-    std::string img_name = "random-test-img";
 
-    run_test();
+    rados_t cluster;
+    int err = rados_create2(&cluster, "ceph", "client.lsvd", 0);
+    check_negret(err, "Failed to create cluster handle");
 
+    err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
+    check_negret(err, "Failed to read config file");
+
+    err = rados_connect(cluster);
+    check_negret(err, "Failed to connect to cluster");
+
+    rados_ioctx_t io_ctx;
+    err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
+    check_negret(err, "Failed to connect to pool {}", pool_name);
+
+    run_test(io_ctx);
+
+    rados_ioctx_destroy(io_ctx);
+    rados_shutdown(cluster);
     return 0;
 }
