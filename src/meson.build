@@ -10,7 +10,7 @@ lrados = cxx.find_library('rados', required: true)
 ltcmalloc = cxx.find_library('tcmalloc', required: false)
 
 lsvd_src = files(
-	'config.cc', 'file_backend.cc', 'image.cc',
+	'config.cc', 'image.cc',
 	'img_reader.cc', 'liblsvd.cc', 'mkcache.cc', 'nvme.cc', 'objects.cc',
 	'rados_backend.cc', 'shared_read_cache.cc', 'spdk_wrap.cc', 'translate.cc',
 	'write_cache.cc', 'lsvd_debug.cc')

@@ -11,24 +11,22 @@
 #include <sys/uio.h>
 #include <zlib.h>
 
+#include "lsvd_debug.h"
 #include "lsvd_types.h"
 #include "objects.h"
-#include "lsvd_debug.h"
 
 char *object_reader::read_object_hdr(const char *name, bool fast)
 {
     obj_hdr *h = (obj_hdr *)malloc(4096);
-    iovec iov = {(char *)h, 4096};
     int rv;
-    if ((rv = objstore->read_object(name, &iov, 1, 0)) < 0)
+    if ((rv = objstore->read(name, 0, h, 4096)) < 0)
         goto fail;
     if (fast)
         return (char *)h;
     if (h->hdr_sectors > 8) {
         size_t len = h->hdr_sectors * 512;
         h = (obj_hdr *)realloc(h, len);
-        iovec iov = {(char *)h, len};
-        if (objstore->read_object(name, &iov, 1, 0) < 0)
+        if (objstore->read(name, 0, h, len) < 0)
             goto fail;
     }
     return (char *)h;
@@ -49,7 +47,7 @@ object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
                           std::vector<snap_info *> &snaps, uuid_t &uuid)
 {
     char *super_buf = read_object_hdr(name, false);
-    if(super_buf == NULL)
+    if (super_buf == NULL)
         return std::make_pair((char *)NULL, -1);
 
     auto super_h = (obj_hdr *)super_buf;
@@ -131,5 +129,3 @@ ssize_t object_reader::read_checkpoint(const char *name, uint64_t &cache_seq,
     free(buf);
     return 0;
 }
-
-

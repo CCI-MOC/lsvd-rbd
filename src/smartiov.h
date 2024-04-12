@@ -95,6 +95,25 @@ class smartiov
         }
     }
 
+    void copy_in(char *buf, size_t limit)
+    {
+        if (limit == 0) // do nothing
+            return;
+
+        assert(buf != nullptr);
+        auto remaining = limit;
+        for (auto i : iovs) {
+            auto to_copy = std::min(remaining, i.iov_len);
+            remaining -= to_copy;
+
+            memcpy((void *)i.iov_base, (void *)buf, to_copy);
+            buf += i.iov_len;
+
+            if (remaining == 0)
+                break;
+        }
+    }
+
     void copy_out(char *buf)
     {
         for (auto i : iovs) {

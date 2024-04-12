@@ -104,9 +104,7 @@ class direct_read_req : public self_refcount_request
         oo = oo_;
         r = r_;
         objname name(r->be->prefix(oo.obj), oo.obj);
-        auto [iov, iovcnt] = iovs.c_iov();
-        obj_req =
-            r->io->make_read_req(name.c_str(), 512L * oo.offset, iov, iovcnt);
+        obj_req = r->io->aio_read(name.str(), 512L * oo.offset, iovs);
     }
     ~direct_read_req() {}
 

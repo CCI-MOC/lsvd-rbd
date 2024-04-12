@@ -129,7 +129,7 @@ void create_thick(char *name, long size)
         map1->len = 16384;
         sector += 16384;
 
-        auto req = be->make_write_req(oname, hdr_buf, data_bytes + 4096);
+        auto req = be->aio_write(oname, hdr_buf, data_bytes + 4096);
         auto r = new writer(hdr_buf);
         q.push(r);
         req->run(r);
@@ -199,7 +199,7 @@ void create_thick(char *name, long size)
 
     char oname[128];
     sprintf(oname, "%s.%08x", name, n_objs + 1);
-    be->write_object(oname, ckpt_buf, ckpt_sectors * 512);
+    be->write(oname, ckpt_buf, ckpt_sectors * 512);
 
     /* now write the superblock, with a single checkpoint pointer
      */
@@ -218,7 +218,7 @@ void create_thick(char *name, long size)
     auto ckpt = (int *)(sb_data + ckpt_offset);
     *ckpt = n_objs + 1;
 
-    be->write_object(name, sb_data, 4096);
+    be->write(name, sb_data, 4096);
 
     printf("Thick provisioning: 100%% complete...done\n");
 }

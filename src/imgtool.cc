@@ -136,7 +136,7 @@ void info(rados_ioctx_t io, const char *image_name)
     printf("write cache: %s\n", wcache_file.c_str());
 
     char base_buf[4096];
-    rv = objstore->read_object(image_name, base_buf, sizeof(base_buf), 0);
+    rv = objstore->read(image_name, 0, base_buf, sizeof(base_buf));
     if (rv < 0)
         throw std::runtime_error("failed to read superblock");
 

@@ -9,27 +9,18 @@
 
 #pragma once
 
-#include <cassert>
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
-#include <string>
+#include <fmt/format.h>
 
 class objname
 {
-    char buf[128];
+    std::string name;
 
   public:
-    objname() {}
-    objname(std::string prefix, uint32_t seq) { init(prefix.c_str(), seq); }
-    objname(const char *prefix, uint32_t seq) { init(prefix, seq); }
-
-    void init(const char *prefix, uint32_t seq)
+    objname(std::string prefix, uint32_t seq)
     {
-        size_t len = strlen(prefix);
-        assert(len + 9 < sizeof(buf));
-        memcpy(buf, prefix, len);
-        sprintf(buf + len, ".%08x", seq);
+        name = fmt::format("{}.{:08x}", prefix, seq);
     }
-    const char *c_str() { return buf; }
+
+    std::string str() { return name; }
+    const char *c_str() { return name.c_str(); }
 };
