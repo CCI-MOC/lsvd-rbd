@@ -170,17 +170,17 @@ int main(int argc, char *argv[])
 
     rados_t cluster;
     int err = rados_create2(&cluster, "ceph", "client.lsvd", 0);
-    check_negret(err, "Failed to create cluster handle");
+    check_ret_neg(err, "Failed to create cluster handle");
 
     err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
-    check_negret(err, "Failed to read config file");
+    check_ret_neg(err, "Failed to read config file");
 
     err = rados_connect(cluster);
-    check_negret(err, "Failed to connect to cluster");
+    check_ret_neg(err, "Failed to connect to cluster");
 
     rados_ioctx_t io_ctx;
     err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
-    check_negret(err, "Failed to connect to pool {}", pool_name);
+    check_ret_neg(err, "Failed to connect to pool {}", pool_name);
 
     run_test(io_ctx);
 
