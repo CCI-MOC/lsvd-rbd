@@ -1,13 +1,3 @@
-/*
- * file:        lsvd.cc
- * description: userspace block-on-object layer with librbd interface
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
 #include <algorithm>
 #include <cassert>
 #include <cstdio>

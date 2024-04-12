@@ -22,6 +22,7 @@
 namespace fs = std::filesystem;
 
 #include "config.h"
+#include "config_macros.h"
 
 std::vector<std::string> cfg_path({"lsvd.conf", "/usr/local/etc/lsvd.conf"});
 
@@ -48,7 +49,6 @@ static std::map<std::string, cfg_backend> m = {{"file", BACKEND_FILE},
  *   environment var = LSVD_ + uppercase(field name)
  *   skips blank lines and lines that don't match a keyword
  */
-#include "config_macros.h"
 
 int lsvd_config::read()
 {
@@ -112,7 +112,8 @@ int lsvd_config::read()
     return 0; // success
 }
 
-std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name, cfg_cache_type type)
+std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name,
+                                        cfg_cache_type type)
 {
     char buf[256]; // PATH_MAX
     std::string file(name);

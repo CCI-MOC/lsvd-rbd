@@ -1,20 +1,6 @@
-/*
- * file:        img_reader.cc
- * description: implementation of read cache
- *              the read cache is:
- *                       * 1. indexed by obj/offset[*], not LBA
- *                       * 2. stores aligned 64KB blocks
- *                       * [*] offset is in units of 64KB blocks
- * author:      Peter Desnoyers, Northeastern University
- *              Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
 #include <algorithm> // std::min
 #include <cassert>
 #include <mutex>
-#include <shared_mutex>
 #include <string.h>
 #include <unistd.h>
 #include <vector>
@@ -25,7 +11,6 @@
 #include "extent.h"
 #include "img_reader.h"
 #include "lsvd_types.h"
-#include "objname.h"
 #include "request.h"
 #include "shared_read_cache.h"
 #include "smartiov.h"

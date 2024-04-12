@@ -1,18 +1,8 @@
-/*
- * file:        translate.cc
- * description: core translation layer - implementation
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <map>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <string.h>
 #include <sys/uio.h>
@@ -27,7 +17,6 @@
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "objects.h"
-#include "objname.h"
 #include "request.h"
 #include "src/utils.h"
 #include "translate.h"

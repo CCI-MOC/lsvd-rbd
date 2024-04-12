@@ -1,3 +1,13 @@
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/framework/extractor.hpp>
+#include <boost/accumulators/statistics.hpp>
+#include <boost/accumulators/statistics/rolling_count.hpp>
+#include <boost/accumulators/statistics/rolling_sum.hpp>
+#include <boost/bimap.hpp>
+#include <boost/container_hash/hash.hpp>
+
+#include "lsvd_types.h"
+#include "nvme.h"
 #include "shared_read_cache.h"
 
 const size_t CACHE_HEADER_SIZE = 4096;

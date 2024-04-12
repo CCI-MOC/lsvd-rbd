@@ -1,12 +1,3 @@
-/*
- * file:        objects.cc
- * description: serializers / deserializers for object format
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
 #include <string.h>
 #include <sys/uio.h>
 #include <zlib.h>

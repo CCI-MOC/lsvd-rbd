@@ -9,7 +9,6 @@ the how they fit together with rados and s3
 
 #include <stdint.h>
 #include <uuid/uuid.h>
-#include <vector>
 
 struct j_extent {
     uint64_t lba : 40; // volume LBA (in sectors)
@@ -94,8 +93,8 @@ struct j_write_super {
     uuid_t vol_uuid;
 } __attribute__((packed));
 
-/* In the first 4KB block of read cache, never gets overwritten (overwrite map in
- * place) uses a fixed map with 1 entry per 64KB block to update atomically:
+/* In the first 4KB block of read cache, never gets overwritten (overwrite map
+ * in place) uses a fixed map with 1 entry per 64KB block to update atomically:
  * - reclaim batch of blocks, then write map. (free entries: obj=0)
  * - allocate blocks, then write map
  * - recover free list to memory on startup

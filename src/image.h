@@ -1,14 +1,12 @@
 #pragma once
 
-#include <queue>
+#include <functional>
+#include <map>
 
 #include "backend.h"
 #include "config.h"
 #include "extent.h"
-#include "fake_rbd.h"
 #include "img_reader.h"
-#include "lsvd_types.h"
-#include "objects.h"
 #include "shared_read_cache.h"
 #include "translate.h"
 #include "write_cache.h"

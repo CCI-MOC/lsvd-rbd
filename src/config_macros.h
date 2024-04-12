@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string>
 
 static long parseint(const char *_s)
 {

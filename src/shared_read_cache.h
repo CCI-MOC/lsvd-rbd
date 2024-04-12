@@ -1,29 +1,11 @@
 #pragma once
 
-#include <array>
-#include <atomic>
-#include <boost/accumulators/accumulators.hpp>
-#include <boost/accumulators/framework/extractor.hpp>
-#include <boost/accumulators/statistics.hpp>
-#include <boost/accumulators/statistics/rolling_count.hpp>
-#include <boost/accumulators/statistics/rolling_sum.hpp>
-#include <boost/bimap.hpp>
-#include <boost/container_hash/hash.hpp>
 #include <fcntl.h>
-#include <map>
-#include <mutex>
-#include <shared_mutex>
 #include <sys/resource.h>
-#include <thread>
 #include <unistd.h>
-#include <unordered_map>
 
 #include "backend.h"
-#include "extent.h"
-#include "nvme.h"
-#include "objname.h"
 #include "request.h"
-#include "shared_read_cache.h"
 #include "smartiov.h"
 #include "utils.h"
 

@@ -1,12 +1,3 @@
-/*
- * file:        nvme.cc
- * description: implementation of read/write requests to local SSD
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
 #include <sys/uio.h>
 #include <unistd.h>
 #include <utility>
