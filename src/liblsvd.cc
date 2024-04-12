@@ -11,7 +11,6 @@
 #include "config.h"
 #include "fake_rbd.h"
 #include "image.h"
-#include "img_reader.h"
 #include "lsvd_debug.h"
 #include "lsvd_types.h"
 #include "request.h"
