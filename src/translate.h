@@ -1,15 +1,4 @@
-/*
- * file:        translate.h
- * description: core translation layer - interface
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#ifndef TRANSLATE_H
-#define TRANSLATE_H
+#pragma once
 
 #include <mutex>
 #include <shared_mutex>
@@ -18,7 +7,6 @@
 #include "config.h"
 #include "extent.h"
 #include "shared_read_cache.h"
-#include "smartiov.h"
 #include "utils.h"
 
 class translate
@@ -61,5 +49,3 @@ int translate_clone_image(sptr<backend> objstore, const char *source,
                           const char *dest);
 int translate_remove_image(sptr<backend> objstore, const char *name);
 int translate_get_uuid(sptr<backend> objstore, const char *name, uuid_t &uu);
-
-#endif

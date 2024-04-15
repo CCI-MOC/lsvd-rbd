@@ -90,6 +90,12 @@ class self_refcount_request : public request
             child->release();
     }
 
+    void notify_parent(request *parent)
+    {
+        if (parent)
+            parent->notify(this);
+    }
+
   public:
     inline virtual void wait() override { UNIMPLEMENTED(); }
     inline virtual void release() override { dec_and_free(); }

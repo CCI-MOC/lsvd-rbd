@@ -8,7 +8,7 @@
  *              LGPL-2.1-or-later
  */
 
-#include <cassert>
+#include <argp.h>
 #include <condition_variable>
 #include <fcntl.h>
 #include <mutex>
@@ -17,16 +17,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <argp.h>
-
-#include "lsvd_types.h"
-
 #include "backend.h"
-#include "extent.h"
+#include "lsvd_types.h"
 #include "objects.h"
-#include "objname.h"
 #include "request.h"
-#include "smartiov.h"
 
 /* we should be able to just make backend requests and then
  * wait on them, but the backend segfaults in the case where
@@ -75,9 +69,9 @@ long img_size = 0;
 char *image_name;
 
 static struct argp_option options[] = {
-    {"size", 's', "SIZE", 0, "size in bytes (M/G=2^20,2^30)"},
+    {"size", 's', "SIZE", 0, "size in bytes (M/G=2^20,2^30)", 0},
     // {"pool", 'p', "POOL", 0, "pool for object"},
-    {0},
+    {0, 0, 0, 0, 0, 0},
 };
 
 static char args_doc[] = "IMAGE";
@@ -98,7 +92,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     }
     return 0;
 }
-static struct argp argp = {options, parse_opt, NULL, args_doc};
+static struct argp argp = {options, parse_opt, NULL, args_doc, 0, 0, 0};
 
 void create_thick(char *name, long size)
 {
@@ -135,7 +129,7 @@ void create_thick(char *name, long size)
         map1->len = 16384;
         sector += 16384;
 
-        auto req = be->make_write_req(oname, hdr_buf, data_bytes + 4096);
+        auto req = be->aio_write(oname, hdr_buf, data_bytes + 4096);
         auto r = new writer(hdr_buf);
         q.push(r);
         req->run(r);
@@ -205,7 +199,7 @@ void create_thick(char *name, long size)
 
     char oname[128];
     sprintf(oname, "%s.%08x", name, n_objs + 1);
-    be->write_object(oname, ckpt_buf, ckpt_sectors * 512);
+    be->write(oname, ckpt_buf, ckpt_sectors * 512);
 
     /* now write the superblock, with a single checkpoint pointer
      */
@@ -224,7 +218,7 @@ void create_thick(char *name, long size)
     auto ckpt = (int *)(sb_data + ckpt_offset);
     *ckpt = n_objs + 1;
 
-    be->write_object(name, sb_data, 4096);
+    be->write(name, sb_data, 4096);
 
     printf("Thick provisioning: 100%% complete...done\n");
 }

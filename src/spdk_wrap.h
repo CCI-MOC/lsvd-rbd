@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+
+#include "fake_rbd.h"
 #include "image.h"
 
 class lsvd_spdk;

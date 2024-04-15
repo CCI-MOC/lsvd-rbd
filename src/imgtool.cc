@@ -10,19 +10,12 @@
 #include "backend.h"
 #include "config.h"
 #include "fake_rbd.h"
-#include "image.h"
 #include "lsvd_types.h"
 #include "objects.h"
 #include "translate.h"
 #include "utils.h"
 
-const char *backend = "file";
-const char *image_name;
-const char *cache_dir;
-const char *cache_dev;
-cfg_cache_type cache_type = LSVD_CFG_READ;
-
-enum _op {
+enum tool_operation {
     OP_CREATE = 1,
     OP_DELETE = 2,
     OP_INFO = 3,
@@ -30,8 +23,12 @@ enum _op {
     OP_CLONE = 5
 };
 
-enum _op op;
-
+const char *backend = "file";
+const char *image_name;
+const char *cache_dir;
+const char *cache_dev;
+cfg_cache_type cache_type = LSVD_CFG_READ;
+enum tool_operation op;
 size_t size = 0;
 
 static long parseint(const char *_s)
@@ -139,7 +136,7 @@ void info(rados_ioctx_t io, const char *image_name)
     printf("write cache: %s\n", wcache_file.c_str());
 
     char base_buf[4096];
-    rv = objstore->read_object(image_name, base_buf, sizeof(base_buf), 0);
+    rv = objstore->read(image_name, 0, base_buf, sizeof(base_buf));
     if (rv < 0)
         throw std::runtime_error("failed to read superblock");
 
@@ -148,7 +145,6 @@ void info(rados_ioctx_t io, const char *image_name)
 
     if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
         throw std::runtime_error("corrupt superblock");
-
 
     char uuid_str[64];
     uuid_unparse_lower(base_hdr->vol_uuid, uuid_str);
@@ -174,8 +170,6 @@ void info(rados_ioctx_t io, const char *image_name)
         consumed += sizeof(clone_info) + strlen(objname) + 1;
     }
 }
-
-extern size_t getsize64(int fd);
 
 void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name,
               cfg_cache_type type)

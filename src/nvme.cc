@@ -1,26 +1,12 @@
-/*
- * file:        nvme.cc
- * description: implementation of read/write requests to local SSD
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#include <signal.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <utility>
 #include <uuid/uuid.h>
 
-#include <condition_variable>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 
-#include "backend.h"
-#include "extent.h"
 #include "lsvd_types.h"
-#include "misc_cache.h"
 #include "request.h"
 #include "smartiov.h"
 #include "utils.h"
@@ -187,7 +173,7 @@ class nvme_uring : public nvme
         void on_complete(int result)
         {
             // TODO figure out error handling
-            if (result != iovs_.bytes())
+            if (std::cmp_not_equal(result, iovs_.bytes()))
                 log_error("nvme uring request completed with partial result");
 
             parent_->notify(this);

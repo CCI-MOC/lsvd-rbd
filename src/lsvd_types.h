@@ -1,15 +1,7 @@
-/*
- * file:        lsvd_types.h
- * description: basic types, not relying on any other ones
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
+#pragma once
 
-#ifndef __LSVD_TYPES_H__
-#define __LSVD_TYPES_H__
-
+#include <fmt/format.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <vector>
 
@@ -57,4 +49,16 @@ static inline bool aligned(const void *ptr, int a)
     return 0 == ((long)ptr & (a - 1));
 }
 
-#endif
+class objname
+{
+    std::string name;
+
+  public:
+    objname(std::string prefix, uint32_t seq)
+    {
+        name = fmt::format("{}.{:08x}", prefix, seq);
+    }
+
+    std::string str() { return name; }
+    const char *c_str() { return name.c_str(); }
+};

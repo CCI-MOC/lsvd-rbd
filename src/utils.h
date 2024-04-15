@@ -1,26 +1,17 @@
 #pragma once
 
-#include <atomic>
-#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <errno.h>
-#include <filesystem>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <iostream>
 #include <linux/fs.h>
-#include <map>
 #include <mutex>
-#include <optional>
 #include <queue>
-#include <shared_mutex>
 #include <signal.h>
-#include <source_location>
-#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <stdio.h>
@@ -89,11 +80,27 @@ template <typename T> using uptr = std::unique_ptr<T>;
     do {                                                                       \
         if (ret == -1) {                                                       \
             auto en = errno;                                                   \
-            auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] " MSG "\n",     \
-                                 __FILE__, __LINE__, __func__, en,             \
-                                 strerror(en), ##__VA_ARGS__);                 \
+            auto fs = fmt::format(MSG "\n", ##__VA_ARGS__);                    \
+            auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] {}", __FILE__,  \
+                                 __LINE__, __func__, en, strerror(en), fs);    \
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
-            throw std::runtime_error(s);                                       \
+            throw std::runtime_error(fs);                                      \
+        }                                                                      \
+    } while (0)
+
+/**
+ * Check return values of functions that return -errno in the case of an error
+ * and throw an exception
+ */
+#define check_ret_neg(ret, MSG, ...)                                           \
+    do {                                                                       \
+        if (ret < 0) {                                                         \
+            auto en = -ret;                                                    \
+            auto fs = fmt::format(MSG "\n", ##__VA_ARGS__);                    \
+            auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] {}", __FILE__,  \
+                                 __LINE__, __func__, en, strerror(en), fs);    \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            throw std::runtime_error(fs);                                      \
         }                                                                      \
     } while (0)
 

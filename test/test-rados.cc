@@ -1,17 +1,10 @@
-/*
- * file:        test-rados.cc
- * description: simple performance test - create N 8MB objects in parallel
- */
-
+#include <condition_variable>
+#include <mutex>
+#include <rados/librados.h>
+#include <stack>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
-
-#include <rados/librados.h>
-
-#include <condition_variable>
-#include <mutex>
-#include <stack>
 
 rados_t cluster;
 rados_ioctx_t io_ctx;
@@ -45,7 +38,7 @@ void aio_write_done(rados_completion_t c, void *ptr)
  */
 int main(int argc, char **argv)
 {
-    int N = atoi(argv[1]);
+    size_t N = atoi(argv[1]);
     double t = atof(argv[2]);
     char *pool = argv[3];
     char *prefix = argv[4];
@@ -60,7 +53,7 @@ int main(int argc, char **argv)
         printf("error: ioctx\n"), exit(1);
 
     size_t bytes = 8 * 1024 * 1024;
-    for (int i = 0; i < N; i++) {
+    for (size_t i = 0; i < N; i++) {
         auto buf = malloc(bytes);
         // printf("push %p\n", buf);
         buffers.push(buf);

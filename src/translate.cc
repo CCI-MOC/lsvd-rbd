@@ -1,22 +1,9 @@
-/*
- * file:        translate.cc
- * description: core translation layer - implementation
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#include <algorithm>
 #include <atomic>
 #include <condition_variable>
-#include <errno.h>
-#include <list>
 #include <map>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
-#include <stack>
 #include <string.h>
 #include <sys/uio.h>
 #include <thread>
@@ -26,18 +13,13 @@
 #include <zlib.h>
 
 #include "extent.h"
-#include "image.h"
 #include "lsvd_debug.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
 #include "objects.h"
-#include "objname.h"
 #include "request.h"
+#include "src/utils.h"
 #include "translate.h"
-
-void do_log(const char *, ...);
-void fp_log(const char *, ...);
-extern void log_time(uint64_t loc, uint64_t val); // debug
 
 /*
  * Architecture:
@@ -352,7 +334,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
     auto [_buf, bytes] =
         parser->read_super(super_name, ckpts, clones, snaps, uuid);
 
-    check_cond(bytes < 0, "read_super failed");
+    check_cond(bytes < 0, "read_super failed for obj {}", super_name);
     check_cond(_buf == NULL, "no superblock");
 
     int n_ckpts = ckpts.size();
@@ -384,7 +366,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
                 log_info("Using base name: {}", obj_name);
             }
 
-            auto rv = objstore->read_object(obj_name, buf, sizeof(buf), 0);
+            auto rv = objstore->read(obj_name, 0, buf, sizeof(buf));
             check_cond(rv < 0, "Failed to read {}", obj_name);
 
             auto _h = (obj_hdr *)buf;
@@ -500,7 +482,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
      */
     for (int i = 1; i < 32; i++) {
         objname name(prefix(i + seq), i + seq);
-        objstore->delete_object(name.c_str());
+        objstore->delete_obj(name.str());
     }
 
     workers->pool.push(
@@ -801,7 +783,7 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req)
     /* and write it
      */
     objname name(prefix(_seq), _seq);
-    objstore->write_object(name.c_str(), buf, sectors * 512);
+    objstore->write(name.str(), buf, sectors * 512);
     free(buf);
 
     checkpoints.push_back(_seq);
@@ -818,11 +800,11 @@ void translate_impl::write_checkpoint(int _seq, translate_req *req)
     for (size_t i = 0; i < checkpoints.size(); i++)
         *pc++ = checkpoints[i];
 
-    objstore->write_object(super_name, super_buf, 4096);
+    objstore->write(super_name, super_buf, 4096);
 
     for (auto c : ckpts_to_delete) {
         objname name(prefix(c), c);
-        objstore->delete_object(name.c_str());
+        objstore->delete_obj(name.str());
     }
 
     req->done = true;
@@ -863,7 +845,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
     auto data_ptr0 = data_ptr;
     auto in_ptr = req->gc_data;
 
-    int _data_sectors = 0; // actual sectors in GC write
+    // int _data_sectors = 0; // actual sectors in GC write
     std::vector<data_map> obj_extents;
 
     req->local_buf_base = data_ptr;
@@ -879,7 +861,7 @@ void translate_impl::write_gc(int _seq, translate_req *req)
                 continue;
 
             sector_t _sectors = _limit - _base;
-            _data_sectors += _sectors;
+            // _data_sectors += _sectors;
             int bytes = _sectors * 512;
 
             sector_t extent_offset = _base - base;
@@ -935,8 +917,8 @@ void translate_impl::write_gc(int _seq, translate_req *req)
     object_info[_seq] = oi;
 
     objname name(prefix(_seq), _seq);
-    auto req2 = objstore->make_write_req(name.c_str(), hdr,
-                                         (hdr_sectors + data_sectors) * 512);
+    auto req2 = objstore->aio_write(name.str(), hdr,
+                                    (hdr_sectors + data_sectors) * 512);
     outstanding_writes++;
     req2->run(req);
 }
@@ -1003,7 +985,7 @@ void translate_impl::process_batch(int _seq, translate_req *req)
 
     rcache->insert_object(pf, _seq, obj_size, obj_ptr);
 
-    auto req2 = objstore->make_write_req(name.c_str(), obj_ptr, obj_size);
+    auto req2 = objstore->aio_write(name.str(), obj_ptr, obj_size);
     outstanding_writes++;
     req2->run(req);
 }
@@ -1158,7 +1140,7 @@ void translate_impl::do_gc(bool *running)
                 continue;
         }
         objname name(prefix(o), o);
-        auto r = objstore->delete_object_req(name.c_str());
+        auto r = objstore->aio_delete(name.str());
         r->run(NULL);
         deletes.push(r);
         while (deletes.size() > 8) {
@@ -1184,7 +1166,7 @@ void translate_impl::do_gc(bool *running)
      * utilization, i.e. (live data) / (total size)
      */
     obj_r_lock.lock();
-    int calculated_total = 0;
+    // int calculated_total = 0;
     std::set<std::tuple<double, int, int>> utilization;
     for (auto p : object_info) {
         if (p.first > last_ckpt)
@@ -1192,7 +1174,7 @@ void translate_impl::do_gc(bool *running)
         auto [hdrlen, datalen, live] = p.second;
         double rho = 1.0 * live / datalen;
         sector_t sectors = hdrlen + datalen;
-        calculated_total += datalen;
+        // calculated_total += datalen;
         utilization.insert(std::make_tuple(rho, p.first, sectors));
     }
     obj_r_lock.unlock();
@@ -1257,7 +1239,7 @@ void translate_impl::do_gc(bool *running)
 
         for (auto [i, sectors] : objs_to_clean) {
             objname name(prefix(i), i);
-            objstore->read_object(name.c_str(), buf, sectors * 512UL, 0);
+            objstore->read(name.str(), 0, buf, sectors * 512UL);
             gc_sectors_read += sectors;
             file_map[i] = offset;
             if (write(fd, buf, sectors * 512) < 0)
@@ -1367,7 +1349,7 @@ void translate_impl::do_gc(bool *running)
                     continue;
             }
             objname name(prefix(obj), obj);
-            objstore->delete_object(name.c_str());
+            objstore->delete_obj(name.str());
             gc_deleted++;
         }
     }
@@ -1456,7 +1438,8 @@ int translate_create_image(sptr<backend> objstore, const char *name,
                       LSVD_SUPER, // type
                       0,          // seq
                       8,          // hdr_sectors
-                      0};         // data_sectors
+                      0,          // data_sectors
+                      0};
     uuid_generate_random(_hdr->vol_uuid);
 
     auto _super = (super_hdr *)(_hdr + 1);
@@ -1466,14 +1449,14 @@ int translate_create_image(sptr<backend> objstore, const char *name,
                           0,       0,  // clone offset, len
                           0,       0}; // snap offset, len
 
-    auto rv = objstore->write_object(name, buf, 4096);
+    auto rv = objstore->write(name, buf, 4096);
     return rv;
 }
 
 int translate_get_uuid(sptr<backend> objstore, const char *name, uuid_t &uu)
 {
     char buf[4096];
-    int rv = objstore->read_object(name, buf, sizeof(buf), 0);
+    int rv = objstore->read(name, 0, buf, sizeof(buf));
     if (rv < 0)
         return rv;
     auto hdr = (obj_hdr *)buf;
@@ -1487,7 +1470,7 @@ int translate_remove_image(sptr<backend> objstore, const char *name)
     /* read the superblock to get the list of checkpoints
      */
     char buf[4096];
-    int rv = objstore->read_object(name, buf, sizeof(buf), 0);
+    int rv = objstore->read(name, 0, buf, sizeof(buf));
     if (rv < 0)
         return rv;
     auto hdr = (obj_hdr *)buf;
@@ -1517,27 +1500,18 @@ int translate_remove_image(sptr<backend> objstore, const char *name)
 
         /* delete all the objects in the objmap
          */
-        std::queue<request *> deletes;
         for (auto const &o : objects) {
             objname obj(name, o.seq);
-            auto r = objstore->delete_object_req(obj.c_str());
-            r->run(NULL);
-            deletes.push(r);
-            while (deletes.size() > 8) {
-                deletes.front()->wait();
-                deletes.pop();
-            }
-        }
-        while (deletes.size() > 0) {
-            deletes.front()->wait();
-            deletes.pop();
+            auto r = objstore->delete_obj(obj.str());
+            if (r < 0)
+                log_warn("Failed to delete obj {}, r={}", obj.str(), r);
         }
 
         /* delete all the checkpoints
          */
         for (auto const &c : ckpts) {
             objname obj(name, c);
-            objstore->delete_object(obj.c_str());
+            objstore->delete_obj(obj.str());
         }
         free(ckpt_buf);
     }
@@ -1546,13 +1520,13 @@ int translate_remove_image(sptr<backend> objstore, const char *name)
      */
     for (int n = 0; n < 16; seq++, n++) {
         objname obj(name, seq);
-        if (objstore->delete_object(obj.c_str()) >= 0)
+        if (objstore->delete_obj(obj.str()) >= 0)
             n = 0;
     }
 
     /* and delete the superblock
      */
-    objstore->delete_object(name);
+    objstore->delete_obj(name);
     return 0;
 }
 
@@ -1575,29 +1549,5 @@ inline std::vector<ckpt_id> deserialise_checkpoint_ids(char *buf)
 int translate_clone_image(sptr<backend> objstore, const char *source,
                           const char *dest)
 {
-    // read superblock
-    char base_buf[4096];
-    int rv = objstore->read_object(source, base_buf, sizeof(base_buf), 0);
-    if (rv < 0)
-        throw std::runtime_error("failed to read superblock");
-
-    auto base_hdr = (obj_hdr *)base_buf;
-    auto base_super = (super_hdr *)(base_hdr + 1);
-
-    if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
-        throw std::runtime_error("corrupt superblock");
-
-    // get checkpoints
-    int seq = 1;
-    auto cp_ids = deserialise_checkpoint_ids(base_buf);
-    if (cp_ids.size() == 0) {
-        log_error("We need at least 1 checkpoint in the base image to clone");
-        throw std::runtime_error("no checkpoints found");
-    }
-
-    auto cp_name = fmt::format("{}.{:08x}", source, cp_ids.back());
-    char cp_buf[4096];
-    objstore->read_object(cp_name.c_str(), cp_buf, sizeof(cp_buf), 0);
-
     throw std::runtime_error("unimplemented");
 }

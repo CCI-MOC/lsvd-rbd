@@ -1,3 +1,13 @@
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/framework/extractor.hpp>
+#include <boost/accumulators/statistics.hpp>
+#include <boost/accumulators/statistics/rolling_count.hpp>
+#include <boost/accumulators/statistics/rolling_sum.hpp>
+#include <boost/bimap.hpp>
+#include <boost/container_hash/hash.hpp>
+
+#include "lsvd_types.h"
+#include "nvme.h"
 #include "shared_read_cache.h"
 
 const size_t CACHE_HEADER_SIZE = 4096;
@@ -574,9 +584,9 @@ request *shared_read_cache::make_read_req(std::string img_prefix,
     entry.status = entry_status::FETCHING;
     entry.key = cache_key;
 
-    objname obj_name(img_prefix, seqnum);
-    auto backend_req = obj_backend->make_read_req(
-        obj_name.c_str(), obj_offset, (char *)buf, CACHE_CHUNK_SIZE);
+    objname oname(img_prefix, seqnum);
+    auto backend_req =
+        obj_backend->aio_read(oname.str(), obj_offset, buf, CACHE_CHUNK_SIZE);
     cache_map.insert(std::make_pair(cache_key, idx));
     auto req = new cache_miss_request(*this, idx, cache_key, buf, adjust, dest,
                                       backend_req);

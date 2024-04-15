@@ -4,8 +4,8 @@
 //
 
 #include "extent.h"
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <vector>
 
@@ -198,9 +198,9 @@ std::vector<extmap::lba2obj> *merge(std::vector<extmap::obj_offset> *writes)
 {
     int64_t base = 0, limit = 0;
     auto v = new std::vector<extmap::lba2obj>;
-    int i = 0;
+    size_t i = 0;
     while (i < writes->size()) {
-        while (i < writes->size() && (*writes)[i].obj == 0xFFFFFFFF) {
+        while (i < writes->size() - 1 && (*writes)[i].obj == 0xFFFFFFFF) {
             base = i + 1;
             i++;
         }

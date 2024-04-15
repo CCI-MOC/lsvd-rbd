@@ -10,6 +10,7 @@
 #ifndef NVME_H
 #define NVME_H
 
+#include "request.h"
 #include "smartiov.h"
 
 class nvme

@@ -13,9 +13,6 @@
 #include <unistd.h>
 #include <uuid/uuid.h>
 
-#include <string>
-
-#include "extent.h"
 #include "journal.h"
 #include "lsvd_types.h"
 

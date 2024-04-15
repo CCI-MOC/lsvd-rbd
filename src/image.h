@@ -1,14 +1,11 @@
 #pragma once
 
-#include <queue>
+#include <functional>
+#include <map>
 
 #include "backend.h"
 #include "config.h"
 #include "extent.h"
-#include "fake_rbd.h"
-#include "img_reader.h"
-#include "lsvd_types.h"
-#include "objects.h"
 #include "shared_read_cache.h"
 #include "translate.h"
 #include "write_cache.h"
@@ -37,13 +34,15 @@ class lsvd_image
     extmap::bufmap bufmap;
     std::mutex bufmap_lock;
 
+    // TODO only 1 read at a time? probably too coarse
+    std::mutex reader_lock;
+
     std::map<int, char *> buffers;
 
     std::shared_ptr<backend> objstore;
     std::shared_ptr<read_cache> shared_cache;
-    std::unique_ptr<translate> xlate;
     std::unique_ptr<write_cache> wcache;
-    std::unique_ptr<img_reader> reader;
+    std::unique_ptr<translate> xlate;
     int write_fd; /* write cache file */
 
     int refcount = 0;
@@ -64,4 +63,8 @@ class lsvd_image
     request *write(size_t offset, smartiov iov, std::function<void(int)> cb);
     request *trim(size_t offset, size_t len, std::function<void(int)> cb);
     request *flush(std::function<void(int)> cb);
+
+  private:
+    void handle_reads(size_t offset, smartiov iovs,
+                      std::vector<request *> &requests);
 };

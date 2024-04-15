@@ -1,27 +1,11 @@
-/*
- * file:        write_cache.cc
- * description: write_cache implementation
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
-#include <map>
 #include <mutex>
-#include <shared_mutex>
-#include <stack>
-#include <thread>
 #include <uuid/uuid.h>
 #include <vector>
 
-#include "backend.h"
-#include "extent.h"
+#include "config.h"
 #include "journal.h"
 #include "lsvd_types.h"
 #include "misc_cache.h"
@@ -29,12 +13,7 @@
 #include "request.h"
 #include "smartiov.h"
 #include "translate.h"
-
-#include "config.h"
 #include "write_cache.h"
-
-extern void do_log(const char *, ...);
-extern void log_time(uint64_t loc, uint64_t val); // debug
 
 /* ------------- Write cache structure ------------- */
 
