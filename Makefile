@@ -18,5 +18,5 @@ clean:
 
 install-deps:
 	sudo apt install -y meson libfmt-dev libaio-dev librados-dev mold \
-    	libtcmalloc-minimal4 libboost-dev \
+    	libtcmalloc-minimal4 libboost-dev libradospp-dev \
     	liburing-dev
