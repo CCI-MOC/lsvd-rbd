@@ -1,0 +1,29 @@
+name: test-build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Clang 17
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 17
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          make install-deps
+
+      - name: Build
+        run: |
+          make debug
