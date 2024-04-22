@@ -40,6 +40,7 @@ jobs:
           
           cd build-dbg
           sudo meson test
+          sudo ./imgtool --create --size 1g --pool pone test-img
 
       - name: Logs
         if: always()
