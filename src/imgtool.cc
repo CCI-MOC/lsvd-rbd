@@ -219,7 +219,7 @@ int main(int argc, char **argv)
     }
 
     rados_t cluster;
-    int err = rados_create2(&cluster, "ceph", "admin.lsvd", 0);
+    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
     check_ret_neg(err, "Failed to create cluster handle");
 
     err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
