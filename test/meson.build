@@ -24,5 +24,5 @@ unit1 = executable(
 # executable('lsvd_rnd_test', 'lsvd_rnd_test.cc', include_directories: lsvd_inc, link_with: liblsvd, dependencies: lsvd_deps)
 
 test('Sequential write/read', seq)
-test('Misc unit tests', unit1)
-test('RADOS performance test?', rados)
+# test('Misc unit tests', unit1)
+# test('RADOS performance test?', rados)

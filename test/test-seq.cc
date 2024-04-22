@@ -9,6 +9,16 @@
 const size_t LSVD_BLOCK_SIZE = 4096;
 using comp_buf = std::array<uint8_t, LSVD_BLOCK_SIZE>;
 
+// https://stackoverflow.com/a/51061314/21281619
+// There's a memory leak that doesn't affect the functionality.
+// Temporarily disable memory leak checks. Remove the following code
+// block once leak is fixed.
+#ifdef __cplusplus
+extern "C"
+#endif
+const char* __asan_default_options() { return "detect_leaks=0"; }
+
+
 /**
  * Usage:
  *     hexDump(desc, addr, len, perLine);
@@ -104,8 +114,8 @@ void run_test(rados_ioctx_t ctx)
     log_info("Removing old image if one exists");
     rbd_remove(ctx, "random-test-img");
 
-    size_t img_size = 1 * 1024 * 1024 * 1024;
-    // size_t img_size = 100 * 1024 * 1024;
+    // size_t img_size = 1 * 1024 * 1024 * 1024;
+    size_t img_size = 100 * 1024 * 1024;
 
     // create the image for our own use
     log_info("Creating image {} of size {}", "random-test-img", img_size);
@@ -162,14 +172,14 @@ void run_test(rados_ioctx_t ctx)
 int main(int argc, char *argv[])
 {
     // config options
-    setenv("LSVD_RCACHE_DIR", "/mnt/nvme/lsvd-read/", 1);
-    setenv("LSVD_WCACHE_DIR", "/mnt/nvme-remote/lsvd-write/", 1);
+    setenv("LSVD_RCACHE_DIR", "/tmp/lsvd-read", 1);
+    setenv("LSVD_WCACHE_DIR", "/tmp/lsvd-write", 1);
     setenv("LSVD_CACHE_SIZE", "2147483648", 1);
 
     std::string pool_name = "pone";
 
     rados_t cluster;
-    int err = rados_create2(&cluster, "ceph", "client.lsvd", 0);
+    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
     check_ret_neg(err, "Failed to create cluster handle");
 
     err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");

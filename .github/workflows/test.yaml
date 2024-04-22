@@ -27,3 +27,21 @@ jobs:
       - name: Build
         run: |
           make debug
+
+      - name: Install Ceph
+        run: |
+          sudo ./ci/setup_ceph.sh
+          sudo ceph osd pool create pone
+
+      - name: Run tests
+        run: |
+          mkdir -p /tmp/lsvd-read
+          mkdir -p /tmp/lsvd-write
+          
+          cd build-dbg
+          sudo meson test
+
+      - name: Logs
+        if: always()
+        run: |
+          cat build-dbg/meson-logs/testlog.txt
