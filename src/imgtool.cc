@@ -23,12 +23,13 @@ enum tool_operation {
     OP_CLONE = 5
 };
 
-const char *backend = "file";
+const char *backend = "rados";
 const char *image_name;
 const char *cache_dir;
 const char *cache_dev;
 cfg_cache_type cache_type = LSVD_CFG_READ;
 enum tool_operation op;
+const char *pool_name = "lsvd";
 size_t size = 0;
 
 static long parseint(const char *_s)
@@ -46,7 +47,6 @@ static long parseint(const char *_s)
 
 static struct argp_option options[] = {
     {"cache-dir", 'd', "DIR", 0, "cache directory", 0},
-    {"rados", 'O', 0, 0, "use RADOS", 0},
     {"create", 'C', 0, 0, "create image", 0},
     {"mkcache", 'k', "DEV", 0, "use DEV as cache", 0},
     {"cache-type", 't', "R/W", 0,
@@ -55,6 +55,7 @@ static struct argp_option options[] = {
     {"delete", 'D', 0, 0, "delete image", 0},
     {"info", 'I', 0, 0, "show image information", 0},
     {"clone", 'c', "IMAGE", 0, "clone image", 0},
+    {"pool", 'p', "POOL", 0, "pool name", 0},
     {0, 0, 0, 0, 0, 0},
 };
 
@@ -71,9 +72,6 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case 'd':
         cache_dir = arg;
-        break;
-    case 'O':
-        backend = "rados";
         break;
     case 'C':
         op = OP_CREATE;
@@ -105,6 +103,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'c':
         op = OP_CLONE;
         break;
+    case 'p':
+        pool_name = arg;
     case ARGP_KEY_END:
         if (op == 0 || (op == OP_CREATE && size == 0))
             argp_usage(state);
@@ -217,19 +217,36 @@ int main(int argc, char **argv)
         else
             setenv("LSVD_WCACHE_DIR", cache_dir, 1);
     }
-    rados_ioctx_t io = 0;
+
+    rados_t cluster;
+    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
+    check_ret_neg(err, "Failed to create cluster handle");
+
+    err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
+    check_ret_neg(err, "Failed to read config file");
+
+    err = rados_connect(cluster);
+    check_ret_neg(err, "Failed to connect to cluster");
+
+    rados_ioctx_t io_ctx;
+    err = rados_ioctx_create(cluster, pool_name, &io_ctx);
+    check_ret_neg(err, "Failed to connect to pool {}", pool_name);
+
     if (op == OP_CREATE && size > 0)
-        rbd_create(io, image_name, size, NULL);
+        rbd_create(io_ctx, image_name, size, NULL);
     else if (op == OP_DELETE)
-        rbd_remove(io, image_name);
+        rbd_remove(io_ctx, image_name);
     else if (op == OP_INFO)
-        info(io, image_name);
+        info(io_ctx, image_name);
     else if (op == OP_MKCACHE)
-        mk_cache(io, image_name, cache_dev, cache_type);
+        mk_cache(io_ctx, image_name, cache_dev, cache_type);
     else if (op == OP_CLONE) {
         auto src_img = image_name;
         auto dst_img = argv[argc - 1];
         fmt::print("cloning from {} to {}\n", src_img, dst_img);
-        rbd_clone(io, src_img, dst_img);
+        rbd_clone(io_ctx, src_img, dst_img);
     }
+
+    rados_ioctx_destroy(io_ctx);
+    rados_shutdown(cluster);
 }
