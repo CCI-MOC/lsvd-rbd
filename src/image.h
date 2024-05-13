@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <map>
+#include <thread>
 
 #include "backend.h"
 #include "config.h"
@@ -16,6 +17,11 @@
  */
 class lsvd_image
 {
+  private:
+    // no copying
+    lsvd_image(const lsvd_image &) = delete;
+    lsvd_image operator=(const lsvd_image &) = delete;
+
   public:
     std::string image_name;
 

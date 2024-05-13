@@ -1,9 +1,9 @@
 project(
 	'lsvd-rbd',
-	'cpp',
+	['c', 'cpp'],
 	version: '0.1',
 	default_options: [
-		'cpp_std=c++20',
+		'cpp_std=c++2a',
 		'warning_level=2',
 		'b_colorout=always',
 	],
@@ -11,25 +11,33 @@ project(
 
 add_project_arguments('-fPIC', language: 'cpp')
 add_project_arguments('-Wno-unused-parameter', language: 'cpp')
+# add_project_arguments(['-stdlib=libc++'], language: 'cpp')
+# add_project_link_arguments(['-stdlib=libc++'], language: 'cpp')
 
 if get_option('buildtype') == 'debug'
 	add_project_arguments('-fno-inline', language: 'cpp')
 	add_project_arguments('-DLOGLV=1', language: 'cpp')
 
 	# add sanitizers for debug builds
-	add_project_arguments(
-		'-fsanitize=address,undefined,nullability,implicit-conversion',
-		language: 'cpp',
-	)
-	add_project_link_arguments(
-		'-fsanitize=address,undefined',
-		'-Wl,--unresolved-symbols=ignore-in-object-files',
-		language: 'cpp',
-	)
+	# add_project_arguments(
+	# 	'-fsanitize=address,undefined,nullability,implicit-conversion',
+	# 	language: 'cpp',
+	# )
+	# add_project_link_arguments(
+	# 	'-fsanitize=address,undefined',
+	# 	'-Wl,--unresolved-symbols=ignore-in-object-files',
+	# 	language: 'cpp',
+	# )
 endif
 
 subdir('src')
 liblsvd = library('lsvd', lsvd_src, dependencies: lsvd_deps, install: false)
+
+executable(
+	'lsvd',
+	spdk_fe,
+	dependencies: lsvd_deps + spdk_deps + spdk_libs,
+)
 
 executable(
 	'imgtool',

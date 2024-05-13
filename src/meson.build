@@ -1,13 +1,4 @@
-lpthread = dependency('threads')
-lz = dependency('zlib')
-lfmt = dependency('fmt')
-lboost = dependency('boost')
-luring = dependency('liburing', static: true)
-luuid = dependency('uuid')
-
 cxx = meson.get_compiler('cpp')
-lrados = cxx.find_library('rados', required: true)
-ltcmalloc = cxx.find_library('tcmalloc', required: false)
 
 lsvd_src = files(
 	'config.cc',
@@ -25,4 +16,31 @@ lsvd_src = files(
 )
 
 lsvd_inc = include_directories('.')
-lsvd_deps = [lpthread, lz, lfmt, lboost, luring, lrados, luuid, ltcmalloc]
+lsvd_deps = [
+	dependency('threads'),
+	dependency('zlib'),
+	dependency('fmt'),
+	dependency('boost'),
+	dependency('liburing'),
+	dependency('uuid'),
+	cxx.find_library('rados', required: true),
+	cxx.find_library('tcmalloc', required: false),
+]
+
+spdk_fe = lsvd_src + files('spdk_frontend.cc')
+
+spdk_deps = [
+	dependency('numa'),
+	cxx.find_library('archive'),
+]
+
+spdk_libs = [
+	dependency('spdk_bdev', static: true),
+	dependency('spdk_env_dpdk', static: true),
+	dependency('spdk_json', static: true),
+	dependency('spdk_nvme', static: true),
+	dependency('spdk_nvmf', static: true),
+	dependency('spdk_rpc', static: true),
+	dependency('spdk_trace', static: true),
+	dependency('spdk_util', static: true),
+]
