@@ -27,6 +27,8 @@
 template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
 
+#define CEXTERN extern "C"
+
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
         if (LOGLV <= 0)                                                        \

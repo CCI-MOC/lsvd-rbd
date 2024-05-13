@@ -1,16 +1,20 @@
 #include "spdk/env.h"
 #include "spdk/event.h"
 
+#include "utils.h"
+
+static void start_lsvd()
+{
+    log_info("Starting LSVD SPDK program ...");
+}
+
 int main(int argc, char **argv)
 {
-    spdk_env_opts opts;
-    spdk_env_opts_init(&opts);
+    spdk_app_opts opts = {};
+    spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "spdk_frontend";
-    opts.core_mask = "0x1";
-    opts.shm_id = 0;
-    spdk_env_init(&opts);
 
-    spdk_env_thread_wait_all();
-
-    return 0;
+    int rc = spdk_app_start(&opts, NULL, NULL);
+    spdk_app_fini();
+    return rc;
 }
