@@ -3,7 +3,7 @@
 set -xeuo pipefail
 
 lsvd_dir=$(git rev-parse --show-toplevel)
-cd $lsvd_dir/spdk
+cd $lsvd_dir/subprojects/spdk
 
 ./build/bin/nvmf_tgt -m '[0,1,2,3]' &
 

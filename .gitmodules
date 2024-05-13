@@ -1,5 +1,5 @@
 [submodule "spdk"]
-	path = spdk
+	path = subprojects/spdk
 	url = https://github.com/spdk/spdk
 [submodule "lsvd-atc24"]
 	path = atc2024
