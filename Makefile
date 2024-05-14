@@ -17,6 +17,8 @@ clean:
 	cd build-dbg; meson compile --clean
 
 install-deps:
-	sudo apt install -y meson libfmt-dev libaio-dev librados-dev mold \
+	sudo apt install -y meson libfmt-dev libaio-dev librados-dev \
     	libtcmalloc-minimal4 libboost-dev libradospp-dev \
-    	liburing-dev pkg-config uuid-dev
+    	liburing-dev pkg-config uuid-dev libnuma-dev libarchive-dev \
+		libibverbs-dev librdmacm-dev
+
