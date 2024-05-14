@@ -45,4 +45,4 @@ jobs:
       - name: Logs
         if: always()
         run: |
-          cat build-dbg/meson-logs/testlog.txt
+          cat build-rel/meson-logs/testlog.txt
