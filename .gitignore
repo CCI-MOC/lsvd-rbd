@@ -6,6 +6,7 @@ venv/
 .ipynb_checkpoints/
 
 builddir
+build
 qemu/*.img
 qemu/*.iso
 qemu/bzImage
