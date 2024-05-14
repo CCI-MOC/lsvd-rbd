@@ -27,20 +27,8 @@ lsvd_deps = [
 	cxx.find_library('tcmalloc', required: false),
 ]
 
-spdk_fe = lsvd_src + files('spdk_frontend.cc')
-
-spdk_deps = [
-	dependency('numa'),
-	cxx.find_library('archive'),
-]
-
-spdk_libs = [
-	dependency('spdk_bdev', static: true),
-	dependency('spdk_env_dpdk', static: true),
-	dependency('spdk_json', static: true),
-	dependency('spdk_nvme', static: true),
-	dependency('spdk_nvmf', static: true),
-	dependency('spdk_rpc', static: true),
-	dependency('spdk_trace', static: true),
-	dependency('spdk_util', static: true),
-]
+spdk_fe = lsvd_src + files(
+	'spdk_frontend.cc',
+	'bdev_lsvd.cc',
+	'spdk_rpc.cc',
+)

@@ -11,8 +11,6 @@ project(
 
 add_project_arguments('-fPIC', language: 'cpp')
 add_project_arguments('-Wno-unused-parameter', language: 'cpp')
-# add_project_arguments(['-stdlib=libc++'], language: 'cpp')
-# add_project_link_arguments(['-stdlib=libc++'], language: 'cpp')
 
 if get_option('buildtype') == 'debug'
 	add_project_arguments('-fno-inline', language: 'cpp')
@@ -36,7 +34,7 @@ liblsvd = library('lsvd', lsvd_src, dependencies: lsvd_deps, install: false)
 executable(
 	'lsvd',
 	spdk_fe,
-	dependencies: lsvd_deps + spdk_deps + spdk_libs,
+	dependencies: lsvd_deps + [dependency('_spdk')],
 )
 
 executable(
