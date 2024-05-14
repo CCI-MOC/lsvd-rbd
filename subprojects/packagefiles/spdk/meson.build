@@ -52,9 +52,9 @@ archive_dep = cc.find_library(
 if get_option('build_subprojects') and not fs.exists('build')
   message('Configuring ..')
   if get_option('buildtype') == 'debug'
-    run_command('spdk_configure_debug.sh', capture: true, check: true)
+    run_command(['configure-spdk.sh', 'debug'], capture: true, check: true)
   else
-    run_command('spdk_configure.sh', capture: true, check: true)
+    run_command(['configure-spdk.sh', 'release'], capture: true, check: true)
   endif
 endif
 if get_option('build_subprojects') and not fs.exists('build' / 'lib' / 'libspdk_nvme.a')
@@ -124,6 +124,7 @@ custom_libnames = [
   'spdk_event_accel',
   'spdk_accel',
   'spdk_dma',
+  'spdk_accel_error',
   'spdk_accel_ioat',
   'spdk_ioat',
   'spdk_event_vmd',
@@ -158,6 +159,7 @@ custom_libnames = [
   'rte_dmadev',
   'rte_cryptodev',
   'rte_hash',
+  'rte_log',
   'isal',
   'isal_crypto',
 ]
