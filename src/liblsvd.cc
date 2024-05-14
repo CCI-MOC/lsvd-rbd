@@ -23,10 +23,9 @@ extern "C" int rbd_open(rados_ioctx_t io, const char *name, rbd_image_t *image,
                         const char *snap_name)
 {
     auto img = lsvd_spdk::open_image(io, name);
-    if (img == nullptr) {
-        log_error("Failed to open image {}", name);
+    if (img == nullptr)
         return -1;
-    }
+
     *image = (void *)img;
     log_info("Opened image: {}, size {}", name, img->get_img().size);
     return 0;

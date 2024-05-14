@@ -28,7 +28,6 @@ lsvd_deps = [
 ]
 
 spdk_fe = lsvd_src + files(
-	'spdk_frontend.cc',
 	'bdev_lsvd.cc',
-	'spdk_rpc.cc',
+	'spdk_frontend.cc',
 )

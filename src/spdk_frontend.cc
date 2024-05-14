@@ -3,7 +3,7 @@
 
 #include "utils.h"
 
-static void start_lsvd()
+static void start_lsvd(void *arg)
 {
     log_info("Starting LSVD SPDK program ...");
 }
@@ -14,7 +14,7 @@ int main(int argc, char **argv)
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "spdk_frontend";
 
-    int rc = spdk_app_start(&opts, NULL, NULL);
+    int rc = spdk_app_start(&opts, start_lsvd, NULL);
     spdk_app_fini();
     return rc;
 }

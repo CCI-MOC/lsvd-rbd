@@ -1,7 +1,8 @@
 #pragma once
 
-#include "utils.h"
+#include <rados/librados.h>
+#include <string>
 
-CEXTERN int bdev_lsvd_create(const char *pool_name, const char *img_name);
+int bdev_lsvd_create(std::string img_name, rados_ioctx_t io_ctx);
 
-CEXTERN int bdev_lsvd_delete(const char *img_name);
+int bdev_lsvd_delete(std::string img_name);

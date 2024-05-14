@@ -60,6 +60,7 @@ class lsvd_image
     ~lsvd_image();
 
     int try_open(std::string name, rados_ioctx_t io);
+    static uptr<lsvd_image> open_image(std::string name, rados_ioctx_t io);
 
     class aio_request;
     class trivial_request;

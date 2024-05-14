@@ -3,22 +3,41 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "backend.h"
 #include "image.h"
 #include "journal.h"
 #include "lsvd_types.h"
+#include "shared_read_cache.h"
 
 extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 const int block_sectors = CACHE_CHUNK_SIZE / 512;
 
 lsvd_image::~lsvd_image()
 {
-    wcache->flush();
-    wcache->do_write_checkpoint();
-    if (!cfg.no_gc)
+    // TODO fix to the utterly cursed try_open function so that the object is
+    // always in valid state instaed of being partially constructed
+    if (wcache) {
+        wcache->flush();
+        wcache->do_write_checkpoint();
+    }
+    if (xlate && !cfg.no_gc)
         xlate->stop_gc();
-    xlate->checkpoint();
+    if (xlate)
+        xlate->checkpoint();
+    if (write_fd >= 0)
+        close(write_fd);
+}
 
-    close(write_fd);
+uptr<lsvd_image> lsvd_image::open_image(std::string name, rados_ioctx_t io)
+{
+    uptr<lsvd_image> img;
+    try {
+        img->try_open(name, io);
+        return img;
+    } catch (std::exception &e) {
+        log_error("Failed to open image {}: {}", name, e.what());
+        return nullptr;
+    }
 }
 
 int lsvd_image::try_open(std::string name, rados_ioctx_t io)
@@ -28,7 +47,7 @@ int lsvd_image::try_open(std::string name, rados_ioctx_t io)
     if (cfg.read() < 0)
         throw std::runtime_error("Failed to read config");
 
-    objstore = get_backend(&cfg, io, name.c_str());
+    objstore = make_rados_backend(io);
     shared_cache =
         get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
 
