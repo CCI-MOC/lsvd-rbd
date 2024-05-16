@@ -1,53 +1,20 @@
 # copied from xnvme's spdk subproject configuration and cleaned up a bit
 
-project(
-  'spdk',
-  'c',
-  version: '24.01',
-)
-fs = import('fs')
+project('spdk', 'c', version: '24.01')
 
-system_support = ['linux']
-system = host_machine.system()
-message('host_machine.system:', system)
-if not system_support.contains(system)
+if not host_machine.system() == 'linux'
   error('Unsupported system type "@0@"'.format(exec_env))
 endif
-foreach sys : system_support
-  set_variable('is_' + sys, system == sys)
-endforeach
 
+fs = import('fs')
 cc = meson.get_compiler('c')
 
-math_dep = cc.find_library(
-  'm',
-  has_headers: ['math.h'],
-)
-
-ssl_dep = dependency(
-  'openssl',
-  version: '>=1.1.1',
-)
-
-dlfcn_dep = cc.find_library(
-  'dl',
-  has_headers: ['dlfcn.h'],
-)
-
-uuid_dep = cc.find_library(
-  'uuid',
-  dirs: [],
-  has_headers: ['uuid/uuid.h'],
-)
-numa_dep = cc.find_library(
-  'numa',
-  has_headers: ['numaif.h'],
-  required: is_linux,
-)
-archive_dep = cc.find_library(
-  'archive',
-  has_headers: ['archive.h'],
-)
+math_dep = cc.find_library('m', has_headers: ['math.h'])
+ssl_dep = dependency('openssl', version: '>=1.1.1')
+dlfcn_dep = cc.find_library('dl', has_headers: ['dlfcn.h'])
+uuid_dep = cc.find_library('uuid', dirs: [], has_headers: ['uuid/uuid.h'])
+numa_dep = cc.find_library('numa', has_headers: ['numaif.h'])
+archive_dep = cc.find_library('archive', has_headers: ['archive.h'])
 
 if get_option('build_subprojects') and not fs.exists('build')
   message('Configuring ..')
@@ -57,40 +24,14 @@ if get_option('build_subprojects') and not fs.exists('build')
     run_command(['configure-spdk.sh', 'release'], capture: true, check: true)
   endif
 endif
-if get_option('build_subprojects') and not fs.exists('build' / 'lib' / 'libspdk_nvme.a')
-  cpu_count = run_command(
-    [
-      import('python').find_installation('python3'),
-      '-c', 'from multiprocessing import cpu_count; print(cpu_count())',
-    ],
-    check: true,
-  ).stdout().strip()
 
+if get_option('build_subprojects') and not fs.exists('build' / 'lib' / 'libspdk_nvme.a')
   message('Building ..')
-  run_command(
-    [find_program('make'), '-j', cpu_count],
-    capture: true,
-    check: true,
-    env: {},
-  )
+  run_command([find_program('make'), '-j', '20'], capture: true, check: true, env: {})
 endif
 
 message('Setting up dependency ..')
 message('build_subprojects:', get_option('build_subprojects'))
-
-spdk_libnames = get_option('build_subprojects') ? [
-  'spdk_nvme',
-  'spdk_env_dpdk',
-  'spdk_sock',
-  'spdk_sock_posix',
-  'spdk_rpc',
-  'spdk_trace',
-  'spdk_jsonrpc',
-  'spdk_json',
-  'spdk_util',
-  'spdk_log',
-  'spdk_vfio_user',
-] : []
 
 custom_libnames = [
   'spdk_event',
@@ -164,20 +105,6 @@ custom_libnames = [
   'isal_crypto',
 ]
 
-dpdk_libnames = get_option('build_subprojects') ? [
-  'rte_eal',
-  'rte_telemetry',
-  'rte_bus_pci',
-  'rte_pci',
-  'rte_ring',
-  'rte_mempool',
-  'rte_kvargs',
-] : []
-
-isal_libnames = get_option('build_subprojects') ? [
-  'isal',
-] : []
-
 spdk_deps = [
   dlfcn_dep,
   math_dep,
@@ -189,7 +116,6 @@ spdk_deps = [
 ]
 
 spdk_paths = []
-# foreach libname : spdk_libnames + dpdk_libnames + isal_libnames
 foreach libname : custom_libnames
   csd = meson.current_source_dir()
   lib_dep = cc.find_library(
