@@ -30,7 +30,7 @@ lsvd_image::~lsvd_image()
 
 uptr<lsvd_image> lsvd_image::open_image(std::string name, rados_ioctx_t io)
 {
-    uptr<lsvd_image> img;
+    uptr<lsvd_image> img(new lsvd_image());
     try {
         img->try_open(name, io);
         return img;
