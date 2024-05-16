@@ -2,7 +2,7 @@
 
 project('spdk', 'c', version: '24.01')
 
-if not host_machine.system() == 'linux'
+if host_machine.system() != 'linux'
   error('Unsupported system type "@0@"'.format(exec_env))
 endif
 
