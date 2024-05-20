@@ -45,8 +45,8 @@ class lsvd_iodevice
 
     lsvd_iodevice(uptr<lsvd_image> img) : img(std::move(img))
     {
-        bdev.product_name = (char *)"Log-structured Virtual Disk";
-        bdev.name = (char *)img->image_name.c_str();
+        bdev.product_name = strdup("Log-structured Virtual Disk");
+        bdev.name = strdup(img->imgname.c_str());
         bdev.blocklen = 4096;
         bdev.blockcnt = img->size / bdev.blocklen;
         bdev.ctxt = this;
@@ -54,7 +54,11 @@ class lsvd_iodevice
         bdev.fn_table = &lsvd_fn_table;
     }
 
-    ~lsvd_iodevice() {}
+    ~lsvd_iodevice()
+    {
+        free(bdev.product_name);
+        free(bdev.name);
+    }
 };
 
 static int lsvd_destroy_bdev(void *ctx)
@@ -134,6 +138,11 @@ int bdev_lsvd_create(std::string img_name, rados_ioctx_t ioctx)
     assert(!img_name.empty());
 
     auto img = lsvd_image::open_image(img_name, ioctx);
+    if (!img) {
+        log_error("Failed to open image '{}'.", img_name);
+        return -1;
+    }
+
     auto iodev = new lsvd_iodevice(std::move(img));
 
     spdk_io_device_register(
@@ -160,16 +169,15 @@ int bdev_lsvd_create(std::string img_name, rados_ioctx_t ioctx)
     return 0;
 }
 
-static void bdev_lsvd_delete_cb(void *arg, int rc)
-{
-    auto p = (std::promise<int> *)arg;
-    p->set_value(rc);
-}
-
-int bdev_lsvd_delete(std::string img_name, std::function<void(int)> *cb)
+int bdev_lsvd_delete(std::string img_name)
 {
     auto p = std::promise<int>();
-    spdk_bdev_unregister_by_name(img_name.c_str(), &lsvd_if,
-                                 bdev_lsvd_delete_cb, &p);
+    spdk_bdev_unregister_by_name(
+        img_name.c_str(), &lsvd_if,
+        [](void *arg, int rc) {
+            auto p = (std::promise<int> *)arg;
+            p->set_value(rc);
+        },
+        &p);
     return p.get_future().get();
 }
