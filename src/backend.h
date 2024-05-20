@@ -7,6 +7,7 @@
 #include "config.h"
 #include "request.h"
 #include "smartiov.h"
+#include "utils.h"
 
 class backend
 {
@@ -45,6 +46,11 @@ class backend
         smartiov iov((char *)buf, len);
         return aio_read(name, offset, iov);
     }
+
+    virtual opt<u64> get_size(std::string name);
+    virtual opt<vec<byte>> read_whole_obj(std::string name);
+
+    virtual bool exists(std::string name);
 };
 
 extern std::shared_ptr<backend> make_file_backend(const char *prefix);
