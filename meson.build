@@ -3,7 +3,7 @@ project(
 	['c', 'cpp'],
 	version: '0.1',
 	default_options: [
-		'cpp_std=c++2a',
+		'cpp_std=c++23',
 		'warning_level=2',
 		'b_colorout=always',
 		'b_sanitize=address,undefined',
