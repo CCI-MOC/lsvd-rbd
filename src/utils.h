@@ -4,12 +4,14 @@
 #include <condition_variable>
 #include <cstring>
 #include <errno.h>
+#include <filesystem>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <linux/fs.h>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <signal.h>
 #include <sstream>
@@ -26,8 +28,38 @@
 
 template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
+template <typename T> using opt = std::optional<T>;
+template <typename T> using vec = std::vector<T>;
 
 #define CEXTERN extern "C"
+
+using u64 = uint64_t;
+using u32 = uint32_t;
+using u16 = uint16_t;
+using u8 = uint8_t;
+using s64 = int64_t;
+using s32 = int32_t;
+using s16 = int16_t;
+using s8 = int8_t;
+using usize = size_t;
+using ssize = ssize_t;
+using byte = std::byte;
+using str = std::string;
+using fspath = std::filesystem::path;
+
+#define PASSTHRU_NULLOPT(opt)                                                  \
+    do {                                                                       \
+        if (!opt) {                                                            \
+            return std::nullopt;                                               \
+        }                                                                      \
+    } while (0)
+
+#define PASSTHRU_NULLPTR(ptr)                                                  \
+    do {                                                                       \
+        if (!ptr) {                                                            \
+            return nullptr;                                                    \
+        }                                                                      \
+    } while (0)
 
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
@@ -53,13 +85,6 @@ template <typename T> using uptr = std::unique_ptr<T>;
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
-#define log_error(MSG, ...)                                                    \
-    do {                                                                       \
-        fmt::print(stderr, fg(fmt::terminal_color::red) | fmt::emphasis::bold, \
-                   "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__, __func__,   \
-                   ##__VA_ARGS__);                                             \
-    } while (0)
-
 #define log_warn(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 3)                                                        \
@@ -69,9 +94,65 @@ template <typename T> using uptr = std::unique_ptr<T>;
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
+#define log_error(MSG, ...)                                                    \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::terminal_color::red) | fmt::emphasis::bold, \
+                   "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__, __func__,   \
+                   ##__VA_ARGS__);                                             \
+    } while (0)
+
 #define trap_to_debugger()                                                     \
     do {                                                                       \
         raise(SIGTRAP);                                                        \
+    } while (0)
+
+#define RET_IF(cond, ret)                                                      \
+    do {                                                                       \
+        if (cond) {                                                            \
+            return ret;                                                        \
+        }                                                                      \
+    } while (0)
+
+#define PR_RET_IF(cond, ret, MSG, ...)                                         \
+    do {                                                                       \
+        if (cond) {                                                            \
+            log_error(MSG, ##__VA_ARGS__);                                     \
+            return ret;                                                        \
+        }                                                                      \
+    } while (0)
+
+/**
+ * If `cond` is true, print an error message to stdout with MSG, then return
+ * `ret`
+ */
+#define PR_ERR_RET_IF(cond, ret, en, MSG, ...)                                 \
+    do {                                                                       \
+        if (cond) {                                                            \
+            auto fs = fmt::format(MSG "\n", ##__VA_ARGS__);                    \
+            auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] {}", __FILE__,  \
+                                 __LINE__, __func__, en, strerror(en), fs);    \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            return ret;                                                        \
+        }                                                                      \
+    } while (0)
+
+#define THROW_MSG_ON(cond, MSG, ...)                                           \
+    do {                                                                       \
+        if (cond) {                                                            \
+            auto s = fmt::format("[ERR {}:{} {}] " MSG "\n", __FILE__,         \
+                                 __LINE__, __func__, ##__VA_ARGS__);           \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            throw std::runtime_error(s);                                       \
+        }                                                                      \
+    } while (0)
+
+#define THROW_ERRNO_ON(cond, en, MSG, ...)                                     \
+    do {                                                                       \
+        if (cond) {                                                            \
+            auto m =                                                           \
+                fmt::format("{}/{}: " MSG, en, strerr(en), ##__VA_ARGS__);     \
+            throw std::system_error(m);                                        \
+        }                                                                      \
     } while (0)
 
 /**
