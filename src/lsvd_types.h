@@ -5,8 +5,9 @@
 #include <stdint.h>
 #include <vector>
 
-typedef int64_t sector_t;
-typedef int page_t;
+using sector_t = int64_t;
+using page_t = int32_t;
+using seqnum_t = uint32_t;
 
 enum lsvd_op { OP_READ = 2, OP_WRITE = 4 };
 
@@ -62,3 +63,8 @@ class objname
     std::string str() { return name; }
     const char *c_str() { return name.c_str(); }
 };
+
+static inline std::string oname(std::string prefix, uint32_t seq)
+{
+    return fmt::format("{}.{:08x}", prefix, seq);
+}
