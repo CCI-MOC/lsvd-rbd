@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"
 #include "lsvd_types.h"
 #include "translate.h"
 #include "utils.h"
@@ -22,3 +23,8 @@ class write_cache
 
 uptr<write_cache> make_write_cache(uint32_t blkno, int fd, translate *be,
                                    lsvd_config *cfg);
+
+int init_wcache(int fd, uuid_t &uuid, int n_pages);
+
+uptr<write_cache> open_wlog(fspath path, usize size, translate &xlate,
+                            lsvd_config &cfg);

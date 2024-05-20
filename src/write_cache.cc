@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cassert>
+#include <cerrno>
 #include <condition_variable>
 #include <mutex>
 #include <uuid/uuid.h>
@@ -13,6 +14,7 @@
 #include "request.h"
 #include "smartiov.h"
 #include "translate.h"
+#include "utils.h"
 #include "write_cache.h"
 
 /* ------------- Write cache structure ------------- */
@@ -22,7 +24,8 @@ class write_cache_impl : public write_cache
 {
     size_t dev_max;
     uint32_t super_blkno;
-    lsvd_config *cfg;
+    int fd = -1;
+    lsvd_config &cfg;
 
     std::atomic<uint64_t> sequence = 1; // write sequence #
 
@@ -55,7 +58,7 @@ class write_cache_impl : public write_cache
      */
     friend class wcache_write_req;
     std::mutex m;
-    translate *be;
+    translate &be;
     j_hdr *mk_header(char *buf, uint32_t type, page_t blks, page_t prev);
     nvme *nvme_w = NULL;
 
@@ -66,7 +69,7 @@ class write_cache_impl : public write_cache
     void release_room(sector_t sectors);
     void flush(void);
 
-    write_cache_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg);
+    write_cache_impl(uint32_t blkno, int _fd, translate &_be, lsvd_config &cfg);
     ~write_cache_impl();
 
     request *writev(sector_t lba, smartiov *iov);
@@ -451,14 +454,13 @@ int write_cache_impl::roll_log_forward()
 #endif
 }
 
-write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
-                                   lsvd_config *cfg_)
+write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate &be,
+                                   lsvd_config &cfg)
+    : fd(fd), cfg(cfg), be(be)
 {
 
     super_blkno = blkno;
     dev_max = getsize64(fd);
-    be = _be;
-    cfg = cfg_;
 
     _hdrbuf = (char *)aligned_alloc(4096, 4096);
 
@@ -486,20 +488,15 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
 
     int n_pages = super->limit - super->base;
     max_write_pages = n_pages / 2 + n_pages / 4;
-    write_batch = cfg->wcache_batch;
+    write_batch = cfg.wcache_batch;
 
     misc_threads = new thread_pool<int>(&m);
-}
-
-uptr<write_cache> make_write_cache(uint32_t blkno, int fd, translate *be,
-                                   lsvd_config *cfg)
-{
-    return std::make_unique<write_cache_impl>(blkno, fd, be, cfg);
 }
 
 write_cache_impl::~write_cache_impl()
 {
     delete misc_threads;
+    close(fd);
     free(super);
     free(_hdrbuf);
     delete nvme_w;
@@ -526,9 +523,85 @@ request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
     lk.unlock();
 
     // writing to in-memory buffer (translation layer)
-    be->writev(req->seq, lba * 512, iov, iovcnt);
+    be.writev(req->seq, lba * 512, iov, iovcnt);
 
     return req;
 }
 
 void write_cache_impl::do_write_checkpoint(void) { write_checkpoint(); }
+
+int init_wcache(int fd, uuid_t &uuid, int n_pages)
+{
+    page_t w_pages = n_pages - 1;
+    page_t _map = div_round_up(w_pages, 256);
+    page_t _len = div_round_up(w_pages, 512);
+    page_t w_meta = 2 * (_map + _len);
+    char buf[4096];
+
+    w_pages -= w_meta;
+
+    memset(buf, 0, sizeof(buf));
+    auto w_super = (j_write_super *)buf;
+    *w_super = (j_write_super){LSVD_MAGIC,
+                               LSVD_J_W_SUPER,
+                               1,
+                               1,
+                               1,
+                               1,
+                               1 + w_meta,
+                               1 + w_meta,
+                               1 + w_meta + w_pages,
+                               1 + w_meta,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               {0}};
+    memcpy(w_super->vol_uuid, uuid, sizeof(uuid_t));
+
+    int ret = pwrite(fd, buf, 4096, 0);
+    PR_ERR_RET_IF(ret < 0, -errno, errno, "Failed to write wlog header");
+
+    // just truncate to right length, don't bother writing zeroes
+    ret = ftruncate(fd, 4096 * (1 + w_pages + w_meta));
+    PR_ERR_RET_IF(ret < 0, -errno, errno, "Failed to truncate wlog file");
+
+    return 0;
+}
+
+uptr<write_cache> open_wlog(fspath path, usize size, translate &xlate,
+                            lsvd_config &cfg)
+{
+    int fd = 0;
+    if (!std::filesystem::exists(path)) {
+        log_info("Creating write cache file '{}'", path);
+        fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
+        PR_ERR_RET_IF(fd < 0, nullptr, errno, "Failed to create cache file");
+
+        auto err = init_wcache(fd, xlate.uuid, size / 4096);
+        PR_ERR_RET_IF(err < 0, nullptr, -err, "Failed to init wlog");
+    }
+
+    fd = open(path.c_str(), O_RDWR);
+    PR_ERR_RET_IF(fd < 0, nullptr, errno, "Failed to open wlog file");
+
+    char buf[4096];
+    int err = pread(fd, buf, 4096, 0);
+    PR_ERR_RET_IF(err < 0, nullptr, errno, "Failed to read wlog header");
+
+    j_write_super *super = (j_write_super *)buf;
+    PR_RET_IF(super->magic != LSVD_MAGIC, nullptr,
+              "Invalid write cache magic number: {}", super->magic);
+    PR_RET_IF(super->type != LSVD_J_W_SUPER, nullptr, "Invalid cache type: {}",
+              super->type);
+
+    try {
+        return std::make_unique<write_cache_impl>(1, fd, xlate, cfg);
+    } catch (std::exception &e) {
+        log_error("Failed to open write cache: {}", e.what());
+        close(fd);
+        return nullptr;
+    }
+}
