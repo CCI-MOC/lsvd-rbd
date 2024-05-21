@@ -114,8 +114,8 @@ void create_thick(char *name, long size)
         size_t data_bytes = data_sectors * 512;
         auto hdr_buf = (char *)calloc(data_bytes + 4096, 1);
 
-        auto h = (obj_hdr *)hdr_buf;
-        *h = {LSVD_MAGIC, 1, {0}, LSVD_DATA, 0, 8, data_sectors, 0};
+        auto h = (common_obj_hdr *)hdr_buf;
+        *h = {LSVD_MAGIC, 1, {0}, OBJ_LOGDATA, 0, 8, data_sectors, 0};
         memcpy(h->vol_uuid, uu, sizeof(uu));
 
         auto dh = (obj_data_hdr *)(h + 1);
@@ -160,13 +160,13 @@ void create_thick(char *name, long size)
     uint32_t objmap_bytes = n_objs * sizeof(ckpt_obj);
     uint32_t extmap_bytes = n_objs * sizeof(ckpt_mapentry);
 
-    int ckpt_bytes =
-        sizeof(obj_hdr) + sizeof(obj_ckpt_hdr) + objmap_bytes + extmap_bytes;
+    int ckpt_bytes = sizeof(common_obj_hdr) + sizeof(obj_ckpt_hdr) +
+                     objmap_bytes + extmap_bytes;
     uint32_t ckpt_sectors = div_round_up(ckpt_bytes, 512);
 
     auto ckpt_buf = (char *)calloc(ckpt_sectors * 512, 1);
-    auto ch = (obj_hdr *)ckpt_buf;
-    *ch = {LSVD_MAGIC, 1, {0}, LSVD_CKPT, 0, ckpt_sectors, 0, 0};
+    auto ch = (common_obj_hdr *)ckpt_buf;
+    *ch = {LSVD_MAGIC, 1, {0}, OBJ_CHECKPOINT, 0, ckpt_sectors, 0, 0};
     memcpy(ch->vol_uuid, uu, sizeof(uu));
 
     auto cph = (obj_ckpt_hdr *)(ch + 1);
@@ -204,11 +204,11 @@ void create_thick(char *name, long size)
     /* now write the superblock, with a single checkpoint pointer
      */
     auto sb_data = (char *)calloc(4096, 1);
-    auto h2 = (obj_hdr *)sb_data;
+    auto h2 = (common_obj_hdr *)sb_data;
     auto sh = (super_hdr *)(h2 + 1);
     int ckpt_offset = sizeof(*h2) + sizeof(*sh);
 
-    *h2 = {LSVD_MAGIC, 1, {0}, LSVD_SUPER, 0, 8, 0, 0};
+    *h2 = {LSVD_MAGIC, 1, {0}, OBJ_SUPERBLOCK, 0, 8, 0, 0};
     memcpy(h2->vol_uuid, uu, sizeof(uu));
 
     sh->vol_size = img_size / 512;

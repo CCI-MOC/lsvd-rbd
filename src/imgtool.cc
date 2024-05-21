@@ -140,10 +140,10 @@ void info(rados_ioctx_t io, const char *image_name)
     if (rv < 0)
         throw std::runtime_error("failed to read superblock");
 
-    auto base_hdr = (obj_hdr *)base_buf;
+    auto base_hdr = (common_obj_hdr *)base_buf;
     auto base_super = (super_hdr *)(base_hdr + 1);
 
-    if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != LSVD_SUPER)
+    if (base_hdr->magic != LSVD_MAGIC || base_hdr->type != OBJ_SUPERBLOCK)
         throw std::runtime_error("corrupt superblock");
 
     char uuid_str[64];
