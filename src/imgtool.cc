@@ -123,7 +123,7 @@ void info(rados_ioctx_t io, const char *image_name)
         printf("error reading config: %d\n", rv);
         exit(1);
     }
-    auto objstore = get_backend(&cfg, io, NULL);
+    auto objstore = make_rados_backend(io);
     uuid_t uu;
     if ((rv = translate_get_uuid(objstore, image_name, uu)) < 0) {
         printf("error reading superblock: %d\n", rv);
@@ -186,7 +186,7 @@ void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name,
         printf("error reading config: %d\n", rv);
         exit(1);
     }
-    auto objstore = get_backend(&cfg, io, NULL);
+    auto objstore = make_rados_backend(io);
     uuid_t uu;
     if ((rv = translate_get_uuid(objstore, image_name, uu)) < 0) {
         printf("error reading superblock: %d\n", rv);

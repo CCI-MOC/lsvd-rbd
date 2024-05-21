@@ -229,7 +229,7 @@ extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
     lsvd_config cfg;
     if (cfg.read() < 0)
         return -1;
-    auto objstore = get_backend(&cfg, io, NULL);
+    auto objstore = make_rados_backend(io);
     auto rv = translate_create_image(objstore, name, size);
     return rv;
 }
@@ -243,7 +243,7 @@ extern "C" int rbd_clone(rados_ioctx_t io, const char *source_img,
         return -1;
     }
 
-    auto objstore = get_backend(&cfg, io, NULL);
+    auto objstore = make_rados_backend(io);
     auto rv = translate_clone_image(objstore, source_img, dest_img);
 
     return rv;
@@ -260,7 +260,7 @@ extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
     auto rv = cfg.read();
     if (rv < 0)
         return rv;
-    auto objstore = get_backend(&cfg, io, NULL);
+    auto objstore = make_rados_backend(io);
     uuid_t uu;
     if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
         return rv;

@@ -131,6 +131,8 @@ class rados_backend : public backend
         librados::IoCtx::from_rados_ioctx_t(ctx_, this->ctx);
     }
 
+    ~rados_backend() override {}
+
     int write(std::string name, smartiov &iov) override
     {
         auto req = dynamic_cast<rados_write_req *>(aio_write(name, iov));
