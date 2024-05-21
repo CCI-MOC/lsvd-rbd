@@ -139,10 +139,11 @@ using fspath = std::filesystem::path;
 #define THROW_MSG_ON(cond, MSG, ...)                                           \
     do {                                                                       \
         if (cond) {                                                            \
-            auto s = fmt::format("[ERR {}:{} {}] " MSG "\n", __FILE__,         \
-                                 __LINE__, __func__, ##__VA_ARGS__);           \
+            auto m = fmt::format(MSG, ##__VA_ARGS__);                          \
+            auto s = fmt::format("[ERR {}:{} {}] {}\n", __FILE__, __LINE__,    \
+                                 __func__, m);                                 \
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
-            throw std::runtime_error(s);                                       \
+            throw std::runtime_error(m);                                       \
         }                                                                      \
     } while (0)
 

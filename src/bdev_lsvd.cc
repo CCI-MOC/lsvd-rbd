@@ -142,7 +142,7 @@ int bdev_lsvd_create(std::string img_name, rados_ioctx_t ioctx)
     try {
         img = uptr<lsvd_image>(new lsvd_image(img_name, ioctx, cfg));
     } catch (std::runtime_error &e) {
-        log_error("Failed to create image '{}':\n{}", img_name, e.what());
+        log_error("Failed to create image '{}': {}", img_name, e.what());
         return -1;
     }
 
