@@ -5,7 +5,6 @@ lsvd_src = files(
 	'image.cc',
 	'liblsvd.cc',
 	'lsvd_debug.cc',
-	'mkcache.cc',
 	'nvme.cc',
 	'objects.cc',
 	'rados_backend.cc',

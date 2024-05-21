@@ -576,7 +576,7 @@ uptr<write_cache> open_wlog(fspath path, usize size, translate &xlate,
 {
     int fd = 0;
     if (!std::filesystem::exists(path)) {
-        log_info("Creating write cache file '{}'", path);
+        log_info("Creating write cache file '{}'", path.string());
         fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
         PR_ERR_RET_IF(fd < 0, nullptr, errno, "Failed to create cache file");
 
