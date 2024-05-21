@@ -65,7 +65,7 @@ lsvd_rbd *lsvd_rbd::open_image(rados_ioctx_t io, std::string name)
 
         return new lsvd_rbd(name, io, cfg);
     } catch (std::runtime_error &e) {
-        log_error("Failed to open image: {}", e.what());
+        log_error("Failed to open image:\n{}", e.what());
         return nullptr;
     }
 }

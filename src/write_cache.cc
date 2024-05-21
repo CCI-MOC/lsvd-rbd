@@ -600,7 +600,7 @@ uptr<write_cache> open_wlog(fspath path, usize size, translate &xlate,
     try {
         return std::make_unique<write_cache_impl>(1, fd, xlate, cfg);
     } catch (std::exception &e) {
-        log_error("Failed to open write cache: {}", e.what());
+        log_error("Failed to open write cache:\n{}", e.what());
         close(fd);
         return nullptr;
     }

@@ -61,6 +61,7 @@ void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
         *p++ = c;
 
     // Part 2: clones
+    UNIMPLEMENTED();
 
     // Part 3: snapshots
     // TODO implement this when we get around to snapshots

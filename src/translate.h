@@ -28,7 +28,7 @@ class translate
     virtual ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov,
                            int iovcnt) = 0;
     virtual ssize_t trim(size_t offset, size_t len) = 0;
-    virtual void wait_for_room(void) = 0;
+    virtual void backend_backpressure(void) = 0;
 
     virtual void object_read_start(int obj) = 0;
     virtual void object_read_end(int obj) = 0;

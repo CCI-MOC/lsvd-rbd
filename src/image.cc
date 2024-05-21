@@ -20,9 +20,6 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg)
     objstore = make_rados_backend(io);
     rcache = get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
 
-    wlog = open_wlog(cfg.wlog_path(name), cfg.wlog_size / 4096, *xlate, cfg);
-    THROW_MSG_ON(!wlog, "Failed to open write log");
-
     read_superblock();
     if (checkpoints.size() > 0)
         read_from_checkpoint(checkpoints.back());
@@ -30,11 +27,15 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg)
     // Roll forward on the log
     auto last_data_seq = roll_forward_from_last_checkpoint();
 
-    // TODO: actually recover from the write log, this is currently a no-op
-    recover_from_wlog();
-
     // Successfully recovered everything, now we have enough information to
     // init everything else
+    xlate = make_translate(name, cfg, size, uuid, objstore, rcache, objmap,
+                           map_lock, bufmap, bufmap_lock, last_data_seq, clones,
+                           obj_info, checkpoints);
+
+    wlog = open_wlog(cfg.wlog_path(name), cfg.wlog_size / 4096, *xlate, cfg);
+    THROW_MSG_ON(!wlog, "Failed to open write log");
+    // recover_from_wlog();
 }
 
 lsvd_image::~lsvd_image()
@@ -460,7 +461,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
         assert(parent == nullptr);
 
         img->wlog->get_room(req_bytes / 512);
-        img->xlate->wait_for_room();
+        img->xlate->backend_backpressure();
 
         sector_t size_sectors = req_bytes / 512;
 

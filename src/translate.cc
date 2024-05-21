@@ -13,6 +13,7 @@
 #include "extent.h"
 #include "misc_cache.h"
 #include "request.h"
+#include "src/utils.h"
 #include "translate.h"
 
 /*
@@ -224,7 +225,7 @@ class translate_impl : public translate
                    vec<seqnum_t> &checkpoints)
         : name(name), cfg(cfg), vol_size(vol_size), vol_uuid(vol_uuid),
           objstore(be), rcache(rcache), objmap(objmap), omap_mtx(omap_mtx),
-          bufmap(bmap), bufmap_lock(bmap_lck), cur_seq(last_seq),
+          bufmap(bmap), bufmap_lock(bmap_lck), cur_seq(last_seq + 1),
           clones(clones), object_info(objinfo), checkpoints(checkpoints),
           superblock_buf(4096)
     {
@@ -234,6 +235,7 @@ class translate_impl : public translate
             total_live_sectors += oi.live;
         }
 
+        UNIMPLEMENTED();
         // start worker, flush, and GC threads
         // if (cfg.flush_interval_msec > 0)
         //     flush_worker = std::jthread(&translate_impl::flush_thread, this);
@@ -264,7 +266,7 @@ class translate_impl : public translate
     ssize_t writev(uint64_t cache_seq, size_t offset, iovec *iov,
                    int iovcnt) override;
     ssize_t trim(size_t offset, size_t len) override;
-    void wait_for_room(void) override;
+    void backend_backpressure(void) override;
 
     // mark object as busy - can't delete
     void object_read_start(int obj) override;
@@ -445,7 +447,7 @@ ssize_t translate_impl::trim(size_t offset, size_t len)
  * TODO measure how long this takes us, likely to be bottleneck on high
  * write throughput scenarios
  */
-void translate_impl::wait_for_room(void)
+void translate_impl::backend_backpressure(void)
 {
     std::unique_lock lk(m);
     while (outstanding_writes > cfg.num_parallel_writes)
