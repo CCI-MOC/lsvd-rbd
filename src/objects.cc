@@ -31,12 +31,26 @@ void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
     usize req_size = sizeof(common_obj_hdr) + sizeof(super_hdr);
     req_size += checkpoints.size() * sizeof(seqnum_t);
     req_size = std::max(req_size, 8ul); // minimum of 4096 bytes
-    req_size = round_up(req_size, 512); // round to sector boundary
+    req_size = round_up(req_size, 512); // round to sector boundary (why??)
 
     if (buf.size() < req_size)
         buf.resize(req_size);
 
     serialise_common_hdr(buf, OBJ_SUPERBLOCK, 0, req_size / 512, 0, uuid);
+
+    // There are three variable-length arrays in the superblock: checkpoints,
+    // snapshots, and clones. The order doesn't matter, so we put checkpoints
+    // first, as each checkpoint is just a 32-bit sequence number. The rest are
+    // more complicated as they are variable-length due to them also containing
+    // names of the clones and snapshots, which need to be handled correctly
+
+    // Also note that we should make sure that each clone/snapshot is 8-byte
+    // aligned in the buffer, as when we read them back to deserialise we end
+    // up with a bunch of pointers into the buffer and unaligned pointers will
+    // just make all of us sad. Fortunately we have c-style null-terminated
+    // strings so we can just pad with more null
+
+    // Part 1: checkpoints
 
     auto h = (super_hdr *)(buf.data() + sizeof(common_obj_hdr));
     h->ckpts_offset = sizeof(common_obj_hdr) + sizeof(super_hdr);
@@ -45,6 +59,11 @@ void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
     auto p = (seqnum_t *)(buf.data() + h->ckpts_offset);
     for (auto &c : checkpoints)
         *p++ = c;
+
+    // Part 2: clones
+
+    // Part 3: snapshots
+    // TODO implement this when we get around to snapshots
 }
 
 opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
@@ -72,11 +91,59 @@ opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
     return buf;
 }
 
+/* buf[offset ... offset+len] contains array of type T, with variable
+ * length field name_len.
+ */
+template <class T>
+void deserialise_offset_ptr(char *buf, size_t offset, size_t len,
+                            std::vector<T *> &vals)
+{
+    T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
+    for (; p < end;) {
+        vals.push_back(p);
+        p = (T *)((char *)p + sizeof(T) + p->name_len);
+    }
+}
+
+template <typename T> vec<T> deserialise_cpy(byte *buf, usize offset, usize len)
+{
+    vec<T> ret;
+    for (usize i = 0; i < len / sizeof(T); i++) {
+        T *p = (T *)(buf + offset + i * sizeof(T));
+        ret.push_back(*p);
+    }
+    return ret;
+}
+
+template <typename T>
+vec<T *> deserialise_ptrs(byte *buf, usize offset, usize len)
+{
+    vec<T *> ret;
+    for (usize i = 0; i < len / sizeof(T); i++) {
+        T *p = (T *)(buf + offset + i * sizeof(T));
+        ret.push_back(p);
+    }
+    return ret;
+}
+
+template <typename T>
+vec<T *> deserialise_ptrs_with_len(byte *buf, usize offset, usize len)
+{
+    vec<T *> ret;
+    byte *p = buf + offset;
+    for (; p < buf + offset + len;) {
+        ret.push_back((T *)p);
+        p += sizeof(T) + ((T *)p)->name_len;
+    }
+    return ret;
+}
+
 opt<parsed_superblock> object_reader::read_superblock(std::string oname)
 {
     auto buf = objstore->read_whole_obj(oname);
     PASSTHRU_NULLOPT(buf);
     auto hdr = (common_obj_hdr *)buf->data();
+    auto hbuf = buf->data();
 
     PR_RET_IF(hdr->magic != LSVD_MAGIC, std::nullopt,
               "Corrupt object; invalid magic at '{}'", oname);
@@ -86,18 +153,17 @@ opt<parsed_superblock> object_reader::read_superblock(std::string oname)
               "Obj '{}' not a superblock", oname);
 
     parsed_superblock ret;
-    super_hdr *superblk = (super_hdr *)(hdr + 1);
+    super_hdr *shdr = (super_hdr *)(hdr + 1);
 
-    decode_offset_len<u32>((char *)hdr, superblk->ckpts_offset,
-                           superblk->ckpts_len, ret.ckpts);
-    decode_offset_len_ptr<clone_info>((char *)hdr, superblk->clones_offset,
-                                      superblk->clones_len, ret.clones);
-    decode_offset_len_ptr<snap_info>((char *)hdr, superblk->snaps_offset,
-                                     superblk->snaps_len, ret.snaps);
+    ret.ckpts = deserialise_cpy<u32>(hbuf, shdr->ckpts_offset, shdr->ckpts_len);
+    ret.clones = deserialise_ptrs_with_len<clone_info>(
+        hbuf, shdr->clones_offset, shdr->clones_len);
+    ret.snaps = deserialise_ptrs_with_len<snap_info>(hbuf, shdr->snaps_offset,
+                                                     shdr->snaps_len);
 
     ret.superblock_buf = *buf;
     uuid_copy(ret.uuid, hdr->vol_uuid);
-    ret.vol_size = superblk->vol_size * 512;
+    ret.vol_size = shdr->vol_size * 512;
 
     return ret;
 }
@@ -113,12 +179,11 @@ opt<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
               "Invalid object type in '{}'", oname);
     h.data_hdr = (obj_data_hdr *)(hdr->data() + sizeof(common_obj_hdr));
 
-    auto buf = (char *)hdr->data();
-    decode_offset_len_ptr<obj_cleaned>(buf, h.data_hdr->objs_cleaned_offset,
-                                       h.data_hdr->objs_cleaned_len, h.cleaned);
-    decode_offset_len_ptr<data_map>(buf, h.data_hdr->data_map_offset,
-                                    h.data_hdr->data_map_len, h.data_map);
-
+    auto buf = hdr->data();
+    h.cleaned = deserialise_ptrs<obj_cleaned>(
+        buf, h.data_hdr->objs_cleaned_offset, h.data_hdr->objs_cleaned_len);
+    h.data_map = deserialise_ptrs<data_map>(buf, h.data_hdr->data_map_offset,
+                                            h.data_hdr->data_map_len);
     h.buf = std::move(*hdr);
     return h;
 }
@@ -134,17 +199,15 @@ opt<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
               "Invalid object type it '{}'", oname);
     ret.ckpt_hdr = (obj_ckpt_hdr *)(&hdr->at(sizeof(common_obj_hdr)));
 
-    auto buf = (char *)hdr->data();
-    decode_offset_len<u32>(buf, ret.ckpt_hdr->ckpts_offset,
-                           ret.ckpt_hdr->ckpts_len, ret.ckpts);
-
-    decode_offset_len_ptr<ckpt_obj>(buf, ret.ckpt_hdr->objs_offset,
-                                    ret.ckpt_hdr->objs_len, ret.objects);
-    decode_offset_len_ptr<deferred_delete>(buf, ret.ckpt_hdr->deletes_offset,
-                                           ret.ckpt_hdr->deletes_len,
-                                           ret.deletes);
-    decode_offset_len_ptr<ckpt_mapentry>(buf, ret.ckpt_hdr->map_offset,
-                                         ret.ckpt_hdr->map_len, ret.dmap);
+    auto buf = hdr->data();
+    ret.ckpts = deserialise_cpy<u32>(buf, ret.ckpt_hdr->ckpts_offset,
+                                     ret.ckpt_hdr->ckpts_len);
+    ret.objects = deserialise_ptrs<ckpt_obj>(buf, ret.ckpt_hdr->objs_offset,
+                                             ret.ckpt_hdr->objs_len);
+    ret.deletes = deserialise_ptrs<deferred_delete>(
+        buf, ret.ckpt_hdr->deletes_offset, ret.ckpt_hdr->deletes_len);
+    ret.dmap = deserialise_ptrs<ckpt_mapentry>(buf, ret.ckpt_hdr->map_offset,
+                                               ret.ckpt_hdr->map_len);
     ret.buf = std::move(*hdr);
     return ret;
 }

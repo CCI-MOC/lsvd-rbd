@@ -27,7 +27,7 @@ static void start_lsvd(void *arg)
     err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
     check_ret_neg(err, "Failed to connect to pool {}", pool_name);
 
-    err = bdev_lsvd_create("test-image", io_ctx);
+    err = bdev_lsvd_create("test", io_ctx);
 }
 
 int main(int argc, char **argv)

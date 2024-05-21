@@ -137,9 +137,12 @@ int bdev_lsvd_create(std::string img_name, rados_ioctx_t ioctx)
 {
     assert(!img_name.empty());
 
-    auto img = lsvd_image::open_image(img_name, ioctx);
-    if (!img) {
-        log_error("Failed to open image '{}'.", img_name);
+    lsvd_config cfg; // TODO
+    uptr<lsvd_image> img;
+    try {
+        img = uptr<lsvd_image>(new lsvd_image(img_name, ioctx, cfg));
+    } catch (std::runtime_error &e) {
+        log_error("Failed to create image '{}': {}", img_name, e.what());
         return -1;
     }
 
@@ -158,6 +161,7 @@ int bdev_lsvd_create(std::string img_name, rados_ioctx_t ioctx)
             spdk_put_io_channel(ch->io_channel);
         },
         sizeof(lsvd_bdev_io_channel), img_name.c_str());
+
     auto err = spdk_bdev_register(&iodev->bdev);
     if (err) {
         log_error("Failed to register bdev: err {}", (err));

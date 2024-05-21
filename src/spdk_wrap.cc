@@ -72,6 +72,13 @@ lsvd_rbd *lsvd_rbd::open_image(rados_ioctx_t io, std::string name)
 
 void lsvd_rbd::close_image() { delete this; }
 
+lsvd_rbd::lsvd_rbd(std::string name, rados_ioctx_t io, lsvd_config cfg)
+    : img(name, io, cfg)
+{
+}
+
+lsvd_rbd::~lsvd_rbd() {}
+
 spdk_completion *lsvd_rbd::create_completion(rbd_callback_t cb, void *cb_arg)
 {
     return new spdk_completion(cb, cb_arg);
