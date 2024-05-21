@@ -235,20 +235,26 @@ class translate_impl : public translate
             total_live_sectors += oi.live;
         }
 
-        UNIMPLEMENTED();
         // start worker, flush, and GC threads
-        // if (cfg.flush_interval_msec > 0)
-        //     flush_worker = std::jthread(&translate_impl::flush_thread, this);
+        if (cfg.flush_interval_msec > 0)
+            flush_worker =
+                std::jthread([this](std::stop_token st) { flush_thread(st); });
 
-        // if (!cfg.no_gc)
-        //     gc_worker = std::jthread(&translate_impl::gc_thread, this);
+        if (!cfg.no_gc)
+            gc_worker =
+                std::jthread([this](std::stop_token st) { gc_thread(st); });
 
-        // // honestly have no idea how this works
-        // workers = new thread_pool<translate_req *>(&m);
-        // workers->pool.push(
-        //     std::thread(&translate_impl::worker_thread, this, workers));
+        // honestly have no idea how this works
+        workers = new thread_pool<translate_req *>(&m);
+        workers->pool.push(
+            std::thread(&translate_impl::worker_thread, this, workers));
 
         current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+
+        // Fully serialise superblock once, so we can do partial serialisations
+        // later on and skip the checkpoint stuff every time
+        // currently unimplemented
+        // serialise_superblock(superblock_buf, checkpoints, clones, vol_uuid);
     }
 
     ~translate_impl()
@@ -1258,7 +1264,7 @@ int translate_remove_image(sptr<backend> objstore, const char *name)
 int translate_clone_image(sptr<backend> objstore, const char *source,
                           const char *dest)
 {
-    UNIMPLEMENTED();
+    TODO();
 }
 
 #if 0

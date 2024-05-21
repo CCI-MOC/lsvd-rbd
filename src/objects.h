@@ -193,5 +193,6 @@ struct data_obj_info {
 void serialise_common_hdr(vec<byte> buf, obj_type t, seqnum_t s, u32 hdr,
                           u32 data, uuid_t &uuid);
 
+// Serialise a superblock object.
 void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
                           vec<clone_base> &clones, uuid_t &uuid);

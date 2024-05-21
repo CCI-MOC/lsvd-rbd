@@ -5,6 +5,7 @@
 #include <boost/accumulators/statistics/rolling_sum.hpp>
 #include <boost/bimap.hpp>
 #include <boost/container_hash/hash.hpp>
+#include <thread>
 
 #include "lsvd_types.h"
 #include "nvme.h"

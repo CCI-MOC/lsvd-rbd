@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstring>
 #include <sys/uio.h>
 #include <utility>
 #include <zlib.h>
@@ -28,21 +29,28 @@ void serialise_common_hdr(vec<byte> buf, obj_type t, seqnum_t s, u32 hdr,
 void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
                           vec<clone_base> &clones, uuid_t &uuid)
 {
+    // Reserve required space ahead of time
     usize req_size = sizeof(common_obj_hdr) + sizeof(super_hdr);
     req_size += checkpoints.size() * sizeof(seqnum_t);
+    for (auto &c : clones)
+        req_size += sizeof(clone_info) + round_up(c.name.size(), 8);
+    // TODO snapshots
     req_size = std::max(req_size, 8ul); // minimum of 4096 bytes
     req_size = round_up(req_size, 512); // round to sector boundary (why??)
 
     if (buf.size() < req_size)
         buf.resize(req_size);
 
+    auto bufp = buf.data(); // start of buffer
+    auto hdrp = (super_hdr *)(bufp + sizeof(common_obj_hdr));
+
     serialise_common_hdr(buf, OBJ_SUPERBLOCK, 0, req_size / 512, 0, uuid);
 
     // There are three variable-length arrays in the superblock: checkpoints,
-    // snapshots, and clones. The order doesn't matter, so we put checkpoints
-    // first, as each checkpoint is just a 32-bit sequence number. The rest are
-    // more complicated as they are variable-length due to them also containing
-    // names of the clones and snapshots, which need to be handled correctly
+    // snapshots, and clones. The order doesn't matter, but we put clones first
+    // since that's effectively immutable. This means that the offset into
+    // everything else will not change over the lifetime of an image
+    // The checkpoints and snapshots are appended after that
 
     // Also note that we should make sure that each clone/snapshot is 8-byte
     // aligned in the buffer, as when we read them back to deserialise we end
@@ -50,21 +58,37 @@ void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
     // just make all of us sad. Fortunately we have c-style null-terminated
     // strings so we can just pad with more null
 
-    // Part 1: checkpoints
+    // Part 1: clones. TODO skip on partial serialise
+    byte *clonep;
+    clonep = bufp + sizeof(common_obj_hdr) + sizeof(super_hdr);
+    hdrp->clones_offset = clonep - bufp;
+    for (auto &c : clones) {
+        auto padded_namelen = round_up(c.name.size(), 8);
+        auto record_len = sizeof(clone_info) + padded_namelen;
+        auto cip = (clone_info *)clonep;
 
-    auto h = (super_hdr *)(buf.data() + sizeof(common_obj_hdr));
-    h->ckpts_offset = sizeof(common_obj_hdr) + sizeof(super_hdr);
-    h->ckpts_len = checkpoints.size() * sizeof(seqnum_t);
+        cip->last_seq = c.last_seq;
+        uuid_copy(cip->vol_uuid, nullptr); // TODO
+        cip->name_len = padded_namelen;
 
-    auto p = (seqnum_t *)(buf.data() + h->ckpts_offset);
+        std::memset(cip->name, 0, padded_namelen);
+        std::memcpy(cip->name, c.name.c_str(), c.name.size());
+
+        clonep += record_len;
+        hdrp->clones_len += record_len;
+    }
+
+    // Part 2: checkpoints
+    hdrp->ckpts_offset = clonep - bufp;
+    hdrp->ckpts_len = checkpoints.size() * sizeof(seqnum_t);
+    auto p = (seqnum_t *)(bufp + hdrp->ckpts_offset);
     for (auto &c : checkpoints)
         *p++ = c;
 
-    // Part 2: clones
-    UNIMPLEMENTED();
-
     // Part 3: snapshots
     // TODO implement this when we get around to snapshots
+    hdrp->snaps_offset = 0;
+    hdrp->snaps_len = 0;
 }
 
 opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
