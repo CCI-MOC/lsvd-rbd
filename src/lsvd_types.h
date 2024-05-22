@@ -1,9 +1,9 @@
 #pragma once
 
+#include "utils.h"
 #include <fmt/format.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <vector>
 
 using sector_t = int64_t;
 using page_t = int32_t;
@@ -17,8 +17,7 @@ enum { LSVD_MAGIC = 0x4456534c };
  * copy them into the provided output vector
  */
 template <class T>
-void decode_offset_len(char *buf, size_t offset, size_t len,
-                       std::vector<T> &vals)
+void decode_offset_len(char *buf, size_t offset, size_t len, vec<T> &vals)
 {
     T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
     for (; p < end; p++)
@@ -29,8 +28,7 @@ void decode_offset_len(char *buf, size_t offset, size_t len,
  * length field name_len.
  */
 template <class T>
-void decode_offset_len_ptr(char *buf, size_t offset, size_t len,
-                           std::vector<T *> &vals)
+void decode_offset_len_ptr(char *buf, size_t offset, size_t len, vec<T *> &vals)
 {
     T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
     for (; p < end;) {

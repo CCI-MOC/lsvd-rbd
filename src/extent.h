@@ -29,7 +29,8 @@
 #include <cstddef>
 #include <stdint.h>
 #include <tuple>
-#include <vector>
+
+#include "utils.h"
 
 namespace extmap
 {
@@ -227,9 +228,9 @@ template <class T, class T_in, class T_out, int load = 256> struct extmap {
     static const int _load = load;
 
   public:
-    typedef std::vector<T> extent_vector;
-    std::vector<extent_vector *> lists;
-    std::vector<T_in> maxes;
+    typedef vec<T> extent_vector;
+    vec<extent_vector *> lists;
+    vec<T_in> maxes;
     int count;
 
     extmap() { count = 0; }
@@ -410,9 +411,9 @@ template <class T, class T_in, class T_out, int load = 256> struct extmap {
 
     // Python-style list slicing - remove [len]..[end] and return it
     //
-    static std::vector<T> *_slice(std::vector<T> *A, int len)
+    static vec<T> *_slice(vec<T> *A, int len)
     {
-        auto half = new std::vector<T>();
+        auto half = new vec<T>();
         half->reserve(_load);
         for (auto it = A->begin() + len; it != A->end(); it++)
             half->push_back(*it);
@@ -660,7 +661,7 @@ template <class T, class T_in, class T_out, int load = 256> struct extmap {
 
     // various ways of calling _update...
     //
-    void update(T_in base, T_in limit, T_out e, std::vector<T> *del)
+    void update(T_in base, T_in limit, T_out e, vec<T> *del)
     {
         _update(base, limit, e, false, del);
     }
@@ -669,7 +670,7 @@ template <class T, class T_in, class T_out, int load = 256> struct extmap {
         _update(base, limit, e, false, nullptr);
     }
 
-    void trim(T_in base, T_in limit, std::vector<T> *del)
+    void trim(T_in base, T_in limit, vec<T> *del)
     {
         static T_out unused;
         if (count > 0)

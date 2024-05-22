@@ -227,7 +227,7 @@ class lsvd_image::read_request : public lsvd_image::aio_request
     {
         assert(parent == nullptr);
 
-        std::vector<request *> requests;
+        vec<request *> requests;
         img->handle_reads(req_offset, iovs, requests);
         num_subreqs = requests.size();
 
@@ -255,7 +255,7 @@ class lsvd_image::read_request : public lsvd_image::aio_request
 };
 
 void lsvd_image::handle_reads(size_t offset, smartiov iovs,
-                              std::vector<request *> &requests)
+                              vec<request *> &requests)
 {
     sector_t start_sector = offset / 512;
     sector_t end_sector = start_sector + iovs.bytes() / 512;
@@ -444,7 +444,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
      * and be done with it. The old code had these as pointers, but changed
      * them to be in the vectwor.
      */
-    std::vector<smartiov> sub_iovs;
+    vec<smartiov> sub_iovs;
 
   public:
     write_request(lsvd_image *img, size_t offset, smartiov iovs,
@@ -478,7 +478,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
         n_req += div_round_up(req_bytes / 512, max_sectors);
         // TODO: this is horribly ugly
 
-        std::vector<request *> requests;
+        vec<request *> requests;
         auto cur_offset = req_offset;
 
         for (sector_t s_offset = 0; s_offset < size_sectors;

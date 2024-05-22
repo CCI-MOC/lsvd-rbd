@@ -1,8 +1,10 @@
 cxx = meson.get_compiler('cpp')
 
 cmake = import('cmake')
-libfolly_subproject = cmake.subproject('folly')
-libfolly = libfolly_subproject.dependency('folly')
+# cmvars = cmake.subproject_options()
+# cmvars.add_cmake_defines({'POSITION_INDEPENDENT_CODE': true})
+folly_cm = cmake.subproject('folly')
+libfolly = folly_cm.dependency('folly')
 
 lsvd_src = files(
 	'config.cc',
@@ -20,7 +22,7 @@ lsvd_src = files(
 
 lsvd_inc = include_directories('.')
 lsvd_deps = [
-	# libfolly,
+	libfolly,
 	dependency('threads'),
 	dependency('zlib'),
 	dependency('fmt'),
@@ -28,7 +30,6 @@ lsvd_deps = [
 	dependency('liburing', static: true),
 	dependency('uuid'),
 	cxx.find_library('rados', required: true),
-	# cxx.find_library('tcmalloc', required: false),
 	cxx.find_library('jemalloc', required: false),
 ]
 

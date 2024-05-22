@@ -26,8 +26,8 @@ class lsvd_config
     int backend_obj_size = 8 * 1024 * 1024; // in bytes
     int wcache_batch = 8;                   // requests
     int wcache_chunk = 2 * 1024 * 1024;     // bytes
-    std::string rcache_dir = "/tmp";
-    std::string wcache_dir = "/tmp";
+    std::string rcache_dir = "/tmp/lsvd/";
+    std::string wcache_dir = "/tmp/lsvd/";
     u32 num_parallel_writes = 8;
     int hard_sync = 0;
     enum cfg_backend backend = BACKEND_RADOS;

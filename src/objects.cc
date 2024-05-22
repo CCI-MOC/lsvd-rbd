@@ -123,7 +123,7 @@ opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
  */
 template <class T>
 void deserialise_offset_ptr(char *buf, size_t offset, size_t len,
-                            std::vector<T *> &vals)
+                            vec<T *> &vals)
 {
     T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
     for (; p < end;) {

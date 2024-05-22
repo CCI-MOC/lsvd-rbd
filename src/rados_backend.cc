@@ -191,7 +191,7 @@ class rados_backend : public backend
         auto size = get_size(name);
         PASSTHRU_NULLOPT(size);
 
-        std::vector<byte> buf(size.value());
+        vec<byte> buf(size.value());
         smartiov iov((char *)buf.data(), buf.size());
         auto r = read(name, 0, iov);
         if (r < 0)

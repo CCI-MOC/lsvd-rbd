@@ -57,8 +57,8 @@ class lsvd_image
     usize size; // bytes
     lsvd_config cfg;
 
-    std::vector<clone_base> clones;    // Base images on which we're built
-    std::vector<seqnum_t> checkpoints; // Checkpoints
+    vec<clone_base> clones;    // Base images on which we're built
+    vec<seqnum_t> checkpoints; // Checkpoints
     std::map<seqnum_t, data_obj_info> obj_info;
 
     // LBA -> object id, object offset
@@ -107,5 +107,5 @@ class lsvd_image
 
   private:
     void handle_reads(size_t offset, smartiov iovs,
-                      std::vector<request *> &requests);
+                      vec<request *> &requests);
 };

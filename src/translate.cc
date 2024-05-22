@@ -84,7 +84,7 @@ class translate_req : public request
     char *gc_data = NULL; // passed in by GC thread
 
     /* lba/len/obj/offset (ignore obj/offset for REQ_PUT) */
-    std::vector<ckpt_mapentry> entries;
+    vec<ckpt_mapentry> entries;
 
     /* used for removing from map */
     char *local_buf_base = NULL;
@@ -171,7 +171,7 @@ class translate_impl : public translate
     friend class translate_req;
     translate_req *current = NULL;
 
-    std::vector<clone_base> &clones;
+    vec<clone_base> &clones;
     std::map<seqnum_t, data_obj_info> &object_info;
     vec<seqnum_t> &checkpoints;
 
@@ -233,6 +233,9 @@ class translate_impl : public translate
             total_live_sectors += oi.live;
         }
 
+        current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+        assert(current->batch_buf != nullptr);
+
         // start worker, flush, and GC threads
         if (cfg.flush_interval_msec > 0)
             flush_worker =
@@ -246,8 +249,6 @@ class translate_impl : public translate
         workers = new thread_pool<translate_req *>(&m);
         workers->pool.push(
             std::thread(&translate_impl::worker_thread, this, workers));
-
-        current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
 
         // Fully serialise superblock once, so we can do partial serialisations
         // later on and skip the checkpoint stuff every time
@@ -430,7 +431,7 @@ ssize_t translate_impl::trim(size_t offset, size_t len)
     std::unique_lock obj_w_lock(omap_mtx);
 
     // trim the map
-    std::vector<extmap::lba2obj> deleted;
+    vec<extmap::lba2obj> deleted;
     objmap.trim(offset / 512, (offset + len) / 512, &deleted);
 
     // and then update the GC accounting
@@ -503,7 +504,7 @@ void translate_req::notify(request *child)
          * point to this buffer
          */
         std::unique_lock obj_w_lock(tx->bufmap_lock);
-        std::vector<std::pair<sector_t, sector_t>> extents;
+        vec<std::pair<sector_t, sector_t>> extents;
         for (auto const &e : entries) {
             auto limit = e.lba + e.len;
             for (auto it2 = tx->bufmap.lookup(e.lba);
@@ -544,8 +545,8 @@ void translate_impl::write_checkpoint(seqnum_t cp_seq, translate_req *req)
 {
     debug("Writing checkpoint {}", cp_seq);
 
-    std::vector<ckpt_mapentry> entries;
-    std::vector<ckpt_obj> objects;
+    vec<ckpt_mapentry> entries;
+    vec<ckpt_obj> objects;
 
     for (auto it = objmap.begin(); it != objmap.end(); it++) {
         auto [base, limit, ptr] = it->vals();
@@ -596,7 +597,7 @@ void translate_impl::write_checkpoint(seqnum_t cp_seq, translate_req *req)
     // Update superblock with new checkpoint, and keep only the last 3
     // around both in the backend and the superblock
     checkpoints.push_back(cp_seq);
-    std::vector<seqnum_t> ckpts_to_delete;
+    vec<seqnum_t> ckpts_to_delete;
     while (checkpoints.size() > 3) {
         ckpts_to_delete.push_back(checkpoints.front());
         checkpoints.erase(checkpoints.begin());
@@ -649,7 +650,7 @@ void translate_impl::write_gc(seqnum_t _seq, translate_req *req)
     auto in_ptr = req->gc_data;
 
     // int _data_sectors = 0; // actual sectors in GC write
-    std::vector<data_map> obj_extents;
+    vec<data_map> obj_extents;
 
     req->local_buf_base = data_ptr;
     for (auto const &[base, len, obj, offset] : req->entries) {
@@ -685,7 +686,7 @@ void translate_impl::write_gc(seqnum_t _seq, translate_req *req)
 
     sector_t offset = hdr_sectors;
     data_ptr = data_ptr0;
-    std::vector<extmap::lba2obj> deleted;
+    vec<extmap::lba2obj> deleted;
     req->entries.clear(); // replace with actual extents written
 
     std::unique_lock obj_w_lock(omap_mtx); // protect the readers
@@ -748,9 +749,9 @@ void translate_impl::process_batch(seqnum_t _seq, translate_req *req)
     /* and the object map (copy entries to right format at same time)
      */
     sector_t sector_offset = hdr_sectors;
-    std::vector<extmap::lba2obj> deleted;
+    vec<extmap::lba2obj> deleted;
     deleted.reserve(req->entries.size());
-    std::vector<data_map> dm_entries;
+    vec<data_map> dm_entries;
     dm_entries.reserve(req->entries.size());
 
     for (auto e : req->entries) {
@@ -922,7 +923,7 @@ void translate_impl::do_gc(std::stop_token &st)
     int max_obj = cur_seq.load();
 
     std::shared_lock obj_r_lock(omap_mtx);
-    std::vector<int> dead_objects;
+    vec<int> dead_objects;
     for (auto const &p : object_info) {
         auto [hdrlen, datalen, live] = p.second;
         if (live == 0) {
@@ -987,7 +988,7 @@ void translate_impl::do_gc(std::stop_token &st)
     /* gather list of objects needing cleaning, return if none
      */
     const double threshold = cfg.gc_threshold / 100.0;
-    std::vector<std::pair<int, int>> objs_to_clean;
+    vec<std::pair<int, int>> objs_to_clean;
     for (auto [u, o, n] : utilization) {
         if (u > threshold)
             continue;
@@ -1058,7 +1059,7 @@ void translate_impl::do_gc(std::stop_token &st)
 
         auto file_end = offset;
 
-        std::vector<_extent> all_extents;
+        vec<_extent> all_extents;
         for (auto it = live_extents.begin(); it != live_extents.end(); it++) {
             auto [base, limit, ptr] = it->vals();
             all_extents.push_back((_extent){base, limit, ptr});
@@ -1070,7 +1071,7 @@ void translate_impl::do_gc(std::stop_token &st)
 
         while (all_extents.size() > 0) {
             sector_t sectors = 0, max = cfg.backend_obj_size / 512;
-            std::vector<_extent> extents;
+            vec<_extent> extents;
 
             auto it = all_extents.begin();
             while (it != all_extents.end() && sectors < max) {
@@ -1274,9 +1275,9 @@ int translate_clone_image(sptr<backend> objstore, const char *source,
 #if 0
 ssize_t translate_impl::init(const char *prefix_, bool timedflush)
 {
-    std::vector<uint32_t> ckpts;
-    std::vector<clone_info *> clones;
-    std::vector<snap_info *> snaps;
+    vec<uint32_t> ckpts;
+    vec<clone_info *> clones;
+    vec<snap_info *> snaps;
 
     /* note prefix = superblock name
      */
@@ -1346,9 +1347,9 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
      */
     int last_ckpt = -1;
     if (ckpts.size() > 0) {
-        std::vector<ckpt_obj> objects;
-        std::vector<deferred_delete> deletes;
-        std::vector<ckpt_mapentry> entries;
+        vec<ckpt_obj> objects;
+        vec<deferred_delete> deletes;
+        vec<ckpt_mapentry> entries;
 
         /* hmm, we should never have checkpoints listed in the
          * super that aren't persisted on the backend, should we?
@@ -1391,8 +1392,8 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
     /* roll forward
      */
     for (;; seq++) {
-        std::vector<obj_cleaned> cleaned;
-        std::vector<data_map> entries;
+        vec<obj_cleaned> cleaned;
+        vec<data_map> entries;
         common_obj_hdr h;
         obj_data_hdr dh;
 
@@ -1416,7 +1417,7 @@ ssize_t translate_impl::init(const char *prefix_, bool timedflush)
             max_cache_seq = dh.cache_seq;
 
         int offset = 0, hdr_len = h.hdr_sectors;
-        std::vector<extmap::lba2obj> deleted;
+        vec<extmap::lba2obj> deleted;
         for (auto m : entries) {
             extmap::obj_offset oo = {seq, offset + hdr_len};
             objmap.update(m.lba, m.lba + m.len, oo, &deleted);

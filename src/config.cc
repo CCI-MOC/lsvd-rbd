@@ -24,9 +24,9 @@ namespace fs = std::filesystem;
 #include "config.h"
 #include "config_macros.h"
 
-std::vector<std::string> cfg_path({"lsvd.conf", "/usr/local/etc/lsvd.conf"});
+vec<std::string> cfg_path({"lsvd.conf", "/usr/local/etc/lsvd.conf"});
 
-static void split(std::string s, std::vector<std::string> &words)
+static void split(std::string s, vec<std::string> &words)
 {
     std::string w = "";
     for (auto c : s) {
@@ -65,7 +65,7 @@ int lsvd_config::read()
         while (getline(fp, line)) {
             if (line[0] == '#')
                 continue;
-            std::vector<std::string> words;
+            vec<std::string> words;
             split(line, words);
             if (words.size() != 2)
                 continue;

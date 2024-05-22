@@ -143,7 +143,7 @@ wcache_write_req::wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages,
         r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad * 4096L);
     }
 
-    std::vector<j_extent> extents;
+    vec<j_extent> extents;
     extents.push_back((j_extent){(uint64_t)lba, iovs->bytes() / 512});
 
     /* TODO: don't assign seq# in mk_header
@@ -399,7 +399,7 @@ int write_cache_impl::roll_log_forward()
          * - put mappings into cache map
          * - write data to backend
          */
-        std::vector<j_extent> entries;
+        vec<j_extent> entries;
         decode_offset_len<j_extent>(_hdrbuf, h->extent_offset, h->extent_len,
                                     entries);
 
@@ -486,7 +486,6 @@ write_cache_impl::~write_cache_impl()
 
 request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
 {
-
     size_t bytes = iovs->bytes();
     page_t pages = div_round_up(bytes, 4096);
     page_t pad, n_pad, prev = 0;
