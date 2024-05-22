@@ -14,8 +14,8 @@
 
 const int block_sectors = CACHE_CHUNK_SIZE / 512;
 
-lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg)
-    : imgname(name), cfg(cfg)
+lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg_)
+    : imgname(name), cfg(cfg_)
 {
     objstore = make_rados_backend(io);
     rcache = get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
