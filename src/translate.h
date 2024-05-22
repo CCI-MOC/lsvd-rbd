@@ -15,10 +15,10 @@
 class translate
 {
   public:
-    uuid_t uuid;
     uint64_t max_cache_seq;
+    uuid_t &uuid;
 
-    translate() {}
+    translate(uuid_t &uuid) : uuid(uuid) {}
     virtual ~translate() {}
 
     virtual void shutdown(void) = 0;

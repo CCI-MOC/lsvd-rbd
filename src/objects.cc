@@ -8,26 +8,25 @@
 #include "objects.h"
 #include "utils.h"
 
-void serialise_common_hdr(vec<byte> buf, obj_type t, seqnum_t s, u32 hdr,
+void serialise_common_hdr(vec<byte> &buf, obj_type t, seqnum_t s, u32 hdr,
                           u32 data, uuid_t &uuid)
 {
     if (buf.size() < sizeof(common_obj_hdr))
         buf.resize(sizeof(common_obj_hdr));
 
     auto h = (common_obj_hdr *)buf.data();
-    *h = (common_obj_hdr){.magic = LSVD_MAGIC,
-                          .version = 1,
-                          .vol_uuid = {0},
-                          .type = t,
-                          .seq = s,
-                          .hdr_sectors = hdr,
-                          .data_sectors = data,
-                          .crc = 0};
+    h->magic = LSVD_MAGIC;
+    h->version = 1;
+    h->type = t;
+    h->seq = s;
+    h->hdr_sectors = hdr;
+    h->data_sectors = data;
+    h->crc = 0;
     uuid_copy(h->vol_uuid, uuid);
 }
 
-void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
-                          vec<clone_base> &clones, uuid_t &uuid)
+void serialise_superblock(vec<byte> &buf, vec<seqnum_t> &checkpoints,
+                          vec<clone_base> &clones, uuid_t &uuid, usize vol_size)
 {
     // Reserve required space ahead of time
     usize req_size = sizeof(common_obj_hdr) + sizeof(super_hdr);
@@ -43,6 +42,7 @@ void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
 
     auto bufp = buf.data(); // start of buffer
     auto hdrp = (super_hdr *)(bufp + sizeof(common_obj_hdr));
+    hdrp->vol_size = vol_size / 512;
 
     serialise_common_hdr(buf, OBJ_SUPERBLOCK, 0, req_size / 512, 0, uuid);
 
@@ -95,7 +95,9 @@ opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
 {
     vec<byte> buf(4096);
     auto err = objstore->read(objname, 0, buf.data(), 4096);
-    RET_IF(err != 4096, std::nullopt);
+    RET_IF(err == -ENOENT, std::nullopt);
+    THROW_ERRNO_ON(err < 0, -err, "Failed to read object '{}' header", objname);
+    THROW_MSG_ON(err < 512, "Short read {}/512 on obj '{}'", err, objname);
 
     auto h = (common_obj_hdr *)buf.data();
 

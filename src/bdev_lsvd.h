@@ -1,8 +1,8 @@
 #pragma once
 
 #include <rados/librados.h>
-#include <string>
 
-int bdev_lsvd_create(std::string img_name, rados_ioctx_t io_ctx);
+#include "config.h"
 
-int bdev_lsvd_delete(std::string img_name);
+int bdev_lsvd_create(str img_name, rados_ioctx_t io_ctx, lsvd_config cfg);
+int bdev_lsvd_delete(str img_name);

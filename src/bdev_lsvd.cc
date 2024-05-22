@@ -133,11 +133,10 @@ struct lsvd_bdev_io_channel {
     spdk_io_channel *io_channel;
 };
 
-int bdev_lsvd_create(std::string img_name, rados_ioctx_t ioctx)
+int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
 {
     assert(!img_name.empty());
 
-    lsvd_config cfg; // TODO
     uptr<lsvd_image> img;
     try {
         img = uptr<lsvd_image>(new lsvd_image(img_name, ioctx, cfg));

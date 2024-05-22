@@ -21,11 +21,13 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg)
     rcache = get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
 
     read_superblock();
+    debug("Found checkpoints: {}", checkpoints);
     if (checkpoints.size() > 0)
         read_from_checkpoint(checkpoints.back());
 
     // Roll forward on the log
     auto last_data_seq = roll_forward_from_last_checkpoint();
+    debug("Last data seq: {}", last_data_seq);
 
     // Successfully recovered everything, now we have enough information to
     // init everything else
@@ -36,6 +38,8 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg)
     wlog = open_wlog(cfg.wlog_path(name), cfg.wlog_size / 4096, *xlate, cfg);
     THROW_MSG_ON(!wlog, "Failed to open write log");
     // recover_from_wlog();
+
+    log_info("Image '{}' opened successfully", name);
 }
 
 lsvd_image::~lsvd_image()
@@ -43,6 +47,8 @@ lsvd_image::~lsvd_image()
     wlog->flush();
     wlog->do_write_checkpoint();
     xlate->shutdown();
+
+    log_info("Image '{}' closed", imgname);
 }
 
 bool lsvd_image::apply_log(seqnum_t seq)
@@ -132,7 +138,7 @@ void lsvd_image::read_from_checkpoint(seqnum_t seq)
     }
 }
 
-// Returns last processed checkpoint
+// Returns last processed object's seqnum
 seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
 {
     if (checkpoints.size() == 0)
@@ -147,6 +153,8 @@ seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
         if (!ret)
             break;
     }
+
+    seq -= 1;
 
     // Delete "dangling" objects if there are any in case they cause trouble
     // with corruption

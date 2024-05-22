@@ -13,11 +13,6 @@ struct start_lsvd_args {
 static void start_lsvd(void *arg)
 {
     log_info("Starting LSVD SPDK program ...");
-
-    setenv("LSVD_RCACHE_DIR", "/tmp/lsvd-read", 1);
-    setenv("LSVD_WCACHE_DIR", "/tmp/lsvd-write", 1);
-    setenv("LSVD_CACHE_SIZE", "2147483648", 1);
-
     auto args = (start_lsvd_args *)arg;
 
     rados_t cluster;
@@ -34,11 +29,15 @@ static void start_lsvd(void *arg)
     err = rados_ioctx_create(cluster, args->pool_name, &io_ctx);
     check_ret_neg(err, "Failed to connect to pool {}", args->pool_name);
 
-    err = bdev_lsvd_create(args->image_name, io_ctx);
+    lsvd_config cfg; // TODO get this from somewhere reasonable
+    cfg.cache_size = 160 * 1024 * 1024;
+    err = bdev_lsvd_create(args->image_name, io_ctx, cfg);
     if (err) {
         log_error("Failed to create bdev");
         spdk_app_stop(err);
     }
+
+    // TODO setup nvmf subsystems and all that nonsense
 }
 
 int main(int argc, const char **argv)
@@ -62,11 +61,6 @@ int main(int argc, const char **argv)
     };
     log_info("Args: pool={}, image={}", args.pool_name, args.image_name);
 
-    std::signal(SIGINT, [](int) {
-        log_info("Received SIGINT, shutting down LSVD SPDK program ...");
-        spdk_app_stop(0);
-    });
-
     spdk_app_opts opts = {.shutdown_cb = []() {
         log_info("Shutting down LSVD SPDK program ...");
         spdk_app_stop(0);
@@ -77,5 +71,7 @@ int main(int argc, const char **argv)
 
     int rc = spdk_app_start(&opts, start_lsvd, &args);
     spdk_app_fini();
+
+    log_info("Exiting ...");
     return rc;
 }

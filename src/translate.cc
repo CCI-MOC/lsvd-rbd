@@ -127,7 +127,6 @@ class translate_req : public request
         local_buf_base = data_ptr;
         local_buf_limit = data_ptr + bytes;
     }
-
     translate_req(work_type op_, translate_impl *tx_)
     {
         op = op_;
@@ -153,7 +152,6 @@ class translate_impl : public translate
     std::string name;
     lsvd_config &cfg;
     usize vol_size;
-    uuid_t &vol_uuid;
 
     std::shared_ptr<backend> objstore;
     std::shared_ptr<read_cache> rcache;
@@ -223,7 +221,7 @@ class translate_impl : public translate
                    seqnum_t last_seq, vec<clone_base> &clones,
                    std::map<seqnum_t, data_obj_info> &objinfo,
                    vec<seqnum_t> &checkpoints)
-        : name(name), cfg(cfg), vol_size(vol_size), vol_uuid(vol_uuid),
+        : translate(vol_uuid), name(name), cfg(cfg), vol_size(vol_size),
           objstore(be), rcache(rcache), objmap(objmap), omap_mtx(omap_mtx),
           bufmap(bmap), bufmap_lock(bmap_lck), cur_seq(last_seq + 1),
           clones(clones), object_info(objinfo), checkpoints(checkpoints),
@@ -346,7 +344,7 @@ void translate_impl::make_obj_hdr(char *buf, uint32_t _seq,
                           .hdr_sectors = (uint32_t)hdr_sectors,
                           .data_sectors = (uint32_t)data_sectors,
                           .crc = 0};
-    memcpy(h->vol_uuid, &uuid, sizeof(uuid_t));
+    uuid_copy(h->vol_uuid, uuid);
 
     *dh = (obj_data_hdr){.cache_seq = 0,
                          .objs_cleaned_offset = 0,
@@ -544,6 +542,8 @@ void translate_req::notify(request *child)
  */
 void translate_impl::write_checkpoint(seqnum_t cp_seq, translate_req *req)
 {
+    debug("Writing checkpoint {}", cp_seq);
+
     std::vector<ckpt_mapentry> entries;
     std::vector<ckpt_obj> objects;
 
@@ -602,9 +602,11 @@ void translate_impl::write_checkpoint(seqnum_t cp_seq, translate_req *req)
         checkpoints.erase(checkpoints.begin());
     }
 
-    serialise_superblock(superblock_buf, checkpoints, clones, uuid);
+    serialise_superblock(superblock_buf, checkpoints, clones, uuid, vol_size);
+    debug("Updating superblock with new checkpoint");
     objstore->write(name, superblock_buf.data(), superblock_buf.size());
 
+    debug("Deleting old checkpoints {}", ckpts_to_delete);
     for (auto c : ckpts_to_delete)
         objstore->delete_obj(oname(name, c));
 
@@ -881,6 +883,8 @@ void translate_impl::flush_thread(std::stop_token st)
     auto timeout = std::chrono::milliseconds(cfg.flush_timeout_msec);
     auto t0 = std::chrono::system_clock::now();
     auto seq0 = cur_seq.load();
+
+    debug("Flush thread {} starting", pthread_self());
 
     while (true) {
         std::this_thread::sleep_for(interval);

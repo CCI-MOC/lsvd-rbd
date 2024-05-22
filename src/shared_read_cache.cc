@@ -440,7 +440,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
       user_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW),
       backend_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW)
 {
-    debug("Opening {} for the read cache", cache_path);
+    trace("Opening {} for the read cache", cache_path);
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
     check_ret_errno(fd, "failed to open cache file");
 

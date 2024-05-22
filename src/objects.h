@@ -40,7 +40,7 @@ struct common_obj_hdr {
  * snaps : TBD
  */
 struct super_hdr {
-    uint64_t vol_size;
+    uint64_t vol_size; // in 512 byte sectors
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
     uint32_t clones_offset; // array of struct clone
@@ -190,9 +190,10 @@ struct data_obj_info {
     sector_t live;
 };
 
-void serialise_common_hdr(vec<byte> buf, obj_type t, seqnum_t s, u32 hdr,
+void serialise_common_hdr(vec<byte> &buf, obj_type t, seqnum_t s, u32 hdr,
                           u32 data, uuid_t &uuid);
 
 // Serialise a superblock object.
-void serialise_superblock(vec<byte> buf, vec<seqnum_t> &checkpoints,
-                          vec<clone_base> &clones, uuid_t &uuid);
+void serialise_superblock(vec<byte> &buf, vec<seqnum_t> &checkpoints,
+                          vec<clone_base> &clones, uuid_t &uuid,
+                          usize vol_size);
