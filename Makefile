@@ -19,7 +19,7 @@ clean:
 install-deps:
 	# Folly deps
 	sudo apt install libboost-all-dev libdouble-conversion-dev libevent-dev \
-		libflags-dev libgmock-dev libgoogle-glog-dev libgtest-dev \
+		libgflags-dev libgmock-dev libgoogle-glog-dev libgtest-dev \
 		liblz4-dev liblzma-dev libsnappy-dev libsodium-dev libunwind-dev \
 		libzstd-dev ninja-build zlib1g-dev
 	# SPDK deps
