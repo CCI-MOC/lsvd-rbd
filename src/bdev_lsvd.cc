@@ -43,7 +43,7 @@ class lsvd_iodevice
     spdk_bdev bdev;
     uptr<lsvd_image> img;
 
-    lsvd_iodevice(uptr<lsvd_image> img) : img(std::move(img))
+    lsvd_iodevice(uptr<lsvd_image> img_) : img(std::move(img_))
     {
         bdev.product_name = strdup("Log-structured Virtual Disk");
         bdev.name = strdup(img->imgname.c_str());

@@ -20,7 +20,7 @@ lsvd_src = files(
 
 lsvd_inc = include_directories('.')
 lsvd_deps = [
-	libfolly,
+	# libfolly,
 	dependency('threads'),
 	dependency('zlib'),
 	dependency('fmt'),

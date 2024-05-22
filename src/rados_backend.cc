@@ -176,9 +176,14 @@ class rados_backend : public backend
         u64 size;
         time_t mtime;
         int rv = ctx.stat(name, &size, &mtime);
-        if (rv < 0)
+        switch (rv) {
+        case 0:
+            return size;
+        case -ENOENT:
             return std::nullopt;
-        return size;
+        default:
+            THROW_ERRNO_ON(true, -rv, "Failed to stat object '{}'", name);
+        }
     }
 
     opt<vec<byte>> read_whole_obj(std::string name) override

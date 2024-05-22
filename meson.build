@@ -20,7 +20,9 @@ if get_option('buildtype') == 'debug'
 endif
 
 subdir('src')
-liblsvd = library('lsvd', lsvd_src, dependencies: lsvd_deps, install: false)
+
+liblsvd = shared_library('lsvd', lsvd_src, dependencies: lsvd_deps)
+lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
 
 executable(
 	'lsvd',
@@ -31,13 +33,13 @@ executable(
 executable(
 	'imgtool',
 	'src/imgtool.cc',
-	link_with: liblsvd,
+	link_whole: lsvd_ar,
 	dependencies: lsvd_deps,
 )
 executable(
 	'thick-image',
 	'src/thick-image.cc',
-	link_with: liblsvd,
+	link_whole: lsvd_ar,
 	dependencies: lsvd_deps,
 )
 

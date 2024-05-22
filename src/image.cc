@@ -92,7 +92,7 @@ bool lsvd_image::apply_log(seqnum_t seq)
 void lsvd_image::read_superblock()
 {
     object_reader parser(objstore);
-    auto superblock = parser.read_superblock(oname(imgname, 0));
+    auto superblock = parser.read_superblock(imgname);
     THROW_MSG_ON(!superblock, "Failed to read superblock");
 
     size = superblock->vol_size;

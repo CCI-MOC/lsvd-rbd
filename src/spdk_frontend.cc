@@ -30,8 +30,10 @@ static void start_lsvd(void *arg)
     check_ret_neg(err, "Failed to connect to pool {}", pool_name);
 
     err = bdev_lsvd_create("test", io_ctx);
-
-    spdk_app_stop(err);
+    if (err) {
+        log_error("Failed to create bdev");
+        spdk_app_stop(err);
+    }
 }
 
 int main(int argc, char **argv)

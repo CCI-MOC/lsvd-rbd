@@ -1,10 +1,9 @@
 #pragma once
 
 #include <boost/stacktrace.hpp>
-#include <chrono>
+#include <cerrno>
 #include <condition_variable>
 #include <cstring>
-#include <errno.h>
 #include <filesystem>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
@@ -153,8 +152,8 @@ using fspath = std::filesystem::path;
     do {                                                                       \
         if (cond) {                                                            \
             auto m =                                                           \
-                fmt::format("{}/{}: " MSG, en, strerr(en), ##__VA_ARGS__);     \
-            throw std::system_error(m);                                        \
+                fmt::format("{}/{}: " MSG, en, strerror(en), ##__VA_ARGS__);   \
+            throw std::system_error(en, std::generic_category(), m);           \
         }                                                                      \
     } while (0)
 

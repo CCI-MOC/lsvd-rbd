@@ -171,7 +171,8 @@ opt<parsed_superblock> object_reader::read_superblock(std::string oname)
     auto hbuf = buf->data();
 
     PR_RET_IF(hdr->magic != LSVD_MAGIC, std::nullopt,
-              "Corrupt object; invalid magic at '{}'", oname);
+              "Corrupt object; invalid magic at '{}', found {:x}", oname,
+              hdr->magic);
     PR_RET_IF(hdr->version != 1, std::nullopt,
               "Invalid version in object '{}', only 1 is supported", oname);
     PR_RET_IF(hdr->type != OBJ_SUPERBLOCK, std::nullopt,
