@@ -208,6 +208,14 @@ void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name,
 
 int main(int argc, char **argv)
 {
+    std::set_terminate([]() {
+        try {
+            std::cerr << boost::stacktrace::stacktrace();
+        } catch (...) {
+        }
+        std::abort();
+    });
+
     argp_parse(&argp, argc, argv, 0, 0, 0);
 
     setenv("LSVD_BACKEND", backend, 1);

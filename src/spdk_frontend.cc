@@ -1,4 +1,6 @@
 #include "spdk/event.h"
+#include <csignal>
+#include <iostream>
 
 #include "bdev_lsvd.h"
 #include "utils.h"
@@ -28,11 +30,30 @@ static void start_lsvd(void *arg)
     check_ret_neg(err, "Failed to connect to pool {}", pool_name);
 
     err = bdev_lsvd_create("test", io_ctx);
+
+    spdk_app_stop(err);
 }
 
 int main(int argc, char **argv)
 {
-    spdk_app_opts opts = {};
+    std::set_terminate([]() {
+        try {
+            std::cerr << boost::stacktrace::stacktrace();
+        } catch (...) {
+        }
+        std::abort();
+    });
+
+    std::signal(SIGINT, [](int) {
+        log_info("Received SIGINT, shutting down LSVD SPDK program ...");
+        spdk_app_stop(0);
+    });
+
+    spdk_app_opts opts = {.shutdown_cb = []() {
+        log_info("Shutting down LSVD SPDK program ...");
+        spdk_app_stop(0);
+    }};
+
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "spdk_frontend";
 
