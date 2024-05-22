@@ -1,7 +1,6 @@
 [wrap-git]
 url = https://github.com/facebook/folly.git
 revision = v2024.05.20.00
-patch_directory = folly
 clone-recursive = true
 
 [provide]
