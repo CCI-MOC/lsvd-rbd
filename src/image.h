@@ -57,6 +57,8 @@ class lsvd_image
     usize size; // bytes
     lsvd_config cfg;
 
+    rados_ioctx_t io;
+
     vec<clone_base> clones;    // Base images on which we're built
     vec<seqnum_t> checkpoints; // Checkpoints
     std::map<seqnum_t, data_obj_info> obj_info;
@@ -106,6 +108,5 @@ class lsvd_image
                            rados_ioctx_t io);
 
   private:
-    void handle_reads(size_t offset, smartiov iovs,
-                      vec<request *> &requests);
+    void handle_reads(size_t offset, smartiov iovs, vec<request *> &requests);
 };

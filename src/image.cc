@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <optional>
+#include <rados/librados.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -15,7 +16,7 @@
 const int block_sectors = CACHE_CHUNK_SIZE / 512;
 
 lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg_)
-    : imgname(name), cfg(cfg_)
+    : imgname(name), cfg(cfg_), io(io)
 {
     objstore = make_rados_backend(io);
     rcache = get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
@@ -47,6 +48,9 @@ lsvd_image::~lsvd_image()
     wlog->flush();
     wlog->do_write_checkpoint();
     xlate->shutdown();
+
+    // TODO figure out who owns the rados connection
+    rados_ioctx_destroy(io);
 
     log_info("Image '{}' closed", imgname);
 }

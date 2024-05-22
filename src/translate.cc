@@ -110,7 +110,11 @@ class translate_req : public request
         return len + bytes <= max;
     }
 
-    ~translate_req() {}
+    ~translate_req()
+    {
+        if (batch_buf)
+            free(batch_buf);
+    }
 
     /* NOTE - this assumes the only significant header entry is the map
      */
@@ -519,8 +523,6 @@ void translate_req::notify(request *child)
         }
     }
 
-    if (batch_buf != NULL) // allocated in constructor
-        free(batch_buf);
     if (gc_buf != NULL) // allocated in write_gc
         free(gc_buf);
     if (gc_data != NULL) // allocated in gc threqad
@@ -587,9 +589,11 @@ void translate_impl::write_checkpoint(seqnum_t cp_seq, translate_req *req)
                          .map_len = (uint32_t)map_bytes};
 
     auto objs = (char *)(ch + 1);
-    memcpy(objs, (char *)objects.data(), objs_bytes);
     auto maps = objs + objs_bytes;
-    memcpy(maps, (char *)entries.data(), map_bytes);
+    if (objs_bytes > 0)
+        memcpy(objs, (char *)objects.data(), objs_bytes);
+    if (map_bytes > 0)
+        memcpy(maps, (char *)entries.data(), map_bytes);
 
     // Write out the checkpoint
     objstore->write(oname(name, cp_seq), cp_buf.data(), cp_buf.size());
