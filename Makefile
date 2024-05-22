@@ -18,7 +18,7 @@ clean:
 
 install-deps:
 	sudo apt install -y meson mold libfmt-dev libaio-dev librados-dev \
-    	libjemalloc-dev libboost-dev libradospp-dev \
+    	libjemalloc-dev libboost-all-dev libradospp-dev \
     	liburing-dev pkg-config uuid-dev libnuma-dev libarchive-dev \
 		libibverbs-dev librdmacm-dev python3-pyelftools libcunit1-dev
 
