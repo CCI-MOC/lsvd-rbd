@@ -1,5 +1,6 @@
 #pragma once
 
+#include <boost/stacktrace.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <iostream>
 #include <linux/fs.h>
 #include <mutex>
 #include <optional>
@@ -198,6 +200,13 @@ using fspath = std::filesystem::path;
         }                                                                      \
     } while (0)
 
+#define TODO()                                                                 \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
+                   "[ERR {}:{} {}] TODO\n", __FILE__, __LINE__, __func__);     \
+        throw std::runtime_error("TODO stub");                                 \
+    } while (0)
+
 #define UNIMPLEMENTED()                                                        \
     do {                                                                       \
         fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
@@ -236,25 +245,6 @@ inline std::string string_join(const std::vector<std::string> &strings,
     return result;
 }
 
-inline std::chrono::time_point<std::chrono::system_clock> tnow()
-{
-    return std::chrono::high_resolution_clock::now();
-}
-
-constexpr std::chrono::microseconds
-tus(std::chrono::time_point<std::chrono::system_clock> start,
-    std::chrono::time_point<std::chrono::system_clock> end)
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-}
-
-constexpr int64_t tdus(std::chrono::time_point<std::chrono::system_clock> start,
-                       std::chrono::time_point<std::chrono::system_clock> end)
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-        .count();
-}
-
 template <typename T> std::shared_ptr<T> to_shared(std::unique_ptr<T> ptr)
 {
     return std::shared_ptr<T>(std::move(ptr));
@@ -288,61 +278,3 @@ inline size_t getsize64(int fd)
         size = sb.st_size;
     return size;
 }
-
-/**
- * This is a thread safe, bounded, blocking, multi-producer multi-consumer,
- * single-ended, FIFO queue. Push operations block until there's space, and pop
- * blocks until there are entries in the queue to pop.
- *
- * It uses an underlying std::queue for the actual queue, and then just adds a
- * single global lock to both pop and push. Readers are notified when there are
- * entries via condition vars, same for writers.
- *
- * Based on CPython's queue implementation found at
- * https://github.com/python/cpython/blob/main/Lib/queue.py
- *
- * This queue is neither movable nor copyable. Use smart pointers instead.
- */
-template <typename T> class BlockingMPMC
-{
-  public:
-    BlockingMPMC(size_t size) : _buffer(), _max_capacity(size) {}
-    ~BlockingMPMC();
-
-    // TODO Change to take an rvalue to default move instead of copy
-    void push(T t)
-    {
-        {
-            std::unique_lock<std::mutex> lck(_mutex);
-            _can_push.wait(lck,
-                           [&]() { return _buffer.size() < _max_capacity; });
-            _buffer.push(std::move(t));
-        }
-        _can_pop.notify_one();
-    }
-
-    T pop()
-    {
-        T x;
-        {
-            std::unique_lock<std::mutex> lck(_mutex);
-            _can_pop.wait(lck, [&]() { return !_buffer.empty(); });
-            x = std::move(_buffer.front());
-            _buffer.pop();
-        }
-        _can_push.notify_one();
-        return x;
-    }
-
-  private:
-    BlockingMPMC(BlockingMPMC &src) = delete;
-    BlockingMPMC(BlockingMPMC &&src) = delete;
-    BlockingMPMC &operator=(BlockingMPMC &src) = delete;
-    BlockingMPMC &operator=(BlockingMPMC &&src) = delete;
-
-    std::queue<T> _buffer;
-    size_t _max_capacity;
-    std::mutex _mutex;
-    std::condition_variable _can_pop;
-    std::condition_variable _can_push;
-};
