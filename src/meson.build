@@ -25,7 +25,7 @@ lsvd_deps = [
 	dependency('zlib'),
 	dependency('fmt'),
 	dependency('boost'),
-	dependency('liburing'),
+	dependency('liburing', static: true),
 	dependency('uuid'),
 	cxx.find_library('rados', required: true),
 	# cxx.find_library('tcmalloc', required: false),
