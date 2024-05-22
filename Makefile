@@ -24,7 +24,7 @@ install-deps:
 		libzstd-dev ninja-build zlib1g-dev
 	# SPDK deps
 	sudo apt install libnuma-dev libarchive-dev libibverbs-dev librdmacm-dev \
-		python3-pyelftools libcunit1-dev
+		python3-pyelftools libcunit1-dev libaio-dev
 	# LSVD deps
 	sudo apt install -y meson mold libfmt-dev librados-dev \
     	libjemalloc-dev libradospp-dev liburing-dev pkg-config uuid-dev
