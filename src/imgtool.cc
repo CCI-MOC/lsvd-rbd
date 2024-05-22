@@ -15,18 +15,10 @@
 #include "translate.h"
 #include "utils.h"
 
-enum tool_operation {
-    OP_CREATE = 1,
-    OP_DELETE = 2,
-    OP_INFO = 3,
-    OP_MKCACHE = 4,
-    OP_CLONE = 5
-};
+enum tool_operation { OP_CREATE = 1, OP_DELETE = 2, OP_INFO = 3, OP_CLONE = 5 };
 
 const char *backend = "rados";
 const char *image_name;
-const char *cache_dir;
-const char *cache_dev;
 cfg_cache_type cache_type = LSVD_CFG_READ;
 enum tool_operation op;
 const char *pool_name = "lsvd";
@@ -46,11 +38,7 @@ static long parseint(const char *_s)
 }
 
 static struct argp_option options[] = {
-    {"cache-dir", 'd', "DIR", 0, "cache directory", 0},
     {"create", 'C', 0, 0, "create image", 0},
-    {"mkcache", 'k', "DEV", 0, "use DEV as cache", 0},
-    {"cache-type", 't', "R/W", 0,
-     "R for read cache, W for write cache (default: R)", 0},
     {"size", 'z', "SIZE", 0, "size in bytes (M/G=2^20,2^30)", 0},
     {"delete", 'D', 0, 0, "delete image", 0},
     {"info", 'I', 0, 0, "show image information", 0},
@@ -61,17 +49,11 @@ static struct argp_option options[] = {
 
 static char args_doc[] = "IMAGE";
 
-extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
-int (*make_cache)(int fd, uuid_t &uuid, int n_pages) = init_wcache;
-
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
     switch (key) {
     case ARGP_KEY_ARG:
         image_name = arg;
-        break;
-    case 'd':
-        cache_dir = arg;
         break;
     case 'C':
         op = OP_CREATE;
@@ -84,21 +66,6 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case 'I':
         op = OP_INFO;
-        break;
-    case 't':
-        if (arg[0] == 'R') {
-            cache_type = LSVD_CFG_READ;
-            log_error("read cache no longer supported");
-            exit(1);
-        } else if (arg[0] == 'W') {
-            cache_type = LSVD_CFG_WRITE;
-            make_cache = init_wcache;
-        } else
-            argp_usage(state);
-        break;
-    case 'k':
-        op = OP_MKCACHE;
-        cache_dev = arg;
         break;
     case 'c':
         op = OP_CLONE;
@@ -171,41 +138,6 @@ void info(rados_ioctx_t io, const char *image_name)
     }
 }
 
-void mk_cache(rados_ioctx_t io, const char *image_name, const char *dev_name,
-              cfg_cache_type type)
-{
-    int rv, fd = open(dev_name, O_RDWR);
-    if (fd < 0) {
-        perror("device file open");
-        exit(1);
-    }
-    auto sz = getsize64(fd);
-
-    lsvd_config cfg;
-    if ((rv = cfg.read()) < 0) {
-        printf("error reading config: %d\n", rv);
-        exit(1);
-    }
-    auto objstore = make_rados_backend(io);
-    uuid_t uu;
-    if ((rv = translate_get_uuid(objstore, image_name, uu)) < 0) {
-        printf("error reading superblock: %d\n", rv);
-        exit(1);
-    }
-    auto cache_file = cfg.cache_filename(uu, image_name, type);
-
-    auto n_pages = sz / 4096;
-    if (make_cache(fd, uu, n_pages) < 0) {
-        printf("make_cache failed\n");
-        exit(1);
-    }
-    if ((rv = symlink(dev_name, cache_file.c_str())) < 0) {
-        perror("symbolic link");
-        exit(1);
-    }
-    close(fd);
-}
-
 int main(int argc, char **argv)
 {
     std::set_terminate([]() {
@@ -217,14 +149,6 @@ int main(int argc, char **argv)
     });
 
     argp_parse(&argp, argc, argv, 0, 0, 0);
-
-    setenv("LSVD_BACKEND", backend, 1);
-    if (cache_dir != NULL) {
-        if (cache_type == LSVD_CFG_READ)
-            setenv("LSVD_RCACHE_DIR", cache_dir, 1);
-        else
-            setenv("LSVD_WCACHE_DIR", cache_dir, 1);
-    }
 
     rados_t cluster;
     int err = rados_create2(&cluster, "ceph", "client.admin", 0);
@@ -246,8 +170,6 @@ int main(int argc, char **argv)
         rbd_remove(io_ctx, image_name);
     else if (op == OP_INFO)
         info(io_ctx, image_name);
-    else if (op == OP_MKCACHE)
-        mk_cache(io_ctx, image_name, cache_dev, cache_type);
     else if (op == OP_CLONE) {
         auto src_img = image_name;
         auto dst_img = argv[argc - 1];

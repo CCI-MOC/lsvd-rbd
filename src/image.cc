@@ -35,7 +35,7 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg)
                            map_lock, bufmap, bufmap_lock, last_data_seq, clones,
                            obj_info, checkpoints);
 
-    wlog = open_wlog(cfg.wlog_path(name), cfg.wlog_size / 4096, *xlate, cfg);
+    wlog = open_wlog(cfg.wlog_path(name), *xlate, cfg);
     THROW_MSG_ON(!wlog, "Failed to open write log");
     // recover_from_wlog();
 
@@ -468,7 +468,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
     {
         assert(parent == nullptr);
 
-        img->wlog->get_room(req_bytes / 512);
+        img->wlog->reserve_room(req_bytes / 512);
         img->xlate->backend_backpressure();
 
         sector_t size_sectors = req_bytes / 512;

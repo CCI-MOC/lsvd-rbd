@@ -10,7 +10,7 @@
 class write_cache
 {
   public:
-    virtual void get_room(sector_t sectors) = 0;
+    virtual void reserve_room(sector_t sectors) = 0;
     virtual void release_room(sector_t sectors) = 0;
     virtual void flush(void) = 0;
 
@@ -24,7 +24,4 @@ class write_cache
 uptr<write_cache> make_write_cache(uint32_t blkno, int fd, translate *be,
                                    lsvd_config *cfg);
 
-int init_wcache(int fd, uuid_t &uuid, int n_pages);
-
-uptr<write_cache> open_wlog(fspath path, usize size, translate &xlate,
-                            lsvd_config &cfg);
+uptr<write_cache> open_wlog(fspath path, translate &xlate, lsvd_config &cfg);
