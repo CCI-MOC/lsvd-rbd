@@ -56,6 +56,7 @@ custom_libnames = [
   'spdk_lvol',
   'spdk_blob',
   'spdk_nvme',
+  'spdk_nvmf',
   # 'spdk_bdev_aio',
   'spdk_bdev_ftl',
   'spdk_ftl',

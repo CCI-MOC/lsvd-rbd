@@ -1,8 +1,11 @@
 #include "spdk/event.h"
+#include "spdk/nvmf.h"
 #include <csignal>
+#include <future>
 #include <iostream>
 
 #include "bdev_lsvd.h"
+#include "spdk/nvmf_spec.h"
 #include "utils.h"
 
 struct start_lsvd_args {
@@ -38,6 +41,61 @@ static void start_lsvd(void *arg)
     }
 
     // TODO setup nvmf subsystems and all that nonsense
+    // we can worry about refactoring it into functions later
+
+    // Step 1: create nvmf target
+    log_info("Creating NVMF target");
+    auto nvmf_opts = (spdk_nvmf_target_opts){
+        .name = "lsvd_nvmf_tgt",
+    };
+    auto tgt = spdk_nvmf_tgt_create(&nvmf_opts);
+    assert(tgt != nullptr);
+
+    // Step 1.5: add discovery subsystem so we can probe for it
+    log_info("Creating NVMF discovery subsystem");
+    auto disc_ss = spdk_nvmf_subsystem_create(
+        tgt, SPDK_NVMF_DISCOVERY_NQN, SPDK_NVMF_SUBTYPE_DISCOVERY_CURRENT, 0);
+    assert(disc_ss != nullptr);
+    spdk_nvmf_subsystem_set_allow_any_host(disc_ss, true);
+
+    // Step 2: create TCP transport
+    spdk_nvmf_transport_opts opts;
+    auto succ = spdk_nvmf_transport_opts_init("TCP", &opts, sizeof(opts));
+    assert(succ == true);
+    // opts.io_unit_size = 131072;
+    // opts.max_qpairs_per_ctrlr = 8;
+    opts.in_capsule_data_size = 8192;
+    debug("TCP transport opts: io_unit_size={}, max_qpairs_per_ctrlr={}, "
+          "in_capsule_data_size={}",
+          opts.io_unit_size, opts.max_qpairs_per_ctrlr,
+          opts.in_capsule_data_size);
+
+    log_info("Creating TCP transport");
+    auto transport_p = std::promise<spdk_nvmf_transport *>();
+    spdk_nvmf_transport_create_async(
+        "TCP", &opts,
+        [](auto p, auto b) {
+            auto pr = (std::promise<spdk_nvmf_transport *> *)p;
+            pr->set_value(b);
+        },
+        &transport_p);
+    auto transport = transport_p.get_future().get();
+    assert(transport != nullptr);
+
+    log_info("Adding TCP transport to target");
+    auto stat_p = std::promise<int>();
+    spdk_nvmf_tgt_add_transport(
+        tgt, transport,
+        [](auto p, auto stat) {
+            auto pr = (std::promise<int> *)p;
+            pr->set_value(stat);
+        },
+        nullptr);
+    auto status = stat_p.get_future().get();
+    assert(status == 0);
+
+    // Step 3: create subsystem for our bdev
+    log_info("Creating SPDK controller");
 }
 
 int main(int argc, const char **argv)
