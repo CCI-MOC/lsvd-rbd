@@ -11,3 +11,5 @@ qemu/*.img
 qemu/*.iso
 qemu/bzImage
 
+subprojects/liburing-*
+subprojects/packagecache
