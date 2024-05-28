@@ -205,3 +205,22 @@ std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
 {
     return std::make_shared<rados_backend>(io);
 }
+
+rados_ioctx_t connect_to_pool(str pool_name)
+{
+    rados_t cluster;
+    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
+    check_ret_neg(err, "Failed to create cluster handle");
+
+    err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
+    check_ret_neg(err, "Failed to read config file");
+
+    err = rados_connect(cluster);
+    check_ret_neg(err, "Failed to connect to cluster");
+
+    rados_ioctx_t io_ctx;
+    err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
+    check_ret_neg(err, "Failed to connect to pool {}", pool_name);
+
+    return io_ctx;
+}

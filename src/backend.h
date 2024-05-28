@@ -51,5 +51,5 @@ class backend
     virtual bool exists(std::string name) = 0;
 };
 
-extern std::shared_ptr<backend> make_file_backend(const char *prefix);
 extern std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io);
+rados_ioctx_t connect_to_pool(str pool_name);
