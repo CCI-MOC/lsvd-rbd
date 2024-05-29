@@ -15,6 +15,22 @@ const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
 const char *HOSTNAME = "127.0.0.1";
 const char *PORT = "4420";
 
+spdk_nvme_transport_id get_trid(const char *host, const char *port)
+{
+    spdk_nvme_transport_id trid;
+    // They're fixed-size char[] bufs in the struct, so make sure we have space
+    assert(strlen(host) < sizeof(trid.traddr));
+    assert(strlen(port) < sizeof(trid.trsvcid));
+    std::copy(host, host + strlen(host), trid.traddr);
+    std::copy(port, port + strlen(port), trid.trsvcid);
+    trid.trtype = SPDK_NVME_TRANSPORT_TCP;
+    trid.adrfam = SPDK_NVMF_ADRFAM_IPV4;
+    // This is required because spdk looks at trstring, not the trtype
+    spdk_nvme_transport_id_populate_trstring(
+        &trid, spdk_nvme_transport_id_trtype_str(trid.trtype));
+    return trid;
+}
+
 using IntCallbackFn = std::function<void(int)>;
 IntCallbackFn *alloc_cb(std::function<void(int)> cb)
 {
@@ -98,39 +114,29 @@ void create_tcp_transport(TranspCb *cb)
     assert(rc == 0);
 }
 
-void add_transport(spdk_nvmf_tgt *tgt, spdk_nvmf_transport *tr,
-                   std::function<void(int)> *cb)
+void add_tgt_transport(spdk_nvmf_tgt *tgt, spdk_nvmf_transport *tr,
+                       std::function<void(int)> *cb)
 {
     log_info("Adding transport to target");
     spdk_nvmf_tgt_add_transport(tgt, tr, invoke_and_free_cb, cb);
 }
 
-void add_ss_listener(spdk_nvmf_tgt *tgt, spdk_nvmf_subsystem *ss, str host,
-                     str port, std::function<void(int)> *cb)
+void start_tgt_listen(spdk_nvmf_tgt *tgt, spdk_nvme_transport_id trid)
+{
+    spdk_nvmf_listen_opts lopts;
+    spdk_nvmf_listen_opts_init(&lopts, sizeof(lopts));
+    auto rc = spdk_nvmf_tgt_listen_ext(tgt, &trid, &lopts);
+    assert(rc == 0);
+}
+
+void add_ss_listener(spdk_nvmf_tgt *tgt, spdk_nvmf_subsystem *ss,
+                     spdk_nvme_transport_id trid, std::function<void(int)> *cb)
 {
     log_info("Adding listener to subsystem");
-
-    spdk_nvme_transport_id trid;
-    // They're fixed-size char[] bufs in the struct, so make sure we have space
-    assert(host.size() < sizeof(trid.traddr));
-    assert(port.size() < sizeof(trid.trsvcid));
-    std::copy(host.begin(), host.end(), trid.traddr);
-    std::copy(port.begin(), port.end(), trid.trsvcid);
-    trid.trtype = SPDK_NVME_TRANSPORT_TCP;
-    trid.adrfam = SPDK_NVMF_ADRFAM_IPV4;
-    // This is required because spdk looks at trstring, not the trtype
-    spdk_nvme_transport_id_populate_trstring(
-        &trid, spdk_nvme_transport_id_trtype_str(trid.trtype));
-
-    spdk_nvmf_listen_opts lopts1;
-    spdk_nvmf_listen_opts_init(&lopts1, sizeof(lopts1));
-    auto rc = spdk_nvmf_tgt_listen_ext(tgt, &trid, &lopts1);
-    assert(rc == 0);
 
     spdk_nvmf_listener_opts lopts;
     spdk_nvmf_subsystem_listener_opts_init(&lopts, sizeof(lopts));
     lopts.secure_channel = false;
-
     spdk_nvmf_subsystem_add_listener_ext(ss, &trid, invoke_and_free_cb, cb,
                                          &lopts);
 }
@@ -140,9 +146,9 @@ void add_bdev_ns(spdk_nvmf_subsystem *ss, str bdev_name)
     log_info("Adding bdev namespace to subsystem");
     spdk_nvmf_ns_opts nopts;
     spdk_nvmf_ns_opts_get_defaults(&nopts, sizeof(nopts));
-    auto err = spdk_nvmf_subsystem_add_ns_ext(ss, bdev_name.c_str(), &nopts,
-                                              sizeof(nopts), nullptr);
-    assert(err == 0);
+    auto nsid = spdk_nvmf_subsystem_add_ns_ext(ss, bdev_name.c_str(), &nopts,
+                                               sizeof(nopts), nullptr);
+    assert(nsid != 0);
 }
 
 static void start_lsvd(void *arg)
@@ -156,6 +162,7 @@ static void start_lsvd(void *arg)
     auto tgt = create_target();
     auto disc_ss = add_discovery_ss(tgt);
     auto nvme_ss = add_nvme_ss(tgt);
+    auto trid = get_trid(HOSTNAME, PORT);
 
     // Add lsvd bdev
     lsvd_config cfg;                    // TODO read this in from a config file
@@ -168,15 +175,18 @@ static void start_lsvd(void *arg)
     // clang-format off
     create_tcp_transport(new TranspCb([=](auto *tr) { 
         assert(tr != nullptr);
-        add_transport(tgt, tr, alloc_cb([=](int rc) {
+        add_tgt_transport(tgt, tr, alloc_cb([=](int rc) {
             assert(rc == 0);
-            add_ss_listener(tgt, nvme_ss, HOSTNAME, PORT, alloc_cb([=](int rc) {
-                assert(rc == 0);
-                // Start both subsystems
-                spdk_nvmf_subsystem_start(nvme_ss, nullptr, nullptr);
-                spdk_nvmf_subsystem_start(disc_ss, nullptr, nullptr);
+            start_tgt_listen(tgt, trid);
+            add_ss_listener(tgt, disc_ss, trid, alloc_cb([=](int) { 
+                add_ss_listener(tgt, nvme_ss, trid, alloc_cb([=](int rc) {
+                    assert(rc == 0);
+                    // Start both subsystems
+                    spdk_nvmf_subsystem_start(nvme_ss, nullptr, nullptr);
+                    spdk_nvmf_subsystem_start(disc_ss, nullptr, nullptr);
 
-                log_info("LSVD SPDK program started successfully");
+                    log_info("LSVD SPDK program started successfully");
+                }));
             }));
         }));
     }));

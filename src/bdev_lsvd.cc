@@ -45,6 +45,7 @@ class lsvd_iodevice
 
     lsvd_iodevice(uptr<lsvd_image> img_) : img(std::move(img_))
     {
+        std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("Log-structured Virtual Disk");
         bdev.name = strdup(img->imgname.c_str());
         bdev.blocklen = 4096;
