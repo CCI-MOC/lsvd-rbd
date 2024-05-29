@@ -4,22 +4,35 @@
 
 #include "bdev_lsvd.h"
 #include "image.h"
+#include "request.h"
 #include "smartiov.h"
 #include "spdk/thread.h"
 #include "utils.h"
 
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
+static int bdev_lsvd_io_ctx_size(void);
 
 static spdk_bdev_module lsvd_if = {
     .module_init = bdev_lsvd_init,
     .module_fini = bdev_lsvd_finish,
     .name = "LSVD bdev module",
+    .get_ctx_size = bdev_lsvd_io_ctx_size,
 };
 SPDK_BDEV_MODULE_REGISTER(ext_lsvd, &lsvd_if);
 
-static int bdev_lsvd_init(void) { return 0; }
-static void bdev_lsvd_finish(void) {}
+static int bdev_lsvd_init(void)
+{
+    spdk_io_device_register(
+        &lsvd_if, [](auto iod, auto buf) { return 0; },
+        [](auto iod, auto buf) { return; }, 0, "lsvd_poll_groups");
+    return 0;
+}
+
+static void bdev_lsvd_finish(void)
+{
+    spdk_io_device_unregister(&lsvd_if, nullptr);
+}
 
 /**
  * Function table for the LSVD bdev module.
@@ -90,42 +103,73 @@ static spdk_io_channel *lsvd_get_io_channel(void *ctx)
     // SPDK will pass this to the iodevice's registered create/destroy
     // io_channel functions that were passed in when the device was registered.
     // We don't need to do anything special here, so just return the iodevice.
-    return spdk_get_io_channel(iodev);
+    auto ch = spdk_get_io_channel(iodev);
+    assert(ch != nullptr);
+    return ch;
+}
+
+struct lsvd_bdev_io {
+    spdk_thread *submit_td;
+    spdk_bdev_io_status status;
+    request *r;
+};
+
+static int bdev_lsvd_io_ctx_size(void) { return sizeof(lsvd_bdev_io); }
+
+static void lsvd_io_done(lsvd_bdev_io *io, int rc)
+{
+    auto sth = io->submit_td;
+    assert(sth != nullptr);
+
+    // error is -errno, succ is 0 or bytes read/written
+    io->status =
+        rc >= 0 ? SPDK_BDEV_IO_STATUS_SUCCESS : SPDK_BDEV_IO_STATUS_FAILED;
+
+    spdk_thread_send_msg(
+        sth,
+        [](void *ctx) {
+            auto io = (lsvd_bdev_io *)ctx;
+            spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
+        },
+        io);
 }
 
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
     auto dev = static_cast<lsvd_iodevice *>(io->bdev->ctxt);
     auto &img = dev->img;
+    auto lio = (lsvd_bdev_io *)(io->driver_ctx);
+    lio->submit_td = spdk_io_channel_get_thread(c);
 
     // io details
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
     smartiov iov(io->u.bdev.iovs, io->u.bdev.iovcnt);
 
-    request *r;
+    auto comp = [lio](int rc) { lsvd_io_done(lio, rc); };
+
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ:
-        r = img->read(offset, iov, nullptr);
+        lio->r = img->read(offset, iov, comp);
         break;
     case SPDK_BDEV_IO_TYPE_WRITE:
-        r = img->write(offset, iov, nullptr);
+        lio->r = img->write(offset, iov, comp);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        r = img->flush(nullptr);
+        lio->r = img->flush(comp);
         break;
     case SPDK_BDEV_IO_TYPE_UNMAP:
-        r = img->trim(offset, len, nullptr);
+        lio->r = img->trim(offset, len, comp);
         break;
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        r = img->trim(offset, len, nullptr);
+        lio->r = img->trim(offset, len, comp);
         break;
     default:
         log_error("Unknown request type: {}", io->type);
         return;
     }
 
-    r->run(nullptr);
+    lio->r->run(nullptr);
 }
 
 // Just copying from bdev_rbd, not sure where this is actually used
