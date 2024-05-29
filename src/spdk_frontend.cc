@@ -51,7 +51,7 @@ struct start_lsvd_args {
 
 spdk_nvmf_tgt *create_target()
 {
-    log_info("Creating NVMF target");
+    debug("Creating NVMF target");
     spdk_nvmf_target_opts opts = {
         .name = "lsvd_nvmf_tgt",
         .discovery_filter = SPDK_NVMF_TGT_DISCOVERY_MATCH_ANY,
@@ -67,7 +67,7 @@ spdk_nvmf_tgt *create_target()
 
 spdk_nvmf_subsystem *add_discovery_ss(spdk_nvmf_tgt *tgt)
 {
-    log_info("Creating NVMF discovery subsystem");
+    debug("Creating NVMF discovery subsystem");
     auto ss = spdk_nvmf_subsystem_create(
         tgt, SPDK_NVMF_DISCOVERY_NQN, SPDK_NVMF_SUBTYPE_DISCOVERY_CURRENT, 0);
     assert(ss != nullptr);
@@ -77,7 +77,7 @@ spdk_nvmf_subsystem *add_discovery_ss(spdk_nvmf_tgt *tgt)
 
 spdk_nvmf_subsystem *add_nvme_ss(spdk_nvmf_tgt *tgt)
 {
-    log_info("Creating SPDK controller subsystem");
+    debug("Creating SPDK controller subsystem");
     auto ss =
         spdk_nvmf_subsystem_create(tgt, NVME_SS_NQN, SPDK_NVMF_SUBTYPE_NVME, 1);
     assert(ss != nullptr);
@@ -91,7 +91,7 @@ spdk_nvmf_subsystem *add_nvme_ss(spdk_nvmf_tgt *tgt)
 using TranspCb = std::function<void(spdk_nvmf_transport *)>;
 void create_tcp_transport(TranspCb *cb)
 {
-    log_info("Creating TCP transport");
+    debug("Creating TCP transport");
     spdk_nvmf_transport_opts opts;
     auto succ = spdk_nvmf_transport_opts_init("TCP", &opts, sizeof(opts));
     assert(succ == true);
@@ -117,7 +117,7 @@ void create_tcp_transport(TranspCb *cb)
 void add_tgt_transport(spdk_nvmf_tgt *tgt, spdk_nvmf_transport *tr,
                        std::function<void(int)> *cb)
 {
-    log_info("Adding transport to target");
+    debug("Adding transport to target");
     spdk_nvmf_tgt_add_transport(tgt, tr, invoke_and_free_cb, cb);
 }
 
@@ -132,7 +132,7 @@ void start_tgt_listen(spdk_nvmf_tgt *tgt, spdk_nvme_transport_id trid)
 void add_ss_listener(spdk_nvmf_tgt *tgt, spdk_nvmf_subsystem *ss,
                      spdk_nvme_transport_id trid, std::function<void(int)> *cb)
 {
-    log_info("Adding listener to subsystem");
+    debug("Adding listener to subsystem");
 
     spdk_nvmf_listener_opts lopts;
     spdk_nvmf_subsystem_listener_opts_init(&lopts, sizeof(lopts));
@@ -143,12 +143,25 @@ void add_ss_listener(spdk_nvmf_tgt *tgt, spdk_nvmf_subsystem *ss,
 
 void add_bdev_ns(spdk_nvmf_subsystem *ss, str bdev_name)
 {
-    log_info("Adding bdev namespace to subsystem");
+    debug("Adding bdev namespace to subsystem");
     spdk_nvmf_ns_opts nopts;
     spdk_nvmf_ns_opts_get_defaults(&nopts, sizeof(nopts));
     auto nsid = spdk_nvmf_subsystem_add_ns_ext(ss, bdev_name.c_str(), &nopts,
                                                sizeof(nopts), nullptr);
     assert(nsid != 0);
+}
+
+void start_ss(spdk_nvmf_subsystem *ss, std::function<void(int)> *cb)
+{
+    // debug("Starting subsystem");
+    spdk_nvmf_subsystem_start(
+        ss,
+        [](auto ss, auto arg, auto rc) {
+            auto cb = static_cast<std::function<void(int)> *>(arg);
+            (*cb)(rc);
+            delete cb;
+        },
+        cb);
 }
 
 static void start_lsvd(void *arg)
@@ -172,24 +185,26 @@ static void start_lsvd(void *arg)
     add_bdev_ns(nvme_ss, args->image_name);
 
     // some stupid formatting decisions up ahead due to tower-of-callback
+    // it also looks cleaner without indents
     // clang-format off
     create_tcp_transport(new TranspCb([=](auto *tr) { 
-        assert(tr != nullptr);
-        add_tgt_transport(tgt, tr, alloc_cb([=](int rc) {
-            assert(rc == 0);
-            start_tgt_listen(tgt, trid);
-            add_ss_listener(tgt, disc_ss, trid, alloc_cb([=](int) { 
-                add_ss_listener(tgt, nvme_ss, trid, alloc_cb([=](int rc) {
-                    assert(rc == 0);
-                    // Start both subsystems
-                    spdk_nvmf_subsystem_start(nvme_ss, nullptr, nullptr);
-                    spdk_nvmf_subsystem_start(disc_ss, nullptr, nullptr);
+    assert(tr != nullptr);
 
-                    log_info("LSVD SPDK program started successfully");
-                }));
-            }));
-        }));
-    }));
+    add_tgt_transport(tgt, tr, alloc_cb([=](int rc) {
+    assert(rc == 0);
+
+    start_tgt_listen(tgt, trid);
+    add_ss_listener(tgt, disc_ss, trid, alloc_cb([=](int) { 
+    add_ss_listener(tgt, nvme_ss, trid, alloc_cb([=](int rc) {
+    assert(rc == 0);
+
+    // Start both subsystems
+    start_ss(nvme_ss, alloc_cb([=](int) {
+    start_ss(disc_ss, alloc_cb([=](int) {
+
+    log_info("LSVD SPDK program started successfully");
+
+    })); })); })); })); })); }));
     // clang-format on
 }
 
@@ -212,7 +227,7 @@ int main(int argc, const char **argv)
         .pool_name = argv[1],
         .image_name = argv[2],
     };
-    log_info("Args: pool={}, image={}", args.pool_name, args.image_name);
+    debug("Args: pool={}, image={}", args.pool_name, args.image_name);
 
     spdk_app_opts opts = {.shutdown_cb = []() {
         log_info("Shutting down LSVD SPDK program ...");
