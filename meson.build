@@ -8,6 +8,7 @@ project(
 		'b_colorout=always',
 		'b_sanitize=address,undefined',
 		'b_lto=true',
+		'b_thinlto_cache=true',
 	],
 )
 
