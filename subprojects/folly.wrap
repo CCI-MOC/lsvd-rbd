@@ -2,6 +2,8 @@
 url = https://github.com/facebook/folly.git
 revision = v2024.05.20.00
 clone-recursive = true
+method = cmake
+depth = 1
 
 [provide]
 _folly = folly_dep
