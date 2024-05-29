@@ -38,9 +38,14 @@ spdk_nvmf_tgt *create_target()
     log_info("Creating NVMF target");
     spdk_nvmf_target_opts opts = {
         .name = "lsvd_nvmf_tgt",
+        .discovery_filter = SPDK_NVMF_TGT_DISCOVERY_MATCH_ANY,
     };
     auto tgt = spdk_nvmf_tgt_create(&opts);
     assert(tgt != nullptr);
+
+    auto pg = spdk_nvmf_poll_group_create(tgt);
+    assert(pg != nullptr);
+
     return tgt;
 }
 
@@ -109,10 +114,13 @@ void add_ss_listener(spdk_nvmf_tgt *tgt, spdk_nvmf_subsystem *ss, str host,
     // They're fixed-size char[] bufs in the struct, so make sure we have space
     assert(host.size() < sizeof(trid.traddr));
     assert(port.size() < sizeof(trid.trsvcid));
-    trid.trtype = SPDK_NVME_TRANSPORT_TCP;
-    trid.adrfam = SPDK_NVMF_ADRFAM_IPV4;
     std::copy(host.begin(), host.end(), trid.traddr);
     std::copy(port.begin(), port.end(), trid.trsvcid);
+    trid.trtype = SPDK_NVME_TRANSPORT_TCP;
+    trid.adrfam = SPDK_NVMF_ADRFAM_IPV4;
+    // This is required because spdk looks at trstring, not the trtype
+    spdk_nvme_transport_id_populate_trstring(
+        &trid, spdk_nvme_transport_id_trtype_str(trid.trtype));
 
     spdk_nvmf_listen_opts lopts1;
     spdk_nvmf_listen_opts_init(&lopts1, sizeof(lopts1));
@@ -160,13 +168,15 @@ static void start_lsvd(void *arg)
     // clang-format off
     create_tcp_transport(new TranspCb([=](auto *tr) { 
         assert(tr != nullptr);
-        add_transport(tgt, tr, alloc_cb([=](int status) {
-            assert(status == 0);
-            add_ss_listener(tgt, nvme_ss, HOSTNAME, PORT, alloc_cb([=](int status) {
-                assert(status == 0);
+        add_transport(tgt, tr, alloc_cb([=](int rc) {
+            assert(rc == 0);
+            add_ss_listener(tgt, nvme_ss, HOSTNAME, PORT, alloc_cb([=](int rc) {
+                assert(rc == 0);
                 // Start both subsystems
                 spdk_nvmf_subsystem_start(nvme_ss, nullptr, nullptr);
                 spdk_nvmf_subsystem_start(disc_ss, nullptr, nullptr);
+
+                log_info("LSVD SPDK program started successfully");
             }));
         }));
     }));
