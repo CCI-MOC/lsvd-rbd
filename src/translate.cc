@@ -608,10 +608,10 @@ void translate_impl::write_checkpoint(seqnum_t cp_seq, translate_req *req)
     }
 
     serialise_superblock(superblock_buf, checkpoints, clones, uuid, vol_size);
-    debug("Updating superblock with new checkpoint");
+    // debug("Updating superblock with new checkpoint");
     objstore->write(name, superblock_buf.data(), superblock_buf.size());
 
-    debug("Deleting old checkpoints {}", ckpts_to_delete);
+    // debug("Deleting old checkpoints {}", ckpts_to_delete);
     for (auto c : ckpts_to_delete)
         objstore->delete_obj(oname(name, c));
 
@@ -789,6 +789,8 @@ void translate_impl::process_batch(seqnum_t _seq, translate_req *req)
     objname name(pf, _seq);
     auto obj_size = (hdr_sectors + data_sectors) * 512;
     auto obj_ptr = hdr_ptr;
+
+    trace("Writing data obj seq {}", _seq);
 
     rcache->insert_object(pf, _seq, obj_size, obj_ptr);
 
