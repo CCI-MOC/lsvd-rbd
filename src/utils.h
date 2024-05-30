@@ -220,8 +220,7 @@ template <class... Ts> struct overloaded : Ts... {
     using Ts::operator()...;
 };
 
-inline vec<std::string> split_string_on_char(const std::string &s,
-                                                     char delim)
+inline vec<std::string> split_string_on_char(const std::string &s, char delim)
 {
     vec<std::string> result;
     std::stringstream ss(s);

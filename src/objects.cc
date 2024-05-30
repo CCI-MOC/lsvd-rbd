@@ -202,17 +202,17 @@ opt<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
     PASSTHRU_NULLOPT(hdr);
 
     parsed_data_hdr h;
+    h.buf = std::move(*hdr);
     h.hdr = (common_obj_hdr *)h.buf.data();
     PR_RET_IF(h.hdr->type != OBJ_LOGDATA, std::nullopt,
               "Invalid object type in '{}'", oname);
-    h.data_hdr = (obj_data_hdr *)(hdr->data() + sizeof(common_obj_hdr));
+    h.data_hdr = (obj_data_hdr *)(h.buf.data() + sizeof(common_obj_hdr));
 
-    auto buf = hdr->data();
+    auto buf = h.buf.data();
     h.cleaned = deserialise_ptrs<obj_cleaned>(
         buf, h.data_hdr->objs_cleaned_offset, h.data_hdr->objs_cleaned_len);
     h.data_map = deserialise_ptrs<data_map>(buf, h.data_hdr->data_map_offset,
                                             h.data_hdr->data_map_len);
-    h.buf = std::move(*hdr);
     return h;
 }
 
