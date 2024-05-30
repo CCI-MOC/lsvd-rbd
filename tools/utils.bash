@@ -101,7 +101,7 @@ function create_lsvd_thin {
 	# ./builddir/imgtool --delete --rados $pool/$img || true
 	./tools/remove_objs.py $pool $img
 
-	./builddir/imgtool --create --rados --size=$size $pool/$img
+	./builddir/imgtool create --size $size $pool $img
 
 	# make sure image exists
 	rados -p $pool stat $img

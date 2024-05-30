@@ -31,7 +31,7 @@ static usize parseint(str i)
     return val;
 }
 
-static void create(rados_ioctx_t io, str name, usize size)
+static void create(rados_ioctx_t io, str name, usize size, bool thick)
 {
     auto rc = lsvd_image::create_new(name, size, io);
     THROW_MSG_ON(rc != 0, "Failed to create new image '{}'", name);
@@ -97,6 +97,8 @@ int main(int argc, char **argv)
         ("pool", po::value<str>(), "pool where the image resides")
         ("size", po::value<str>()->default_value("1G"), 
                                     "size in bytes (M=2^20,G=2^30)")
+        ("thick", po::value<bool>()->default_value(false), 
+            "thick provision when creating an image (not currently supported)")
         ("dest", po::value<str>(), "destination (for clone)");
     // clang-format on
 
@@ -124,7 +126,8 @@ int main(int argc, char **argv)
 
     if (cmd == "create") {
         auto size = parseint(vm["size"].as<str>());
-        create(io, img, size);
+        auto thick = vm["thick"].as<bool>();
+        create(io, img, size, thick);
     } else if (cmd == "delete")
         remove(io, img);
     else if (cmd == "clone") {

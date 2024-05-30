@@ -52,7 +52,7 @@ Parameters are:
 - `batch_size`, `LSVD_BATCH_SIZE`: size of objects written to the backend, in bytes (K/M recognized as 1024, 1024\*1024). Default: 8MiB
 - `wcache_batch`: write cache batching (see below)
 - `wcache_chunk': maximum size of atomic write, in bytes - larger writes will be split and may be non-atomic.
-- `rcache_dir` - directory used for read cache file and GC temporary files. Note that `lsvd_imgtool` can format a partition for cache and symlink it into this directory, although the performance improvement seems limited.
+- `rcache_dir` - directory used for read cache file and GC temporary files. Note that `imgtool` can format a partition for cache and symlink it into this directory, although the performance improvement seems limited.
 - `wcache_dir` - directory used for write cache file
 - `xlate_window`: max writes (i.e. objects) in flight to the backend. Note that this value is coupled to the size of the write cache, which must be big enough to hold all outstanding writes in case of a crash.
 - `hard_sync` (untested): "flush" forces all batched writes to the backend.
@@ -70,7 +70,7 @@ figure out how to optimize at runtime instead of bothering the user for a value.
 
 First create a volume:
 ```
-build$ sudo bin/lsvd_imgtool --create --rados --size=20g pool/imgname
+build$ sudo imgtool create poolname imgname --size=20g 
 ```
 
 Then you can start a SPDK NVMe-oF gateway:
@@ -158,21 +158,17 @@ The read cache typically fetches 64K blocks, so there may be a bit of extra load
 Most of the testing to date has been with an 8,3 code with 64K stripe size.
 
 ## Tools
-`lsvd_imgtool` mostly just calls the LSVD versions of `rbd_create` and `rbd_remove`, although it can also format a cache file (e.g. if you're using a raw partition) 
-```
-build$ bin/lsvd_imgtool --help
-Usage: lsvd_imgtool [OPTION...]
-IMAGE
 
-  -C, --create               create image
-  -d, --cache-dir=DIR        cache directory
-  -D, --delete               delete image
-  -I, --info                 show image information
-  -k, --mkcache=DEV          use DEV as cache
-  -O, --rados                use RADOS
-  -z, --size=SIZE            size in bytes (M/G=2^20,2^30)
-  -?, --help                 Give this help list
-      --usage                Give a short usage message
+```
+build$ ./imgtool --help
+❯ ./imgtool --help
+Allowed options:
+  --help                produce help message
+  --cmd arg             subcommand: create, clone, delete, info
+  --img arg             name of the iname
+  --pool arg            pool where the image resides
+  --size arg (=1G)      size in bytes (M=2^20,G=2^30)
+  --dest arg            destination (for clone)
 ```
 
 Other tools live in the `tools` subdirectory - see the README there for more details.
