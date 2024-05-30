@@ -49,10 +49,3 @@ uptr<translate> make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
                                extmap::objmap *map, extmap::bufmap *bufmap,
                                std::shared_mutex *m, std::mutex *buf_m,
                                sptr<read_cache> rcache);
-
-int translate_create_image(sptr<backend> objstore, const char *name,
-                           uint64_t size);
-int translate_clone_image(sptr<backend> objstore, const char *source,
-                          const char *dest);
-int translate_remove_image(sptr<backend> objstore, const char *name);
-int translate_get_uuid(sptr<backend> objstore, const char *name, uuid_t &uu);

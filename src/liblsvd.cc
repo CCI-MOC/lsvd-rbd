@@ -226,27 +226,13 @@ std::pair<std::string, std::string> split_string(std::string s,
 extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
                           int *order)
 {
-    lsvd_config cfg;
-    if (cfg.read() < 0)
-        return -1;
-    auto objstore = make_rados_backend(io);
-    auto rv = translate_create_image(objstore, name, size);
-    return rv;
+    return lsvd_image::create_new(name, size, io);
 }
 
 extern "C" int rbd_clone(rados_ioctx_t io, const char *source_img,
                          const char *dest_img)
 {
-    lsvd_config cfg;
-    if (cfg.read() < 0) {
-        throw std::runtime_error("Failed to read config");
-        return -1;
-    }
-
-    auto objstore = make_rados_backend(io);
-    auto rv = translate_clone_image(objstore, source_img, dest_img);
-
-    return rv;
+    return lsvd_image::clone_image(source_img, dest_img, io);
 }
 
 /* remove all objects and cache file.
@@ -256,20 +242,7 @@ extern "C" int rbd_clone(rados_ioctx_t io, const char *source_img,
  */
 extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
 {
-    lsvd_config cfg;
-    auto rv = cfg.read();
-    if (rv < 0)
-        return rv;
-    auto objstore = make_rados_backend(io);
-    uuid_t uu;
-    if ((rv = translate_get_uuid(objstore, name, uu)) < 0)
-        return rv;
-    auto rcache_file = cfg.cache_filename(uu, name, LSVD_CFG_READ);
-    unlink(rcache_file.c_str());
-    auto wcache_file = cfg.cache_filename(uu, name, LSVD_CFG_WRITE);
-    unlink(wcache_file.c_str());
-    rv = translate_remove_image(objstore, name);
-    return rv;
+    return lsvd_image::delete_image(name, io);
 }
 
 extern "C" void rbd_uuid(rbd_image_t image, uuid_t *uuid)

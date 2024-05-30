@@ -563,3 +563,60 @@ request *lsvd_image::flush(std::function<void(int)> cb)
 {
     return new flush_request(this, cb);
 }
+
+int lsvd_image::create_new(std::string name, usize size, rados_ioctx_t io)
+{
+    auto be = make_rados_backend(io);
+    auto parser = object_reader(be);
+
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+
+    vec<byte> buf(4096);
+    vec<seqnum_t> ckpts;
+    vec<clone_base> clones;
+    serialise_superblock(buf, ckpts, clones, uuid, size);
+
+    return be->write(name, buf.data(), buf.size());
+}
+
+int lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
+{
+    auto be = make_rados_backend(io);
+    auto parser = object_reader(be);
+    auto osb = parser.read_superblock(name);
+    PR_RET_IF(!osb, -EEXIST, "Could not read superblock '{}'", name);
+
+    uuid_copy(uuid, osb->uuid);
+    return 0;
+}
+
+int lsvd_image::delete_image(std::string name, rados_ioctx_t io)
+{
+    auto be = make_rados_backend(io);
+    auto parser = object_reader(be);
+    auto osb = parser.read_superblock(name);
+    PR_RET_IF(!osb, -EEXIST, "Could not read superblock '{}'", name);
+    auto sb = *osb;
+
+    seqnum_t seq;
+    for (auto ckpt : sb.ckpts) {
+        auto rc = be->delete_obj(oname(name, ckpt));
+        PR_RET_IF(rc < 0, rc, "Failed to delete checkpoint '{}'", ckpt);
+        seq = ckpt;
+    }
+
+    for (int n = 0; n < 16; seq++, n++)
+        if (be->delete_obj(oname(name, seq)) >= 0)
+            n = 0;
+
+    // delete the superblock last so we can recover from partial deletion
+    return be->delete_obj(name);
+}
+
+int lsvd_image::clone_image(std::string oldname, std::string newname,
+                            rados_ioctx_t io)
+{
+    UNIMPLEMENTED();
+    return -1;
+}

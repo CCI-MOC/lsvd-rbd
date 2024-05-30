@@ -17,7 +17,7 @@ add_project_arguments('-Wno-unused-parameter', language: 'cpp')
 
 if get_option('buildtype') == 'debug'
 	add_project_arguments('-fno-inline', language: 'cpp')
-	add_project_arguments('-DLOGLV=1', language: 'cpp')
+	add_project_arguments('-DLOGLV=0', language: 'cpp')
 endif
 
 subdir('src')
