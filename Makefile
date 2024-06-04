@@ -28,4 +28,4 @@ install-deps:
 		python3-pyelftools libcunit1-dev libaio-dev nasm
 	# LSVD deps
 	sudo apt install -y meson mold libfmt-dev librados-dev \
-    	libjemalloc-dev libradospp-dev liburing-dev pkg-config uuid-dev
+    	libjemalloc-dev libradospp-dev pkg-config uuid-dev
