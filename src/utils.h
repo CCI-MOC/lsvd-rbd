@@ -1,6 +1,6 @@
 #pragma once
 
-#include "folly/FBVector.h"
+// #include "folly/FBVector.h"
 #include <boost/stacktrace.hpp>
 #include <cerrno>
 #include <condition_variable>
@@ -32,7 +32,7 @@ template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
 template <typename T> using opt = std::optional<T>;
 template <typename T> using vec = std::vector<T>;
-template <typename T> using fvec = folly::fbvector<T>;
+// template <typename T> using fvec = folly::fbvector<T>;
 
 #define CEXTERN extern "C"
 
