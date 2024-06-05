@@ -23,7 +23,7 @@ jobs:
         run: |
           sudo apt update
           make install-deps
-          pip3 install --upgrade meson
+          sudo pip3 install --upgrade meson --break-system-packages
 
       - name: Build
         run: |
