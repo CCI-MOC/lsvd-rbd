@@ -46,4 +46,4 @@ jobs:
       - name: Logs
         if: always()
         run: |
-          cat build-dbg/meson-logs/meson-log.txt
+          cat build-dbg/meson-logs/*.txt
