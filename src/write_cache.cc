@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cassert>
+#include <cerrno>
 #include <condition_variable>
 #include <mutex>
 #include <uuid/uuid.h>
@@ -13,7 +14,10 @@
 #include "request.h"
 #include "smartiov.h"
 #include "translate.h"
+#include "utils.h"
 #include "write_cache.h"
+
+const usize SUPER_BLOCKNO = 1;
 
 /* ------------- Write cache structure ------------- */
 
@@ -21,8 +25,7 @@ class wcache_write_req;
 class write_cache_impl : public write_cache
 {
     size_t dev_max;
-    uint32_t super_blkno;
-    lsvd_config *cfg;
+    int fd = -1;
 
     std::atomic<uint64_t> sequence = 1; // write sequence #
 
@@ -35,38 +38,30 @@ class write_cache_impl : public write_cache
     size_t write_batch = 0;
     std::condition_variable write_cv;
 
-    /* initialization stuff
-     */
+    // initialization stuff
     int roll_log_forward();
-    char *_hdrbuf; // for reading at startup
-
-    thread_pool<int> *misc_threads;
-
     void write_checkpoint(void);
 
-    /* allocate journal entry, create a header
-     */
+    // allocate journal entry, create a header
     uint32_t allocate(page_t n, page_t &pad, page_t &n_pad, page_t &prev);
     j_write_super *super;
     page_t previous_hdr = 0;
     page_t next_alloc = 0;
 
-    /* these are used by wcache_write_req
-     */
+    // these are used by wcache_write_req
     friend class wcache_write_req;
     std::mutex m;
-    translate *be;
+    translate &be;
     j_hdr *mk_header(char *buf, uint32_t type, page_t blks, page_t prev);
     nvme *nvme_w = NULL;
 
   public:
-    /* throttle writes with window of max_write_pages
-     */
-    void get_room(sector_t sectors);
+    // throttle writes with window of max_write_pages
+    void reserve_room(sector_t sectors);
     void release_room(sector_t sectors);
     void flush(void);
 
-    write_cache_impl(uint32_t blkno, int _fd, translate *_be, lsvd_config *cfg);
+    write_cache_impl(int fd, translate &_be, lsvd_config &cfg);
     ~write_cache_impl();
 
     request *writev(sector_t lba, smartiov *iov);
@@ -148,7 +143,7 @@ wcache_write_req::wcache_write_req(sector_t lba, smartiov *iovs, page_t n_pages,
         r_pad = wcache->nvme_w->make_write_request(&pad_iov, pad * 4096L);
     }
 
-    std::vector<j_extent> extents;
+    vec<j_extent> extents;
     extents.push_back((j_extent){(uint64_t)lba, iovs->bytes() / 512});
 
     /* TODO: don't assign seq# in mk_header
@@ -216,7 +211,7 @@ void wcache_write_req::run(request *parent_)
  *
  * TODO record how long this takes per request, unlikely to be bottleneck though
  */
-void write_cache_impl::get_room(sector_t sectors)
+void write_cache_impl::reserve_room(sector_t sectors)
 {
     int pages = sectors / 8;
     std::unique_lock lk(m2);
@@ -305,11 +300,11 @@ j_hdr *write_cache_impl::mk_header(char *buf, uint32_t type, page_t blks,
  */
 void write_cache_impl::write_checkpoint(void)
 {
-    /* shouldn't really need the copy, since it's only called on
-     * shutdown, except that some unit tests call this and expect things
-     * to work afterwards
-     */
-    j_write_super *super_copy = (j_write_super *)aligned_alloc(4096, 4096);
+    // shouldn't really need the copy, since it's only called on
+    // shutdown, except that some unit tests call this and expect things
+    // to work afterwards
+    vec<byte> buf(4096);
+    auto super_copy = (j_write_super *)buf.data();
 
     memcpy(super_copy, super, 4096);
     super_copy->seq = sequence;
@@ -325,10 +320,8 @@ void write_cache_impl::write_checkpoint(void)
 
     super_copy->clean = true;
 
-    if (nvme_w->write((char *)super_copy, 4096, 4096L * super_blkno) < 0)
-        throw_fs_error("wckpt_s");
-
-    free(super_copy);
+    auto res = nvme_w->write(buf.data(), buf.size(), 4096);
+    THROW_ERRNO_ON(res < 0, errno, "Failed to write wlog header");
 }
 
 /* needs to set the following variables:
@@ -406,7 +399,7 @@ int write_cache_impl::roll_log_forward()
          * - put mappings into cache map
          * - write data to backend
          */
-        std::vector<j_extent> entries;
+        vec<j_extent> entries;
         decode_offset_len<j_extent>(_hdrbuf, h->extent_offset, h->extent_len,
                                     entries);
 
@@ -451,28 +444,23 @@ int write_cache_impl::roll_log_forward()
 #endif
 }
 
-write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
-                                   lsvd_config *cfg_)
+write_cache_impl::write_cache_impl(int fd, translate &be, lsvd_config &cfg)
+    : fd(fd), be(be)
 {
-
-    super_blkno = blkno;
     dev_max = getsize64(fd);
-    be = _be;
-    cfg = cfg_;
 
-    _hdrbuf = (char *)aligned_alloc(4096, 4096);
-
-    const char *name = "wlog_uring";
-    nvme_w = make_nvme_uring(fd, name);
+    nvme_w = make_nvme_uring(fd, "wlog_uring");
 
     char *buf = (char *)aligned_alloc(4096, 4096);
-    if (nvme_w->read(buf, 4096, 4096L * super_blkno) < 4096)
-        throw_fs_error("wcache");
-    super = (j_write_super *)buf;
+    auto res = nvme_w->read(buf, 4096, 4096L * SUPER_BLOCKNO);
+    THROW_ERRNO_ON(res < 0, -res, "Failed to read wlog header");
+    THROW_MSG_ON(res < 4096, "Short read {}/4096 on wlog header", res);
 
-    /* if it's clean we can read in the map and lengths, otherwise
-     * do crash recovery. Then set the dirty flag
-     */
+    super = (j_write_super *)buf;
+    THROW_MSG_ON(super->magic != LSVD_MAGIC, "Invalid magic in wlog sub-hdr");
+
+    // if it's clean we can read in the map and lengths, otherwise
+    // do crash recovery. Then set the dirty flag
     if (super->clean) {
         sequence = super->seq;
         next_alloc = super->base;
@@ -481,33 +469,23 @@ write_cache_impl::write_cache_impl(uint32_t blkno, int fd, translate *_be,
     next_alloc = super->base;
 
     super->clean = false;
-    if (nvme_w->write(buf, 4096, 4096L * super_blkno) < 4096)
-        throw_fs_error("wcache");
+    res = nvme_w->write(buf, 4096, 4096L * SUPER_BLOCKNO);
+    THROW_ERRNO_ON(res < 0, -res, "Failed to write wlog subhdr");
 
     int n_pages = super->limit - super->base;
-    max_write_pages = n_pages / 2 + n_pages / 4;
-    write_batch = cfg->wcache_batch;
-
-    misc_threads = new thread_pool<int>(&m);
-}
-
-uptr<write_cache> make_write_cache(uint32_t blkno, int fd, translate *be,
-                                   lsvd_config *cfg)
-{
-    return std::make_unique<write_cache_impl>(blkno, fd, be, cfg);
+    max_write_pages = n_pages / 2 + n_pages / 4; // no idea why this is 3/4ths
+    write_batch = cfg.wcache_batch;
 }
 
 write_cache_impl::~write_cache_impl()
 {
-    delete misc_threads;
+    close(fd);
     free(super);
-    free(_hdrbuf);
     delete nvme_w;
 }
 
 request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
 {
-
     size_t bytes = iovs->bytes();
     page_t pages = div_round_up(bytes, 4096);
     page_t pad, n_pad, prev = 0;
@@ -526,9 +504,104 @@ request *write_cache_impl::writev(sector_t lba, smartiov *iovs)
     lk.unlock();
 
     // writing to in-memory buffer (translation layer)
-    be->writev(req->seq, lba * 512, iov, iovcnt);
+    be.writev(req->seq, lba * 512, iov, iovcnt);
 
     return req;
 }
 
 void write_cache_impl::do_write_checkpoint(void) { write_checkpoint(); }
+
+int init_wcache(int fd, uuid_t &uuid, usize cache_size)
+{
+    // write log file has 2 header blocks: the first 4k block is the j_hdr,
+    // the second 4k block is the j_write_super
+    // not entirely sure why they are separate, but I'm leaving it for now
+
+    page_t total_pages = cache_size / 4096;
+    page_t content_pages = total_pages - 2;
+    page_t _map = div_round_up(content_pages, 256);
+    page_t _len = div_round_up(content_pages, 512);
+    page_t meta_pages = 2 * (_map + _len);
+    page_t data_pages = content_pages - meta_pages;
+
+    vec<byte> buf(4096 * 2);
+    auto hdr = (j_hdr *)buf.data();
+    *hdr = {
+        .magic = LSVD_MAGIC,
+        .type = LSVD_J_DATA,
+        .version = 1,
+        .len = total_pages,
+        .seq = 0,
+        .crc32 = 0,
+        .extent_offset = 0,
+        .extent_len = 0,
+        .prev = 0,
+    };
+
+    auto sup = (j_write_super *)(buf.data() + 4096);
+    *sup = {
+        .magic = LSVD_MAGIC,
+        .type = LSVD_J_W_SUPER,
+        .version = 1,
+        .clean = 1,
+        .seq = 1,
+        .meta_base = 1,
+        .meta_limit = 1 + meta_pages,
+        .base = 1 + meta_pages,
+        .limit = 1 + meta_pages + data_pages,
+        .next = 1 + meta_pages,
+        .map_start = 0,
+        .map_blocks = 0,
+        .map_entries = 0,
+        .len_start = 0,
+        .len_blocks = 0,
+        .len_entries = 0,
+        .vol_uuid = {0},
+    };
+    uuid_copy(sup->vol_uuid, uuid);
+
+    int ret = pwrite(fd, buf.data(), buf.size(), 0);
+    PR_ERR_RET_IF(ret < 0, -errno, errno, "Failed to write wlog header");
+
+    // just truncate to right length, don't bother writing zeroes
+    ret = ftruncate(fd, 4096 * total_pages);
+    PR_ERR_RET_IF(ret < 0, -errno, errno, "Failed to truncate wlog file");
+
+    return 0;
+}
+
+uptr<write_cache> open_wlog(fspath path, translate &xlate, lsvd_config &cfg)
+{
+    log_info("Opening write log at '{}'", path.string());
+
+    int fd = 0;
+    if (!std::filesystem::exists(path)) {
+        log_info("Creating write log file '{}'", path.string());
+        fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
+        PR_ERR_RET_IF(fd < 0, nullptr, errno, "Failed to create cache file");
+
+        auto err = init_wcache(fd, xlate.uuid, cfg.wlog_size);
+        PR_ERR_RET_IF(err < 0, nullptr, -err, "Failed to init wlog");
+    } else {
+        fd = open(path.c_str(), O_RDWR);
+        PR_ERR_RET_IF(fd < 0, nullptr, errno, "Failed to open wlog file");
+    }
+
+    char buf[4096];
+    int err = pread(fd, buf, 4096, 0);
+    PR_ERR_RET_IF(err < 0, nullptr, errno, "Failed to read wlog header");
+
+    auto super = (j_hdr *)buf;
+    PR_RET_IF(super->magic != LSVD_MAGIC, nullptr,
+              "Invalid write cache magic number: {}", super->magic);
+    PR_RET_IF(super->type != LSVD_J_DATA, nullptr, "Invalid cache type: {}",
+              super->type);
+
+    try {
+        return std::make_unique<write_cache_impl>(fd, xlate, cfg);
+    } catch (std::exception &e) {
+        log_error("Failed to open write cache: {}", e.what());
+        close(fd);
+        return nullptr;
+    }
+}

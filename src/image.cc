@@ -1,84 +1,177 @@
 #include <fcntl.h>
+#include <optional>
+#include <rados/librados.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "backend.h"
 #include "image.h"
-#include "journal.h"
 #include "lsvd_types.h"
+#include "objects.h"
+#include "shared_read_cache.h"
+#include "utils.h"
+#include "write_cache.h"
 
-extern int init_wcache(int fd, uuid_t &uuid, int n_pages);
 const int block_sectors = CACHE_CHUNK_SIZE / 512;
+
+lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg_)
+    : imgname(name), cfg(cfg_), io(io)
+{
+    objstore = make_rados_backend(io);
+    rcache = get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
+
+    read_superblock();
+    debug("Found checkpoints: {}", checkpoints);
+    if (checkpoints.size() > 0)
+        read_from_checkpoint(checkpoints.back());
+
+    // Roll forward on the log
+    auto last_data_seq = roll_forward_from_last_checkpoint();
+    debug("Last data seq: {}", last_data_seq);
+
+    // Successfully recovered everything, now we have enough information to
+    // init everything else
+    xlate = make_translate(name, cfg, size, uuid, objstore, rcache, objmap,
+                           map_lock, bufmap, bufmap_lock, last_data_seq, clones,
+                           obj_info, checkpoints);
+
+    wlog = open_wlog(cfg.wlog_path(name), *xlate, cfg);
+    THROW_MSG_ON(!wlog, "Failed to open write log");
+    // recover_from_wlog();
+
+    log_info("Image '{}' opened successfully", name);
+}
 
 lsvd_image::~lsvd_image()
 {
-    wcache->flush();
-    wcache->do_write_checkpoint();
-    if (!cfg.no_gc)
-        xlate->stop_gc();
-    xlate->checkpoint();
+    wlog->flush();
+    wlog->do_write_checkpoint();
+    xlate->shutdown();
 
-    close(write_fd);
+    // TODO figure out who owns the rados connection
+    rados_ioctx_destroy(io);
+
+    log_info("Image '{}' closed", imgname);
 }
 
-int lsvd_image::try_open(std::string name, rados_ioctx_t io)
+bool lsvd_image::apply_log(seqnum_t seq)
 {
-    this->image_name = name;
+    object_reader parser(objstore);
+    // TODO
+    auto data_hdr = parser.read_data_hdr(oname(imgname, seq));
+    if (!data_hdr.has_value())
+        return false;
+    trace("Recovering log with object at seq {}", seq);
 
-    if (cfg.read() < 0)
-        throw std::runtime_error("Failed to read config");
-
-    objstore = get_backend(&cfg, io, name.c_str());
-    shared_cache =
-        get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
-
-    /* read superblock and initialize translation layer
-     */
-    xlate = make_translate(objstore, &cfg, &map, &bufmap, &map_lock,
-                           &bufmap_lock, shared_cache);
-    size = xlate->init(name.c_str(), true);
-    check_cond(size < 0, "Failed to initialize translation layer err={}", size);
-
-    /* figure out cache file name, create it if necessary
-     */
-
-    /*
-     * TODO: Open 2 files. One for wcache and one for reader
-     */
-    std::string wcache_name =
-        cfg.cache_filename(xlate->uuid, name.c_str(), LSVD_CFG_WRITE);
-
-    if (access(wcache_name.c_str(), R_OK | W_OK) < 0) {
-        log_info("Creating write cache file {}", wcache_name);
-        int cache_pages = cfg.wlog_size / 4096;
-
-        int fd = open(wcache_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        check_ret_errno(fd, "Can't open wcache file");
-
-        if (init_wcache(fd, xlate->uuid, cache_pages) < 0)
-            throw std::runtime_error("Failed to initialize write cache");
-        close(fd);
+    auto ohdr = data_hdr->hdr;
+    if (ohdr->type == OBJ_CHECKPOINT) {
+        log_warn("CORRUPTION: Found checkpoint at seq {} that was not "
+                 "present in the superblock.",
+                 seq);
+        checkpoints.push_back(seq);
+        return true;
     }
 
-    write_fd = open(wcache_name.c_str(), O_RDWR);
-    check_ret_errno(write_fd, "Can't open wcache file");
+    obj_info[seq] = (data_obj_info){
+        .hdr = ohdr->hdr_sectors,
+        .data = ohdr->data_sectors,
+        .live = ohdr->data_sectors,
+    };
 
-    j_write_super *jws = (j_write_super *)aligned_alloc(512, 4096);
+    // Consume log records
+    sector_t offset = 0;
+    vec<extmap::lba2obj> deleted;
+    for (auto dmap : data_hdr->data_map) {
+        // Update the extent map
+        extmap::obj_offset oo = {seq, offset + ohdr->hdr_sectors};
+        objmap.update(dmap->lba, dmap->lba + dmap->len, oo, &deleted);
+        offset += dmap->len;
+    }
 
-    check_ret_errno(pread(write_fd, (char *)jws, 4096, 0),
-                    "Can't read wcache superblock");
-    if (jws->magic != LSVD_MAGIC || jws->type != LSVD_J_W_SUPER)
-        throw std::runtime_error("bad magic/type in write cache superblock\n");
-    if (memcmp(jws->vol_uuid, xlate->uuid, sizeof(uuid_t)) != 0)
-        throw std::runtime_error("object and cache UUIDs don't match");
+    // Manage deleted extents
+    for (auto d : deleted) {
+        auto [base, limit, ptr] = d.vals();
+        obj_info[ptr.obj].live -= (limit - base);
+        THROW_MSG_ON(obj_info[ptr.obj].live >= 0, "Negative live sectors.");
+    }
 
-    wcache = make_write_cache(0, write_fd, xlate.get(), &cfg);
-    free(jws);
-
-    if (!cfg.no_gc)
-        xlate->start_gc();
-    return 0;
+    return true;
 }
+
+void lsvd_image::read_superblock()
+{
+    object_reader parser(objstore);
+    auto superblock = parser.read_superblock(imgname);
+    THROW_MSG_ON(!superblock, "Failed to read superblock");
+
+    size = superblock->vol_size;
+    uuid_copy(uuid, superblock->uuid);
+
+    for (auto ckpt : superblock->ckpts)
+        checkpoints.push_back(ckpt);
+
+    for (auto ci : superblock->clones) {
+        clone_base c;
+        c.name = std::string(ci->name, ci->name_len);
+        c.last_seq = ci->last_seq;
+        c.first_seq = ci->last_seq + 1;
+
+        debug("Using base image {} upto seq {}", c.name, c.last_seq);
+        clones.push_back(c);
+    }
+}
+
+void lsvd_image::read_from_checkpoint(seqnum_t seq)
+{
+    object_reader parser(objstore);
+    auto parsed = parser.read_checkpoint(oname(imgname, seq));
+    THROW_MSG_ON(!parsed, "Failed to read checkpoint");
+
+    for (auto obj : parsed->objects) {
+        obj_info[obj->seq] = (data_obj_info){
+            .hdr = obj->hdr_sectors,
+            .data = obj->data_sectors,
+            .live = obj->live_sectors,
+        };
+    }
+
+    for (auto m : parsed->dmap) {
+        extmap::obj_offset oo = {m->obj, m->offset};
+        objmap.update(m->lba, m->lba + m->len, oo);
+    }
+}
+
+// Returns last processed object's seqnum
+seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
+{
+    if (checkpoints.size() == 0)
+        return 0;
+
+    object_reader parser(objstore);
+    auto last_ckpt = checkpoints.back();
+    auto seq = last_ckpt + 1;
+
+    for (;; seq++) {
+        auto ret = apply_log(seq);
+        if (!ret)
+            break;
+    }
+
+    seq -= 1;
+
+    // Delete "dangling" objects if there are any in case they cause trouble
+    // with corruption
+    // This must be larger than the max backend batch size to avoid
+    // potential corruption if subsequent breaks overlap with current dangling
+    // objects and we get writes from two different "generations"
+    for (seqnum_t i = 1; i < cfg.num_parallel_writes * 4; i++)
+        objstore->delete_obj(oname(imgname, seq + i));
+
+    return seq;
+}
+
+void lsvd_image::recover_from_wlog() { UNIMPLEMENTED(); }
 
 /**
  * This is the base for aio read and write requests. It's copied from
@@ -138,7 +231,7 @@ class lsvd_image::read_request : public lsvd_image::aio_request
     {
         assert(parent == nullptr);
 
-        std::vector<request *> requests;
+        vec<request *> requests;
         img->handle_reads(req_offset, iovs, requests);
         num_subreqs = requests.size();
 
@@ -166,7 +259,7 @@ class lsvd_image::read_request : public lsvd_image::aio_request
 };
 
 void lsvd_image::handle_reads(size_t offset, smartiov iovs,
-                              std::vector<request *> &requests)
+                              vec<request *> &requests)
 {
     sector_t start_sector = offset / 512;
     sector_t end_sector = start_sector + iovs.bytes() / 512;
@@ -181,7 +274,7 @@ void lsvd_image::handle_reads(size_t offset, smartiov iovs,
     auto bufmap_it = bufmap.end();
     if (bufmap.size() > 0)
         bufmap_it = bufmap.lookup(start_sector);
-    auto backend_it = map.lookup(start_sector);
+    auto backend_it = objmap.lookup(start_sector);
     size_t _offset = 0;
 
     /*
@@ -218,7 +311,7 @@ void lsvd_image::handle_reads(size_t offset, smartiov iovs,
 
         sector_t base2 = end_sector, limit2 = end_sector;
         extmap::obj_offset objptr = {0, 0};
-        if (backend_it != map.end())
+        if (backend_it != objmap.end())
             std::tie(base2, limit2, objptr) =
                 backend_it->vals(start_sector, end_sector);
 
@@ -249,14 +342,14 @@ void lsvd_image::handle_reads(size_t offset, smartiov iovs,
              *  it2:    |----|    |----|
              *                           |------|   < but not this
              */
-            while (backend_it != map.end() && backend_it->limit() <= limit1)
+            while (backend_it != objmap.end() && backend_it->limit() <= limit1)
                 backend_it++;
             bufmap_it++;
             continue;
         }
 
         assert(base2 == start_sector);
-        assert(backend_it != map.end());
+        assert(backend_it != objmap.end());
         limit2 = std::min(limit2, base1);
         sector_t sectors = limit2 - start_sector;
 
@@ -330,9 +423,8 @@ void lsvd_image::handle_reads(size_t offset, smartiov iovs,
 
             // same thing to the shared read cache
             auto prefix = xlate->prefix(key.obj);
-            auto req =
-                shared_cache->make_read_req(prefix, key.obj, key.offset * 512L,
-                                            sector_in_blk * 512L, slice);
+            auto req = rcache->make_read_req(prefix, key.obj, key.offset * 512L,
+                                             sector_in_blk * 512L, slice);
             if (req != nullptr)
                 requests.push_back(req);
 
@@ -356,7 +448,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
      * and be done with it. The old code had these as pointers, but changed
      * them to be in the vectwor.
      */
-    std::vector<smartiov> sub_iovs;
+    vec<smartiov> sub_iovs;
 
   public:
     write_request(lsvd_image *img, size_t offset, smartiov iovs,
@@ -372,7 +464,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
         if (old > 1)
             return;
 
-        img->wcache->release_room(req_bytes / 512);
+        img->wlog->release_room(req_bytes / 512);
         complete_request(0); // TODO shouldn't we return bytes written?
     }
 
@@ -380,8 +472,8 @@ class lsvd_image::write_request : public lsvd_image::aio_request
     {
         assert(parent == nullptr);
 
-        img->wcache->get_room(req_bytes / 512);
-        img->xlate->wait_for_room();
+        img->wlog->reserve_room(req_bytes / 512);
+        img->xlate->backend_backpressure();
 
         sector_t size_sectors = req_bytes / 512;
 
@@ -390,7 +482,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
         n_req += div_round_up(req_bytes / 512, max_sectors);
         // TODO: this is horribly ugly
 
-        std::vector<request *> requests;
+        vec<request *> requests;
         auto cur_offset = req_offset;
 
         for (sector_t s_offset = 0; s_offset < size_sectors;
@@ -400,7 +492,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
                 iovs.slice(s_offset * 512L, s_offset * 512L + _sectors * 512L);
             smartiov _iov(tmp.data(), tmp.size());
             sub_iovs.push_back(_iov);
-            auto req = img->wcache->writev(cur_offset / 512, &_iov);
+            auto req = img->wlog->writev(cur_offset / 512, &_iov);
             requests.push_back(req);
 
             cur_offset += _sectors * 512L;
@@ -470,4 +562,61 @@ request *lsvd_image::trim(size_t offset, size_t len,
 request *lsvd_image::flush(std::function<void(int)> cb)
 {
     return new flush_request(this, cb);
+}
+
+int lsvd_image::create_new(std::string name, usize size, rados_ioctx_t io)
+{
+    auto be = make_rados_backend(io);
+    auto parser = object_reader(be);
+
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+
+    vec<byte> buf(4096);
+    vec<seqnum_t> ckpts;
+    vec<clone_base> clones;
+    serialise_superblock(buf, ckpts, clones, uuid, size);
+
+    return be->write(name, buf.data(), buf.size());
+}
+
+int lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
+{
+    auto be = make_rados_backend(io);
+    auto parser = object_reader(be);
+    auto osb = parser.read_superblock(name);
+    PR_RET_IF(!osb, -EEXIST, "Could not read superblock '{}'", name);
+
+    uuid_copy(uuid, osb->uuid);
+    return 0;
+}
+
+int lsvd_image::delete_image(std::string name, rados_ioctx_t io)
+{
+    auto be = make_rados_backend(io);
+    auto parser = object_reader(be);
+    auto osb = parser.read_superblock(name);
+    PR_RET_IF(!osb, -EEXIST, "Could not read superblock '{}'", name);
+    auto sb = *osb;
+
+    seqnum_t seq;
+    for (auto ckpt : sb.ckpts) {
+        auto rc = be->delete_obj(oname(name, ckpt));
+        PR_RET_IF(rc < 0, rc, "Failed to delete checkpoint '{}'", ckpt);
+        seq = ckpt;
+    }
+
+    for (int n = 0; n < 16; seq++, n++)
+        if (be->delete_obj(oname(name, seq)) >= 0)
+            n = 0;
+
+    // delete the superblock last so we can recover from partial deletion
+    return be->delete_obj(name);
+}
+
+int lsvd_image::clone_image(std::string oldname, std::string newname,
+                            rados_ioctx_t io)
+{
+    UNIMPLEMENTED();
+    return -1;
 }

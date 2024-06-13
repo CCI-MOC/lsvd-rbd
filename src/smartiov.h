@@ -9,7 +9,7 @@
  */
 class smartiov
 {
-    std::vector<iovec> iovs;
+    vec<iovec> iovs;
 
   public:
     smartiov() {}

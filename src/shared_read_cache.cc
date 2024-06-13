@@ -5,6 +5,7 @@
 #include <boost/accumulators/statistics/rolling_sum.hpp>
 #include <boost/bimap.hpp>
 #include <boost/container_hash/hash.hpp>
+#include <thread>
 
 #include "lsvd_types.h"
 #include "nvme.h"
@@ -85,13 +86,13 @@ class shared_read_cache
         void *pending_fill_data = nullptr;
 
         // Keep track of pending reads
-        std::vector<pending_read_request *> pending_reads;
+        vec<pending_read_request *> pending_reads;
 
         // Keep track of the reverse map so we can evict this entry
         chunk_key key;
     };
 
-    std::vector<entry_state> cache_state;
+    vec<entry_state> cache_state;
 
     std::mutex global_cache_lock;
     std::mutex cache_stats_lock;
@@ -351,7 +352,7 @@ class shared_read_cache::cache_miss_request : public self_refcount_request
     {
         is_backend_done = true;
 
-        std::vector<pending_read_request *> reqs;
+        vec<pending_read_request *> reqs;
         {
             std::unique_lock lock(cache.global_cache_lock);
 
@@ -439,7 +440,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
       user_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW),
       backend_bytes(tag::rolling_window::window_size = CACHE_STATS_WINDOW)
 {
-    debug("Opening {} for the read cache", cache_path);
+    trace("Opening {} for the read cache", cache_path);
     fd = open(cache_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
     check_ret_errno(fd, "failed to open cache file");
 
@@ -458,7 +459,7 @@ shared_read_cache::shared_read_cache(std::string cache_path,
     //       CACHE_CHUNK_SIZE);
 
     cache_store = std::unique_ptr<nvme>(make_nvme_uring(fd, "rcache_uring"));
-    cache_state = std::vector<entry_state>(num_cache_blocks);
+    cache_state = vec<entry_state>(num_cache_blocks);
 }
 
 shared_read_cache::~shared_read_cache() {}
@@ -685,7 +686,7 @@ class sharded_cache : public read_cache
 
     // TODO in-place obj instead of uptrs, don't understand why we can't have
     // just a vector of the plain object
-    std::vector<uptr<shared_read_cache>> shards;
+    vec<uptr<shared_read_cache>> shards;
 
     // centralise the reporter
     std::thread cache_stats_reporter;

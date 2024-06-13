@@ -1,5 +1,5 @@
-#include <cassert>
 #include <array>
+#include <cassert>
 #include <iostream>
 #include <rados/librados.h>
 
@@ -16,8 +16,11 @@ using comp_buf = std::array<uint8_t, LSVD_BLOCK_SIZE>;
 #ifdef __cplusplus
 extern "C"
 #endif
-const char* __asan_default_options() { return "detect_leaks=0"; }
-
+    const char *
+    __asan_default_options()
+{
+    return "detect_leaks=0";
+}
 
 /**
  * Usage:
@@ -33,7 +36,8 @@ void hexdump(std::string desc, const void *addr, const int len,
              int perLine = 16)
 {
     int i;
-    unsigned char buff[perLine + 1];
+    vec<byte> buf(perLine + 1);
+    auto buff = (unsigned char *)buf.data();
     const unsigned char *pc = (const unsigned char *)addr;
 
     check_cond(len <= 0, "Invalid length {}", len);
@@ -172,8 +176,8 @@ void run_test(rados_ioctx_t ctx)
 int main(int argc, char *argv[])
 {
     // config options
-    setenv("LSVD_RCACHE_DIR", "/tmp/lsvd-read", 1);
-    setenv("LSVD_WCACHE_DIR", "/tmp/lsvd-write", 1);
+    setenv("LSVD_RCACHE_DIR", "/tmp/lsvd", 1);
+    setenv("LSVD_WCACHE_DIR", "/tmp/lsvd", 1);
     setenv("LSVD_CACHE_SIZE", "2147483648", 1);
 
     std::string pool_name = "pone";

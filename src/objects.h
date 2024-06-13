@@ -1,25 +1,23 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 #include <uuid/uuid.h>
-#include <vector>
 
 #include "backend.h"
+#include "lsvd_types.h"
+#include "utils.h"
 
 #if __BYTE_ORDER != __LITTLE_ENDIAN
 #error "this code is little-endian only"
 #endif
 
-/* for now we'll use 32-bit object sequence numbers. So sue me...
- */
-
-enum obj_type { LSVD_SUPER = 1, LSVD_DATA = 2, LSVD_CKPT = 3 };
+enum obj_type { OBJ_SUPERBLOCK = 1, OBJ_LOGDATA = 2, OBJ_CHECKPOINT = 3 };
 
 /* hdr - standard header for all backend objects
  * total length is hdr_sectors + data_sectors, in 512-byte units
  * name is <prefix> for superblock, (<prefix>.%08x % seq) otherwise
  */
-struct obj_hdr {
+struct common_obj_hdr {
     uint32_t magic;
     uint32_t version; // 1
     uuid_t vol_uuid;
@@ -42,7 +40,7 @@ struct obj_hdr {
  * snaps : TBD
  */
 struct super_hdr {
-    uint64_t vol_size;
+    uint64_t vol_size; // in 512 byte sectors
     uint32_t ckpts_offset;
     uint32_t ckpts_len;
     uint32_t clones_offset; // array of struct clone
@@ -138,28 +136,64 @@ struct ckpt_mapentry {
 
 /* ------ helper functions -------- */
 
+struct parsed_superblock {
+    vec<byte> superblock_buf; // buffer containing superblock
+    usize vol_size;           // size in bytes
+    vec<u32> ckpts;           // checkpoint sequence numbers
+    vec<clone_info *> clones; // ptrs are into the buffer
+    vec<snap_info *> snaps;   // ptrs are into the buffer
+    uuid_t uuid;
+};
+
+struct parsed_data_hdr {
+    vec<byte> buf;
+    common_obj_hdr *hdr;
+    obj_data_hdr *data_hdr;
+    vec<obj_cleaned *> cleaned;
+    vec<data_map *> data_map;
+};
+
+struct parsed_checkpoint {
+    vec<byte> buf;
+    common_obj_hdr *hdr;
+    obj_ckpt_hdr *ckpt_hdr;
+    vec<u32> ckpts;
+    vec<ckpt_obj *> objects;
+    vec<deferred_delete *> deletes;
+    vec<ckpt_mapentry *> dmap;
+};
+
 class object_reader
 {
-    std::shared_ptr<backend> objstore;
+    sptr<backend> objstore;
 
   public:
     object_reader(std::shared_ptr<backend> be) : objstore(be) {}
 
-    char *read_object_hdr(const char *name, bool fast);
-
-    std::pair<char *, ssize_t> read_super(const char *name,
-                                          std::vector<uint32_t> &ckpts,
-                                          std::vector<clone_info *> &clones,
-                                          std::vector<snap_info *> &snaps,
-                                          uuid_t &uuid);
-
-    ssize_t read_data_hdr(const char *name, obj_hdr &h, obj_data_hdr &dh,
-                          std::vector<obj_cleaned> &cleaned,
-                          std::vector<data_map> &dmap);
-
-    ssize_t read_checkpoint(const char *name, uint64_t &cache_seq,
-                            std::vector<uint32_t> &ckpts,
-                            std::vector<ckpt_obj> &objects,
-                            std::vector<deferred_delete> &deletes,
-                            std::vector<ckpt_mapentry> &dmap);
+    opt<vec<byte>> fetch_object_header(std::string oname);
+    opt<parsed_superblock> read_superblock(std::string oname);
+    opt<parsed_data_hdr> read_data_hdr(std::string oname);
+    opt<parsed_checkpoint> read_checkpoint(std::string oname);
 };
+
+// ----- common image types, temporary(T&Cs apply) workaround -----
+
+struct clone_base {
+    std::string name;
+    seqnum_t last_seq;
+    seqnum_t first_seq = 0;
+};
+
+struct data_obj_info {
+    sector_t hdr;
+    sector_t data;
+    sector_t live;
+};
+
+void serialise_common_hdr(vec<byte> &buf, obj_type t, seqnum_t s, u32 hdr,
+                          u32 data, uuid_t &uuid);
+
+// Serialise a superblock object.
+void serialise_superblock(vec<byte> &buf, vec<seqnum_t> &checkpoints,
+                          vec<clone_base> &clones, uuid_t &uuid,
+                          usize vol_size);

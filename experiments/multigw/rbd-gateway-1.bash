@@ -44,7 +44,7 @@ scripts/rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:lsvd-gw1 -a -s SPDKMULT
 scripts/rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:lsvd-gw1 -t tcp -a $gw_ip -s 9922
 
 function add_rbd_img {
-  cd $lsvd_dir/spdk
+  cd $lsvd_dir/subprojects/spdk
   local pool=$1
   local img=$2
   local bdev="bdev_$img"

@@ -8,21 +8,22 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup Clang 17
+      - name: Setup Clang 18
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 17
+          sudo ./llvm.sh 18
 
       - name: Install dependencies
         run: |
           sudo apt update
           make install-deps
+          sudo pip3 install --upgrade meson
 
       - name: Build
         run: |
@@ -37,12 +38,13 @@ jobs:
         run: |
           mkdir -p /tmp/lsvd-read
           mkdir -p /tmp/lsvd-write
+          mkdir -p /tmp/lsvd
           
           cd build-dbg
           sudo meson test
-          sudo ./imgtool --create --size 1g --pool pone test-img
+          sudo ./imgtool create --size 1g --pool pone --img test-img
 
       - name: Logs
         if: always()
         run: |
-          cat build-dbg/meson-logs/testlog.txt
+          cat build-dbg/meson-logs/*.txt

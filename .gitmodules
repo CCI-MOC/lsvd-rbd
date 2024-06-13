@@ -1,6 +1,3 @@
-[submodule "spdk"]
-	path = spdk
-	url = https://github.com/spdk/spdk
 [submodule "lsvd-atc24"]
 	path = atc2024
 	url = git@github.com:CCI-MOC/lsvd-atc24.git

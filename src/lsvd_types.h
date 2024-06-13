@@ -1,12 +1,13 @@
 #pragma once
 
+#include "utils.h"
 #include <fmt/format.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <vector>
 
-typedef int64_t sector_t;
-typedef int page_t;
+using sector_t = int64_t;
+using page_t = int32_t;
+using seqnum_t = uint32_t;
 
 enum lsvd_op { OP_READ = 2, OP_WRITE = 4 };
 
@@ -16,8 +17,7 @@ enum { LSVD_MAGIC = 0x4456534c };
  * copy them into the provided output vector
  */
 template <class T>
-void decode_offset_len(char *buf, size_t offset, size_t len,
-                       std::vector<T> &vals)
+void decode_offset_len(char *buf, size_t offset, size_t len, vec<T> &vals)
 {
     T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
     for (; p < end; p++)
@@ -28,8 +28,7 @@ void decode_offset_len(char *buf, size_t offset, size_t len,
  * length field name_len.
  */
 template <class T>
-void decode_offset_len_ptr(char *buf, size_t offset, size_t len,
-                           std::vector<T *> &vals)
+void decode_offset_len_ptr(char *buf, size_t offset, size_t len, vec<T *> &vals)
 {
     T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
     for (; p < end;) {
@@ -62,3 +61,8 @@ class objname
     std::string str() { return name; }
     const char *c_str() { return name.c_str(); }
 };
+
+static inline std::string oname(std::string prefix, uint32_t seq)
+{
+    return fmt::format("{}.{:08x}", prefix, seq);
+}

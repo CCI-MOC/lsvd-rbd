@@ -1,4 +1,6 @@
 #include "spdk_wrap.h"
+#include "config.h"
+#include "src/utils.h"
 
 spdk_completion::spdk_completion(rbd_callback_t cb, void *cb_arg)
     : cb(cb), cb_arg(cb_arg)
@@ -11,7 +13,7 @@ spdk_completion::~spdk_completion()
         req->release();
 }
 
-void spdk_completion::delayed_init(lsvd_spdk *img, request *req)
+void spdk_completion::delayed_init(lsvd_rbd *img, request *req)
 {
     this->img = img;
     this->req = req;
@@ -54,31 +56,37 @@ inline void spdk_completion::dec_and_free()
         delete this;
 }
 
-lsvd_spdk *lsvd_spdk::open_image(rados_ioctx_t io, std::string name)
+lsvd_rbd *lsvd_rbd::open_image(rados_ioctx_t io, std::string name)
 {
-    auto img = new lsvd_spdk();
-
     try {
-        img->img.try_open(name, io);
+        lsvd_config cfg;
+        auto err = cfg.read();
+        PR_ERR_RET_IF(err < 0, nullptr, -err, "Failed to read config");
+
+        return new lsvd_rbd(name, io, cfg);
     } catch (std::runtime_error &e) {
         log_error("Failed to open image: {}", e.what());
-        delete img;
         return nullptr;
     }
-
-    return img;
 }
 
-void lsvd_spdk::close_image() { delete this; }
+void lsvd_rbd::close_image() { delete this; }
 
-spdk_completion *lsvd_spdk::create_completion(rbd_callback_t cb, void *cb_arg)
+lsvd_rbd::lsvd_rbd(std::string name, rados_ioctx_t io, lsvd_config cfg)
+    : img(name, io, cfg)
+{
+}
+
+lsvd_rbd::~lsvd_rbd() {}
+
+spdk_completion *lsvd_rbd::create_completion(rbd_callback_t cb, void *cb_arg)
 {
     return new spdk_completion(cb, cb_arg);
 }
 
-void lsvd_spdk::release_completion(spdk_completion *c) { c->release(); }
+void lsvd_rbd::release_completion(spdk_completion *c) { c->release(); }
 
-void lsvd_spdk::on_request_complete(spdk_completion *c)
+void lsvd_rbd::on_request_complete(spdk_completion *c)
 {
     std::unique_lock lk(completions_mtx);
     if (ev.has_value()) {
@@ -87,13 +95,13 @@ void lsvd_spdk::on_request_complete(spdk_completion *c)
     }
 }
 
-int lsvd_spdk::switch_to_poll(event_socket &&ev)
+int lsvd_rbd::switch_to_poll(event_socket &&ev)
 {
     this->ev = std::move(ev);
     return 0;
 }
 
-int lsvd_spdk::poll_io_events(spdk_completion **comps, int numcomp)
+int lsvd_rbd::poll_io_events(spdk_completion **comps, int numcomp)
 {
     assert(ev.has_value());
 
@@ -117,34 +125,34 @@ std::function<void(int)> make_cb(spdk_completion *c)
         return [c](int rv) { c->complete(rv); };
 }
 
-void init_completion(spdk_completion *c, lsvd_spdk *img, request *req)
+void init_completion(spdk_completion *c, lsvd_rbd *img, request *req)
 {
     if (c != nullptr)
         c->delayed_init(img, req);
 }
 
-request *lsvd_spdk::read(size_t offset, smartiov iov, spdk_completion *c)
+request *lsvd_rbd::read(size_t offset, smartiov iov, spdk_completion *c)
 {
     auto req = img.read(offset, iov, make_cb(c));
     init_completion(c, this, req);
     return req;
 }
 
-request *lsvd_spdk::write(size_t offset, smartiov iov, spdk_completion *c)
+request *lsvd_rbd::write(size_t offset, smartiov iov, spdk_completion *c)
 {
     auto req = img.write(offset, iov, make_cb(c));
     init_completion(c, this, req);
     return req;
 }
 
-request *lsvd_spdk::trim(size_t offset, size_t len, spdk_completion *c)
+request *lsvd_rbd::trim(size_t offset, size_t len, spdk_completion *c)
 {
     auto req = img.trim(offset, len, make_cb(c));
     init_completion(c, this, req);
     return req;
 }
 
-request *lsvd_spdk::flush(spdk_completion *c)
+request *lsvd_rbd::flush(spdk_completion *c)
 {
     auto req = img.flush(make_cb(c));
     init_completion(c, this, req);

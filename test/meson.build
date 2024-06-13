@@ -2,7 +2,7 @@ seq = executable(
 	'test-seq',
 	'test-seq.cc',
 	include_directories: lsvd_inc,
-	link_with: liblsvd,
+	link_with: lsvd_ar,
 	dependencies: lsvd_deps,
 )
 
@@ -10,7 +10,7 @@ extentmap = executable(
 	'test-extentmap',
 	'test-extentmap.cc',
 	include_directories: lsvd_inc,
-	link_with: liblsvd,
+	link_with: lsvd_ar,
 	dependencies: lsvd_deps,
 )
 

@@ -4,9 +4,9 @@
 #include <rados/librados.h>
 #include <sys/uio.h>
 
-#include "config.h"
 #include "request.h"
 #include "smartiov.h"
+#include "utils.h"
 
 class backend
 {
@@ -45,16 +45,11 @@ class backend
         smartiov iov((char *)buf, len);
         return aio_read(name, offset, iov);
     }
+
+    virtual opt<u64> get_size(std::string name) = 0;
+    virtual opt<vec<byte>> read_whole_obj(std::string name) = 0;
+    virtual bool exists(std::string name) = 0;
 };
 
-extern std::shared_ptr<backend> make_file_backend(const char *prefix);
 extern std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io);
-
-inline std::shared_ptr<backend> get_backend(lsvd_config *cfg, rados_ioctx_t io,
-                                            const char *name)
-{
-    if (cfg->backend == BACKEND_RADOS)
-        return make_rados_backend(io);
-
-    throw std::runtime_error("Unknown backend");
-}
+rados_ioctx_t connect_to_pool(str pool_name);

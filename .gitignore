@@ -5,10 +5,11 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
-subprojects/
-
 builddir
+build
 qemu/*.img
 qemu/*.iso
 qemu/bzImage
 
+subprojects/liburing-*
+subprojects/packagecache

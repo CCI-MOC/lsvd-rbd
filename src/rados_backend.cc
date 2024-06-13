@@ -131,6 +131,8 @@ class rados_backend : public backend
         librados::IoCtx::from_rados_ioctx_t(ctx_, this->ctx);
     }
 
+    ~rados_backend() override {}
+
     int write(std::string name, smartiov &iov) override
     {
         auto req = dynamic_cast<rados_write_req *>(aio_write(name, iov));
@@ -163,9 +165,62 @@ class rados_backend : public backend
     {
         return new rados_delete_req(ctx, name);
     }
+
+    bool exists(std::string name) override
+    {
+        return ctx.stat(name, nullptr, nullptr) == 0;
+    }
+
+    opt<u64> get_size(std::string name) override
+    {
+        u64 size;
+        time_t mtime;
+        int rv = ctx.stat(name, &size, &mtime);
+        switch (rv) {
+        case 0:
+            return size;
+        case -ENOENT:
+            return std::nullopt;
+        default:
+            THROW_ERRNO_ON(true, -rv, "Failed to stat object '{}'", name);
+        }
+    }
+
+    opt<vec<byte>> read_whole_obj(std::string name) override
+    {
+        auto size = get_size(name);
+        PASSTHRU_NULLOPT(size);
+
+        vec<byte> buf(size.value());
+        smartiov iov((char *)buf.data(), buf.size());
+        auto r = read(name, 0, iov);
+        if (r < 0)
+            return std::nullopt;
+
+        return buf;
+    }
 };
 
 std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
 {
     return std::make_shared<rados_backend>(io);
+}
+
+rados_ioctx_t connect_to_pool(str pool_name)
+{
+    rados_t cluster;
+    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
+    check_ret_neg(err, "Failed to create cluster handle");
+
+    err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
+    check_ret_neg(err, "Failed to read config file");
+
+    err = rados_connect(cluster);
+    check_ret_neg(err, "Failed to connect to cluster");
+
+    rados_ioctx_t io_ctx;
+    err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
+    check_ret_neg(err, "Failed to connect to pool {}", pool_name);
+
+    return io_ctx;
 }

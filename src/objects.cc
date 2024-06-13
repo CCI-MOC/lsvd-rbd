@@ -1,122 +1,241 @@
-#include <string.h>
+#include <algorithm>
+#include <cstring>
 #include <sys/uio.h>
+#include <utility>
 #include <zlib.h>
 
-#include "lsvd_debug.h"
 #include "lsvd_types.h"
 #include "objects.h"
+#include "utils.h"
 
-char *object_reader::read_object_hdr(const char *name, bool fast)
+void serialise_common_hdr(vec<byte> &buf, obj_type t, seqnum_t s, u32 hdr,
+                          u32 data, uuid_t &uuid)
 {
-    obj_hdr *h = (obj_hdr *)malloc(4096);
-    int rv;
-    if ((rv = objstore->read(name, 0, h, 4096)) < 0)
-        goto fail;
-    if (fast)
-        return (char *)h;
-    if (h->hdr_sectors > 8) {
-        size_t len = h->hdr_sectors * 512;
-        h = (obj_hdr *)realloc(h, len);
-        if (objstore->read(name, 0, h, len) < 0)
-            goto fail;
-    }
-    return (char *)h;
-fail:
-    free((char *)h);
-    return NULL;
+    if (buf.size() < sizeof(common_obj_hdr))
+        buf.resize(sizeof(common_obj_hdr));
+
+    auto h = (common_obj_hdr *)buf.data();
+    h->magic = LSVD_MAGIC;
+    h->version = 1;
+    h->type = t;
+    h->seq = s;
+    h->hdr_sectors = hdr;
+    h->data_sectors = data;
+    h->crc = 0;
+    uuid_copy(h->vol_uuid, uuid);
 }
 
-/* read all info from superblock, returns a vast number of things:
- * [super, vol_size] = f(name, &ckpts, &clones, *&snaps):
- *  - super - pointer to buffer (must be freed)
- *  - vol_size - in bytes (-1 on failure)
- *  - ckpts, clones, snaps - what you'd expect
- */
-std::pair<char *, ssize_t>
-object_reader::read_super(const char *name, std::vector<uint32_t> &ckpts,
-                          std::vector<clone_info *> &clones,
-                          std::vector<snap_info *> &snaps, uuid_t &uuid)
+void serialise_superblock(vec<byte> &buf, vec<seqnum_t> &checkpoints,
+                          vec<clone_base> &clones, uuid_t &uuid, usize vol_size)
 {
-    char *super_buf = read_object_hdr(name, false);
-    if (super_buf == NULL)
-        return std::make_pair((char *)NULL, -1);
+    // Reserve required space ahead of time
+    usize req_size = sizeof(common_obj_hdr) + sizeof(super_hdr);
+    req_size += checkpoints.size() * sizeof(seqnum_t);
+    for (auto &c : clones)
+        req_size += sizeof(clone_info) + round_up(c.name.size(), 8);
+    // TODO snapshots
+    req_size = std::max(req_size, 8ul); // minimum of 4096 bytes
+    req_size = round_up(req_size, 512); // round to sector boundary (why??)
 
-    auto super_h = (obj_hdr *)super_buf;
+    if (buf.size() < req_size)
+        buf.resize(req_size);
 
-    if (super_h->magic != LSVD_MAGIC || super_h->version != 1 ||
-        super_h->type != LSVD_SUPER)
-        return std::make_pair((char *)NULL, -1);
-    memcpy(uuid, super_h->vol_uuid, sizeof(uuid_t));
+    auto bufp = buf.data(); // start of buffer
+    auto hdrp = (super_hdr *)(bufp + sizeof(common_obj_hdr));
+    hdrp->vol_size = vol_size / 512;
 
-    super_hdr *super_sh = (super_hdr *)(super_h + 1);
+    serialise_common_hdr(buf, OBJ_SUPERBLOCK, 0, req_size / 512, 0, uuid);
 
-    decode_offset_len<uint32_t>(super_buf, super_sh->ckpts_offset,
-                                super_sh->ckpts_len, ckpts);
-    decode_offset_len_ptr<clone_info>(super_buf, super_sh->clones_offset,
-                                      super_sh->clones_len, clones);
-    decode_offset_len_ptr<snap_info>(super_buf, super_sh->snaps_offset,
-                                     super_sh->snaps_len, snaps);
+    // There are three variable-length arrays in the superblock: checkpoints,
+    // snapshots, and clones. The order doesn't matter, but we put clones first
+    // since that's effectively immutable. This means that the offset into
+    // everything else will not change over the lifetime of an image
+    // The checkpoints and snapshots are appended after that
 
-    return std::make_pair(super_buf, super_sh->vol_size * 512);
+    // Also note that we should make sure that each clone/snapshot is 8-byte
+    // aligned in the buffer, as when we read them back to deserialise we end
+    // up with a bunch of pointers into the buffer and unaligned pointers will
+    // just make all of us sad. Fortunately we have c-style null-terminated
+    // strings so we can just pad with more null
+
+    // Part 1: clones. TODO skip on partial serialise
+    byte *clonep;
+    clonep = bufp + sizeof(common_obj_hdr) + sizeof(super_hdr);
+    hdrp->clones_offset = clonep - bufp;
+    for (auto &c : clones) {
+        auto padded_namelen = round_up(c.name.size(), 8);
+        auto record_len = sizeof(clone_info) + padded_namelen;
+        auto cip = (clone_info *)clonep;
+
+        cip->last_seq = c.last_seq;
+        uuid_copy(cip->vol_uuid, nullptr); // TODO
+        cip->name_len = padded_namelen;
+
+        std::memset(cip->name, 0, padded_namelen);
+        std::memcpy(cip->name, c.name.c_str(), c.name.size());
+
+        clonep += record_len;
+        hdrp->clones_len += record_len;
+    }
+
+    // Part 2: checkpoints
+    hdrp->ckpts_offset = clonep - bufp;
+    hdrp->ckpts_len = checkpoints.size() * sizeof(seqnum_t);
+    auto p = (seqnum_t *)(bufp + hdrp->ckpts_offset);
+    for (auto &c : checkpoints)
+        *p++ = c;
+
+    // Part 3: snapshots
+    // TODO implement this when we get around to snapshots
+    hdrp->snaps_offset = 0;
+    hdrp->snaps_len = 0;
 }
 
-/* read and decode the header of an object. Copies into arguments,
- * frees all allocated memory
- */
-ssize_t object_reader::read_data_hdr(const char *name, obj_hdr &h,
-                                     obj_data_hdr &dh,
-                                     std::vector<obj_cleaned> &cleaned,
-                                     std::vector<data_map> &dmap)
+opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
 {
-    char *buf = read_object_hdr(name, false);
-    if (buf == NULL)
-        return -1;
-    auto tmp_h = (obj_hdr *)buf;
-    auto tmp_dh = (obj_data_hdr *)(tmp_h + 1);
-    if (tmp_h->type != LSVD_DATA) {
-        free(buf);
-        return -1;
-    }
+    vec<byte> buf(4096);
+    auto err = objstore->read(objname, 0, buf.data(), 4096);
+    RET_IF(err == -ENOENT, std::nullopt);
+    THROW_ERRNO_ON(err < 0, -err, "Failed to read object '{}' header", objname);
+    THROW_MSG_ON(err < 512, "Short read {}/512 on obj '{}'", err, objname);
 
-    h = *tmp_h;
-    dh = *tmp_dh;
+    auto h = (common_obj_hdr *)buf.data();
 
-    decode_offset_len<obj_cleaned>(buf, tmp_dh->objs_cleaned_offset,
-                                   tmp_dh->objs_cleaned_len, cleaned);
-    decode_offset_len<data_map>(buf, tmp_dh->data_map_offset,
-                                tmp_dh->data_map_len, dmap);
+    // Validate magic
+    PR_RET_IF(h->magic != LSVD_MAGIC || h->version != 1, std::nullopt,
+              "Invalid magic or version in object '{}'", objname);
 
-    free(buf);
-    return 0;
+    if (h->hdr_sectors <= 8)
+        return buf;
+
+    // Header is longer than 4096, we have to fetch the rest
+    auto len = h->hdr_sectors * 512;
+    buf.reserve(len);
+    err = objstore->read(objname, 0, buf.data(), len);
+    PR_ERR_RET_IF(std::cmp_not_equal(err, len), std::nullopt, err,
+                  "Failed to read object '{}' header", objname);
+
+    return buf;
 }
 
-/* read and decode a checkpoint object identified by sequence number
+/* buf[offset ... offset+len] contains array of type T, with variable
+ * length field name_len.
  */
-ssize_t object_reader::read_checkpoint(const char *name, uint64_t &cache_seq,
-                                       std::vector<uint32_t> &ckpts,
-                                       std::vector<ckpt_obj> &objects,
-                                       std::vector<deferred_delete> &deletes,
-                                       std::vector<ckpt_mapentry> &dmap)
+template <class T>
+void deserialise_offset_ptr(char *buf, size_t offset, size_t len,
+                            vec<T *> &vals)
 {
-    char *buf = read_object_hdr(name, false);
-    if (buf == NULL) {
-        do_log("buf == NULL\n");
-        return -1;
+    T *p = (T *)(buf + offset), *end = (T *)(buf + offset + len);
+    for (; p < end;) {
+        vals.push_back(p);
+        p = (T *)((char *)p + sizeof(T) + p->name_len);
     }
-    auto h = (obj_hdr *)buf;
-    auto ch = (obj_ckpt_hdr *)(h + 1);
-    if (h->type != LSVD_CKPT) {
-        do_log("%s: WRONG TYPE %d\n", name, h->type);
-        free(buf);
-        return -1;
-    }
-    cache_seq = ch->cache_seq;
-    decode_offset_len<uint32_t>(buf, ch->ckpts_offset, ch->ckpts_len, ckpts);
-    decode_offset_len<ckpt_obj>(buf, ch->objs_offset, ch->objs_len, objects);
-    decode_offset_len<deferred_delete>(buf, ch->deletes_offset, ch->deletes_len,
-                                       deletes);
-    decode_offset_len<ckpt_mapentry>(buf, ch->map_offset, ch->map_len, dmap);
+}
 
-    free(buf);
-    return 0;
+template <typename T> vec<T> deserialise_cpy(byte *buf, usize offset, usize len)
+{
+    vec<T> ret;
+    for (usize i = 0; i < len / sizeof(T); i++) {
+        T *p = (T *)(buf + offset + i * sizeof(T));
+        ret.push_back(*p);
+    }
+    return ret;
+}
+
+template <typename T>
+vec<T *> deserialise_ptrs(byte *buf, usize offset, usize len)
+{
+    vec<T *> ret;
+    for (usize i = 0; i < len / sizeof(T); i++) {
+        T *p = (T *)(buf + offset + i * sizeof(T));
+        ret.push_back(p);
+    }
+    return ret;
+}
+
+template <typename T>
+vec<T *> deserialise_ptrs_with_len(byte *buf, usize offset, usize len)
+{
+    vec<T *> ret;
+    byte *p = buf + offset;
+    for (; p < buf + offset + len;) {
+        ret.push_back((T *)p);
+        p += sizeof(T) + ((T *)p)->name_len;
+    }
+    return ret;
+}
+
+opt<parsed_superblock> object_reader::read_superblock(std::string oname)
+{
+    auto buf = objstore->read_whole_obj(oname);
+    PASSTHRU_NULLOPT(buf);
+    auto hdr = (common_obj_hdr *)buf->data();
+    auto hbuf = buf->data();
+
+    PR_RET_IF(hdr->magic != LSVD_MAGIC, std::nullopt,
+              "Corrupt object; invalid magic at '{}', found {:x}", oname,
+              hdr->magic);
+    PR_RET_IF(hdr->version != 1, std::nullopt,
+              "Invalid version in object '{}', only 1 is supported", oname);
+    PR_RET_IF(hdr->type != OBJ_SUPERBLOCK, std::nullopt,
+              "Obj '{}' not a superblock", oname);
+
+    parsed_superblock ret;
+    super_hdr *shdr = (super_hdr *)(hdr + 1);
+
+    ret.ckpts = deserialise_cpy<u32>(hbuf, shdr->ckpts_offset, shdr->ckpts_len);
+    ret.clones = deserialise_ptrs_with_len<clone_info>(
+        hbuf, shdr->clones_offset, shdr->clones_len);
+    ret.snaps = deserialise_ptrs_with_len<snap_info>(hbuf, shdr->snaps_offset,
+                                                     shdr->snaps_len);
+
+    ret.superblock_buf = *buf;
+    uuid_copy(ret.uuid, hdr->vol_uuid);
+    ret.vol_size = shdr->vol_size * 512;
+
+    return ret;
+}
+
+opt<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
+{
+    auto hdr = fetch_object_header(oname);
+    PASSTHRU_NULLOPT(hdr);
+
+    parsed_data_hdr h;
+    h.buf = std::move(*hdr);
+    h.hdr = (common_obj_hdr *)h.buf.data();
+    PR_RET_IF(h.hdr->type != OBJ_LOGDATA, std::nullopt,
+              "Invalid object type in '{}'", oname);
+    h.data_hdr = (obj_data_hdr *)(h.buf.data() + sizeof(common_obj_hdr));
+
+    auto buf = h.buf.data();
+    h.cleaned = deserialise_ptrs<obj_cleaned>(
+        buf, h.data_hdr->objs_cleaned_offset, h.data_hdr->objs_cleaned_len);
+    h.data_map = deserialise_ptrs<data_map>(buf, h.data_hdr->data_map_offset,
+                                            h.data_hdr->data_map_len);
+    return h;
+}
+
+opt<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
+{
+    auto hdr = fetch_object_header(oname);
+    PASSTHRU_NULLOPT(hdr);
+
+    parsed_checkpoint ret;
+    ret.hdr = (common_obj_hdr *)hdr->data();
+    PR_RET_IF(ret.hdr->type != OBJ_CHECKPOINT, std::nullopt,
+              "Invalid object type it '{}'", oname);
+    ret.ckpt_hdr = (obj_ckpt_hdr *)(&hdr->at(sizeof(common_obj_hdr)));
+
+    auto buf = hdr->data();
+    ret.ckpts = deserialise_cpy<u32>(buf, ret.ckpt_hdr->ckpts_offset,
+                                     ret.ckpt_hdr->ckpts_len);
+    ret.objects = deserialise_ptrs<ckpt_obj>(buf, ret.ckpt_hdr->objs_offset,
+                                             ret.ckpt_hdr->objs_len);
+    ret.deletes = deserialise_ptrs<deferred_delete>(
+        buf, ret.ckpt_hdr->deletes_offset, ret.ckpt_hdr->deletes_len);
+    ret.dmap = deserialise_ptrs<ckpt_mapentry>(buf, ret.ckpt_hdr->map_offset,
+                                               ret.ckpt_hdr->map_len);
+    ret.buf = std::move(*hdr);
+    return ret;
 }

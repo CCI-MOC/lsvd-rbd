@@ -24,9 +24,9 @@ namespace fs = std::filesystem;
 #include "config.h"
 #include "config_macros.h"
 
-std::vector<std::string> cfg_path({"lsvd.conf", "/usr/local/etc/lsvd.conf"});
+vec<std::string> cfg_path({"lsvd.conf", "/usr/local/etc/lsvd.conf"});
 
-static void split(std::string s, std::vector<std::string> &words)
+static void split(std::string s, vec<std::string> &words)
 {
     std::string w = "";
     for (auto c : s) {
@@ -65,22 +65,22 @@ int lsvd_config::read()
         while (getline(fp, line)) {
             if (line[0] == '#')
                 continue;
-            std::vector<std::string> words;
+            vec<std::string> words;
             split(line, words);
             if (words.size() != 2)
                 continue;
-            F_CONFIG_H_INT(words[0], words[1], batch_size);
+            F_CONFIG_H_INT(words[0], words[1], backend_obj_size);
             F_CONFIG_INT(words[0], words[1], wcache_batch);
             F_CONFIG_H_INT(words[0], words[1], wcache_chunk);
             F_CONFIG_STR(words[0], words[1], rcache_dir);
             F_CONFIG_STR(words[0], words[1], wcache_dir);
-            F_CONFIG_INT(words[0], words[1], xlate_window);
+            F_CONFIG_INT(words[0], words[1], num_parallel_writes);
             F_CONFIG_TABLE(words[0], words[1], backend, m);
             F_CONFIG_H_INT(words[0], words[1], cache_size);
             F_CONFIG_H_INT(words[0], words[1], wlog_size);
             F_CONFIG_INT(words[0], words[1], hard_sync);
             F_CONFIG_INT(words[0], words[1], ckpt_interval);
-            F_CONFIG_INT(words[0], words[1], flush_msec);
+            F_CONFIG_INT(words[0], words[1], flush_timeout_msec);
             F_CONFIG_INT(words[0], words[1], gc_threshold);
             F_CONFIG_INT(words[0], words[1], fetch_window);
             F_CONFIG_INT(words[0], words[1], fetch_ratio);
@@ -91,18 +91,18 @@ int lsvd_config::read()
         break;
     }
 
-    ENV_CONFIG_H_INT(batch_size);
+    ENV_CONFIG_H_INT(backend_obj_size);
     ENV_CONFIG_INT(wcache_batch);
     ENV_CONFIG_H_INT(wcache_chunk);
     ENV_CONFIG_STR(rcache_dir);
     ENV_CONFIG_STR(wcache_dir);
-    ENV_CONFIG_INT(xlate_window);
+    ENV_CONFIG_INT(num_parallel_writes);
     ENV_CONFIG_TABLE(backend, m);
     ENV_CONFIG_H_INT(cache_size);
     ENV_CONFIG_H_INT(wlog_size);
     ENV_CONFIG_INT(hard_sync);
     ENV_CONFIG_INT(ckpt_interval);
-    ENV_CONFIG_INT(flush_msec);
+    ENV_CONFIG_INT(flush_timeout_msec);
     ENV_CONFIG_INT(gc_threshold);
     ENV_CONFIG_INT(fetch_window);
     ENV_CONFIG_INT(fetch_ratio);

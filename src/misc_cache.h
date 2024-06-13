@@ -101,12 +101,12 @@ static inline void throw_fs_error(std::string msg)
  */
 template <class T> class sized_vector
 {
-    std::vector<T> *elements;
+    vec<T> *elements;
 
   public:
     ~sized_vector() { delete elements; }
-    void init(int n) { elements = new std::vector<T>(n); }
-    void init(int n, T val) { elements = new std::vector<T>(n, val); }
+    void init(int n) { elements = new vec<T>(n); }
+    void init(int n, T val) { elements = new vec<T>(n, val); }
     T &operator[](int index) { return (*elements)[index]; }
 };
 

@@ -1,15 +1,19 @@
 #pragma once
 
-#include <chrono>
+// #include "folly/FBVector.h"
+#include <boost/stacktrace.hpp>
+#include <cerrno>
 #include <condition_variable>
 #include <cstring>
-#include <errno.h>
+#include <filesystem>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <iostream>
 #include <linux/fs.h>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <signal.h>
 #include <sstream>
@@ -26,6 +30,39 @@
 
 template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
+template <typename T> using opt = std::optional<T>;
+template <typename T> using vec = std::vector<T>;
+// template <typename T> using fvec = folly::fbvector<T>;
+
+#define CEXTERN extern "C"
+
+using u64 = uint64_t;
+using u32 = uint32_t;
+using u16 = uint16_t;
+using u8 = uint8_t;
+using s64 = int64_t;
+using s32 = int32_t;
+using s16 = int16_t;
+using s8 = int8_t;
+using usize = size_t;
+using ssize = ssize_t;
+using byte = std::byte;
+using str = std::string;
+using fspath = std::filesystem::path;
+
+#define PASSTHRU_NULLOPT(opt)                                                  \
+    do {                                                                       \
+        if (!opt) {                                                            \
+            return std::nullopt;                                               \
+        }                                                                      \
+    } while (0)
+
+#define PASSTHRU_NULLPTR(ptr)                                                  \
+    do {                                                                       \
+        if (!ptr) {                                                            \
+            return nullptr;                                                    \
+        }                                                                      \
+    } while (0)
 
 #define trace(MSG, ...)                                                        \
     do {                                                                       \
@@ -51,13 +88,6 @@ template <typename T> using uptr = std::unique_ptr<T>;
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
-#define log_error(MSG, ...)                                                    \
-    do {                                                                       \
-        fmt::print(stderr, fg(fmt::terminal_color::red) | fmt::emphasis::bold, \
-                   "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__, __func__,   \
-                   ##__VA_ARGS__);                                             \
-    } while (0)
-
 #define log_warn(MSG, ...)                                                     \
     do {                                                                       \
         if (LOGLV <= 3)                                                        \
@@ -67,9 +97,66 @@ template <typename T> using uptr = std::unique_ptr<T>;
                        __func__, ##__VA_ARGS__);                               \
     } while (0)
 
+#define log_error(MSG, ...)                                                    \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::terminal_color::red) | fmt::emphasis::bold, \
+                   "[ERR {}:{} {}] " MSG "\n", __FILE__, __LINE__, __func__,   \
+                   ##__VA_ARGS__);                                             \
+    } while (0)
+
 #define trap_to_debugger()                                                     \
     do {                                                                       \
         raise(SIGTRAP);                                                        \
+    } while (0)
+
+#define RET_IF(cond, ret)                                                      \
+    do {                                                                       \
+        if (cond) {                                                            \
+            return ret;                                                        \
+        }                                                                      \
+    } while (0)
+
+#define PR_RET_IF(cond, ret, MSG, ...)                                         \
+    do {                                                                       \
+        if (cond) {                                                            \
+            log_error(MSG, ##__VA_ARGS__);                                     \
+            return ret;                                                        \
+        }                                                                      \
+    } while (0)
+
+/**
+ * If `cond` is true, print an error message to stdout with MSG, then return
+ * `ret`
+ */
+#define PR_ERR_RET_IF(cond, ret, en, MSG, ...)                                 \
+    do {                                                                       \
+        if (cond) {                                                            \
+            auto fs = fmt::format(MSG "\n", ##__VA_ARGS__);                    \
+            auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] {}", __FILE__,  \
+                                 __LINE__, __func__, en, strerror(en), fs);    \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            return ret;                                                        \
+        }                                                                      \
+    } while (0)
+
+#define THROW_MSG_ON(cond, MSG, ...)                                           \
+    do {                                                                       \
+        if (cond) {                                                            \
+            auto m = fmt::format(MSG, ##__VA_ARGS__);                          \
+            auto s = fmt::format("[ERR {}:{} {}] {}\n", __FILE__, __LINE__,    \
+                                 __func__, m);                                 \
+            fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
+            throw std::runtime_error(m);                                       \
+        }                                                                      \
+    } while (0)
+
+#define THROW_ERRNO_ON(cond, en, MSG, ...)                                     \
+    do {                                                                       \
+        if (cond) {                                                            \
+            auto m =                                                           \
+                fmt::format("{}/{}: " MSG, en, strerror(en), ##__VA_ARGS__);   \
+            throw std::system_error(en, std::generic_category(), m);           \
+        }                                                                      \
     } while (0)
 
 /**
@@ -114,6 +201,13 @@ template <typename T> using uptr = std::unique_ptr<T>;
         }                                                                      \
     } while (0)
 
+#define TODO()                                                                 \
+    do {                                                                       \
+        fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
+                   "[ERR {}:{} {}] TODO\n", __FILE__, __LINE__, __func__);     \
+        throw std::runtime_error("TODO stub");                                 \
+    } while (0)
+
 #define UNIMPLEMENTED()                                                        \
     do {                                                                       \
         fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,          \
@@ -126,10 +220,9 @@ template <class... Ts> struct overloaded : Ts... {
     using Ts::operator()...;
 };
 
-inline std::vector<std::string> split_string_on_char(const std::string &s,
-                                                     char delim)
+inline vec<std::string> split_string_on_char(const std::string &s, char delim)
 {
-    std::vector<std::string> result;
+    vec<std::string> result;
     std::stringstream ss(s);
     std::string item;
 
@@ -140,7 +233,7 @@ inline std::vector<std::string> split_string_on_char(const std::string &s,
     return result;
 }
 
-inline std::string string_join(const std::vector<std::string> &strings,
+inline std::string string_join(const vec<std::string> &strings,
                                const std::string &delim)
 {
     std::string result;
@@ -150,25 +243,6 @@ inline std::string string_join(const std::vector<std::string> &strings,
             result += delim;
     }
     return result;
-}
-
-inline std::chrono::time_point<std::chrono::system_clock> tnow()
-{
-    return std::chrono::high_resolution_clock::now();
-}
-
-constexpr std::chrono::microseconds
-tus(std::chrono::time_point<std::chrono::system_clock> start,
-    std::chrono::time_point<std::chrono::system_clock> end)
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-}
-
-constexpr int64_t tdus(std::chrono::time_point<std::chrono::system_clock> start,
-                       std::chrono::time_point<std::chrono::system_clock> end)
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-        .count();
 }
 
 template <typename T> std::shared_ptr<T> to_shared(std::unique_ptr<T> ptr)
@@ -204,61 +278,3 @@ inline size_t getsize64(int fd)
         size = sb.st_size;
     return size;
 }
-
-/**
- * This is a thread safe, bounded, blocking, multi-producer multi-consumer,
- * single-ended, FIFO queue. Push operations block until there's space, and pop
- * blocks until there are entries in the queue to pop.
- *
- * It uses an underlying std::queue for the actual queue, and then just adds a
- * single global lock to both pop and push. Readers are notified when there are
- * entries via condition vars, same for writers.
- *
- * Based on CPython's queue implementation found at
- * https://github.com/python/cpython/blob/main/Lib/queue.py
- *
- * This queue is neither movable nor copyable. Use smart pointers instead.
- */
-template <typename T> class BlockingMPMC
-{
-  public:
-    BlockingMPMC(size_t size) : _buffer(), _max_capacity(size) {}
-    ~BlockingMPMC();
-
-    // TODO Change to take an rvalue to default move instead of copy
-    void push(T t)
-    {
-        {
-            std::unique_lock<std::mutex> lck(_mutex);
-            _can_push.wait(lck,
-                           [&]() { return _buffer.size() < _max_capacity; });
-            _buffer.push(std::move(t));
-        }
-        _can_pop.notify_one();
-    }
-
-    T pop()
-    {
-        T x;
-        {
-            std::unique_lock<std::mutex> lck(_mutex);
-            _can_pop.wait(lck, [&]() { return !_buffer.empty(); });
-            x = std::move(_buffer.front());
-            _buffer.pop();
-        }
-        _can_push.notify_one();
-        return x;
-    }
-
-  private:
-    BlockingMPMC(BlockingMPMC &src) = delete;
-    BlockingMPMC(BlockingMPMC &&src) = delete;
-    BlockingMPMC &operator=(BlockingMPMC &src) = delete;
-    BlockingMPMC &operator=(BlockingMPMC &&src) = delete;
-
-    std::queue<T> _buffer;
-    size_t _max_capacity;
-    std::mutex _mutex;
-    std::condition_variable _can_pop;
-    std::condition_variable _can_push;
-};

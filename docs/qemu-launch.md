@@ -5,7 +5,7 @@ install config, run QEMU with
 `-drive format=raw,file=seed.iso,cache=none,if=virtio`.
 
 1. Create a lsvd image if you don't already have one: 
-   `./imgtool --create --rados --size 10g $pool_name/$img_name`
+   `./imgtool create --size 10g $pool_name $img_name`
 2. Launch LSVD as a NVMF target `qemu-gateway.bash $pool_name $img_name`
 3. Lanuch QEMU with the NVMF target `qemu-client.bash`. This does the following:
    - `nvme connect` to the nvmf target on the gateway

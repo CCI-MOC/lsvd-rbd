@@ -1,18 +1,16 @@
+#include <liburing.h>
+#include <mutex>
 #include <sys/uio.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <uuid/uuid.h>
 
-#include <mutex>
-#include <thread>
-
 #include "lsvd_types.h"
+#include "nvme.h"
 #include "request.h"
 #include "smartiov.h"
 #include "utils.h"
-#include <liburing.h>
-
-#include "nvme.h"
 
 void do_log(const char *, ...);
 
