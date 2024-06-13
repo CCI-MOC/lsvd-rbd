@@ -38,10 +38,11 @@ jobs:
         run: |
           mkdir -p /tmp/lsvd-read
           mkdir -p /tmp/lsvd-write
+          mkdir -p /tmp/lsvd
           
           cd build-dbg
           sudo meson test
-          sudo ./imgtool --create --size 1g --pool pone test-img
+          sudo ./imgtool create --size 1g --pool pone --img test-img
 
       - name: Logs
         if: always()
