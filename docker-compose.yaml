@@ -1,0 +1,14 @@
+services:
+  spdk-lsvd:
+    image: lsvd-rbd
+    build: .
+    volumes:
+      - /dev/hugepages:/dev/hugepages
+      - /etc/ceph:/etc/ceph
+      - /var/tmp:/var/tmp
+      - /dev/shm:/dev/shm
+    network_mode: host
+    stdin_open: true
+    tty: true
+    privileged: true
+    entrypoint: /bin/bash
