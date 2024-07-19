@@ -11,6 +11,8 @@
 #include "spdk/nvmf_spec.h"
 #include "utils.h"
 
+enum class frontend { NVMF, ISCSI };
+
 const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
 const char *HOSTNAME = "127.0.0.1";
 const char *PORT = "4420";
@@ -21,8 +23,8 @@ spdk_nvme_transport_id get_trid(const char *host, const char *port)
     // They're fixed-size char[] bufs in the struct, so make sure we have space
     assert(strlen(host) < sizeof(trid.traddr));
     assert(strlen(port) < sizeof(trid.trsvcid));
-    std::copy(host, host + strlen(host), trid.traddr);
-    std::copy(port, port + strlen(port), trid.trsvcid);
+    std::copy(host, host + strlen(host) + 1, trid.traddr);
+    std::copy(port, port + strlen(port) + 1, trid.trsvcid);
     trid.trtype = SPDK_NVME_TRANSPORT_TCP;
     trid.adrfam = SPDK_NVMF_ADRFAM_IPV4;
     // This is required because spdk looks at trstring, not the trtype
@@ -47,6 +49,7 @@ void invoke_and_free_cb(void *ctx, int status)
 struct start_lsvd_args {
     const char *pool_name;
     const char *image_name;
+    frontend fe;
 };
 
 spdk_nvmf_tgt *create_target()
@@ -219,15 +222,22 @@ int main(int argc, const char **argv)
     });
 
     if (argc < 3) {
-        log_error("Usage: {} <pool> <image>", argv[0]);
+        log_error("Usage: {} <pool> <image> [nvmf|iscsi]", argv[0]);
         return 1;
     }
+
 
     auto args = (start_lsvd_args){
         .pool_name = argv[1],
         .image_name = argv[2],
+        .fe = frontend::NVMF,
     };
+
+    if (argc == 4 && std::string(argv[3]) == "iscsi")
+        args.fe = frontend::ISCSI;
+
     debug("Args: pool={}, image={}", args.pool_name, args.image_name);
+
 
     spdk_app_opts opts = {.shutdown_cb = []() {
         log_info("Shutting down LSVD SPDK program ...");

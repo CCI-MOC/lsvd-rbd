@@ -6,7 +6,7 @@ project(
 		'cpp_std=c++23',
 		'warning_level=2',
 		'b_colorout=always',
-		'b_sanitize=address,undefined',
+		# 'b_sanitize=address,undefined',
 		'b_lto=true',
 		'b_thinlto_cache=true',
 	],
@@ -22,6 +22,7 @@ endif
 
 subdir('src')
 lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
+shared_library('lsvd', lsvd_src, dependencies: lsvd_deps)
 
 executable(
 	'lsvd',
