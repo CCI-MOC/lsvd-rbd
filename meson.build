@@ -31,6 +31,12 @@ executable(
 )
 
 executable(
+	'lsvd_tgt',
+	lsvd_tgt,
+	dependencies: lsvd_deps + [dependency('_spdk')],
+)
+
+executable(
 	'imgtool',
 	['src/imgtool.cc'],
 	link_whole: lsvd_ar,

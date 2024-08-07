@@ -45,12 +45,13 @@ class lsvd_config
     lsvd_config() {}
     ~lsvd_config() {}
     int read();
-    std::string cache_filename(uuid_t &uuid, const char *name,
-                               cfg_cache_type type);
+    str cache_filename(uuid_t &uuid, const char *name, cfg_cache_type type);
 
     inline fspath wlog_path(str imgname)
     {
         auto filename = imgname + ".wlog";
         return fspath(wcache_dir) / filename;
     }
+
+    static opt<lsvd_config> from_file(str path);
 };

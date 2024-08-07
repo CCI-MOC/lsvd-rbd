@@ -9,6 +9,7 @@
  *              LGPL-2.1-or-later
  */
 
+#include "src/utils.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -111,6 +112,8 @@ int lsvd_config::read()
 
     return 0; // success
 }
+
+opt<lsvd_config> lsvd_config::from_file(str path) { UNIMPLEMENTED(); }
 
 std::string lsvd_config::cache_filename(uuid_t &uuid, const char *name,
                                         cfg_cache_type type)

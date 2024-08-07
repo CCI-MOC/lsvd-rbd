@@ -7,6 +7,8 @@
 #include "request.h"
 #include "smartiov.h"
 #include "spdk/thread.h"
+#include "src/backend.h"
+#include "src/config.h"
 #include "utils.h"
 
 static int bdev_lsvd_init(void);
@@ -217,7 +219,16 @@ int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
     return 0;
 }
 
-int bdev_lsvd_delete(std::string img_name)
+int bdev_lsvd_create(str pool_name, str image_name, str cfg_path)
+{
+    auto be = connect_to_pool(pool_name);
+    auto cfg = lsvd_config::from_file(cfg_path);
+    PR_RET_IF(!cfg.has_value(), -1, "Failed to read config file");
+
+    return bdev_lsvd_create(image_name, be, cfg.value());
+}
+
+int bdev_lsvd_delete(str img_name)
 {
     auto p = std::promise<int>();
     spdk_bdev_unregister_by_name(
