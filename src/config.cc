@@ -1,3 +1,5 @@
+#include <fstream>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
 #include <string>
@@ -7,24 +9,70 @@
 #include "config.h"
 #include "utils.h"
 
-vec<std::string> cfg_path({"lsvd.conf", "/usr/local/etc/lsvd.conf"});
+lsvd_config lsvd_config::get_default() { return lsvd_config(); }
 
-opt<lsvd_config> lsvd_config::from_file(str path)
+opt<lsvd_config> lsvd_config::from_user_cfg(str cfg)
 {
-    // write just a simple braindead parser
-    // syntax: lines of `key = value`
+    auto c = get_default();
+    if (cfg.empty())
+        return c;
 
-    UNIMPLEMENTED();
+    try {
+        c.parse_file("/usr/local/etc/lsvd.json", true);
+        c.parse_file("./lsvd.json", true);
+
+        if (cfg[0] == '{') {
+            c.parse_json(cfg);
+        } else {
+            c.parse_file(cfg, false);
+        }
+        return c;
+    } catch (const std::exception &e) {
+        log_error("Failed to parse config '{}': {}", cfg, e.what());
+        return std::nullopt;
+    }
 }
 
-lsvd_config lsvd_config::get_default() { return lsvd_config(); }
+// https://stackoverflow.com/questions/116038/how-do-i-read-an-entire-file-into-a-stdstring-in-c
+auto read_file(std::string_view path) -> std::string
+{
+    constexpr auto read_size = std::size_t(4096);
+    auto stream = std::ifstream(path.data());
+    stream.exceptions(std::ios_base::badbit);
+
+    if (not stream)
+        throw std::ios_base::failure("file does not exist");
+
+    auto out = std::string();
+    auto buf = std::string(read_size, '\0');
+    while (stream.read(&buf[0], read_size))
+        out.append(buf, 0, stream.gcount());
+    out.append(buf, 0, stream.gcount());
+    return out;
+}
+
+void lsvd_config::parse_file(str path, bool can_be_missing)
+{
+    assert(!path.empty());
+    if (access(path.c_str(), F_OK) == -1) {
+        if (can_be_missing) {
+            log_info("Optional config file missing: {}, continuing...", path);
+            return;
+        }
+        log_error("Config file not found: {}", path);
+        return;
+    }
+
+    auto cfg = read_file(path);
+    parse_json(cfg);
+}
 
 #define JSON_GET_BOOL(key)                                                     \
     do {                                                                       \
         if (js.contains(#key)) {                                               \
             auto v = js[#key];                                                 \
             if (v.is_boolean()) {                                              \
-                cfg.key = js[#key];                                            \
+                this->key = js[#key];                                          \
             } else {                                                           \
                 log_error("Invalid value for key (must be bool): {}", #key);   \
             }                                                                  \
@@ -36,7 +84,7 @@ lsvd_config lsvd_config::get_default() { return lsvd_config(); }
         if (js.contains(#key)) {                                               \
             auto v = js[#key];                                                 \
             if (v.is_number_unsigned()) {                                      \
-                cfg.key = js[#key];                                            \
+                this->key = js[#key];                                          \
             } else {                                                           \
                 log_error("Invalid value for key (must be uint): {}", #key);   \
             }                                                                  \
@@ -48,25 +96,17 @@ lsvd_config lsvd_config::get_default() { return lsvd_config(); }
         if (js.contains(#key)) {                                               \
             auto v = js[#key];                                                 \
             if (v.is_string()) {                                               \
-                cfg.key = js[#key];                                            \
+                this->key = js[#key];                                          \
             } else {                                                           \
                 log_error("Invalid value for key (must be str): {}", #key);    \
             }                                                                  \
         }                                                                      \
     } while (0)
 
-opt<lsvd_config> lsvd_config::from_json(str json)
+void lsvd_config::parse_json(str json)
 {
-    nlohmann::json js;
+    auto js = nlohmann::json::parse(json);
 
-    try {
-        js = nlohmann::json::parse(json);
-    } catch (nlohmann::json::parse_error &e) {
-        log_error("Failed to parse JSON: {}", e.what());
-        return std::nullopt;
-    }
-
-    lsvd_config cfg;
     JSON_GET_STR(rcache_dir);
     JSON_GET_UINT(rcache_bytes);
     JSON_GET_UINT(rcache_fetch_window);
@@ -86,6 +126,4 @@ opt<lsvd_config> lsvd_config::from_json(str json)
     JSON_GET_UINT(gc_threshold_pc);
     JSON_GET_UINT(gc_write_window);
     JSON_GET_BOOL(no_gc);
-
-    return cfg;
 }

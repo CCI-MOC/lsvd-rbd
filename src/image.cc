@@ -19,7 +19,8 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg_)
     : imgname(name), cfg(cfg_), io(io)
 {
     objstore = make_rados_backend(io);
-    rcache = get_read_cache_instance(cfg.rcache_dir, cfg.rcache_size, objstore);
+    rcache =
+        get_read_cache_instance(cfg.rcache_dir, cfg.rcache_bytes, objstore);
 
     read_superblock();
     debug("Found checkpoints: {}", checkpoints);

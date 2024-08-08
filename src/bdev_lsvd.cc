@@ -219,10 +219,10 @@ int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
     return 0;
 }
 
-int bdev_lsvd_create(str pool_name, str image_name, str cfg_path)
+int bdev_lsvd_create(str pool_name, str image_name, str user_cfg)
 {
     auto be = connect_to_pool(pool_name);
-    auto cfg = lsvd_config::from_file(cfg_path);
+    auto cfg = lsvd_config::from_user_cfg(user_cfg);
     PR_RET_IF(!cfg.has_value(), -1, "Failed to read config file");
 
     return bdev_lsvd_create(image_name, be, cfg.value());

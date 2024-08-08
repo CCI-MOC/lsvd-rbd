@@ -1111,7 +1111,7 @@ void translate_impl::do_gc(std::stop_token &st)
             workers->put_locked(req);
             lk.unlock();
 
-            while ((int)requests.size() > cfg.gc_write_window &&
+            while (requests.size() > cfg.gc_write_window &&
                    !st.stop_requested()) {
                 auto t = requests.front();
                 t->wait();

@@ -40,10 +40,17 @@ class lsvd_config
         return fspath(wlog_dir) / filename;
     }
 
-    static opt<lsvd_config> from_json(str json);
-    static opt<lsvd_config> from_file(str path);
+    /**
+     * Read LSVD configuration from user-supplied string. The string can be
+     * either a json string containing the configuration, the path to a file
+     * containing the same, or empty, in which case it will be ignored.
+     */
+    static opt<lsvd_config> from_user_cfg(str cfg);
     static lsvd_config get_default();
 
   private:
     lsvd_config() {}
+
+    void parse_json(str js);
+    void parse_file(str path, bool can_be_missing = true);
 };
