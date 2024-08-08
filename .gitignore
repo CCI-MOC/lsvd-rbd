@@ -13,4 +13,4 @@ qemu/bzImage
 
 subprojects/liburing-*
 subprojects/packagecache
-subprojects/nlohmann_json*
+subprojects/nlohmann_json-*
