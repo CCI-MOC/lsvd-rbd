@@ -40,4 +40,6 @@ spdk_fe = lsvd_src + files(
 
 lsvd_tgt = lsvd_src + files(
 	'lsvd_tgt.cc',
+	'bdev_lsvd.cc',
+	'bdev_lsvd_rpc.cc',
 )
