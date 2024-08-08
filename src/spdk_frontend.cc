@@ -182,7 +182,7 @@ static void start_lsvd(void *arg)
 
     // Add lsvd bdev
     lsvd_config cfg;                    // TODO read this in from a config file
-    cfg.cache_size = 160 * 1024 * 1024; // small 160mb cache for testing
+    cfg.rcache_bytes = 160 * 1024 * 1024; // small 160mb cache for testing
     auto err = bdev_lsvd_create(args->image_name, io_ctx, cfg);
     assert(err == 0);
     add_bdev_ns(nvme_ss, args->image_name);

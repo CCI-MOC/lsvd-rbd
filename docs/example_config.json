@@ -1,0 +1,18 @@
+{
+	"rcache_dir": "/tmp/lsvd",
+	"rcache_size": 524288000,
+	"rcache_fetch_window": 12,
+	"wlog_dir": "/tmp/lsvd",
+	"wlog_bytes": 524288000,
+	"wlog_write_window": 8,
+	"wlog_chunk_bytes": 2097152,
+	"antithrash_ratio": 67,
+	"backend_obj_bytes": 8388608,
+	"backend_write_window": 8,
+	"checkpoint_interval_objs": 500,
+	"flush_timeout_ms": 2000,
+	"flush_interval_ms": 1000,
+	"gc_threshold_pc": 60,
+	"gc_write_window": 4,
+	"no_gc": false
+}

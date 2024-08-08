@@ -237,11 +237,11 @@ class translate_impl : public translate
             total_live_sectors += oi.live;
         }
 
-        current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+        current = new translate_req(REQ_PUT, cfg.backend_obj_bytes, this);
         assert(current->batch_buf != nullptr);
 
         // start worker, flush, and GC threads
-        if (cfg.flush_interval_msec > 0)
+        if (cfg.flush_interval_ms > 0)
             flush_worker =
                 std::jthread([this](std::stop_token st) { flush_thread(st); });
 
@@ -400,7 +400,7 @@ ssize_t translate_impl::writev(uint64_t cache_seq, size_t offset, iovec *iov,
     std::unique_lock lk(m);
     if (!current->room(bytes)) {
         workers->put_locked(current);
-        current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+        current = new translate_req(REQ_PUT, cfg.backend_obj_bytes, this);
     }
 
     // write the data into the in-memory log
@@ -459,7 +459,7 @@ ssize_t translate_impl::trim(size_t offset, size_t len)
 void translate_impl::backend_backpressure(void)
 {
     std::unique_lock lk(m);
-    while (outstanding_writes > cfg.num_parallel_writes)
+    while (outstanding_writes > cfg.backend_write_window)
         cv.wait(lk);
 }
 
@@ -643,7 +643,7 @@ void translate_impl::write_gc(seqnum_t _seq, translate_req *req)
         data_sectors += e.len;
 
     int max_hdr_bytes = sizeof(common_obj_hdr) + sizeof(obj_data_hdr) +
-                        (cfg.backend_obj_size / 2048) * sizeof(data_map);
+                        (cfg.backend_obj_bytes / 2048) * sizeof(data_map);
     int max_hdr_sectors = div_round_up(max_hdr_bytes, 512);
 
     auto buf = req->gc_buf =
@@ -855,7 +855,7 @@ void translate_impl::flush(void)
 
     if (current->len > 0) {
         workers->put_locked(current);
-        current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+        current = new translate_req(REQ_PUT, cfg.backend_obj_bytes, this);
     }
 
     auto flush_req = new translate_req(REQ_FLUSH, this);
@@ -870,7 +870,7 @@ void translate_impl::checkpoint(void)
 
     if (current->len > 0) {
         workers->put_locked(current);
-        current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+        current = new translate_req(REQ_PUT, cfg.backend_obj_bytes, this);
     }
 
     auto ckpt_req = new translate_req(REQ_CKPT, this);
@@ -886,8 +886,8 @@ void translate_impl::checkpoint(void)
 void translate_impl::flush_thread(std::stop_token st)
 {
     pthread_setname_np(pthread_self(), "flush_thread");
-    auto interval = std::chrono::milliseconds(cfg.flush_interval_msec);
-    auto timeout = std::chrono::milliseconds(cfg.flush_timeout_msec);
+    auto interval = std::chrono::milliseconds(cfg.flush_interval_ms);
+    auto timeout = std::chrono::milliseconds(cfg.flush_timeout_ms);
     auto t0 = std::chrono::system_clock::now();
     auto seq0 = cur_seq.load();
 
@@ -902,7 +902,7 @@ void translate_impl::flush_thread(std::stop_token st)
             if (std::chrono::system_clock::now() - t0 < timeout)
                 continue;
             workers->put_locked(current);
-            current = new translate_req(REQ_PUT, cfg.backend_obj_size, this);
+            current = new translate_req(REQ_PUT, cfg.backend_obj_bytes, this);
         } else {
             seq0 = cur_seq.load();
             t0 = std::chrono::system_clock::now();
@@ -993,7 +993,7 @@ void translate_impl::do_gc(std::stop_token &st)
 
     /* gather list of objects needing cleaning, return if none
      */
-    const double threshold = cfg.gc_threshold / 100.0;
+    const double threshold = cfg.gc_threshold_pc / 100.0;
     vec<std::pair<int, int>> objs_to_clean;
     for (auto [u, o, n] : utilization) {
         if (u > threshold)
@@ -1076,7 +1076,7 @@ void translate_impl::do_gc(std::stop_token &st)
         std::queue<translate_req *> requests;
 
         while (all_extents.size() > 0) {
-            sector_t sectors = 0, max = cfg.backend_obj_size / 512;
+            sector_t sectors = 0, max = cfg.backend_obj_bytes / 512;
             vec<_extent> extents;
 
             auto it = all_extents.begin();
@@ -1111,7 +1111,7 @@ void translate_impl::do_gc(std::stop_token &st)
             workers->put_locked(req);
             lk.unlock();
 
-            while ((int)requests.size() > cfg.gc_window &&
+            while ((int)requests.size() > cfg.gc_write_window &&
                    !st.stop_requested()) {
                 auto t = requests.front();
                 t->wait();

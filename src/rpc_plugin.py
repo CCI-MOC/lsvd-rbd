@@ -11,7 +11,7 @@ def spdk_rpc_plugin_initialize(subparsers):
     p = subparsers.add_parser('bdev_lsvd_create', help='Create a bdev with LSVD backend')
     p.add_argument('pool_name', help='Name of the ceph pool')
     p.add_argument('name', help='Name of the lsvd disk image')
-    p.add_argument('-c', '--cfg', help='Path to config file', required=False)
+    p.add_argument('-c', '--cfg', help='Path to config file OR inline JSON string', required=False)
     p.set_defaults(func=bdev_lsvd_create)
 
     def bdev_lsvd_delete(args):

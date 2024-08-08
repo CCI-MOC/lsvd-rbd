@@ -29,6 +29,7 @@ lsvd_deps = [
 	dependency('boost', modules: ['system', 'filesystem', 'program_options', 'thread', 'regex']),
 	dependency('liburing', static: true),
 	dependency('uuid'),
+	dependency('nlohmann_json'),
 	cxx.find_library('rados', required: true),
 	cxx.find_library('jemalloc', required: false),
 ]
