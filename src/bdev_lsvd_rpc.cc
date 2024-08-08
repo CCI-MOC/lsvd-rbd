@@ -44,13 +44,13 @@ static void rpc_bdev_lsvd_create(spdk_jsonrpc_request *req_json,
     auto rc = spdk_json_decode_object(params, rpc_create_lsvd_decoders,
                                       SPDK_COUNTOF(rpc_create_lsvd_decoders),
                                       req.get());
-    PR_GOTO_IF(rc != 0, fail, "spdk_json_decode_object failed\n");
+    PR_GOTO_IF(rc != 0, fail, "spdk_json_decode_object failed");
 
     rc = bdev_lsvd_create(req->pool_name, req->image_name, req->config);
-    PR_GOTO_IF(rc != 0, fail, "failed to create lsvd bdev\n");
+    PR_GOTO_IF(rc != 0, fail, "failed to create lsvd bdev");
 
     w = spdk_jsonrpc_begin_result(req_json);
-    PR_GOTO_IF(w == nullptr, fail, "failed to create json result\n");
+    PR_GOTO_IF(w == nullptr, fail, "failed to create json result");
     spdk_json_write_bool(w, true);
     spdk_jsonrpc_end_result(req_json, w);
 
@@ -81,13 +81,13 @@ static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
     int rc = spdk_json_decode_object(params, rpc_delete_lsvd_decoders,
                                      SPDK_COUNTOF(rpc_delete_lsvd_decoders),
                                      req.get());
-    PR_GOTO_IF(rc != 0, fail, "failed to decode json object\n");
+    PR_GOTO_IF(rc != 0, fail, "failed to decode json object");
 
     rc = bdev_lsvd_delete(req->image_name);
     PR_GOTO_IF(rc != 0, fail, "failed to destroy lsvd bdev");
 
     w = spdk_jsonrpc_begin_result(req_json);
-    PR_GOTO_IF(w == nullptr, fail, "failed to create json result\n");
+    PR_GOTO_IF(w == nullptr, fail, "failed to create json result");
     spdk_json_write_bool(w, true);
     spdk_jsonrpc_end_result(req_json, w);
 
