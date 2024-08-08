@@ -32,9 +32,7 @@ class lsvd_config
     u64 gc_write_window = 4;  // max GC writes outstanding
     bool no_gc = false;       // turn off GC
 
-    lsvd_config() {}
     ~lsvd_config() {}
-    int read();
 
     inline fspath wlog_path(str imgname)
     {
@@ -45,4 +43,7 @@ class lsvd_config
     static opt<lsvd_config> from_json(str json);
     static opt<lsvd_config> from_file(str path);
     static lsvd_config get_default();
+
+  private:
+    lsvd_config() {}
 };

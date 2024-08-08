@@ -2,13 +2,13 @@
 #include "spdk/bdev_module.h"
 #include <future>
 
+#include "backend.h"
 #include "bdev_lsvd.h"
+#include "config.h"
 #include "image.h"
 #include "request.h"
 #include "smartiov.h"
 #include "spdk/thread.h"
-#include "src/backend.h"
-#include "src/config.h"
 #include "utils.h"
 
 static int bdev_lsvd_init(void);

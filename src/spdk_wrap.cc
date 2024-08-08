@@ -1,6 +1,6 @@
 #include "spdk_wrap.h"
 #include "config.h"
-#include "src/utils.h"
+#include "utils.h"
 
 spdk_completion::spdk_completion(rbd_callback_t cb, void *cb_arg)
     : cb(cb), cb_arg(cb_arg)
@@ -59,10 +59,7 @@ inline void spdk_completion::dec_and_free()
 lsvd_rbd *lsvd_rbd::open_image(rados_ioctx_t io, std::string name)
 {
     try {
-        lsvd_config cfg;
-        auto err = cfg.read();
-        PR_ERR_RET_IF(err < 0, nullptr, -err, "Failed to read config");
-
+        auto cfg = lsvd_config::get_default();
         return new lsvd_rbd(name, io, cfg);
     } catch (std::runtime_error &e) {
         log_error("Failed to open image: {}", e.what());
