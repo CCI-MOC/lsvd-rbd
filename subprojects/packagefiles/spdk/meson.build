@@ -50,6 +50,7 @@ custom_libnames = [
   # 'spdk_bdev_split',
   # 'spdk_bdev_delay',
   # 'spdk_bdev_zone_block',
+  # 'spdk_bdev_rbd',
   'spdk_blobfs_bdev',
   'spdk_blobfs',
   'spdk_blob_bdev',
