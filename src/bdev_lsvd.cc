@@ -228,19 +228,23 @@ int bdev_lsvd_create(str pool_name, str image_name, str user_cfg)
     return bdev_lsvd_create(image_name, be, cfg.value());
 }
 
-int bdev_lsvd_delete(str img_name)
+void bdev_lsvd_delete(str img_name, std::function<void(int)> cb)
 {
-    // TODO this currently deadlocks because of spdk's threading model, need to
-    // make it async
     log_info("Deleting image '{}'", img_name);
-    auto p = std::promise<int>();
-    spdk_bdev_unregister_by_name(
+    auto rc = spdk_bdev_unregister_by_name(
         img_name.c_str(), &lsvd_if,
+        // some of the ugliest lifetime management code you'll ever see, but
+        // it should work
         [](void *arg, int rc) {
-            log_info("Image deletion complete, rc = {}", rc);
-            auto p = (std::promise<int> *)arg;
-            p->set_value(rc);
+            log_info("Image deletion done, rc = {}", rc);
+            auto cb = (std::function<void(int)> *)arg;
+            (*cb)(rc);
+            delete cb;
         },
-        &p);
-    return p.get_future().get();
+        new std::function<void(int)>(cb));
+
+    if (rc != 0) {
+        log_error("Failed to delete image '{}': {}", img_name, rc);
+        cb(rc);
+    }
 }

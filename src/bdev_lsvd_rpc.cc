@@ -22,9 +22,12 @@ struct rpc_create_lsvd {
 };
 
 static const struct spdk_json_object_decoder rpc_create_lsvd_decoders[] = {
-    {"image_name", offsetof(rpc_create_lsvd, image_name), spdk_json_decode_string, false},
-    {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, false},
-    {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string, true},
+    {"image_name", offsetof(rpc_create_lsvd, image_name),
+     spdk_json_decode_string, false},
+    {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string,
+     false},
+    {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string,
+     true},
 };
 
 static void rpc_bdev_lsvd_create(spdk_jsonrpc_request *req_json,
@@ -64,13 +67,13 @@ struct rpc_delete_lsvd {
 };
 
 static const struct spdk_json_object_decoder rpc_delete_lsvd_decoders[] = {
-    {"image_name", offsetof(struct rpc_delete_lsvd, image_name), spdk_json_decode_string, false},
+    {"image_name", offsetof(struct rpc_delete_lsvd, image_name),
+     spdk_json_decode_string, false},
 };
 
 static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
                                  const struct spdk_json_val *params)
 {
-    spdk_json_write_ctx *w;
     std::unique_ptr<rpc_delete_lsvd,
                     decltype([](auto p) { free(p->image_name); })>
         req(new rpc_delete_lsvd());
@@ -78,19 +81,23 @@ static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
     int rc = spdk_json_decode_object(params, rpc_delete_lsvd_decoders,
                                      SPDK_COUNTOF(rpc_delete_lsvd_decoders),
                                      req.get());
-    PR_GOTO_IF(rc != 0, fail, "failed to decode json object");
+    if (rc != 0) {
+        spdk_jsonrpc_send_error_response(req_json, rc,
+                                         "Failed to parse rpc json");
+        return;
+    }
 
-    rc = bdev_lsvd_delete(req->image_name);
-    PR_GOTO_IF(rc != 0, fail, "failed to destroy lsvd bdev");
-
-    w = spdk_jsonrpc_begin_result(req_json);
-    PR_GOTO_IF(w == nullptr, fail, "failed to create json result");
-    spdk_json_write_bool(w, true);
-    spdk_jsonrpc_end_result(req_json, w);
-
-fail:
-    spdk_jsonrpc_send_error_response(req_json, rc,
-                                     "failed to create lsvd bdev");
+    bdev_lsvd_delete(req->image_name, [=](int rc) {
+        if (rc == 0) {
+            auto w = spdk_jsonrpc_begin_result(req_json);
+            spdk_json_write_bool(w, true);
+            spdk_jsonrpc_end_result(req_json, w);
+        } else {
+            log_error("Failed to destroy lsvd bdev, rc = {}", rc);
+            spdk_jsonrpc_send_error_response(req_json, rc,
+                                             "Failed to destroy lsvd bdev");
+        }
+    });
 }
 
 SPDK_RPC_REGISTER("bdev_lsvd_delete", rpc_bdev_lsvd_delete, SPDK_RPC_RUNTIME)
