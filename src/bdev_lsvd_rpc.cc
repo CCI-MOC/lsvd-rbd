@@ -22,12 +22,9 @@ struct rpc_create_lsvd {
 };
 
 static const struct spdk_json_object_decoder rpc_create_lsvd_decoders[] = {
-    {"image_name", offsetof(rpc_create_lsvd, image_name),
-     spdk_json_decode_string, false},
-    {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string,
-     false},
-    {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string,
-     true},
+    {"image_name", offsetof(rpc_create_lsvd, image_name), spdk_json_decode_string, false},
+    {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, false},
+    {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string, true},
 };
 
 static void rpc_bdev_lsvd_create(spdk_jsonrpc_request *req_json,
@@ -53,6 +50,7 @@ static void rpc_bdev_lsvd_create(spdk_jsonrpc_request *req_json,
     PR_GOTO_IF(w == nullptr, fail, "failed to create json result");
     spdk_json_write_bool(w, true);
     spdk_jsonrpc_end_result(req_json, w);
+    return;
 
 fail:
     spdk_jsonrpc_send_error_response(req_json, rc,
@@ -66,8 +64,7 @@ struct rpc_delete_lsvd {
 };
 
 static const struct spdk_json_object_decoder rpc_delete_lsvd_decoders[] = {
-    {"image_name", offsetof(struct rpc_delete_lsvd, image_name),
-     spdk_json_decode_string, false},
+    {"image_name", offsetof(struct rpc_delete_lsvd, image_name), spdk_json_decode_string, false},
 };
 
 static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
