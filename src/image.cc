@@ -19,7 +19,8 @@ lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg_)
     : imgname(name), cfg(cfg_), io(io)
 {
     objstore = make_rados_backend(io);
-    rcache = get_read_cache_instance(cfg.rcache_dir, cfg.cache_size, objstore);
+    rcache =
+        get_read_cache_instance(cfg.rcache_dir, cfg.rcache_bytes, objstore);
 
     read_superblock();
     debug("Found checkpoints: {}", checkpoints);
@@ -165,7 +166,7 @@ seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
     // This must be larger than the max backend batch size to avoid
     // potential corruption if subsequent breaks overlap with current dangling
     // objects and we get writes from two different "generations"
-    for (seqnum_t i = 1; i < cfg.num_parallel_writes * 4; i++)
+    for (seqnum_t i = 1; i < cfg.backend_write_window * 4; i++)
         objstore->delete_obj(oname(imgname, seq + i));
 
     return seq;
@@ -478,7 +479,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
         sector_t size_sectors = req_bytes / 512;
 
         // split large requests into 2MB (default) chunks
-        sector_t max_sectors = img->cfg.wcache_chunk / 512;
+        sector_t max_sectors = img->cfg.wlog_chunk_bytes / 512;
         n_req += div_round_up(req_bytes / 512, max_sectors);
         // TODO: this is horribly ugly
 

@@ -181,8 +181,9 @@ static void start_lsvd(void *arg)
     auto trid = get_trid(HOSTNAME, PORT);
 
     // Add lsvd bdev
-    lsvd_config cfg;                    // TODO read this in from a config file
-    cfg.cache_size = 160 * 1024 * 1024; // small 160mb cache for testing
+    auto cfg =
+        lsvd_config::get_default(); // TODO read this in from a config file
+    cfg.rcache_bytes = 160 * 1024 * 1024; // small 160mb cache for testing
     auto err = bdev_lsvd_create(args->image_name, io_ctx, cfg);
     assert(err == 0);
     add_bdev_ns(nvme_ss, args->image_name);
@@ -226,7 +227,6 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-
     auto args = (start_lsvd_args){
         .pool_name = argv[1],
         .image_name = argv[2],
@@ -237,7 +237,6 @@ int main(int argc, const char **argv)
         args.fe = frontend::ISCSI;
 
     debug("Args: pool={}, image={}", args.pool_name, args.image_name);
-
 
     spdk_app_opts opts = {.shutdown_cb = []() {
         log_info("Shutting down LSVD SPDK program ...");

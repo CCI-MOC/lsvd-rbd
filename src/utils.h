@@ -124,6 +124,14 @@ using fspath = std::filesystem::path;
         }                                                                      \
     } while (0)
 
+#define PR_GOTO_IF(cond, lbl, MSG, ...)                                        \
+    do {                                                                       \
+        if (cond) {                                                            \
+            log_error(MSG, ##__VA_ARGS__);                                     \
+            goto lbl;                                                          \
+        }                                                                      \
+    } while (0)
+
 /**
  * If `cond` is true, print an error message to stdout with MSG, then return
  * `ret`

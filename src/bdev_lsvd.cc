@@ -2,7 +2,9 @@
 #include "spdk/bdev_module.h"
 #include <future>
 
+#include "backend.h"
 #include "bdev_lsvd.h"
+#include "config.h"
 #include "image.h"
 #include "request.h"
 #include "smartiov.h"
@@ -217,15 +219,32 @@ int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
     return 0;
 }
 
-int bdev_lsvd_delete(std::string img_name)
+int bdev_lsvd_create(str pool_name, str image_name, str user_cfg)
 {
-    auto p = std::promise<int>();
-    spdk_bdev_unregister_by_name(
+    auto be = connect_to_pool(pool_name);
+    auto cfg = lsvd_config::from_user_cfg(user_cfg);
+    PR_RET_IF(!cfg.has_value(), -1, "Failed to read config file");
+
+    return bdev_lsvd_create(image_name, be, cfg.value());
+}
+
+void bdev_lsvd_delete(str img_name, std::function<void(int)> cb)
+{
+    log_info("Deleting image '{}'", img_name);
+    auto rc = spdk_bdev_unregister_by_name(
         img_name.c_str(), &lsvd_if,
+        // some of the ugliest lifetime management code you'll ever see, but
+        // it should work
         [](void *arg, int rc) {
-            auto p = (std::promise<int> *)arg;
-            p->set_value(rc);
+            log_info("Image deletion done, rc = {}", rc);
+            auto cb = (std::function<void(int)> *)arg;
+            (*cb)(rc);
+            delete cb;
         },
-        &p);
-    return p.get_future().get();
+        new std::function<void(int)>(cb));
+
+    if (rc != 0) {
+        log_error("Failed to delete image '{}': {}", img_name, rc);
+        cb(rc);
+    }
 }

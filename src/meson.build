@@ -29,6 +29,7 @@ lsvd_deps = [
 	dependency('boost', modules: ['system', 'filesystem', 'program_options', 'thread', 'regex']),
 	dependency('liburing', static: true),
 	dependency('uuid'),
+	dependency('nlohmann_json'),
 	cxx.find_library('rados', required: true),
 	cxx.find_library('jemalloc', required: false),
 ]
@@ -36,4 +37,10 @@ lsvd_deps = [
 spdk_fe = lsvd_src + files(
 	'bdev_lsvd.cc',
 	'spdk_frontend.cc',
+)
+
+lsvd_tgt = lsvd_src + files(
+	'lsvd_tgt.cc',
+	'bdev_lsvd.cc',
+	'bdev_lsvd_rpc.cc',
 )
