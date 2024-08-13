@@ -1,3 +1,4 @@
+#include <boost/outcome/success_failure.hpp>
 #include <rados/librados.h>
 #include <rados/librados.hpp>
 
@@ -46,13 +47,16 @@ class rados_io_req : public self_refcount_request
 
     void notify(request *parent) override {}
 
-    int run_getres_and_free()
+    result<int> run_getres_and_free()
     {
         run(nullptr);
         wait();
         auto r = this->ret;
         dec_and_free();
-        return r;
+        if (r < 0)
+            return errcode_to_result<int>(-r);
+        else
+            return r;
     }
 };
 
@@ -72,8 +76,8 @@ class rados_read_req : public rados_io_req
     void run(request *parent) override
     {
         this->parent = parent;
-        int rv = ctx.aio_read(name, comp, &bl, iov.bytes(), off);
-        check_ret_neg(rv, "Failed to start RADOS aio read");
+        auto rv = ctx.aio_read(name, comp, &bl, iov.bytes(), off);
+        THROW_ERRNO_ON(rv < 0, -rv, "Failed to start RADOS aio read");
     }
 
     void notify(request *parent) override
@@ -92,15 +96,15 @@ class rados_write_req : public rados_io_req
         : rados_io_req(name, ctx)
     {
         auto [v, c] = iov.c_iov();
-        for (int i = 0; i < c; i++)
+        for (auto i = 0; i < c; i++)
             bl.append((char *)v[i].iov_base, v[i].iov_len);
     }
 
     void run(request *parent) override
     {
         this->parent = parent;
-        int rv = ctx.aio_write(name, comp, bl, bl.length(), 0);
-        check_ret_neg(rv, "Failed to start RADOS aio write");
+        auto rv = ctx.aio_write(name, comp, bl, bl.length(), 0);
+        THROW_ERRNO_ON(rv < 0, -rv, "Failed to start RADOS aio write");
     }
 };
 
@@ -115,8 +119,8 @@ class rados_delete_req : public rados_io_req
     void run(request *parent) override
     {
         this->parent = parent;
-        int rv = ctx.aio_remove(name, comp);
-        check_ret_neg(rv, "Failed to start RADOS aio remove");
+        auto rv = ctx.aio_remove(name, comp);
+        THROW_ERRNO_ON(rv < 0, -rv, "Failed to start RADOS aio remove");
     }
 };
 
@@ -133,22 +137,24 @@ class rados_backend : public backend
 
     ~rados_backend() override {}
 
-    int write(std::string name, smartiov &iov) override
+    result<int> write(std::string name, smartiov &iov) override
     {
         auto req = dynamic_cast<rados_write_req *>(aio_write(name, iov));
         return req->run_getres_and_free();
     }
 
-    int read(std::string name, off_t offset, smartiov &iov) override
+    result<int> read(std::string name, off_t offset, smartiov &iov) override
     {
         auto req = dynamic_cast<rados_read_req *>(aio_read(name, offset, iov));
         return req->run_getres_and_free();
     }
 
-    int delete_obj(std::string name) override
+    result<void> delete_obj(std::string name) override
     {
         auto req = dynamic_cast<rados_delete_req *>(aio_delete(name));
-        return req->run_getres_and_free();
+        auto rc = BOOST_OUTCOME_TRYX(req->run_getres_and_free());
+        assert(rc == 0);
+        return outcome::success();
     }
 
     request *aio_write(std::string name, smartiov &iov) override
@@ -171,32 +177,24 @@ class rados_backend : public backend
         return ctx.stat(name, nullptr, nullptr) == 0;
     }
 
-    opt<u64> get_size(std::string name) override
+    result<u64> get_size(std::string name) override
     {
         u64 size;
         time_t mtime;
         int rv = ctx.stat(name, &size, &mtime);
-        switch (rv) {
-        case 0:
-            return size;
-        case -ENOENT:
-            return std::nullopt;
-        default:
-            THROW_ERRNO_ON(true, -rv, "Failed to stat object '{}'", name);
-        }
+        FAILURE_IF_NEGATIVE(rv);
+        return size;
     }
 
-    opt<vec<byte>> read_whole_obj(std::string name) override
+    result<vec<byte>> read_whole_obj(std::string name) override
     {
-        auto size = get_size(name);
-        PASSTHRU_NULLOPT(size);
+        auto size = BOOST_OUTCOME_TRYX(get_size(name));
 
-        vec<byte> buf(size.value());
+        vec<byte> buf(size);
         smartiov iov((char *)buf.data(), buf.size());
-        auto r = read(name, 0, iov);
-        if (r < 0)
-            return std::nullopt;
-
+        auto r = BOOST_OUTCOME_TRYX(read(name, 0, iov));
+        if (std::cmp_less(r, size))
+            return outcome::failure(LsvdError::MissingData);
         return buf;
     }
 };
@@ -206,21 +204,21 @@ std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
     return std::make_shared<rados_backend>(io);
 }
 
-rados_ioctx_t connect_to_pool(str pool_name)
+result<rados_ioctx_t> connect_to_pool(str pool_name)
 {
     rados_t cluster;
-    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
-    check_ret_neg(err, "Failed to create cluster handle");
+    auto err = rados_create2(&cluster, "ceph", "client.admin", 0);
+    PR_FAILURE_IF_NEGATIVE(err, "Failed to create cluster handle");
 
     err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
-    check_ret_neg(err, "Failed to read config file");
+    PR_FAILURE_IF_NEGATIVE(err, "Failed to read config file");
 
     err = rados_connect(cluster);
-    check_ret_neg(err, "Failed to connect to cluster");
+    PR_FAILURE_IF_NEGATIVE(err, "Failed to connect to cluster");
 
     rados_ioctx_t io_ctx;
     err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
-    check_ret_neg(err, "Failed to connect to pool {}", pool_name);
+    PR_FAILURE_IF_NEGATIVE(err, "Failed to connect to pool {}", pool_name);
 
     return io_ctx;
 }

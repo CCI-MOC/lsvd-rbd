@@ -7,8 +7,6 @@
 #include <unistd.h>
 #include <uuid/uuid.h>
 
-#include "backend.h"
-#include "config.h"
 #include "fake_rbd.h"
 #include "image.h"
 #include "lsvd_debug.h"
@@ -226,13 +224,15 @@ std::pair<std::string, std::string> split_string(std::string s,
 extern "C" int rbd_create(rados_ioctx_t io, const char *name, uint64_t size,
                           int *order)
 {
-    return lsvd_image::create_new(name, size, io);
+    auto rc = lsvd_image::create_new(name, size, io);
+    return result_to_rc(rc);
 }
 
 extern "C" int rbd_clone(rados_ioctx_t io, const char *source_img,
                          const char *dest_img)
 {
-    return lsvd_image::clone_image(source_img, dest_img, io);
+    auto rc = lsvd_image::clone_image(source_img, dest_img, io);
+    return result_to_rc(rc);
 }
 
 /* remove all objects and cache file.
@@ -242,7 +242,8 @@ extern "C" int rbd_clone(rados_ioctx_t io, const char *source_img,
  */
 extern "C" int rbd_remove(rados_ioctx_t io, const char *name)
 {
-    return lsvd_image::delete_image(name, io);
+    auto rc = lsvd_image::delete_image(name, io);
+    return result_to_rc(rc);
 }
 
 extern "C" void rbd_uuid(rbd_image_t image, uuid_t *uuid)

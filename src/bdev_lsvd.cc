@@ -180,7 +180,8 @@ struct lsvd_bdev_io_channel {
     spdk_io_channel *io_channel;
 };
 
-int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
+auto bdev_lsvd_create(str img_name, rados_ioctx_t ioctx,
+                      lsvd_config cfg) -> result<void>
 {
     assert(!img_name.empty());
 
@@ -189,7 +190,7 @@ int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
         img = uptr<lsvd_image>(new lsvd_image(img_name, ioctx, cfg));
     } catch (std::runtime_error &e) {
         log_error("Failed to create image '{}': {}", img_name, e.what());
-        return -1;
+        return outcome::failure(std::errc::io_error);
     }
 
     auto iodev = new lsvd_iodevice(std::move(img));
@@ -213,22 +214,22 @@ int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
         log_error("Failed to register bdev: err {}", (err));
         spdk_io_device_unregister(
             iodev, [](void *ctx) { delete (lsvd_iodevice *)ctx; });
-        return err;
+
+        return std::error_code(err, std::system_category());
     }
 
-    return 0;
+    return outcome::success();
 }
 
-int bdev_lsvd_create(str pool_name, str image_name, str user_cfg)
+auto bdev_lsvd_create(str pool_name, str image_name,
+                      str user_cfg) -> result<void>
 {
-    auto be = connect_to_pool(pool_name);
-    auto cfg = lsvd_config::from_user_cfg(user_cfg);
-    PR_RET_IF(!cfg.has_value(), -1, "Failed to read config file");
-
-    return bdev_lsvd_create(image_name, be, cfg.value());
+    auto be = BOOST_OUTCOME_TRYX(connect_to_pool(pool_name));
+    auto cfg = BOOST_OUTCOME_TRYX(lsvd_config::from_user_cfg(user_cfg));
+    return bdev_lsvd_create(image_name, be, cfg);
 }
 
-void bdev_lsvd_delete(str img_name, std::function<void(int)> cb)
+void bdev_lsvd_delete(str img_name, std::function<void(result<void>)> cb)
 {
     log_info("Deleting image '{}'", img_name);
     auto rc = spdk_bdev_unregister_by_name(
@@ -237,14 +238,14 @@ void bdev_lsvd_delete(str img_name, std::function<void(int)> cb)
         // it should work
         [](void *arg, int rc) {
             log_info("Image deletion done, rc = {}", rc);
-            auto cb = (std::function<void(int)> *)arg;
-            (*cb)(rc);
+            auto cb = (std::function<void(result<void>)> *)arg;
+            (*cb)(errcode_to_result<void>(rc));
             delete cb;
         },
-        new std::function<void(int)>(cb));
+        new std::function<void(result<void>)>(cb));
 
     if (rc != 0) {
         log_error("Failed to delete image '{}': {}", img_name, rc);
-        cb(rc);
+        cb(outcome::failure(std::error_code(rc, std::system_category())));
     }
 }

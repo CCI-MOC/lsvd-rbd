@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <queue>
 
 #include "fake_rbd.h"
 #include "image.h"

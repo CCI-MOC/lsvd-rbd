@@ -6,6 +6,7 @@
 
 #include "lsvd_types.h"
 #include "objects.h"
+#include "src/backend.h"
 #include "utils.h"
 
 void serialise_common_hdr(vec<byte> &buf, obj_type t, seqnum_t s, u32 hdr,
@@ -91,18 +92,18 @@ void serialise_superblock(vec<byte> &buf, vec<seqnum_t> &checkpoints,
     hdrp->snaps_len = 0;
 }
 
-opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
+result<vec<byte>> object_reader::fetch_object_header(std::string objname)
 {
     vec<byte> buf(4096);
-    auto err = objstore->read(objname, 0, buf.data(), 4096);
-    RET_IF(err == -ENOENT, std::nullopt);
+    auto err = BOOST_OUTCOME_TRYX(objstore->read(objname, 0, buf.data(), 4096));
     THROW_ERRNO_ON(err < 0, -err, "Failed to read object '{}' header", objname);
     THROW_MSG_ON(err < 512, "Short read {}/512 on obj '{}'", err, objname);
 
     auto h = (common_obj_hdr *)buf.data();
 
     // Validate magic
-    PR_RET_IF(h->magic != LSVD_MAGIC || h->version != 1, std::nullopt,
+    PR_RET_IF(h->magic != LSVD_MAGIC || h->version != 1,
+              LsvdError::InvalidMagic,
               "Invalid magic or version in object '{}'", objname);
 
     if (h->hdr_sectors <= 8)
@@ -111,9 +112,9 @@ opt<vec<byte>> object_reader::fetch_object_header(std::string objname)
     // Header is longer than 4096, we have to fetch the rest
     auto len = h->hdr_sectors * 512;
     buf.reserve(len);
-    err = objstore->read(objname, 0, buf.data(), len);
-    PR_ERR_RET_IF(std::cmp_not_equal(err, len), std::nullopt, err,
-                  "Failed to read object '{}' header", objname);
+    auto r = BOOST_OUTCOME_TRYX(objstore->read(objname, 0, buf.data(), len));
+    PR_RET_IF(std::cmp_not_equal(r, len), LsvdError::MissingData,
+              "Failed to read object '{}' header", objname);
 
     return buf;
 }
@@ -165,19 +166,18 @@ vec<T *> deserialise_ptrs_with_len(byte *buf, usize offset, usize len)
     return ret;
 }
 
-opt<parsed_superblock> object_reader::read_superblock(std::string oname)
+result<parsed_superblock> object_reader::read_superblock(std::string oname)
 {
-    auto buf = objstore->read_whole_obj(oname);
-    PASSTHRU_NULLOPT(buf);
-    auto hdr = (common_obj_hdr *)buf->data();
-    auto hbuf = buf->data();
+    auto buf = BOOST_OUTCOME_TRYX(objstore->read_whole_obj(oname));
+    auto hdr = (common_obj_hdr *)buf.data();
+    auto hbuf = buf.data();
 
-    PR_RET_IF(hdr->magic != LSVD_MAGIC, std::nullopt,
+    PR_RET_IF(hdr->magic != LSVD_MAGIC, LsvdError::InvalidMagic,
               "Corrupt object; invalid magic at '{}', found {:x}", oname,
               hdr->magic);
-    PR_RET_IF(hdr->version != 1, std::nullopt,
+    PR_RET_IF(hdr->version != 1, LsvdError::InvalidVersion,
               "Invalid version in object '{}', only 1 is supported", oname);
-    PR_RET_IF(hdr->type != OBJ_SUPERBLOCK, std::nullopt,
+    PR_RET_IF(hdr->type != OBJ_SUPERBLOCK, LsvdError::InvalidObjectType,
               "Obj '{}' not a superblock", oname);
 
     parsed_superblock ret;
@@ -189,22 +189,21 @@ opt<parsed_superblock> object_reader::read_superblock(std::string oname)
     ret.snaps = deserialise_ptrs_with_len<snap_info>(hbuf, shdr->snaps_offset,
                                                      shdr->snaps_len);
 
-    ret.superblock_buf = *buf;
+    ret.superblock_buf = buf;
     uuid_copy(ret.uuid, hdr->vol_uuid);
     ret.vol_size = shdr->vol_size * 512;
 
     return ret;
 }
 
-opt<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
+result<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
 {
-    auto hdr = fetch_object_header(oname);
-    PASSTHRU_NULLOPT(hdr);
+    auto hdr = BOOST_OUTCOME_TRYX(fetch_object_header(oname));
 
     parsed_data_hdr h;
-    h.buf = std::move(*hdr);
+    h.buf = std::move(hdr);
     h.hdr = (common_obj_hdr *)h.buf.data();
-    PR_RET_IF(h.hdr->type != OBJ_LOGDATA, std::nullopt,
+    PR_RET_IF(h.hdr->type != OBJ_LOGDATA, LsvdError::InvalidObjectType,
               "Invalid object type in '{}'", oname);
     h.data_hdr = (obj_data_hdr *)(h.buf.data() + sizeof(common_obj_hdr));
 
@@ -216,18 +215,19 @@ opt<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
     return h;
 }
 
-opt<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
+result<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
 {
-    auto hdr = fetch_object_header(oname);
-    PASSTHRU_NULLOPT(hdr);
+    auto hdr = BOOST_OUTCOME_TRYX(fetch_object_header(oname));
 
     parsed_checkpoint ret;
-    ret.hdr = (common_obj_hdr *)hdr->data();
-    PR_RET_IF(ret.hdr->type != OBJ_CHECKPOINT, std::nullopt,
-              "Invalid object type it '{}'", oname);
-    ret.ckpt_hdr = (obj_ckpt_hdr *)(&hdr->at(sizeof(common_obj_hdr)));
+    ret.buf = std::move(hdr);
 
-    auto buf = hdr->data();
+    ret.hdr = (common_obj_hdr *)ret.buf.data();
+    PR_RET_IF(ret.hdr->type != OBJ_CHECKPOINT, LsvdError::InvalidObjectType,
+              "Invalid object type it '{}'", oname);
+    ret.ckpt_hdr = (obj_ckpt_hdr *)(&hdr.at(sizeof(common_obj_hdr)));
+
+    auto buf = ret.buf.data();
     ret.ckpts = deserialise_cpy<u32>(buf, ret.ckpt_hdr->ckpts_offset,
                                      ret.ckpt_hdr->ckpts_len);
     ret.objects = deserialise_ptrs<ckpt_obj>(buf, ret.ckpt_hdr->objs_offset,
@@ -236,6 +236,5 @@ opt<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
         buf, ret.ckpt_hdr->deletes_offset, ret.ckpt_hdr->deletes_len);
     ret.dmap = deserialise_ptrs<ckpt_mapentry>(buf, ret.ckpt_hdr->map_offset,
                                                ret.ckpt_hdr->map_len);
-    ret.buf = std::move(*hdr);
     return ret;
 }

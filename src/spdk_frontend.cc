@@ -172,7 +172,7 @@ static void start_lsvd(void *arg)
     log_info("Starting LSVD SPDK program ...");
     auto args = (start_lsvd_args *)arg;
 
-    auto io_ctx = connect_to_pool(args->pool_name);
+    auto io_ctx = connect_to_pool(args->pool_name).value();
 
     // Setup spdk nvmf
     auto tgt = create_target();
@@ -184,8 +184,7 @@ static void start_lsvd(void *arg)
     auto cfg =
         lsvd_config::get_default(); // TODO read this in from a config file
     cfg.rcache_bytes = 160 * 1024 * 1024; // small 160mb cache for testing
-    auto err = bdev_lsvd_create(args->image_name, io_ctx, cfg);
-    assert(err == 0);
+    bdev_lsvd_create(args->image_name, io_ctx, cfg);
     add_bdev_ns(nvme_ss, args->image_name);
 
     // some stupid formatting decisions up ahead due to tower-of-callback

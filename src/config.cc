@@ -11,37 +11,32 @@
 
 lsvd_config lsvd_config::get_default() { return lsvd_config(); }
 
-opt<lsvd_config> lsvd_config::from_user_cfg(str cfg)
+result<lsvd_config> lsvd_config::from_user_cfg(str cfg)
 {
     auto c = get_default();
     if (cfg.empty())
         return c;
 
-    try {
-        c.parse_file("/usr/local/etc/lsvd.json", true);
-        c.parse_file("./lsvd.json", true);
+    BOOST_OUTCOME_TRYX(c.parse_file("/usr/local/etc/lsvd.json", true));
+    BOOST_OUTCOME_TRYX(c.parse_file("./lsvd.json", true));
 
-        if (cfg[0] == '{') {
-            c.parse_json(cfg);
-        } else {
-            c.parse_file(cfg, false);
-        }
-        return c;
-    } catch (const std::exception &e) {
-        log_error("Failed to parse config '{}': {}", cfg, e.what());
-        return std::nullopt;
+    if (cfg[0] == '{') {
+        BOOST_OUTCOME_TRYX(c.parse_json(cfg));
+    } else {
+        BOOST_OUTCOME_TRYX(c.parse_file(cfg, false));
     }
+    return c;
 }
 
 // https://stackoverflow.com/questions/116038/how-do-i-read-an-entire-file-into-a-stdstring-in-c
-auto read_file(std::string_view path) -> std::string
+auto read_file(std::string_view path) -> result<str>
 {
     constexpr auto read_size = std::size_t(4096);
     auto stream = std::ifstream(path.data());
     stream.exceptions(std::ios_base::badbit);
 
     if (not stream)
-        throw std::ios_base::failure("file does not exist");
+        return outcome::failure(std::errc::no_such_file_or_directory);
 
     auto out = std::string();
     auto buf = std::string(read_size, '\0');
@@ -51,20 +46,24 @@ auto read_file(std::string_view path) -> std::string
     return out;
 }
 
-void lsvd_config::parse_file(str path, bool can_be_missing)
+auto lsvd_config::parse_file(str path, bool allow_missing) -> result<void>
 {
     assert(!path.empty());
-    if (access(path.c_str(), F_OK) == -1) {
-        if (can_be_missing) {
-            log_info("Optional config file missing: {}, continuing...", path);
-            return;
-        }
-        log_error("Config file not found: {}", path);
-        return;
-    }
 
     auto cfg = read_file(path);
-    parse_json(cfg);
+    if (cfg.has_error()) {
+        if (cfg.error() == std::errc::no_such_file_or_directory &&
+            allow_missing) {
+            return outcome::success();
+        } else {
+            log_error("Failed to read config file '{}': {}", path,
+                      cfg.error().message());
+            return cfg.as_failure();
+        }
+    }
+
+    BOOST_OUTCOME_TRYX(parse_json(cfg.value()));
+    return outcome::success();
 }
 
 #define JSON_GET_BOOL(key)                                                     \
@@ -103,7 +102,7 @@ void lsvd_config::parse_file(str path, bool can_be_missing)
         }                                                                      \
     } while (0)
 
-void lsvd_config::parse_json(str json)
+result<void> lsvd_config::parse_json(str json)
 {
     auto js = nlohmann::json::parse(json);
 
@@ -126,4 +125,6 @@ void lsvd_config::parse_json(str json)
     JSON_GET_UINT(gc_threshold_pc);
     JSON_GET_UINT(gc_write_window);
     JSON_GET_BOOL(no_gc);
+
+    return outcome::success();
 }

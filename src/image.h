@@ -41,9 +41,9 @@ class lsvd_image
     lsvd_image operator=(const lsvd_image &&) = delete;
 
     // Log recovery
-    void read_superblock();
-    void read_from_checkpoint(seqnum_t ckpt_id);
-    bool apply_log(seqnum_t seq);
+    result<void> read_superblock();
+    result<void> read_from_checkpoint(seqnum_t ckpt_id);
+    result<void> apply_log(seqnum_t seq);
 
     seqnum_t roll_forward_from_last_checkpoint();
     void recover_from_wlog();
@@ -101,11 +101,10 @@ class lsvd_image
 
     // Image management
     // They all return 0 on success, -errno on failure
-    static int create_new(std::string name, usize size, rados_ioctx_t io);
-    static int get_uuid(std::string name, uuid_t &uuid, rados_ioctx_t io);
-    static int delete_image(std::string name, rados_ioctx_t io);
-    static int clone_image(std::string oldname, std::string newname,
-                           rados_ioctx_t io);
+    static result<void> create_new(str name, usize size, rados_ioctx_t io);
+    static result<void> get_uuid(str name, uuid_t &uuid, rados_ioctx_t io);
+    static result<void> delete_image(str name, rados_ioctx_t io);
+    static result<void> clone_image(str oldname, str newname, rados_ioctx_t io);
 
   private:
     void handle_reads(size_t offset, smartiov iovs, vec<request *> &requests);

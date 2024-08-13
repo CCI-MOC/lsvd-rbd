@@ -1,9 +1,9 @@
 #include <fcntl.h>
-#include <optional>
 #include <rados/librados.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <utility>
 
 #include "backend.h"
 #include "image.h"
@@ -15,17 +15,17 @@
 
 const int block_sectors = CACHE_CHUNK_SIZE / 512;
 
-lsvd_image::lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg_)
+lsvd_image::lsvd_image(str name, rados_ioctx_t io, lsvd_config cfg_)
     : imgname(name), cfg(cfg_), io(io)
 {
     objstore = make_rados_backend(io);
     rcache =
         get_read_cache_instance(cfg.rcache_dir, cfg.rcache_bytes, objstore);
 
-    read_superblock();
+    read_superblock().value();
     debug("Found checkpoints: {}", checkpoints);
     if (checkpoints.size() > 0)
-        read_from_checkpoint(checkpoints.back());
+        read_from_checkpoint(checkpoints.back()).value();
 
     // Roll forward on the log
     auto last_data_seq = roll_forward_from_last_checkpoint();
@@ -56,22 +56,20 @@ lsvd_image::~lsvd_image()
     log_info("Image '{}' closed", imgname);
 }
 
-bool lsvd_image::apply_log(seqnum_t seq)
+result<void> lsvd_image::apply_log(seqnum_t seq)
 {
     object_reader parser(objstore);
-    // TODO
-    auto data_hdr = parser.read_data_hdr(oname(imgname, seq));
-    if (!data_hdr.has_value())
-        return false;
+    auto data_hdr =
+        BOOST_OUTCOME_TRYX(parser.read_data_hdr(oname(imgname, seq)));
     trace("Recovering log with object at seq {}", seq);
 
-    auto ohdr = data_hdr->hdr;
+    auto ohdr = data_hdr.hdr;
     if (ohdr->type == OBJ_CHECKPOINT) {
         log_warn("CORRUPTION: Found checkpoint at seq {} that was not "
                  "present in the superblock.",
                  seq);
         checkpoints.push_back(seq);
-        return true;
+        return outcome::success();
     }
 
     obj_info[seq] = (data_obj_info){
@@ -83,7 +81,7 @@ bool lsvd_image::apply_log(seqnum_t seq)
     // Consume log records
     sector_t offset = 0;
     vec<extmap::lba2obj> deleted;
-    for (auto dmap : data_hdr->data_map) {
+    for (auto dmap : data_hdr.data_map) {
         // Update the extent map
         extmap::obj_offset oo = {seq, offset + ohdr->hdr_sectors};
         objmap.update(dmap->lba, dmap->lba + dmap->len, oo, &deleted);
@@ -97,22 +95,21 @@ bool lsvd_image::apply_log(seqnum_t seq)
         THROW_MSG_ON(obj_info[ptr.obj].live >= 0, "Negative live sectors.");
     }
 
-    return true;
+    return outcome::success();
 }
 
-void lsvd_image::read_superblock()
+result<void> lsvd_image::read_superblock()
 {
     object_reader parser(objstore);
-    auto superblock = parser.read_superblock(imgname);
-    THROW_MSG_ON(!superblock, "Failed to read superblock");
+    auto superblock = BOOST_OUTCOME_TRYX(parser.read_superblock(imgname));
 
-    size = superblock->vol_size;
-    uuid_copy(uuid, superblock->uuid);
+    size = superblock.vol_size;
+    uuid_copy(uuid, superblock.uuid);
 
-    for (auto ckpt : superblock->ckpts)
+    for (auto ckpt : superblock.ckpts)
         checkpoints.push_back(ckpt);
 
-    for (auto ci : superblock->clones) {
+    for (auto ci : superblock.clones) {
         clone_base c;
         c.name = std::string(ci->name, ci->name_len);
         c.last_seq = ci->last_seq;
@@ -121,15 +118,17 @@ void lsvd_image::read_superblock()
         debug("Using base image {} upto seq {}", c.name, c.last_seq);
         clones.push_back(c);
     }
+
+    return outcome::success();
 }
 
-void lsvd_image::read_from_checkpoint(seqnum_t seq)
+result<void> lsvd_image::read_from_checkpoint(seqnum_t seq)
 {
     object_reader parser(objstore);
-    auto parsed = parser.read_checkpoint(oname(imgname, seq));
-    THROW_MSG_ON(!parsed, "Failed to read checkpoint");
+    auto parsed =
+        BOOST_OUTCOME_TRYX(parser.read_checkpoint(oname(imgname, seq)));
 
-    for (auto obj : parsed->objects) {
+    for (auto obj : parsed.objects) {
         obj_info[obj->seq] = (data_obj_info){
             .hdr = obj->hdr_sectors,
             .data = obj->data_sectors,
@@ -137,10 +136,12 @@ void lsvd_image::read_from_checkpoint(seqnum_t seq)
         };
     }
 
-    for (auto m : parsed->dmap) {
+    for (auto m : parsed.dmap) {
         extmap::obj_offset oo = {m->obj, m->offset};
         objmap.update(m->lba, m->lba + m->len, oo);
     }
+
+    return outcome::success();
 }
 
 // Returns last processed object's seqnum
@@ -565,7 +566,7 @@ request *lsvd_image::flush(std::function<void(int)> cb)
     return new flush_request(this, cb);
 }
 
-int lsvd_image::create_new(std::string name, usize size, rados_ioctx_t io)
+result<void> lsvd_image::create_new(str name, usize size, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -578,46 +579,42 @@ int lsvd_image::create_new(std::string name, usize size, rados_ioctx_t io)
     vec<clone_base> clones;
     serialise_superblock(buf, ckpts, clones, uuid, size);
 
-    return be->write(name, buf.data(), buf.size());
+    auto rc = BOOST_OUTCOME_TRYX(be->write(name, buf.data(), buf.size()));
+    PR_RET_IF(std::cmp_not_equal(rc, buf.size()), LsvdError::MissingData,
+              "Failed to write superblock '{}'", name);
+    return outcome::success();
 }
 
-int lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
+result<void> lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
-    auto osb = parser.read_superblock(name);
-    PR_RET_IF(!osb, -EEXIST, "Could not read superblock '{}'", name);
-
-    uuid_copy(uuid, osb->uuid);
-    return 0;
+    auto osb = BOOST_OUTCOME_TRYX(parser.read_superblock(name));
+    uuid_copy(uuid, osb.uuid);
+    return outcome::success();
 }
 
-int lsvd_image::delete_image(std::string name, rados_ioctx_t io)
+result<void> lsvd_image::delete_image(str name, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
-    auto osb = parser.read_superblock(name);
-    PR_RET_IF(!osb, -EEXIST, "Could not read superblock '{}'", name);
-    auto sb = *osb;
+    auto sb = BOOST_OUTCOME_TRYX(parser.read_superblock(name));
 
     seqnum_t seq;
     for (auto ckpt : sb.ckpts) {
-        auto rc = be->delete_obj(oname(name, ckpt));
-        PR_RET_IF(rc < 0, rc, "Failed to delete checkpoint '{}'", ckpt);
+        BOOST_OUTCOME_TRYX(be->delete_obj(oname(name, ckpt)));
         seq = ckpt;
     }
 
     for (int n = 0; n < 16; seq++, n++)
-        if (be->delete_obj(oname(name, seq)) >= 0)
+        if (be->delete_obj(oname(name, seq)).has_value())
             n = 0;
 
     // delete the superblock last so we can recover from partial deletion
     return be->delete_obj(name);
 }
 
-int lsvd_image::clone_image(std::string oldname, std::string newname,
-                            rados_ioctx_t io)
+result<void> lsvd_image::clone_image(str oldname, str newname, rados_ioctx_t io)
 {
     UNIMPLEMENTED();
-    return -1;
 }

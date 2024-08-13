@@ -33,20 +33,17 @@ static usize parseint(str i)
 
 static void create(rados_ioctx_t io, str name, usize size, bool thick)
 {
-    auto rc = lsvd_image::create_new(name, size, io);
-    THROW_MSG_ON(rc != 0, "Failed to create new image '{}'", name);
+    lsvd_image::create_new(name, size, io).value();
 }
 
 static void remove(rados_ioctx_t io, str name)
 {
-    auto rc = lsvd_image::delete_image(name, io);
-    THROW_MSG_ON(rc != 0, "Failed to delete image '{}'", name);
+    lsvd_image::delete_image(name, io).value();
 }
 
 static void clone(rados_ioctx_t io, str src, str dst)
 {
-    auto rc = lsvd_image::clone_image(src, dst, io);
-    THROW_MSG_ON(rc != 0, "Failed to clone image '{}' to '{}'", src, dst);
+    lsvd_image::clone_image(src, dst, io).value();
 }
 
 static void info(rados_ioctx_t io, str name)
@@ -54,10 +51,8 @@ static void info(rados_ioctx_t io, str name)
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
 
-    auto sb = parser.read_superblock(name);
-    THROW_MSG_ON(!sb, "Superblock not found");
-
-    auto i = *sb;
+    auto sb = parser.read_superblock(name).value();
+    auto i = sb;
     char uuid_str[37];
     uuid_unparse_lower(i.uuid, uuid_str);
 
@@ -121,8 +116,7 @@ int main(int argc, char **argv)
     auto pool = vm["pool"].as<str>();
     auto img = vm["img"].as<str>();
 
-    auto io = connect_to_pool(pool);
-    THROW_MSG_ON(io == nullptr, "Failed to connect to pool '{}'", pool);
+    auto io = connect_to_pool(pool).value();
 
     if (cmd == "create") {
         auto size = parseint(vm["size"].as<str>());

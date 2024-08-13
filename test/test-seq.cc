@@ -3,6 +3,7 @@
 #include <iostream>
 #include <rados/librados.h>
 
+#include "backend.h"
 #include "fake_rbd.h"
 #include "utils.h"
 
@@ -176,29 +177,16 @@ void run_test(rados_ioctx_t ctx)
 int main(int argc, char *argv[])
 {
     // config options
+    // TODO set this with new config framework
     setenv("LSVD_RCACHE_DIR", "/tmp/lsvd", 1);
     setenv("LSVD_WCACHE_DIR", "/tmp/lsvd", 1);
     setenv("LSVD_CACHE_SIZE", "2147483648", 1);
 
     std::string pool_name = "pone";
-
-    rados_t cluster;
-    int err = rados_create2(&cluster, "ceph", "client.admin", 0);
-    check_ret_neg(err, "Failed to create cluster handle");
-
-    err = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
-    check_ret_neg(err, "Failed to read config file");
-
-    err = rados_connect(cluster);
-    check_ret_neg(err, "Failed to connect to cluster");
-
-    rados_ioctx_t io_ctx;
-    err = rados_ioctx_create(cluster, pool_name.c_str(), &io_ctx);
-    check_ret_neg(err, "Failed to connect to pool {}", pool_name);
+    auto io_ctx = connect_to_pool(pool_name).value();
 
     run_test(io_ctx);
 
     rados_ioctx_destroy(io_ctx);
-    rados_shutdown(cluster);
     return 0;
 }

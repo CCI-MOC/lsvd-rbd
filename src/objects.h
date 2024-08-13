@@ -170,10 +170,10 @@ class object_reader
   public:
     object_reader(std::shared_ptr<backend> be) : objstore(be) {}
 
-    opt<vec<byte>> fetch_object_header(std::string oname);
-    opt<parsed_superblock> read_superblock(std::string oname);
-    opt<parsed_data_hdr> read_data_hdr(std::string oname);
-    opt<parsed_checkpoint> read_checkpoint(std::string oname);
+    result<vec<byte>> fetch_object_header(str oname);
+    result<parsed_superblock> read_superblock(str oname);
+    result<parsed_data_hdr> read_data_hdr(str oname);
+    result<parsed_checkpoint> read_checkpoint(str oname);
 };
 
 // ----- common image types, temporary(T&Cs apply) workaround -----

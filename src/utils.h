@@ -1,20 +1,17 @@
 #pragma once
 
 // #include "folly/FBVector.h"
+#include <boost/outcome.hpp>
 #include <boost/stacktrace.hpp>
 #include <cerrno>
-#include <condition_variable>
 #include <cstring>
 #include <filesystem>
 #include <fmt/chrono.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <iostream>
 #include <linux/fs.h>
-#include <mutex>
 #include <optional>
-#include <queue>
 #include <signal.h>
 #include <sstream>
 #include <stdexcept>
@@ -27,6 +24,9 @@
 #ifndef LOGLV
 #define LOGLV 1
 #endif
+
+namespace outcome = boost::outcome_v2;
+template <typename T> using result = outcome::result<T>;
 
 template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
@@ -61,6 +61,13 @@ using fspath = std::filesystem::path;
     do {                                                                       \
         if (!ptr) {                                                            \
             return nullptr;                                                    \
+        }                                                                      \
+    } while (0)
+
+#define PASSTHRU_FAILURE(res)                                                  \
+    do {                                                                       \
+        if (res.has_error()) {                                                 \
+            return res;                                                        \
         }                                                                      \
     } while (0)
 
@@ -124,14 +131,6 @@ using fspath = std::filesystem::path;
         }                                                                      \
     } while (0)
 
-#define PR_GOTO_IF(cond, lbl, MSG, ...)                                        \
-    do {                                                                       \
-        if (cond) {                                                            \
-            log_error(MSG, ##__VA_ARGS__);                                     \
-            goto lbl;                                                          \
-        }                                                                      \
-    } while (0)
-
 /**
  * If `cond` is true, print an error message to stdout with MSG, then return
  * `ret`
@@ -183,19 +182,28 @@ using fspath = std::filesystem::path;
         }                                                                      \
     } while (0)
 
+#define FAILURE_IF_NEGATIVE(rc)                                                \
+    do {                                                                       \
+        if (rc < 0) {                                                          \
+            return outcome::failure(                                           \
+                std::error_code(-rc, std::generic_category()));                \
+        }                                                                      \
+    } while (0)
+
 /**
  * Check return values of functions that return -errno in the case of an error
- * and throw an exception
+ * and convert it to a outcome::failure() instead on failure
  */
-#define check_ret_neg(ret, MSG, ...)                                           \
+#define PR_FAILURE_IF_NEGATIVE(ret, MSG, ...)                                  \
     do {                                                                       \
         if (ret < 0) {                                                         \
             auto en = -ret;                                                    \
+            auto ec = std::error_code(en, std::generic_category());            \
             auto fs = fmt::format(MSG "\n", ##__VA_ARGS__);                    \
             auto s = fmt::format("[ERR {}:{} {} | errno {}/{}] {}", __FILE__,  \
-                                 __LINE__, __func__, en, strerror(en), fs);    \
+                                 __LINE__, __func__, en, ec.message(), fs);    \
             fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold, s);  \
-            throw std::runtime_error(fs);                                      \
+            return outcome::failure(ec);                                       \
         }                                                                      \
     } while (0)
 
@@ -285,4 +293,84 @@ inline size_t getsize64(int fd)
     } else
         size = sb.st_size;
     return size;
+}
+
+template <typename T> inline auto errcode_to_result(int rc) -> result<T>
+{
+    if (rc > 0)
+        return outcome::failure(std::error_code(rc, std::generic_category()));
+    return outcome::success();
+}
+
+enum class LsvdError {
+    Success,
+    InvalidMagic,
+    InvalidVersion,
+    InvalidObjectType,
+    MissingData,
+};
+
+namespace std
+{
+template <> struct is_error_code_enum<LsvdError> : true_type {
+};
+}; // namespace std
+
+namespace detail
+{
+// Define a custom error code category derived from std::error_category
+class BackendError_category : public std::error_category
+{
+  public:
+    // Return a short descriptive name for the category
+    virtual const char *name() const noexcept override final
+    {
+        return "Data validity error";
+    }
+
+    // Return what each enum means in text
+    virtual std::string message(int c) const override final
+    {
+        switch (static_cast<LsvdError>(c)) {
+        case LsvdError::Success:
+            return "passed validity checks";
+        case LsvdError::InvalidMagic:
+            return "invalid magic number in the header";
+        case LsvdError::InvalidVersion:
+            return "version number unsupported";
+        case LsvdError::InvalidObjectType:
+            return "does not match required object type";
+        case LsvdError::MissingData:
+            return "required data not found";
+        }
+    }
+};
+} // namespace detail
+
+extern inline const detail::BackendError_category &BackendError_category()
+{
+    static detail::BackendError_category c;
+    return c;
+}
+
+inline std::error_code make_error_code(LsvdError e)
+{
+    static detail::BackendError_category c;
+    return {static_cast<int>(e), c};
+}
+
+inline int result_to_rc(result<void> res)
+{
+    if (res.has_value())
+        return 0;
+    else
+        return res.error().value();
+}
+
+inline int result_to_rc(result<int> res)
+{
+    if (res.has_value())
+        return res.value();
+    else
+        return res.error().value();
 }
