@@ -1,56 +1,56 @@
 #pragma once
 
-/*
- * file:        config.h
- * description: quick and dirty config file parser
- *              env var overrides modeled on github.com/spf13/viper
- *
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#include <string>
 #include <uuid/uuid.h>
 
 #include "utils.h"
 
-enum cfg_backend { BACKEND_FILE = 1, BACKEND_RADOS = 2 };
-
-enum cfg_cache_type { LSVD_CFG_READ = 1, LSVD_CFG_WRITE = 2 };
-
 class lsvd_config
 {
   public:
-    int backend_obj_size = 8 * 1024 * 1024; // in bytes
-    int wcache_batch = 8;                   // requests
-    int wcache_chunk = 2 * 1024 * 1024;     // bytes
-    std::string rcache_dir = "/tmp/lsvd/";
-    std::string wcache_dir = "/tmp/lsvd/";
-    u32 num_parallel_writes = 8;
-    int hard_sync = 0;
-    enum cfg_backend backend = BACKEND_RADOS;
-    long cache_size = 500 * 1024 * 1024; // in bytes
-    long wlog_size = 500 * 1024 * 1024;  // in bytes
-    int ckpt_interval = 500;             // objects
-    int flush_timeout_msec = 2000;       // flush timeout
-    int flush_interval_msec = 1000;      // flush interval
-    int gc_threshold = 60;               // GC threshold, percent
-    int gc_window = 4;                   // max GC writes outstanding
-    int fetch_window = 12;               // read cache fetches
-    int fetch_ratio = 67;                // anti-thrash served:backend ratio
-    int no_gc = 0;                       // turn off GC
+    // read cache
+    str rcache_dir = "/tmp/lsvd/";        // directory to store read cache files
+    u64 rcache_bytes = 500 * 1024 * 1024; // in bytes
+    u64 rcache_fetch_window = 12;         // read cache fetches
 
-    lsvd_config() {}
+    // write log
+    str wlog_dir = "/tmp/lsvd/";
+    u64 wlog_bytes = 500 * 1024 * 1024;     // in bytes
+    u64 wlog_write_window = 8;              // requests
+    u64 wlog_chunk_bytes = 2 * 1024 * 1024; // bytes
+
+    // backend
+    u64 antithrash_ratio = 67;               // anti-thrash served:backend ratio
+    u64 backend_obj_bytes = 8 * 1024 * 1024; // in bytes
+    u64 backend_write_window = 8;            // backend parallel writes
+
+    u64 checkpoint_interval_objs = 500; // objects
+    u64 flush_timeout_ms = 2000;        // flush timeout
+    u64 flush_interval_ms = 1000;       // flush interval
+
+    // GC
+    u64 gc_threshold_pc = 60; // GC threshold, percent
+    u64 gc_write_window = 4;  // max GC writes outstanding
+    bool no_gc = false;       // turn off GC
+
     ~lsvd_config() {}
-    int read();
-    std::string cache_filename(uuid_t &uuid, const char *name,
-                               cfg_cache_type type);
 
     inline fspath wlog_path(str imgname)
     {
         auto filename = imgname + ".wlog";
-        return fspath(wcache_dir) / filename;
+        return fspath(wlog_dir) / filename;
     }
+
+    /**
+     * Read LSVD configuration from user-supplied string. The string can be
+     * either a json string containing the configuration, the path to a file
+     * containing the same, or empty, in which case it will be ignored.
+     */
+    static opt<lsvd_config> from_user_cfg(str cfg);
+    static lsvd_config get_default();
+
+  private:
+    lsvd_config() {}
+
+    void parse_json(str js);
+    void parse_file(str path, bool can_be_missing = true);
 };

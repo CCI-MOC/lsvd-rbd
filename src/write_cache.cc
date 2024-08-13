@@ -474,7 +474,7 @@ write_cache_impl::write_cache_impl(int fd, translate &be, lsvd_config &cfg)
 
     int n_pages = super->limit - super->base;
     max_write_pages = n_pages / 2 + n_pages / 4; // no idea why this is 3/4ths
-    write_batch = cfg.wcache_batch;
+    write_batch = cfg.wlog_write_window;
 }
 
 write_cache_impl::~write_cache_impl()
@@ -580,7 +580,7 @@ uptr<write_cache> open_wlog(fspath path, translate &xlate, lsvd_config &cfg)
         fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
         PR_ERR_RET_IF(fd < 0, nullptr, errno, "Failed to create cache file");
 
-        auto err = init_wcache(fd, xlate.uuid, cfg.wlog_size);
+        auto err = init_wcache(fd, xlate.uuid, cfg.wlog_bytes);
         PR_ERR_RET_IF(err < 0, nullptr, -err, "Failed to init wlog");
     } else {
         fd = open(path.c_str(), O_RDWR);
