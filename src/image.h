@@ -100,12 +100,11 @@ class lsvd_image
     request *flush(std::function<void(int)> cb);
 
     // Image management
-    // They all return 0 on success, -errno on failure
     static result<void> create_new(str name, usize size, rados_ioctx_t io);
     static result<void> get_uuid(str name, uuid_t &uuid, rados_ioctx_t io);
     static result<void> delete_image(str name, rados_ioctx_t io);
     static result<void> clone_image(str oldname, str newname, rados_ioctx_t io);
 
   private:
-    void handle_reads(size_t offset, smartiov iovs, vec<request *> &requests);
+    void handle_reads(usize offset, smartiov iovs, vec<request *> &requests);
 };

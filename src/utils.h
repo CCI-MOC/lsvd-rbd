@@ -20,6 +20,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <vector>
+#include <future>
 
 #ifndef LOGLV
 #define LOGLV 1
@@ -32,6 +33,7 @@ template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
 template <typename T> using opt = std::optional<T>;
 template <typename T> using vec = std::vector<T>;
+template <typename T> using fut = std::future<T>;
 // template <typename T> using fvec = folly::fbvector<T>;
 
 #define CEXTERN extern "C"

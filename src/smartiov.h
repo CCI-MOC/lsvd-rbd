@@ -5,6 +5,8 @@
 #include <sys/uio.h>
 #include <vector>
 
+#include "utils.h"
+
 /* this makes readv / writev a lot easier...
  */
 class smartiov

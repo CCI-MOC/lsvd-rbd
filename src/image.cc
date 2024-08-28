@@ -168,7 +168,7 @@ seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
     // potential corruption if subsequent breaks overlap with current dangling
     // objects and we get writes from two different "generations"
     for (seqnum_t i = 1; i < cfg.backend_write_window * 4; i++)
-        objstore->delete_obj(oname(imgname, seq + i));
+        std::ignore = objstore->delete_obj(oname(imgname, seq + i));
 
     return seq;
 }

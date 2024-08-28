@@ -5,8 +5,9 @@ project(
     default_options: [
         'cpp_std=c++23',
         'warning_level=2',
+        'default_library=static',
         'b_colorout=always',
-        # 'b_sanitize=address,undefined',
+        'b_sanitize=address,undefined',
         'b_lto=true',
         'b_thinlto_cache=true',
     ],
@@ -14,6 +15,9 @@ project(
 
 add_project_arguments('-fPIC', language: 'cpp')
 add_project_arguments('-Wno-unused-parameter', language: 'cpp')
+add_project_link_arguments('-static-libstdc++', language: 'cpp')
+add_project_link_arguments('-static-libgcc', language: 'cpp')
+# add_project_link_arguments('-static', language: 'cpp')
 
 if get_option('buildtype') == 'debug'
     add_project_arguments('-fno-inline', language: 'cpp')
