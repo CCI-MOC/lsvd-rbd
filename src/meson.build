@@ -1,24 +1,5 @@
-cxx = meson.get_compiler('cpp')
-
-cmake = import('cmake')
-cmvars = cmake.subproject_options()
-cmvars.add_cmake_defines({'POSITION_INDEPENDENT_CODE': true})
-concurrencpp = cmake.subproject('concurrencpp', options: cmvars)
-
-# workaround for pic: https://github.com/mesonbuild/meson/issues/10764
-concurrencpp_static = static_library(
-    'concurrencpp_static',
-    dependencies: concurrencpp.dependency('concurrencpp'),
-    pic: true,
-    install: false,
-)
-libconcurrencpp_satic_dep = declare_dependency(
-    link_with: concurrencpp_static,
-    include_directories: concurrencpp.include_directories('concurrencpp'),
-)
-
-# folly_cm = cmake.subproject('folly')
-# libfolly = folly_cm.dependency('folly')
+folly_sub = subproject('folly')
+libfolly = folly_sub.get_variable('folly_dep')
 
 lsvd_src = files(
     'config.cc',
@@ -32,12 +13,13 @@ lsvd_src = files(
     'spdk_wrap.cc',
     'translate.cc',
     'write_cache.cc',
+    'backend_rados.cc',
+    'read_cache.cc',
 )
 
 lsvd_inc = include_directories('.')
 lsvd_deps = [
     # libfolly,
-    libconcurrencpp_satic_dep,
     dependency('threads', static: true),
     dependency('zlib', static: true),
     dependency('zstd', modules: ['zstd::libzstd_static'], static: true),
@@ -53,6 +35,7 @@ lsvd_deps = [
     dependency('nlohmann_json'),
     cxx.find_library('rados', required: true),
     cxx.find_library('jemalloc', required: false),
+    libfolly,
 ]
 
 spdk_fe = lsvd_src + files(

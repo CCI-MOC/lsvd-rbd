@@ -7,22 +7,29 @@ project(
         'warning_level=2',
         'default_library=static',
         'b_colorout=always',
-        'b_sanitize=address,undefined',
+        # 'b_sanitize=address,undefined',
+        'b_asneeded=false',
         'b_lto=true',
         'b_thinlto_cache=true',
+        'b_lundef=false',
     ],
 )
 
 add_project_arguments('-fPIC', language: 'cpp')
 add_project_arguments('-Wno-unused-parameter', language: 'cpp')
-add_project_link_arguments('-static-libstdc++', language: 'cpp')
-add_project_link_arguments('-static-libgcc', language: 'cpp')
+add_project_arguments('-Wno-deprecated-declarations', language: 'c')
+add_project_arguments('-Wno-deprecated-declarations', language: 'cpp')
+# add_project_link_arguments('-static-libstdc++', language: 'cpp')
+# add_project_link_arguments('-static-libgcc', language: 'cpp')
 # add_project_link_arguments('-static', language: 'cpp')
 
 if get_option('buildtype') == 'debug'
     add_project_arguments('-fno-inline', language: 'cpp')
     add_project_arguments('-DLOGLV=0', language: 'cpp')
 endif
+
+# globals
+cxx = meson.get_compiler('cpp')
 
 subdir('src')
 lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
