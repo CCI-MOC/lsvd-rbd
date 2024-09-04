@@ -5,16 +5,14 @@
 #include <boost/accumulators/statistics/rolling_sum.hpp>
 #include <boost/bimap.hpp>
 #include <boost/container_hash/hash.hpp>
+#include <folly/FBVector.h>
 #include <folly/experimental/coro/SharedMutex.h>
-#include <
 #include <thread>
 
 #include "backend.h"
-#include "folly/Synchronized.h"
 #include "lsvd_types.h"
 #include "nvme.h"
 #include "read_cache.h"
-#include "subprojects/folly/folly/container/FBVector.h"
 
 const size_t CACHE_CHUNK_SIZE = 64 * 1024;
 const size_t CACHE_HEADER_SIZE = 4096;
@@ -119,23 +117,6 @@ class read_cache_shard_coro : public read_cache_coro
                           sptr<backend> obj_backend);
     ~read_cache_shard_coro() {}
 
-    // because the part that does the request slicing is not here, we need to
-    // let the upper layers hint to us that there was a bypassed request
-    bool should_bypass_cache();
-    void served_bypass_request(size_t bytes);
-
-    /**
-     * Read a single cache chunk. obj_offset MUST be cache block aligned, and
-     * will read `iov.bytes` bytes from the cache block into the dest smartiov,
-     * starting at `obj_offset + adjust`. `adjust + iov.bytes` MUST be less than
-     * the size of a cache block.
-     *
-     * If the data is not in the cache, it will be fetched from the backend.
-     * See documentation for shared_read_cache for more details on the lifecycle
-     * of a request.
-     *
-     * If data is in memory, this will fill in the iov and return NULL
-     */
     ResTask<void> read(str img, seqnum_t seqnum, usize offset, usize adjust,
                        smartiov &dest)
     {
@@ -150,13 +131,4 @@ class read_cache_shard_coro : public read_cache_coro
      * Insert a backend object into the cache.
      */
     void insert_object(chunk_key key, void *data);
-
-    std::tuple<size_t, size_t, size_t, size_t, size_t> get_stats()
-    {
-        std::unique_lock lock(cache_stats_lock);
-        return std::make_tuple(
-            rolling_sum(user_bytes), rolling_sum(backend_bytes),
-            rolling_sum(hitrate_stats), rolling_count(hitrate_stats),
-            (size_t)total_requests);
-    }
 };
