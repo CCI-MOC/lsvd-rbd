@@ -10,6 +10,10 @@ debug:
 	meson setup --native-file meson.ini build-dbg --buildtype=debug 
 	cd build-dbg; meson compile
 
+release:
+	meson setup --native-file meson.ini build-rel --buildtype=release -Db_sanitize=none
+	cd build-rel; meson compile
+
 paper:
 	@$(MAKE) -C atc2024
 
@@ -28,4 +32,4 @@ install-deps:
 		python3-pyelftools libcunit1-dev libaio-dev nasm librados-dev librbd-dev
 	# LSVD deps
 	sudo apt install -y meson mold libfmt-dev librados-dev \
-    	libjemalloc-dev libradospp-dev pkg-config uuid-dev
+    	libjemalloc-dev libradospp-dev pkg-config uuid-dev ceph-common
