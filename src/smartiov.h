@@ -37,6 +37,8 @@ class smartiov
     iovec &operator[](int i) { return iovs[i]; }
     int size(void) { return iovs.size(); }
 
+    vec<iovec> &iovs_vec(void) { return iovs; }
+
     std::pair<iovec *, int> c_iov(void)
     {
         return std::pair(iovs.data(), (int)iovs.size());

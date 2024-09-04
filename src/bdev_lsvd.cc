@@ -181,7 +181,7 @@ struct lsvd_bdev_io_channel {
 };
 
 auto bdev_lsvd_create(str img_name, rados_ioctx_t ioctx,
-                      lsvd_config cfg) -> result<void>
+                      lsvd_config cfg) -> Result<void>
 {
     assert(!img_name.empty());
 
@@ -222,14 +222,14 @@ auto bdev_lsvd_create(str img_name, rados_ioctx_t ioctx,
 }
 
 auto bdev_lsvd_create(str pool_name, str image_name,
-                      str user_cfg) -> result<void>
+                      str user_cfg) -> Result<void>
 {
     auto be = BOOST_OUTCOME_TRYX(connect_to_pool(pool_name));
     auto cfg = BOOST_OUTCOME_TRYX(lsvd_config::from_user_cfg(user_cfg));
     return bdev_lsvd_create(image_name, be, cfg);
 }
 
-void bdev_lsvd_delete(str img_name, std::function<void(result<void>)> cb)
+void bdev_lsvd_delete(str img_name, std::function<void(Result<void>)> cb)
 {
     log_info("Deleting image '{}'", img_name);
     auto rc = spdk_bdev_unregister_by_name(
@@ -238,11 +238,11 @@ void bdev_lsvd_delete(str img_name, std::function<void(result<void>)> cb)
         // it should work
         [](void *arg, int rc) {
             log_info("Image deletion done, rc = {}", rc);
-            auto cb = (std::function<void(result<void>)> *)arg;
+            auto cb = (std::function<void(Result<void>)> *)arg;
             (*cb)(errcode_to_result<void>(rc));
             delete cb;
         },
-        new std::function<void(result<void>)>(cb));
+        new std::function<void(Result<void>)>(cb));
 
     if (rc != 0) {
         log_error("Failed to delete image '{}': {}", img_name, rc);

@@ -47,7 +47,7 @@ class rados_io_req : public self_refcount_request
 
     void notify(request *parent) override {}
 
-    result<int> run_getres_and_free()
+    Result<int> run_getres_and_free()
     {
         run(nullptr);
         wait();
@@ -137,19 +137,19 @@ class rados_backend : public backend
 
     ~rados_backend() override {}
 
-    result<int> write(std::string name, smartiov &iov) override
+    Result<int> write(std::string name, smartiov &iov) override
     {
         auto req = dynamic_cast<rados_write_req *>(aio_write(name, iov));
         return req->run_getres_and_free();
     }
 
-    result<int> read(std::string name, off_t offset, smartiov &iov) override
+    Result<int> read(std::string name, off_t offset, smartiov &iov) override
     {
         auto req = dynamic_cast<rados_read_req *>(aio_read(name, offset, iov));
         return req->run_getres_and_free();
     }
 
-    result<void> delete_obj(std::string name) override
+    Result<void> delete_obj(std::string name) override
     {
         auto req = dynamic_cast<rados_delete_req *>(aio_delete(name));
         auto rc = BOOST_OUTCOME_TRYX(req->run_getres_and_free());
@@ -177,7 +177,7 @@ class rados_backend : public backend
         return ctx.stat(name, nullptr, nullptr) == 0;
     }
 
-    result<u64> get_size(std::string name) override
+    Result<u64> get_size(std::string name) override
     {
         u64 size;
         time_t mtime;
@@ -186,7 +186,7 @@ class rados_backend : public backend
         return size;
     }
 
-    result<vec<byte>> read_whole_obj(std::string name) override
+    Result<vec<byte>> read_whole_obj(std::string name) override
     {
         auto size = BOOST_OUTCOME_TRYX(get_size(name));
 
@@ -204,7 +204,7 @@ std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io)
     return std::make_shared<rados_backend>(io);
 }
 
-result<rados_ioctx_t> connect_to_pool(str pool_name)
+Result<rados_ioctx_t> connect_to_pool(str pool_name)
 {
     rados_t cluster;
     auto err = rados_create2(&cluster, "ceph", "client.admin", 0);

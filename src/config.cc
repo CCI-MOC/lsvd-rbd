@@ -11,7 +11,7 @@
 
 lsvd_config lsvd_config::get_default() { return lsvd_config(); }
 
-result<lsvd_config> lsvd_config::from_user_cfg(str cfg)
+Result<lsvd_config> lsvd_config::from_user_cfg(str cfg)
 {
     auto c = get_default();
     if (cfg.empty())
@@ -29,7 +29,7 @@ result<lsvd_config> lsvd_config::from_user_cfg(str cfg)
 }
 
 // https://stackoverflow.com/questions/116038/how-do-i-read-an-entire-file-into-a-stdstring-in-c
-auto read_file(std::string_view path) -> result<str>
+auto read_file(std::string_view path) -> Result<str>
 {
     constexpr auto read_size = std::size_t(4096);
     auto stream = std::ifstream(path.data());
@@ -46,7 +46,7 @@ auto read_file(std::string_view path) -> result<str>
     return out;
 }
 
-auto lsvd_config::parse_file(str path, bool allow_missing) -> result<void>
+auto lsvd_config::parse_file(str path, bool allow_missing) -> Result<void>
 {
     assert(!path.empty());
 
@@ -102,7 +102,7 @@ auto lsvd_config::parse_file(str path, bool allow_missing) -> result<void>
         }                                                                      \
     } while (0)
 
-result<void> lsvd_config::parse_json(str json)
+Result<void> lsvd_config::parse_json(str json)
 {
     auto js = nlohmann::json::parse(json);
 

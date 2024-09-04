@@ -56,7 +56,7 @@ lsvd_image::~lsvd_image()
     log_info("Image '{}' closed", imgname);
 }
 
-result<void> lsvd_image::apply_log(seqnum_t seq)
+Result<void> lsvd_image::apply_log(seqnum_t seq)
 {
     object_reader parser(objstore);
     auto data_hdr =
@@ -98,7 +98,7 @@ result<void> lsvd_image::apply_log(seqnum_t seq)
     return outcome::success();
 }
 
-result<void> lsvd_image::read_superblock()
+Result<void> lsvd_image::read_superblock()
 {
     object_reader parser(objstore);
     auto superblock = BOOST_OUTCOME_TRYX(parser.read_superblock(imgname));
@@ -122,7 +122,7 @@ result<void> lsvd_image::read_superblock()
     return outcome::success();
 }
 
-result<void> lsvd_image::read_from_checkpoint(seqnum_t seq)
+Result<void> lsvd_image::read_from_checkpoint(seqnum_t seq)
 {
     object_reader parser(objstore);
     auto parsed =
@@ -566,7 +566,7 @@ request *lsvd_image::flush(std::function<void(int)> cb)
     return new flush_request(this, cb);
 }
 
-result<void> lsvd_image::create_new(str name, usize size, rados_ioctx_t io)
+Result<void> lsvd_image::create_new(str name, usize size, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -585,7 +585,7 @@ result<void> lsvd_image::create_new(str name, usize size, rados_ioctx_t io)
     return outcome::success();
 }
 
-result<void> lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
+Result<void> lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -594,7 +594,7 @@ result<void> lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
     return outcome::success();
 }
 
-result<void> lsvd_image::delete_image(str name, rados_ioctx_t io)
+Result<void> lsvd_image::delete_image(str name, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -614,7 +614,7 @@ result<void> lsvd_image::delete_image(str name, rados_ioctx_t io)
     return be->delete_obj(name);
 }
 
-result<void> lsvd_image::clone_image(str oldname, str newname, rados_ioctx_t io)
+Result<void> lsvd_image::clone_image(str oldname, str newname, rados_ioctx_t io)
 {
     UNIMPLEMENTED();
 }

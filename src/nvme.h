@@ -1,14 +1,4 @@
-/*
- * file:        nvme.h
- * description: interface for request-driven interface to local SSD
- * author:      Peter Desnoyers, Northeastern University
- * Copyright 2021, 2022 Peter Desnoyers
- * license:     GNU LGPL v2.1 or newer
- *              LGPL-2.1-or-later
- */
-
-#ifndef NVME_H
-#define NVME_H
+#pragma once
 
 #include "request.h"
 #include "smartiov.h"
@@ -16,8 +6,7 @@
 class nvme
 {
   public:
-    nvme(){};
-    virtual ~nvme(){};
+    virtual ~nvme() = 0;
 
     virtual int read(void *buf, size_t count, off_t offset) = 0;
     virtual int write(const void *buf, size_t count, off_t offset) = 0;
@@ -34,6 +23,20 @@ class nvme
                                        size_t offset) = 0;
 };
 
-nvme *make_nvme_uring(int fd, const char *name);
+class fileio
+{
+  public:
+    virtual ~fileio() = 0;
 
-#endif
+    virtual ResTask<usize> read(usize offset, smartiov &iov) = 0;
+    virtual ResTask<usize> read(usize offset, iovec iov) = 0;
+    virtual ResTask<usize> write(usize offset, smartiov &iov) = 0;
+    virtual ResTask<usize> write(usize offset, iovec iov) = 0;
+};
+
+/**
+Takes ownership of the fd, will close it on destruction.
+ */
+sptr<fileio> make_fileio(int fd);
+
+nvme *make_nvme_uring(int fd, const char *name);

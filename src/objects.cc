@@ -92,7 +92,7 @@ void serialise_superblock(vec<byte> &buf, vec<seqnum_t> &checkpoints,
     hdrp->snaps_len = 0;
 }
 
-result<vec<byte>> object_reader::fetch_object_header(std::string objname)
+Result<vec<byte>> object_reader::fetch_object_header(std::string objname)
 {
     vec<byte> buf(4096);
     auto err = BOOST_OUTCOME_TRYX(objstore->read(objname, 0, buf.data(), 4096));
@@ -166,7 +166,7 @@ vec<T *> deserialise_ptrs_with_len(byte *buf, usize offset, usize len)
     return ret;
 }
 
-result<parsed_superblock> object_reader::read_superblock(std::string oname)
+Result<parsed_superblock> object_reader::read_superblock(std::string oname)
 {
     auto buf = BOOST_OUTCOME_TRYX(objstore->read_whole_obj(oname));
     auto hdr = (common_obj_hdr *)buf.data();
@@ -196,7 +196,7 @@ result<parsed_superblock> object_reader::read_superblock(std::string oname)
     return ret;
 }
 
-result<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
+Result<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
 {
     auto hdr = BOOST_OUTCOME_TRYX(fetch_object_header(oname));
 
@@ -215,7 +215,7 @@ result<parsed_data_hdr> object_reader::read_data_hdr(std::string oname)
     return h;
 }
 
-result<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
+Result<parsed_checkpoint> object_reader::read_checkpoint(std::string oname)
 {
     auto hdr = BOOST_OUTCOME_TRYX(fetch_object_header(oname));
 

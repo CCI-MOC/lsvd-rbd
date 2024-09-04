@@ -88,7 +88,7 @@ static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
         return;
     }
 
-    bdev_lsvd_delete(req->image_name, [=](result<void> res) {
+    bdev_lsvd_delete(req->image_name, [=](Result<void> res) {
         if (res.has_value()) {
             auto w = spdk_jsonrpc_begin_result(req_json);
             spdk_json_write_bool(w, true);

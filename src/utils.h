@@ -10,6 +10,9 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <folly/experimental/coro/Promise.h>
+#include <folly/experimental/coro/Task.h>
+#include <future>
 #include <linux/fs.h>
 #include <optional>
 #include <signal.h>
@@ -20,14 +23,15 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <vector>
-#include <future>
 
 #ifndef LOGLV
 #define LOGLV 1
 #endif
 
 namespace outcome = boost::outcome_v2;
-template <typename T> using result = outcome::result<T>;
+template <typename T> using Result = outcome::result<T>;
+template <typename T> using Task = folly::coro::Task<T>;
+template <typename T> using ResTask = folly::coro::Task<outcome::result<T>>;
 
 template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
@@ -192,6 +196,14 @@ using fspath = std::filesystem::path;
         }                                                                      \
     } while (0)
 
+#define CO_FAILURE_IF_NEGATIVE(rc)                                             \
+    do {                                                                       \
+        if (rc < 0) {                                                          \
+            co_return outcome::failure(                                        \
+                std::error_code(-rc, std::generic_category()));                \
+        }                                                                      \
+    } while (0)
+
 /**
  * Check return values of functions that return -errno in the case of an error
  * and convert it to a outcome::failure() instead on failure
@@ -297,7 +309,7 @@ inline size_t getsize64(int fd)
     return size;
 }
 
-template <typename T> inline auto errcode_to_result(int rc) -> result<T>
+template <typename T> inline auto errcode_to_result(int rc) -> Result<T>
 {
     if (rc > 0)
         return outcome::failure(std::error_code(rc, std::generic_category()));
@@ -361,7 +373,7 @@ inline std::error_code make_error_code(LsvdError e)
     return {static_cast<int>(e), c};
 }
 
-inline int result_to_rc(result<void> res)
+inline int result_to_rc(Result<void> res)
 {
     if (res.has_value())
         return 0;
@@ -369,7 +381,7 @@ inline int result_to_rc(result<void> res)
         return res.error().value();
 }
 
-inline int result_to_rc(result<int> res)
+inline int result_to_rc(Result<int> res)
 {
     if (res.has_value())
         return res.value();

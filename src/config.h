@@ -47,11 +47,11 @@ class lsvd_config
      * either a json string containing the configuration, the path to a file
      * containing the same, or empty, in which case it will be ignored.
      */
-    static result<lsvd_config> from_user_cfg(str cfg);
+    static Result<lsvd_config> from_user_cfg(str cfg);
 
   private:
     lsvd_config() {}
 
-    result<void> parse_json(str js);
-    result<void> parse_file(str path, bool can_be_missing = true);
+    Result<void> parse_json(str js);
+    Result<void> parse_file(str path, bool can_be_missing = true);
 };
