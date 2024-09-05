@@ -7,12 +7,14 @@
 #include <boost/container_hash/hash.hpp>
 #include <folly/FBVector.h>
 #include <folly/experimental/coro/SharedMutex.h>
-#include <thread>
 
 #include "backend.h"
+#include "folly/container/F14Map.h"
 #include "lsvd_types.h"
 #include "nvme.h"
 #include "read_cache.h"
+
+template <typename T> using fvec = folly::fbvector<T>;
 
 const size_t CACHE_CHUNK_SIZE = 64 * 1024;
 const size_t CACHE_HEADER_SIZE = 4096;
@@ -33,10 +35,7 @@ struct chunk_key_hash {
     }
 };
 
-using namespace boost::accumulators;
-const size_t CACHE_STATS_WINDOW = 10'000;
-
-class read_cache_shard_coro : public read_cache_coro
+class read_cache_shard_coro
 {
   private:
     enum entry_status {
@@ -67,64 +66,82 @@ class read_cache_shard_coro : public read_cache_coro
         chunk_key key;
     };
 
-    folly::fbvector<entry_state> cache_state;
+    fvec<entry_state> cache_state;
     folly::coro::SharedMutex cache_lock;
 
-    int fd;
-    uptr<nvme> cache_store;
-    size_t size_in_chunks;
-    size_t header_size_bytes;
-    size_t cache_filesize_bytes;
-    sptr<backend> obj_backend;
+    uptr<fileio> cache_file;
+    sptr<backend_coro> s3;
 
-    // cache map
-    // we map <objname, seqnum, offset> to a cache block
-    // offset MUST be a multiple of CACHE_CHUNK_SIZE
-    // the reverse map exists so that we can evict entries
-    // boost::bimap<chunk_key, chunk_idx> cache_map;
-    std::unordered_map<chunk_key, chunk_idx, chunk_key_hash> cache_map;
-
-    // clock eviction
-    size_t clock_idx = 0;
-
-    // maintain cache hit rate statistics
-    std::atomic_int total_requests = 0;
-    accumulator_set<int, stats<tag::rolling_sum, tag::rolling_count>>
-        hitrate_stats;
-    accumulator_set<size_t, stats<tag::rolling_sum>> user_bytes;
-    accumulator_set<size_t, stats<tag::rolling_sum>> backend_bytes;
-
-    /**
-     * Allocate a new cache chunk, and return its index
-     *
-     * This uses the clock eviction policy; it will search through the cache
-     * in index order, and clear abit it is set and evict the first entry
-     * without abit set
-     */
-    chunk_idx allocate_chunk();
-
-    void dec_chunk_refcount(chunk_idx idx);
-    entry_status get_chunk_status(chunk_idx idx);
-    void set_chunk_status(chunk_idx idx, entry_status status);
-
-    size_t get_store_offset_for_chunk(chunk_idx idx);
-    request *get_fill_req(chunk_idx idx, void *data);
-
-    void on_store_done(chunk_idx idx);
+    folly::coro::SharedMutex map_lock;
+    folly::F14FastMap<chunk_key, usize> entry_map;
 
   public:
-    read_cache_shard_coro(std::string cache_path, size_t num_cache_chunks,
-                          sptr<backend> obj_backend);
+    read_cache_shard_coro(str cache_path, usize num_cache_chunks,
+                          sptr<backend_coro> s3)
+        : s3(s3)
+    {
+        auto fd = open(cache_path.c_str(), O_RDWR | O_CREAT, 0666);
+        cache_file = make_fileio(fd);
+    }
+
     ~read_cache_shard_coro() {}
+
+    size_t get_store_offset_for_chunk(chunk_idx chunk)
+    {
+        return chunk * CACHE_CHUNK_SIZE + CACHE_HEADER_SIZE;
+    }
+
+    auto allocate_chunk() -> usize;
 
     ResTask<void> read(str img, seqnum_t seqnum, usize offset, usize adjust,
                        smartiov &dest)
     {
-
         auto req_size = dest.bytes();
-
         assert(offset % CACHE_CHUNK_SIZE == 0);
         assert(adjust + req_size <= CACHE_CHUNK_SIZE);
+
+        auto key = chunk_key{img, seqnum, offset};
+
+        // TODO figure out locking for this
+        auto v = entry_map.find(key);
+
+        // cache hit
+        if (v != entry_map.end()) {
+            auto idx = v->second;
+            auto &entry = cache_state.at(idx);
+            entry.refcount += 1;
+            entry.accessed = true;
+
+            // valid entry, read and return
+            if (entry.status == entry_status::VALID) {
+                auto offset = get_store_offset_for_chunk(idx);
+                BOOST_OUTCOME_CO_TRYX(
+                    co_await cache_file->read(offset + adjust, dest));
+                co_return outcome::success();
+            }
+
+            // TODO other states
+        }
+
+        // cache miss
+        auto idx = allocate_chunk();
+        auto &entry = cache_state.at(idx);
+        entry.refcount += 1;
+
+        // read from backend
+        auto buf = fvec<byte>(CACHE_CHUNK_SIZE);
+        auto oname = objname(img, seqnum);
+        std::ignore = BOOST_OUTCOME_CO_TRYX(co_await s3->read(
+            oname.str(), offset, iovec{buf.data(), buf.size()}));
+        // todo handle partial writes
+
+        // write to cache
+        auto cache_offset = get_store_offset_for_chunk(idx);
+        std::ignore = BOOST_OUTCOME_CO_TRYX(co_await cache_file->write(
+            cache_offset, iovec{buf.data(), buf.size()}));
+        // todo handle partial writes
+
+        co_return outcome::success();
     }
 
     /**

@@ -1,9 +1,0 @@
-[wrap-git]
-url = https://github.com/David-Haim/concurrencpp.git
-revision = v.0.1.7
-clone-recursive = true
-method = cmake
-depth = 1
-
-[provide]
-concurrencpp = concurrencpp_dep

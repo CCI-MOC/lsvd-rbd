@@ -307,9 +307,9 @@ class file_uring_coro : public fileio
     }
 };
 
-sptr<fileio> make_fileio(int fd)
+uptr<fileio> make_fileio(int fd)
 {
-    return std::make_shared<file_uring_coro>(fd, "file_uring_coro");
+    return std::make_unique<file_uring_coro>(fd, "file_uring_coro");
 }
 
 nvme *make_nvme_uring(int fd, const char *name)

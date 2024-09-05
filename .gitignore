@@ -11,7 +11,6 @@ qemu/*.img
 qemu/*.iso
 qemu/bzImage
 
-subprojects/liburing-*
-subprojects/packagecache
-subprojects/nlohmann_json-*
-subprojects/concurrencpp/
+subprojects/
+!subprojects/*.wrap
+!subprojects/packagefiles/

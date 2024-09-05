@@ -37,6 +37,6 @@ class fileio
 /**
 Takes ownership of the fd, will close it on destruction.
  */
-sptr<fileio> make_fileio(int fd);
+uptr<fileio> make_fileio(int fd);
 
 nvme *make_nvme_uring(int fd, const char *name);
