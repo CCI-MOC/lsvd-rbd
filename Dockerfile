@@ -18,4 +18,4 @@ COPY subprojects /app/subprojects
 COPY test /app/test
 
 RUN make install-deps \
-    && make debug
+    && make release
