@@ -30,6 +30,68 @@ It is able to install and boot Ubuntu 22.04 (see `qemu/`) and is stable under
 most of our tests, but there are likely regressions around crash recovery and
 other less well-trodden paths.
 
+## How to run
+
+```
+echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+docker run --net host -v /dev/hugepages:/dev/hugepages -v /etc/ceph:/etc/ceph -v /var/tmp:/var/tmp -v /dev/shm:/dev/shm -i -t --privileged --entrypoint /bin/bash ghcr.io/cci-moc/lsvd-rbd:main
+```
+
+If the cpu is too old, you might have to rebuild the image:
+
+```
+git clone https://github.com/cci-moc/lsvd-rbd.git
+cd lsvd-rbd
+docker build -t lsvd-rbd .
+docker run --net host -v /dev/hugepages:/dev/hugepages -v /etc/ceph:/etc/ceph -v /var/tmp:/var/tmp -v /dev/shm:/dev/shm -i -t --privileged --entrypoint /bin/bash lsvd-rbd
+```
+
+To setup lsvd images:
+
+```
+#./imgtool create <pool> <imgname> --size 100g
+./imgtool create lsvd-ssd benchtest1 --size 100g
+```
+
+To configure nvmf:
+
+```
+export gateway_ip=0.0.0.0
+./rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
+./rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
+./rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 9922
+```
+
+To mount images on the gateway:
+
+```
+export PYTHONPATH=/app/src/
+./rpc.py --plugin rpc_plugin bdev_lsvd_create lsvd-ssd benchtest1 -c '{"rcache_dir":"/var/tmp/lsvd","wlog_dir":"/var/tmp/lsvd"}'
+./rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 benchtest1
+```
+
+To kill gracefully shutdown gateway:
+
+```
+./rpc.py --plugin rpc_plugin bdev_lsvd_delete benchtest1
+./rpc.py spdk_kill_instance SIGTERM
+docker kill <container id>
+```
+
+## Mount a client
+
+```
+modprobe nvme-fabrics
+nvme disconnect -n nqn.2016-06.io.spdk:cnode1
+gw_ip=${gw_ip:-10.1.0.5}
+nvme connect -t tcp  --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+sleep 2
+nvme list
+dev_name=$(nvme list | perl -lane 'print @F[0] if /SPDK/')
+printf "Using device $dev_name\n"
+```
+
+
 ## Build
 
 This project uses `meson` to manage the build system. Run `make setup` to
@@ -41,55 +103,20 @@ by default.
 
 ## Configuration
 
-LSVD is not yet merged into the Ceph configuration framework, and uses its own
-system.  It reads from a configuration file (`lsvd.conf` or
-`/usr/local/etc/lsvd.conf`) or from environment variables of the form
-`LSVD_<NAME>`, where NAME is the upper-case version of the config file variable.
-Default values can be found in `config.h`
+LSVD is configured using a JSON file. When creating an image, we will
+try to read the following paths and parse them for configuration options:
 
-Parameters are:
+- Default built-in configuration
+- `/usr/local/etc/lsvd.json`
+- `./lsvd.json`
+- user supplied path
 
-- `batch_size`, `LSVD_BATCH_SIZE`: size of objects written to the backend, in bytes (K/M recognized as 1024, 1024\*1024). Default: 8MiB
-- `wcache_batch`: write cache batching (see below)
-- `wcache_chunk': maximum size of atomic write, in bytes - larger writes will be split and may be non-atomic.
-- `rcache_dir` - directory used for read cache file and GC temporary files. Note that `imgtool` can format a partition for cache and symlink it into this directory, although the performance improvement seems limited.
-- `wcache_dir` - directory used for write cache file
-- `xlate_window`: max writes (i.e. objects) in flight to the backend. Note that this value is coupled to the size of the write cache, which must be big enough to hold all outstanding writes in case of a crash.
-- `hard_sync` (untested): "flush" forces all batched writes to the backend.
-- `backend`: "file" or "rados" (default rados). The "file" backend is for testing only
-- `cache_size` (bytes, K/M/G): total size of the cache file. Currently split 1/3 write, 2/3 read. Ignored if the cache file already exists.
-- `ckpt_interval` N: limits the number of objects to be examined during crash recovery by flushing metadata every N objects.
-- `flush_msec`: timeout for flushing batched writes
-- `gc_threshold` (percent): described below
+The file read last has highest priority.
 
-Typically the only parameters that need to be set are `cache_dir` and
-`cache_size`.  Parameters may be added or removed as we tune things and/or
-figure out how to optimize at runtime instead of bothering the user for a value.
+We will also first try to parse the user-supplied path as a JSON object, and if
+that fails try treat it as a path and read it from a file.
 
-## Using LSVD with fio and QEMU
-
-First create a volume:
-```
-build$ sudo imgtool create poolname imgname --size=20g 
-```
-
-Then you can start a SPDK NVMe-oF gateway:
-```
-./qemu/qemu-gateway.sh pool imgname
-```
-
-Then connect to the NVMe-oF gateway:
-
-```
-nvme connect -t tcp -n nqn.2016-06.io.spdk:cnode1 -a
-```
-
-You should now have just a plain old NVMe device, with which you can use just
-like any other NVMe device.
-
-Do not use multiple fio jobs on the same image - currently there's no protection
-and they'll stomp all over each other.  RBD performs horribly in that case, but
-AFAIK it doesn't compromise correctness.
+An example configuration file is provided in `docs/example_config.json`.
 
 ## Image and object names
 
