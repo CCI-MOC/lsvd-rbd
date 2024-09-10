@@ -33,3 +33,5 @@ install-deps:
 	# LSVD deps
 	sudo apt install -y meson mold libfmt-dev librados-dev \
     	libjemalloc-dev libradospp-dev pkg-config uuid-dev ceph-common
+	# to make my life a little easier
+	sudo apt install -y gdb fish
