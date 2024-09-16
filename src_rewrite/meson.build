@@ -19,6 +19,7 @@ lsvd_deps = [
         static: true,
     ),
     subproject('liburing').get_variable('uring'),
+    subproject('cereal').get_variable('cereal_dep'),
     dependency('uuid'),
     dependency('nlohmann_json'),
     cxx.find_library('rados', required: true),
