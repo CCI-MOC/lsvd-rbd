@@ -31,9 +31,8 @@ endif
 # globals
 cxx = meson.get_compiler('cpp')
 
-subdir('src')
-lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
-shared_library('lsvd', lsvd_src, dependencies: lsvd_deps)
+subdir('src_rewrite')
+# lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
 
 executable(
     'lsvd',
@@ -47,19 +46,11 @@ executable(
     dependencies: lsvd_deps + [dependency('_spdk')],
 )
 
-executable(
-    'imgtool',
-    ['tools/imgtool.cc'],
-    link_whole: lsvd_ar,
-    include_directories: lsvd_inc,
-    dependencies: lsvd_deps,
-)
-executable(
-    'thick-image',
-    ['tools/thick-image.cc'],
-    link_whole: lsvd_ar,
-    include_directories: lsvd_inc,
-    dependencies: lsvd_deps,
-)
+# executable(
+#     'imgtool',
+#     lsvd_src + ['tools/imgtool.cc'],
+#     include_directories: lsvd_inc,
+#     dependencies: lsvd_deps,
+# )
 
-subdir('test')
+# subdir('test')

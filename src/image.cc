@@ -15,7 +15,7 @@
 
 const int block_sectors = CACHE_CHUNK_SIZE / 512;
 
-lsvd_image::lsvd_image(str name, rados_ioctx_t io, lsvd_config cfg_)
+LsvdImage::LsvdImage(str name, rados_ioctx_t io, lsvd_config cfg_)
     : imgname(name), cfg(cfg_), io(io)
 {
     objstore = make_rados_backend(io);
@@ -44,7 +44,7 @@ lsvd_image::lsvd_image(str name, rados_ioctx_t io, lsvd_config cfg_)
     log_info("Image '{}' opened successfully", name);
 }
 
-lsvd_image::~lsvd_image()
+LsvdImage::~LsvdImage()
 {
     wlog->flush();
     wlog->do_write_checkpoint();
@@ -56,7 +56,7 @@ lsvd_image::~lsvd_image()
     log_info("Image '{}' closed", imgname);
 }
 
-Result<void> lsvd_image::apply_log(seqnum_t seq)
+Result<void> LsvdImage::apply_log(seqnum_t seq)
 {
     object_reader parser(objstore);
     auto data_hdr =
@@ -98,7 +98,7 @@ Result<void> lsvd_image::apply_log(seqnum_t seq)
     return outcome::success();
 }
 
-Result<void> lsvd_image::read_superblock()
+Result<void> LsvdImage::read_superblock()
 {
     object_reader parser(objstore);
     auto superblock = BOOST_OUTCOME_TRYX(parser.read_superblock(imgname));
@@ -122,7 +122,7 @@ Result<void> lsvd_image::read_superblock()
     return outcome::success();
 }
 
-Result<void> lsvd_image::read_from_checkpoint(seqnum_t seq)
+Result<void> LsvdImage::read_from_checkpoint(seqnum_t seq)
 {
     object_reader parser(objstore);
     auto parsed =
@@ -145,7 +145,7 @@ Result<void> lsvd_image::read_from_checkpoint(seqnum_t seq)
 }
 
 // Returns last processed object's seqnum
-seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
+seqnum_t LsvdImage::roll_forward_from_last_checkpoint()
 {
     if (checkpoints.size() == 0)
         return 0;
@@ -173,27 +173,27 @@ seqnum_t lsvd_image::roll_forward_from_last_checkpoint()
     return seq;
 }
 
-void lsvd_image::recover_from_wlog() { UNIMPLEMENTED(); }
+void LsvdImage::recover_from_wlog() { UNIMPLEMENTED(); }
 
 /**
  * This is the base for aio read and write requests. It's copied from
  * the old rbd_aio_req omniclass, with the read and write paths split out and
  * the common completion handling moved here.
  */
-class lsvd_image::aio_request : public self_refcount_request
+class LsvdImage::aio_request : public self_refcount_request
 {
   private:
     std::function<void(int)> cb;
     std::atomic_flag done = false;
 
   protected:
-    lsvd_image *img = nullptr;
+    LsvdImage *img = nullptr;
     smartiov iovs;
 
     size_t req_offset;
     size_t req_bytes;
 
-    aio_request(lsvd_image *img, size_t offset, smartiov iovs,
+    aio_request(LsvdImage *img, size_t offset, smartiov iovs,
                 std::function<void(int)> cb)
         : cb(cb), img(img), iovs(iovs), req_offset(offset)
     {
@@ -217,13 +217,13 @@ class lsvd_image::aio_request : public self_refcount_request
     }
 };
 
-class lsvd_image::read_request : public lsvd_image::aio_request
+class LsvdImage::read_request : public LsvdImage::aio_request
 {
   private:
     std::atomic_int num_subreqs = 0;
 
   public:
-    read_request(lsvd_image *img, size_t offset, smartiov iovs,
+    read_request(LsvdImage *img, size_t offset, smartiov iovs,
                  std::function<void(int)> cb)
         : aio_request(img, offset, iovs, cb)
     {
@@ -260,7 +260,7 @@ class lsvd_image::read_request : public lsvd_image::aio_request
     }
 };
 
-void lsvd_image::handle_reads(size_t offset, smartiov iovs,
+void LsvdImage::handle_reads(size_t offset, smartiov iovs,
                               vec<request *> &requests)
 {
     sector_t start_sector = offset / 512;
@@ -441,7 +441,7 @@ void lsvd_image::handle_reads(size_t offset, smartiov iovs,
     }
 }
 
-class lsvd_image::write_request : public lsvd_image::aio_request
+class LsvdImage::write_request : public LsvdImage::aio_request
 {
   private:
     std::atomic_int n_req = 0;
@@ -453,7 +453,7 @@ class lsvd_image::write_request : public lsvd_image::aio_request
     vec<smartiov> sub_iovs;
 
   public:
-    write_request(lsvd_image *img, size_t offset, smartiov iovs,
+    write_request(LsvdImage *img, size_t offset, smartiov iovs,
                   std::function<void(int)> cb)
         : aio_request(img, offset, iovs, cb)
     {
@@ -505,10 +505,10 @@ class lsvd_image::write_request : public lsvd_image::aio_request
     }
 };
 
-class trim_request : public lsvd_image::aio_request
+class trim_request : public LsvdImage::aio_request
 {
   public:
-    trim_request(lsvd_image *img, size_t offset, size_t len,
+    trim_request(LsvdImage *img, size_t offset, size_t len,
                  std::function<void(int)> cb)
         : aio_request(img, offset, smartiov(), cb)
     {
@@ -525,10 +525,10 @@ class trim_request : public lsvd_image::aio_request
     void notify(request *req) override { UNIMPLEMENTED(); }
 };
 
-class flush_request : public lsvd_image::aio_request
+class flush_request : public LsvdImage::aio_request
 {
   public:
-    flush_request(lsvd_image *img, std::function<void(int)> cb)
+    flush_request(LsvdImage *img, std::function<void(int)> cb)
         : aio_request(img, 0, smartiov(), cb)
     {
     }
@@ -543,30 +543,30 @@ class flush_request : public lsvd_image::aio_request
     void notify(request *req) override { UNIMPLEMENTED(); }
 };
 
-request *lsvd_image::read(size_t offset, smartiov iov,
+request *LsvdImage::read(size_t offset, smartiov iov,
                           std::function<void(int)> cb)
 {
     return new read_request(this, offset, iov, cb);
 }
 
-request *lsvd_image::write(size_t offset, smartiov iov,
+request *LsvdImage::write(size_t offset, smartiov iov,
                            std::function<void(int)> cb)
 {
     return new write_request(this, offset, iov, cb);
 }
 
-request *lsvd_image::trim(size_t offset, size_t len,
+request *LsvdImage::trim(size_t offset, size_t len,
                           std::function<void(int)> cb)
 {
     return new trim_request(this, offset, len, cb);
 }
 
-request *lsvd_image::flush(std::function<void(int)> cb)
+request *LsvdImage::flush(std::function<void(int)> cb)
 {
     return new flush_request(this, cb);
 }
 
-Result<void> lsvd_image::create_new(str name, usize size, rados_ioctx_t io)
+Result<void> LsvdImage::create_new(str name, usize size, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -585,7 +585,7 @@ Result<void> lsvd_image::create_new(str name, usize size, rados_ioctx_t io)
     return outcome::success();
 }
 
-Result<void> lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
+Result<void> LsvdImage::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -594,7 +594,7 @@ Result<void> lsvd_image::get_uuid(str name, uuid_t &uuid, rados_ioctx_t io)
     return outcome::success();
 }
 
-Result<void> lsvd_image::delete_image(str name, rados_ioctx_t io)
+Result<void> LsvdImage::delete_image(str name, rados_ioctx_t io)
 {
     auto be = make_rados_backend(io);
     auto parser = object_reader(be);
@@ -614,7 +614,7 @@ Result<void> lsvd_image::delete_image(str name, rados_ioctx_t io)
     return be->delete_obj(name);
 }
 
-Result<void> lsvd_image::clone_image(str oldname, str newname, rados_ioctx_t io)
+Result<void> LsvdImage::clone_image(str oldname, str newname, rados_ioctx_t io)
 {
     UNIMPLEMENTED();
 }

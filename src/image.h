@@ -31,14 +31,14 @@
  * resource ownership and to overhaul the disastrous locking situation, but
  * that's only a dream for now
  */
-class lsvd_image
+class LsvdImage
 {
   private:
     // no copying or moving
-    lsvd_image(const lsvd_image &) = delete;
-    lsvd_image operator=(const lsvd_image &) = delete;
-    lsvd_image(const lsvd_image &&) = delete;
-    lsvd_image operator=(const lsvd_image &&) = delete;
+    LsvdImage(const LsvdImage &) = delete;
+    LsvdImage operator=(const LsvdImage &) = delete;
+    LsvdImage(const LsvdImage &&) = delete;
+    LsvdImage operator=(const LsvdImage &&) = delete;
 
     // Log recovery
     Result<void> read_superblock();
@@ -49,8 +49,8 @@ class lsvd_image
     void recover_from_wlog();
 
   public:
-    lsvd_image(std::string name, rados_ioctx_t io, lsvd_config cfg);
-    ~lsvd_image();
+    LsvdImage(std::string name, rados_ioctx_t io, lsvd_config cfg);
+    ~LsvdImage();
 
     std::string imgname;
     uuid_t uuid;
@@ -80,8 +80,8 @@ class lsvd_image
 
     std::map<int, char *> buffers;
 
-    std::shared_ptr<backend> objstore;
-    std::shared_ptr<read_cache> rcache;
+    std::shared_ptr<Backend> objstore;
+    std::shared_ptr<ReadCache> rcache;
     std::unique_ptr<write_cache> wlog;
     std::unique_ptr<translate> xlate;
 

@@ -37,15 +37,15 @@ class translate
 };
 
 uptr<translate> make_translate(str name, lsvd_config &cfg, usize vol_size,
-                               uuid_t &vol_uuid, sptr<backend> be,
-                               sptr<read_cache> rcache, extmap::objmap &objmap,
+                               uuid_t &vol_uuid, sptr<Backend> be,
+                               sptr<ReadCache> rcache, extmap::objmap &objmap,
                                std::shared_mutex &omap_mtx,
                                extmap::bufmap &bmap, std::mutex &bmap_lck,
                                seqnum_t last_seq, vec<clone_base> &clones,
                                std::map<seqnum_t, data_obj_info> &objinfo,
                                vec<seqnum_t> &checkpoints);
 
-uptr<translate> make_translate(std::shared_ptr<backend> _io, lsvd_config *cfg,
+uptr<translate> make_translate(std::shared_ptr<Backend> _io, lsvd_config *cfg,
                                extmap::objmap *map, extmap::bufmap *bufmap,
                                std::shared_mutex *m, std::mutex *buf_m,
-                               sptr<read_cache> rcache);
+                               sptr<ReadCache> rcache);

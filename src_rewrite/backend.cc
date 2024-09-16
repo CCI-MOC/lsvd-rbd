@@ -6,11 +6,12 @@
 #include <rados/buffer.h>
 #include <rados/librados.h>
 #include <rados/librados.hpp>
+#include <system_error>
 
 #include "backend.h"
 #include "utils.h"
 
-class CoroRados : public backend_coro
+class Rados : public Backend
 {
   private:
     librados::IoCtx io;
@@ -31,7 +32,7 @@ class CoroRados : public backend_coro
         ~RadosCbWrap() { cb->release(); }
     };
 
-    static auto neg_ec_to_result(int iores) -> Result<int>
+    static auto neg_ec_to_result(int iores) -> Result<usize>
     {
         if (iores < 0)
             return outcome::failure(
@@ -57,9 +58,9 @@ class CoroRados : public backend_coro
     }
 
   public:
-    CoroRados(rados_ioctx_t io)
+    Rados(rados_ioctx_t io)
     {
-        check_cond(io == nullptr, "io_ctx is null");
+        assert(io != nullptr);
         librados::IoCtx::from_rados_ioctx_t(io, this->io);
     }
 
@@ -70,11 +71,13 @@ class CoroRados : public backend_coro
 
         u64 size;
         time_t mtime;
-        auto rc = io.aio_stat(name, cb.cb, &size, &mtime);
+        auto rc = io.aio_stat(name.toStdString(), cb.cb, &size, &mtime);
         assert(rc == 0);
 
         rc = co_await std::move(f);
-        CO_FAILURE_IF_NEGATIVE(rc);
+        if (rc < 0)
+            co_return std::error_code(-rc, std::system_category());
+
         co_return size;
     }
 
@@ -88,7 +91,8 @@ class CoroRados : public backend_coro
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc = io.aio_read(name, cb.cb, &bl, bl.length(), offset);
+        auto rc =
+            io.aio_read(name.toStdString(), cb.cb, &bl, bl.length(), offset);
         assert(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
@@ -98,18 +102,32 @@ class CoroRados : public backend_coro
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc = io.aio_read(name, cb.cb, &bl, bl.length(), offset);
+        auto rc =
+            io.aio_read(name.toStdString(), cb.cb, &bl, bl.length(), offset);
         assert(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
     auto read_all(str name) -> ResTask<vec<byte>> override
     {
-        auto size = BOOST_OUTCOME_CO_TRYX(co_await get_size(name));
+        auto size_res = co_await get_size(name);
+        if (!size_res.has_value())
+            co_return size_res.error();
+
+        auto size = size_res.value();
         vec<byte> buf(size);
-        auto iores = BOOST_OUTCOME_CO_TRYX(
-            co_await read(name, 0, iovec{buf.data(), buf.size()}));
-        CO_FAILURE_IF_NEGATIVE(iores);
+        auto iores = co_await read(name, 0, iovec{buf.data(), buf.size()});
+
+        if (!iores.has_value())
+            co_return outcome::failure(iores.error());
+
+        if (iores.value() != size)
+            co_return outcome::failure(std::errc::io_error);
+
+        if (iores.value() < 0)
+            co_return outcome::failure(
+                std::error_code(-iores.value(), std::system_category()));
+
         co_return buf;
     }
 
@@ -118,7 +136,7 @@ class CoroRados : public backend_coro
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc = io.aio_write(name, cb.cb, bl, bl.length(), 0);
+        auto rc = io.aio_write(name.toStdString(), cb.cb, bl, bl.length(), 0);
         assert(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
@@ -128,7 +146,7 @@ class CoroRados : public backend_coro
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc = io.aio_write(name, cb.cb, bl, bl.length(), 0);
+        auto rc = io.aio_write(name.toStdString(), cb.cb, bl, bl.length(), 0);
         assert(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
