@@ -35,6 +35,24 @@ struct S3Ext {
     uint64_t len;
 };
 
+// === Log headers ===
+
+struct __attribute((packed)) log_obj_hdr {
+    uint64_t magic;
+    uint64_t total_bytes;
+    seqnum_t seqnum;
+    uint32_t num_entries;
+    byte data[];
+};
+
+struct __attribute((packed)) superblock_hdr {
+    uint64_t magic;
+    uint64_t total_bytes;
+    byte data[];
+};
+
+// === Log entries ===
+
 enum log_entry_type {
     WRITE = 0,
     TRIM = 1,
@@ -44,10 +62,20 @@ struct __attribute((packed)) log_write_entry {
     log_entry_type type : 2;
     uint64_t offset : 62;
     uint64_t len;
-    std::byte data[];
+    byte data[];
+};
+
+struct __attribute((packed)) log_trim_entry {
+    log_entry_type type : 2;
+    uint64_t offset : 62;
+    uint64_t len;
 };
 
 const uint32_t LOG_WRITE_ENTRY_SIZE = sizeof(log_write_entry);
+static_assert(LOG_WRITE_ENTRY_SIZE == 16);
+
+const auto LOG_TRIM_ENTRY_SIZE = sizeof(log_trim_entry);
+static_assert(LOG_TRIM_ENTRY_SIZE == 16);
 
 inline auto get_data_ext(S3Ext ext)
 {
@@ -58,10 +86,18 @@ inline auto get_data_ext(S3Ext ext)
     };
 }
 
-struct __attribute((packed)) log_trim_entry {
+// === Backend representation ===
+
+inline auto get_object_name(str image_name, seqnum_t seqnum) -> std::string
+{
+    return fmt::format("{}.{:08x}", image_name, seqnum);
+}
+
+// === Journal entries ===
+
+struct __attribute((packed)) journal_entry {
     log_entry_type type : 2;
     uint64_t offset : 62;
     uint64_t len;
+    byte data[];
 };
-
-const auto LOG_TRIM_ENTRY_SIZE = sizeof(log_trim_entry);

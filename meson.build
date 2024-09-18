@@ -7,7 +7,7 @@ project(
         'warning_level=2',
         'default_library=static',
         'b_colorout=always',
-        # 'b_sanitize=address,undefined',
+        'b_sanitize=address,undefined',
         'b_asneeded=false',
         'b_lto=true',
         'b_thinlto_cache=true',

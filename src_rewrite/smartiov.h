@@ -7,6 +7,8 @@
 
 #include "utils.h"
 
+using byte = std::byte;
+
 /* this makes readv / writev a lot easier...
  */
 class smartiov

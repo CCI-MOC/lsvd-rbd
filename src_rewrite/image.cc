@@ -3,25 +3,61 @@
 #include "image.h"
 #include "representation.h"
 #include "smartiov.h"
+#include "utils.h"
 
-FutRes<void> LsvdImage::read(off_t offset, smartiov iovs)
+class LogObj
 {
-    return read_task(offset, std::move(iovs)).semi().via(executor);
-}
+  public:
+    const seqnum_t seqnum;
 
-FutRes<void> LsvdImage::write(off_t offset, smartiov iovs)
-{
-    return write_task(offset, std::move(iovs)).semi().via(executor);
-}
+  private:
+    u32 bytes_written = 0;
+    vec<byte> data;
 
-ResTask<void> LsvdImage::read_task(off_t offset, smartiov iovs)
+    // We start with one to mark that we're expecting further writes, only when
+    // we get mark as completed to we let it go to 0
+    std::atomic<u32> writes_pending = 1;
+    folly::coro::Baton writes_done_baton;
+
+  public:
+    LogObj(seqnum_t seqnum, usize size) : seqnum(seqnum), data(size) {}
+    ~LogObj() { assert(writes_pending == 0); }
+
+    auto append(usize len) -> std::pair<S3Ext, byte *>
+    {
+        assert(bytes_written + len <= data.size());
+        auto ret = bytes_written;
+        bytes_written += len;
+        return {S3Ext{seqnum, ret, len}, data.data() + ret};
+    }
+
+    auto remaining() { return data.size() - bytes_written; }
+    auto as_iov() { return iovec{data.data(), bytes_written}; }
+    auto at(S3Ext ext) { return data.data() + ext.offset; }
+
+    Task<void> wait_for_writes() { co_await writes_done_baton; }
+    void mark_complete() { write_end(); }
+    void write_start() { writes_pending++; }
+    void write_end()
+    {
+        if (writes_pending.fetch_sub(1) == 1)
+            writes_done_baton.post();
+    }
+};
+
+ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
 {
     // Since backend objects are immutable, we just need a read lock for as long
     // as we're getting the extents. Once we have the extents, the map can be
     // moified and we don't care.
     auto exts = co_await extmap.lookup(offset, iovs.bytes());
 
-    folly::fbvector<folly::SemiFuture<Result<void>>> tasks(exts.size());
+    folly::fbvector<folly::SemiFuture<Result<void>>> tasks;
+    tasks.reserve(exts.size());
+
+    // We can hold on to this for a while since we only write to the map on
+    // rollover, and those are fairly rare compared to reads
+    auto l = co_await pending_mtx.co_scoped_lock_shared();
     for (auto &[img_off, ext] : exts) {
         auto base = img_off - offset;
 
@@ -34,20 +70,24 @@ ResTask<void> LsvdImage::read_task(off_t offset, smartiov iovs)
         auto ext_iov = iovs.slice(base, ext.len);
 
         // First try to read from the write log in case it's in memory
-        auto success = co_await wlog->try_read(ext, ext_iov);
-        if (success)
+        auto it = pending_objs.find(ext.seqnum);
+        if (it != pending_objs.end()) {
+            auto ptr = it->second->at(ext);
+            iovs.copy_in(ptr, ext.len);
             continue;
+        }
 
         // Not in pending logobjs, get it from the read-through backend cache
         tasks.push_back(cache->read(ext, ext_iov).semi());
     }
+    l.unlock();
 
     auto all = co_await folly::collectAll(tasks);
     for (auto &t : all)
         if (t.hasException())
-            co_return std::errc::io_error;
-        else if (t.value().has_error())
-            co_return t.value().error();
+            co_return outcome::failure(std::errc::io_error);
+        else
+            BOOST_OUTCOME_CO_TRYX(t.value());
 
     co_return outcome::success();
 }
@@ -94,38 +134,120 @@ avoid locking anything for too long by doing this and ensure maximum
 parallelism.
 
 */
-ResTask<void> LsvdImage::write_task(off_t offset, smartiov iovs)
+ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
 {
+    assert(offset >= 0);
     auto data_bytes = iovs.bytes();
     assert(data_bytes > 0 && data_bytes % block_size == 0);
 
-    auto [h, buf] = co_await wlog->new_write_entry(offset, data_bytes);
+    // pin the current object to reserve space in the logobj, and while the
+    // log is held check if we have to rollover
+    auto lck = co_await logobj_mtx.co_scoped_lock();
+    auto obj = cur_logobj;
+    obj->write_start();
+    auto [ext, buf] = obj->append(data_bytes);
+    co_await log_rollover(false);
+    lck.unlock();
 
-    // we can't avoid the copy, we have to retain the write somewhere until
-    // we can flush it to the backend
-    iovs.copy_out(buf);
+    // Write out the data
+    auto *entry = reinterpret_cast<log_write_entry *>(buf);
+    *entry = log_write_entry{
+        .type = log_entry_type::WRITE,
+        .offset = static_cast<u64>(offset),
+        .len = data_bytes,
+    };
+    iovs.copy_out(entry->data);
 
+    // Write it to the journal
     BOOST_OUTCOME_CO_TRY(
-        co_await journal->record_write(offset, iovec{buf, data_bytes}, h.ext));
+        co_await journal->record_write(offset, iovec{buf, data_bytes}, ext));
 
     // Update the extent map and ack. The extent map takes extents that do not
     // include headers, so strip those off before updating.
-    auto data_ext = get_data_ext(h.ext);
+    auto data_ext = get_data_ext(ext);
     co_await extmap.update(offset, data_bytes, data_ext);
 
+    obj->write_end();
     co_return outcome::success();
 }
 
-ResTask<void> LsvdImage::trim_task(off_t offset, usize len)
+ResTask<void> LsvdImage::trim(off_t offset, usize len)
 {
-    auto h = co_await wlog->new_trim_entry(offset, len);
-    BOOST_OUTCOME_CO_TRY(co_await journal->record_trim(offset, len, h.ext));
+    assert(offset >= 0);
+    if (len == 0)
+        co_return outcome::success();
+
+    auto ol = co_await logobj_mtx.co_scoped_lock();
+    auto obj = cur_logobj;
+    obj->write_start();
+    auto [ext, buf] = obj->append(len);
+    co_await log_rollover(false);
+    ol.unlock();
+
+    // Write out the data
+    auto *entry = reinterpret_cast<log_trim_entry *>(buf);
+    *entry = log_trim_entry{
+        .type = log_entry_type::TRIM,
+        .offset = static_cast<u64>(offset),
+        .len = len,
+    };
+
+    BOOST_OUTCOME_CO_TRY(co_await journal->record_trim(offset, len, ext));
     co_await extmap.unmap(offset, len);
+
+    obj->write_end();
     co_return outcome::success();
 }
 
-ResTask<void> LsvdImage::flush_task()
+ResTask<void> LsvdImage::flush()
 {
-    co_await wlog->force_rollover();
+    auto ol = co_await logobj_mtx.co_scoped_lock();
+    auto obj = co_await log_rollover(true);
+    ol.unlock();
+
+    co_await obj->wait_for_writes();
     co_return outcome::success();
+}
+
+// Assumes that the logobj_mtx is held exclusively
+Task<sptr<LogObj>> LsvdImage::log_rollover(bool force)
+{
+    if (!force && cur_logobj->remaining() > rollover_threshold) {
+        co_return cur_logobj;
+    }
+
+    auto prev = cur_logobj;
+    auto new_seqnum = prev->seqnum + 1;
+    auto new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
+    {
+        auto l = co_await pending_mtx.co_scoped_lock();
+        auto [it, inserted] = pending_objs.emplace(new_seqnum, new_logobj);
+        assert(inserted == true);
+    }
+
+    cur_logobj = new_logobj;
+    prev->mark_complete();
+
+    auto exe = co_await folly::coro::co_current_executor;
+    flush_logobj(prev).scheduleOn(exe).start();
+    co_return prev;
+}
+
+Task<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
+{
+    co_await obj->wait_for_writes();
+    auto k = get_key(obj->seqnum);
+
+    // TODO think about what to do in the case of failure here
+    std::ignore = co_await s3->write(k, obj->as_iov());
+    std::ignore = co_await cache->insert_obj(obj->seqnum, obj->as_iov());
+
+    auto l = co_await pending_mtx.co_scoped_lock();
+    pending_objs.erase(obj->seqnum);
+}
+
+Task<void> LsvdImage::checkpoint()
+{
+    TODO();
+    co_return;
 }

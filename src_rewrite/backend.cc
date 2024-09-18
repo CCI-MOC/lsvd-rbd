@@ -11,7 +11,7 @@
 #include "backend.h"
 #include "utils.h"
 
-class Rados : public Backend
+class Rados : public ObjStore
 {
   private:
     librados::IoCtx io;
