@@ -8,7 +8,7 @@ lsvd_src = files(
 lsvd_deps = [
     subproject('folly').get_variable('folly_dep'),
     subproject('liburing').get_variable('uring'),
-    subproject('cereal').get_variable('cereal_dep'),
+    subproject('zpp_bits').get_variable('zppbits_dep'),
 
     dependency('threads', static: true),
     dependency('zlib', static: true),
@@ -20,7 +20,6 @@ lsvd_deps = [
         modules: ['system', 'filesystem', 'program_options', 'thread', 'regex'],
         static: true,
     ),
-    dependency('uuid'),
     dependency('nlohmann_json'),
     cxx.find_library('rados', required: true),
     cxx.find_library('rbd', required: true),

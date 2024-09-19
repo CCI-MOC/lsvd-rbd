@@ -1,7 +1,4 @@
 #include <boost/uuid/uuid.hpp>
-#include <cereal/types/map.hpp>
-#include <cereal/types/string.hpp>
-#include <cereal/types/vector.hpp>
 #include <folly/AtomicHashMap.h>
 #include <folly/FBVector.h>
 

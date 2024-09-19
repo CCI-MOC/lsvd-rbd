@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cereal/types/map.hpp>
-#include <cereal/types/vector.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <folly/AtomicHashMap.h>
@@ -23,7 +21,6 @@ using byte = std::byte;
 using str = folly::fbstring;
 
 using seqnum_t = uint32_t;
-
 const u64 LSVD_MAGIC = 0x4c5356444c535644; // "LSVDLSVD"
 
 /**
