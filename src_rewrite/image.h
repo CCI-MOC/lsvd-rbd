@@ -1,7 +1,9 @@
+#include <boost/uuid/uuid.hpp>
+#include <cereal/types/map.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
 #include <folly/AtomicHashMap.h>
 #include <folly/FBVector.h>
-#include <folly/executors/CPUThreadPoolExecutor.h>
-#include <uuid.h>
 
 #include "backend.h"
 #include "config.h"
@@ -14,36 +16,45 @@
 template <typename T> using FutRes = folly::Future<Result<T>>;
 
 struct SuperblockInfo {
-    u64 magic;
-    u64 version;
-    u64 block_size_bytes;
-    u64 image_size_bytes;
+    u64 magic = LSVD_MAGIC;
+    u64 version = 1;
+    u64 block_size = 4096;
+    u64 image_size;
 
-    folly::fbvector<seqnum_t> checkpoints;
-    folly::fbvector<seqnum_t> snapshots;
-    folly::AtomicHashMap<seqnum_t, str> clones;
+    std::map<seqnum_t, std::string> clones;
+    std::vector<seqnum_t> checkpoints;
+    std::vector<seqnum_t> snapshots;
 };
 
 class LogObj;
 
 class LsvdImage
 {
-    const usize rollover_threshold = 4 * 1024 * 1024;  // 4MB
-    const usize max_log_size = rollover_threshold * 2; // 8MB
+    const usize rollover_threshold = 8 * 1024 * 1024;
+    const usize max_log_size = rollover_threshold * 2;
     const usize block_size = 4096;
+    const usize checkpoint_interval_epoch = 100;
 
   public:
     const str name;
-    const uuid_t uuid;
-    const usize size_bytes;
 
   private:
-    folly::Executor::KeepAlive<> &executor;
+    // Cannot be copied or moved
+    LsvdImage(LsvdImage &) = delete;
+    LsvdImage(LsvdImage &&) = delete;
+    LsvdImage operator=(LsvdImage &) = delete;
+    LsvdImage operator=(LsvdImage &&) = delete;
+
+    // Clone, checkpoint, and snapshopt metadata
+    SuperblockInfo superblock;
+    seqnum_t last_checkpoint;
+
+    // Utilities
     LsvdConfig cfg;
     ExtMap extmap;
-    sptr<ObjStore> s3;
-    sptr<ReadCache> cache;
-    sptr<Journal> journal;
+    uptr<ObjStore> s3;
+    uptr<ReadCache> cache;
+    uptr<Journal> journal;
 
     // The "log" part of LSVD
     folly::coro::SharedMutex logobj_mtx;
@@ -51,20 +62,11 @@ class LsvdImage
     folly::coro::SharedMutex pending_mtx;
     folly::F14FastMap<seqnum_t, sptr<LogObj>> pending_objs;
 
-    // Clone, checkpoint, and snapshopt metadata
-    SuperblockInfo info;
-
     // Internal functions
     std::string get_key(seqnum_t seqnum);
     Task<sptr<LogObj>> log_rollover(bool force);
     Task<void> flush_logobj(sptr<LogObj> obj);
-    Task<void> checkpoint();
-
-    // Cannot be copied or moved
-    LsvdImage(LsvdImage &) = delete;
-    LsvdImage(LsvdImage &&) = delete;
-    LsvdImage operator=(LsvdImage &) = delete;
-    LsvdImage operator=(LsvdImage &&) = delete;
+    Task<void> checkpoint(seqnum_t seqnum);
 
   public:
     static Result<uptr<LsvdImage>> mount(sptr<ObjStore> s3, str name,

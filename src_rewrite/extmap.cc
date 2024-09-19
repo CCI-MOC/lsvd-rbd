@@ -1,5 +1,10 @@
-#include "extmap.h"
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/map.hpp>
 #include <cstdint>
+#include <memory>
+
+#include "extmap.h"
+#include "zpp_bits.h"
 
 Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
 {
@@ -98,4 +103,26 @@ Task<void> ExtMap::unmap(usize base, usize len)
     auto l = co_await mtx.co_scoped_lock();
     unmap_locked(base, len);
     map[base] = {0, 0, len};
+}
+
+Task<vec<byte>> ExtMap::serialise()
+{
+    vec<byte> buf;
+    auto lck = co_await mtx.co_scoped_lock_shared();
+    buf.reserve(map.size() * (sizeof(usize) + sizeof(S3Ext)));
+    zpp::bits::out ar(buf);
+    auto res = ar(map);
+    // TODO handle error
+    assert(zpp::bits::failure(res) == false);
+    co_return buf;
+}
+
+uptr<ExtMap> ExtMap::deserialise(vec<byte> buf)
+{
+    std::map<usize, S3Ext> map;
+    zpp::bits::in ar(buf);
+    auto res = ar(map);
+    // TODO handle error
+    assert(zpp::bits::failure(res) == false);
+    return std::make_unique<ExtMap>(map);
 }

@@ -1,15 +1,17 @@
 #pragma once
-#include <folly/experimental/io/IoUring.h>
 #include <folly/File.h>
+#include <folly/experimental/io/IoUring.h>
 
+#include "backend.h"
 #include "representation.h"
 #include "smartiov.h"
 #include "utils.h"
 
 class Journal
 {
-    folly::File journal_file;
-    folly::IoUring uring;
+  private:
+    sptr<FileIo> journ_file;
+    usize journ_size;
 
   public:
     static uptr<Journal> open(fspath path);

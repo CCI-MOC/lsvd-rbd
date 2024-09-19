@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cereal/types/map.hpp>
+#include <cereal/types/vector.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <folly/AtomicHashMap.h>
 #include <folly/FBString.h>
+#include <folly/FBVector.h>
 #include <unistd.h>
 
 using u64 = uint64_t;
@@ -19,6 +23,8 @@ using byte = std::byte;
 using str = folly::fbstring;
 
 using seqnum_t = uint32_t;
+
+const u64 LSVD_MAGIC = 0x4c5356444c535644; // "LSVDLSVD"
 
 /**
 Represents an extent on the backend. We allow a special object_id = offset = 0
@@ -58,24 +64,15 @@ enum log_entry_type {
     TRIM = 1,
 };
 
-struct __attribute((packed)) log_write_entry {
+struct __attribute((packed)) log_entry {
     log_entry_type type : 2;
     uint64_t offset : 62;
     uint64_t len;
     byte data[];
 };
 
-struct __attribute((packed)) log_trim_entry {
-    log_entry_type type : 2;
-    uint64_t offset : 62;
-    uint64_t len;
-};
-
-const uint32_t LOG_WRITE_ENTRY_SIZE = sizeof(log_write_entry);
+const uint32_t LOG_WRITE_ENTRY_SIZE = sizeof(log_entry);
 static_assert(LOG_WRITE_ENTRY_SIZE == 16);
-
-const auto LOG_TRIM_ENTRY_SIZE = sizeof(log_trim_entry);
-static_assert(LOG_TRIM_ENTRY_SIZE == 16);
 
 inline auto get_data_ext(S3Ext ext)
 {
@@ -86,9 +83,7 @@ inline auto get_data_ext(S3Ext ext)
     };
 }
 
-// === Backend representation ===
-
-inline auto get_object_name(str image_name, seqnum_t seqnum) -> std::string
+inline auto get_logobj_key(str image_name, seqnum_t seqnum) -> std::string
 {
     return fmt::format("{}.{:08x}", image_name, seqnum);
 }
@@ -101,3 +96,6 @@ struct __attribute((packed)) journal_entry {
     uint64_t len;
     byte data[];
 };
+
+const uint32_t JOURNAL_ENTRY_SIZE = sizeof(journal_entry);
+static_assert(JOURNAL_ENTRY_SIZE == 16);

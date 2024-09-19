@@ -1,4 +1,5 @@
 #include <folly/experimental/coro/SharedMutex.h>
+#include <iostream>
 #include <map>
 #include <unistd.h>
 #include <utility>
@@ -40,10 +41,14 @@ class ExtMap
     void unmap_locked(usize base, usize len);
 
   public:
+    ExtMap() {}
+    ExtMap(std::map<usize, S3Ext> map) : map(std::move(map)) {}
+    ~ExtMap() {}
+
     Task<vec<std::pair<usize, S3Ext>>> lookup(usize offset, usize len);
     Task<void> update(usize base, usize len, S3Ext val);
     Task<void> unmap(usize base, usize len);
 
-    Task<void> serialise(vec<byte> &buf);
-    static ExtMap deserialise(vec<byte> &buf);
+    Task<vec<byte>> serialise();
+    static uptr<ExtMap> deserialise(vec<byte> buf);
 };

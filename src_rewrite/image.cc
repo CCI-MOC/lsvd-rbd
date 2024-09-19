@@ -1,4 +1,5 @@
 #include <boost/outcome/try.hpp>
+#include <folly/experimental/coro/Invoke.h>
 
 #include "image.h"
 #include "representation.h"
@@ -150,8 +151,8 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
     lck.unlock();
 
     // Write out the data
-    auto *entry = reinterpret_cast<log_write_entry *>(buf);
-    *entry = log_write_entry{
+    auto *entry = reinterpret_cast<log_entry *>(buf);
+    *entry = log_entry{
         .type = log_entry_type::WRITE,
         .offset = static_cast<u64>(offset),
         .len = data_bytes,
@@ -185,8 +186,8 @@ ResTask<void> LsvdImage::trim(off_t offset, usize len)
     ol.unlock();
 
     // Write out the data
-    auto *entry = reinterpret_cast<log_trim_entry *>(buf);
-    *entry = log_trim_entry{
+    auto *entry = reinterpret_cast<log_entry *>(buf);
+    *entry = log_entry{
         .type = log_entry_type::TRIM,
         .offset = static_cast<u64>(offset),
         .len = len,
@@ -218,6 +219,13 @@ Task<sptr<LogObj>> LsvdImage::log_rollover(bool force)
 
     auto prev = cur_logobj;
     auto new_seqnum = prev->seqnum + 1;
+
+    // add new checkpoint if needed
+    if (new_seqnum > prev->seqnum + checkpoint_interval_epoch) {
+        co_await checkpoint(new_seqnum);
+        new_seqnum += 1;
+    }
+
     auto new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
     {
         auto l = co_await pending_mtx.co_scoped_lock();
@@ -246,8 +254,16 @@ Task<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
     pending_objs.erase(obj->seqnum);
 }
 
-Task<void> LsvdImage::checkpoint()
+Task<void> LsvdImage::checkpoint(seqnum_t seqnum)
 {
-    TODO();
-    co_return;
+    auto buf = co_await extmap.serialise();
+    auto k = get_key(seqnum);
+    auto f = folly::coro::co_invoke(
+        [this, k](auto buf) -> Task<void> {
+            // TODO what to do if the checkpoint fails?
+            std::ignore =
+                co_await s3->write(k, iovec{(void *)buf.data(), buf.size()});
+        },
+        std::move(buf));
+    std::move(f).scheduleOn(co_await folly::coro::co_current_executor).start();
 }
