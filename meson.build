@@ -34,17 +34,10 @@ endif
 cxx = meson.get_compiler('cpp')
 
 subdir('src')
-# lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
 
 executable(
     'lsvd',
-    spdk_fe,
-    dependencies: lsvd_deps + [dependency('_spdk')],
-)
-
-executable(
-    'lsvd_tgt',
-    lsvd_tgt,
+    lsvd_src,
     dependencies: lsvd_deps + [dependency('_spdk')],
 )
 

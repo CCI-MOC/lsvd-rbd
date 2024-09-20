@@ -11,7 +11,11 @@ qemu/*.img
 qemu/*.iso
 qemu/bzImage
 
+CMakeLists.txt
+vcpkg.json
+vckpg-configuration.json
 vcpkg_installed/
+
 subprojects/
 !subprojects/*.wrap
 !subprojects/packagefiles/
