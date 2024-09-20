@@ -11,6 +11,7 @@ qemu/*.img
 qemu/*.iso
 qemu/bzImage
 
+vcpkg_installed/
 subprojects/
 !subprojects/*.wrap
 !subprojects/packagefiles/

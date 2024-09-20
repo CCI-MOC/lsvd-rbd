@@ -7,6 +7,8 @@
 
 #include "utils.h"
 
+using byte = std::byte;
+
 /* this makes readv / writev a lot easier...
  */
 class smartiov
@@ -91,7 +93,7 @@ class smartiov
         }
     }
 
-    void copy_in(char *buf)
+    void copy_in(byte *buf)
     {
         for (auto i : iovs) {
             memcpy((void *)i.iov_base, (void *)buf, (size_t)i.iov_len);
@@ -99,7 +101,7 @@ class smartiov
         }
     }
 
-    void copy_in(char *buf, size_t limit)
+    void copy_in(byte *buf, size_t limit)
     {
         if (limit == 0) // do nothing
             return;
@@ -118,7 +120,7 @@ class smartiov
         }
     }
 
-    void copy_out(char *buf)
+    void copy_out(byte *buf)
     {
         for (auto i : iovs) {
             memcpy((void *)buf, (void *)i.iov_base, (size_t)i.iov_len);
@@ -134,39 +136,3 @@ class smartiov
         return true;
     }
 };
-
-#ifdef TEST
-
-#include <cassert>
-#include <cstdlib>
-
-void test1(void)
-{
-    char *buf1 = (char *)calloc(1001, 1);
-    char *buf2 = (char *)calloc(1001, 1);
-    memset(buf1, 'A', 1000);
-    iovec iov1[] = {{buf1, 117},
-                    {buf1 + 117, 204},
-                    {buf1 + 117 + 204, 412},
-                    {buf1 + 733, 1000 - 733}};
-    auto s = smartiov(iov1, 4);
-    s.copy_out(buf2);
-    assert(strlen(buf2) == 1000);
-
-    auto z = s.slice(200, 500); // 0, 83+121, 0+179
-    assert(z.bytes() == 300);
-    assert(z.size() == 2);
-    assert(z.iov()[0].iov_base == buf1 + 200);
-
-    s.slice(200, 500).zero();
-    assert(strlen(buf1) == 200);
-    assert(memchr(buf1 + 200, 'A', 800) == buf1 + 500);
-
-    memset(buf2, 0, 1001);
-    s.slice(400, 700).copy_out(buf2);
-    assert(memchr(buf2, 'A', 300) == buf2 + 100);
-    assert(strlen(buf2 + 100) == 200);
-}
-
-int main(int argc, char **argv) { test1(); }
-#endif

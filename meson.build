@@ -19,6 +19,8 @@ add_project_arguments('-fPIC', language: 'cpp')
 add_project_arguments('-Wno-unused-parameter', language: 'cpp')
 add_project_arguments('-Wno-deprecated-declarations', language: 'c')
 add_project_arguments('-Wno-deprecated-declarations', language: 'cpp')
+add_project_arguments('-Wno-nullability-completeness', language: 'cpp')
+add_project_arguments('-Wno-defaulted-function-deleted', language: 'cpp')
 # add_project_link_arguments('-static-libstdc++', language: 'cpp')
 # add_project_link_arguments('-static-libgcc', language: 'cpp')
 # add_project_link_arguments('-static', language: 'cpp')
@@ -31,7 +33,7 @@ endif
 # globals
 cxx = meson.get_compiler('cpp')
 
-subdir('src_rewrite')
+subdir('src')
 # lsvd_ar = static_library('lsvd', lsvd_src, dependencies: lsvd_deps)
 
 executable(

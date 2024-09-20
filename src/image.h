@@ -1,110 +1,81 @@
-#pragma once
-
-#include <functional>
-#include <map>
-#include <thread>
+#include <boost/uuid/uuid.hpp>
+#include <folly/AtomicHashMap.h>
+#include <folly/FBVector.h>
 
 #include "backend.h"
 #include "config.h"
-#include "extent.h"
-#include "objects.h"
-#include "shared_read_cache.h"
-#include "translate.h"
-#include "write_cache.h"
+#include "extmap.h"
+#include "journal.h"
+#include "read_cache.h"
+#include "smartiov.h"
+#include "utils.h"
 
-/**
- * Core LSVD image class. An LSVD image supports 4 operations: read, write,
- * trim, and flush. All are async to prevent function colour issues.
- *
- * Currently, a lot of core image functionality is in the `translate` class.
- * The separation between what is here and what is there is not clear, and the
- * two classes really should be consolidated, and the GC function splitted out
- * into its own class.
- *
- * For now, all the core information about the image is owned by this class,
- * and `translate` only takes references to it. Most of the translate code was
- * from long ago, written by people who are no longer around. It's written like
- * a C program, and the ownership structure of most resources is unclear, with
- * sketchy concurrency control and C++ style.
- *
- * Eventually we'll have to rewrite the core translation class to clarify
- * resource ownership and to overhaul the disastrous locking situation, but
- * that's only a dream for now
- */
+template <typename T> using FutRes = folly::Future<Result<T>>;
+
+struct SuperblockInfo {
+    u64 magic = LSVD_MAGIC;
+    u64 version = 1;
+    u64 block_size = 4096;
+    u64 image_size;
+
+    std::map<seqnum_t, std::string> clones;
+    std::vector<seqnum_t> checkpoints;
+    std::vector<seqnum_t> snapshots;
+};
+
+class LogObj;
+
 class LsvdImage
 {
-  private:
-    // no copying or moving
-    LsvdImage(const LsvdImage &) = delete;
-    LsvdImage operator=(const LsvdImage &) = delete;
-    LsvdImage(const LsvdImage &&) = delete;
-    LsvdImage operator=(const LsvdImage &&) = delete;
-
-    // Log recovery
-    Result<void> read_superblock();
-    Result<void> read_from_checkpoint(seqnum_t ckpt_id);
-    Result<void> apply_log(seqnum_t seq);
-
-    seqnum_t roll_forward_from_last_checkpoint();
-    void recover_from_wlog();
+    const usize rollover_threshold = 8 * 1024 * 1024;
+    const usize max_log_size = rollover_threshold * 2;
+    const usize block_size = 4096;
+    const usize checkpoint_interval_epoch = 100;
 
   public:
-    LsvdImage(std::string name, rados_ioctx_t io, lsvd_config cfg);
-    ~LsvdImage();
-
-    std::string imgname;
-    uuid_t uuid;
-    usize size; // bytes
-    lsvd_config cfg;
-
-    rados_ioctx_t io;
-
-    vec<clone_base> clones;    // Base images on which we're built
-    vec<seqnum_t> checkpoints; // Checkpoints
-    std::map<seqnum_t, data_obj_info> obj_info;
-
-    // LBA -> object id, object offset
-    extmap::objmap objmap;
-    std::shared_mutex map_lock;
-
-    // LBA -> in-memory, higher priority than the object map
-    // We potentially want to consolidate this with the object map, but
-    // this is currently not possible as we don't assign object IDs until the
-    // objects are queued for dispatch to the backend
-    // NOTE potential fix: use magic IDs that are in-memory
-    extmap::bufmap bufmap;
-    std::mutex bufmap_lock;
-
-    // TODO only 1 read at a time? probably too coarse
-    std::mutex reader_lock;
-
-    std::map<int, char *> buffers;
-
-    std::shared_ptr<Backend> objstore;
-    std::shared_ptr<ReadCache> rcache;
-    std::unique_ptr<write_cache> wlog;
-    std::unique_ptr<translate> xlate;
-
-    int refcount = 0;
-
-    std::thread dbg;
-    bool done = false;
-
-    class aio_request;
-    class trivial_request;
-    class read_request;
-    class write_request;
-    request *read(size_t offset, smartiov iov, std::function<void(int)> cb);
-    request *write(size_t offset, smartiov iov, std::function<void(int)> cb);
-    request *trim(size_t offset, size_t len, std::function<void(int)> cb);
-    request *flush(std::function<void(int)> cb);
-
-    // Image management
-    static Result<void> create_new(str name, usize size, rados_ioctx_t io);
-    static Result<void> get_uuid(str name, uuid_t &uuid, rados_ioctx_t io);
-    static Result<void> delete_image(str name, rados_ioctx_t io);
-    static Result<void> clone_image(str oldname, str newname, rados_ioctx_t io);
+    const str name;
 
   private:
-    void handle_reads(usize offset, smartiov iovs, vec<request *> &requests);
+    // Cannot be copied or moved
+    LsvdImage(LsvdImage &) = delete;
+    LsvdImage(LsvdImage &&) = delete;
+    LsvdImage operator=(LsvdImage &) = delete;
+    LsvdImage operator=(LsvdImage &&) = delete;
+
+    // Clone, checkpoint, and snapshopt metadata
+    SuperblockInfo superblock;
+    seqnum_t last_checkpoint;
+
+    // Utilities
+    LsvdConfig cfg;
+    ExtMap extmap;
+    uptr<ObjStore> s3;
+    uptr<ReadCache> cache;
+    uptr<Journal> journal;
+
+    // The "log" part of LSVD
+    folly::coro::SharedMutex logobj_mtx;
+    sptr<LogObj> cur_logobj;
+    folly::coro::SharedMutex pending_mtx;
+    folly::F14FastMap<seqnum_t, sptr<LogObj>> pending_objs;
+
+    // Internal functions
+    std::string get_key(seqnum_t seqnum);
+    Task<sptr<LogObj>> log_rollover(bool force);
+    Task<void> flush_logobj(sptr<LogObj> obj);
+    Task<void> checkpoint(seqnum_t seqnum);
+
+  public:
+    static Result<uptr<LsvdImage>> mount(sptr<ObjStore> s3, str name,
+                                         str config);
+    void unmount();
+
+    static FutRes<void> create(sptr<ObjStore> s3, str name);
+    static FutRes<void> remove(sptr<ObjStore> s3, str name);
+    static FutRes<void> clone(sptr<ObjStore> s3, str src, str dst);
+
+    ResTask<void> read(off_t offset, smartiov iovs);
+    ResTask<void> write(off_t offset, smartiov iovs);
+    ResTask<void> trim(off_t offset, usize len);
+    ResTask<void> flush();
 };

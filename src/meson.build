@@ -1,50 +1,38 @@
-folly_sub = subproject('folly')
-libfolly = folly_sub.get_variable('folly_dep')
-
 lsvd_src = files(
-    'config.cc',
+    'backend.cc',
+    'extmap.cc',
     'image.cc',
-    'liblsvd.cc',
-    'lsvd_debug.cc',
-    'nvme.cc',
-    'objects.cc',
-    'rados_backend.cc',
-    'shared_read_cache.cc',
-    'spdk_wrap.cc',
-    'translate.cc',
-    'write_cache.cc',
-    'backend_rados.cc',
-    'read_cache.cc',
+    'journal.cc',
 )
 
-lsvd_inc = include_directories('.')
 lsvd_deps = [
-    # libfolly,
-    dependency('threads', static: true),
-    dependency('zlib', static: true),
-    dependency('zstd', modules: ['zstd::libzstd_static'], static: true),
-    dependency('libarchive', static: true),
-    dependency('fmt', static: true),
-    dependency(
-        'boost',
-        modules: ['system', 'filesystem', 'program_options', 'thread', 'regex'],
-        static: true,
-    ),
-    dependency('liburing', static: true),
-    dependency('uuid'),
-    dependency('nlohmann_json'),
+    # subproject('folly').get_variable('folly_dep'),
+    subproject('cachelib').get_variable('cachelib_dep'),
+    subproject('zpp_bits').get_variable('zppbits_dep'),
+    # subproject('liburing').get_variable('uring'),
+
     cxx.find_library('rados', required: true),
     cxx.find_library('jemalloc', required: false),
-    libfolly,
+
+    # dependency('liburing', static: true),
+    dependency('threads', static: true),
+    # dependency('fmt', static: true),
+    dependency(
+        'boost',
+        modules: ['system', 'filesystem', 'program_options', 'thread', 'regex', 'context'],
+        static: true,
+    ),
+
+    # dependency('zlib', static: true),
+    # dependency('zstd', modules: ['zstd::libzstd_static'], static: true),
+    # dependency('libarchive', static: true),
+    # dependency('nlohmann_json'),
 ]
 
 spdk_fe = lsvd_src + files(
-    'bdev_lsvd.cc',
-    'spdk_frontend.cc',
+    'lsvd_main.cc',
 )
 
 lsvd_tgt = lsvd_src + files(
-    'bdev_lsvd.cc',
-    'bdev_lsvd_rpc.cc',
-    'lsvd_tgt.cc',
+    'lsvd_main.cc',
 )
