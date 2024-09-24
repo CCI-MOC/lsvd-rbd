@@ -64,7 +64,7 @@ class Rados : public ObjStore
         librados::IoCtx::from_rados_ioctx_t(io, this->io);
     }
 
-    auto get_size(str name) -> ResTask<usize> override
+    auto get_size(fstr name) -> ResTask<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
@@ -81,12 +81,12 @@ class Rados : public ObjStore
         co_return size;
     }
 
-    auto exists(str name) -> ResTask<bool> override
+    auto exists(fstr name) -> ResTask<bool> override
     {
         co_return (co_await get_size(name)).has_value();
     }
 
-    auto read(str name, off_t offset, smartiov &v) -> ResTask<usize> override
+    auto read(fstr name, off_t offset, smartiov &v) -> ResTask<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
@@ -97,7 +97,7 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read(str name, off_t offset, iovec v) -> ResTask<usize> override
+    auto read(fstr name, off_t offset, iovec v) -> ResTask<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
@@ -108,7 +108,7 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read_all(str name) -> ResTask<vec<byte>> override
+    auto read_all(fstr name) -> ResTask<vec<byte>> override
     {
         auto size_res = co_await get_size(name);
         if (!size_res.has_value())
@@ -131,7 +131,7 @@ class Rados : public ObjStore
         co_return buf;
     }
 
-    auto write(str name, smartiov &v) -> ResTask<usize> override
+    auto write(fstr name, smartiov &v) -> ResTask<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
@@ -141,7 +141,7 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto write(str name, iovec v) -> ResTask<usize> override
+    auto write(fstr name, iovec v) -> ResTask<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
@@ -150,4 +150,41 @@ class Rados : public ObjStore
         assert(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
+
+    auto remove(fstr name) -> ResTask<void> override
+    {
+        auto &&[p, f] = folly::coro::makePromiseContract<int>();
+        RadosCbWrap cb(std::move(p));
+        auto rc = io.aio_remove(name.toStdString(), cb.cb);
+        assert(rc == 0);
+        auto iores = co_await std::move(f);
+        if (iores < 0)
+            co_return outcome::failure(
+                std::error_code(-iores, std::system_category()));
+        else
+            co_return outcome::success();
+    }
 };
+
+Result<uptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
+{
+    rados_t cluster;
+    auto rc = rados_create(&cluster, "admin");
+    if (rc < 0)
+        return outcome::failure(std::error_code(-rc, std::system_category()));
+
+    rc = rados_conf_read_file(cluster, nullptr);
+    if (rc < 0)
+        return outcome::failure(std::error_code(-rc, std::system_category()));
+
+    rc = rados_connect(cluster);
+    if (rc < 0)
+        return outcome::failure(std::error_code(-rc, std::system_category()));
+
+    rados_ioctx_t io;
+    rc = rados_ioctx_create(cluster, pool_name.toStdString().c_str(), &io);
+    if (rc < 0)
+        return outcome::failure(std::error_code(-rc, std::system_category()));
+
+    return uptr<ObjStore>(new Rados(io));
+}

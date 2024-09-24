@@ -18,7 +18,9 @@ using s8 = int8_t;
 using usize = size_t;
 using ssize = ssize_t;
 using byte = std::byte;
-using str = folly::fbstring;
+using fstr = folly::fbstring;
+using strv = std::string_view;
+using string = std::string;
 
 using seqnum_t = uint32_t;
 const u64 LSVD_MAGIC = 0x4c5356444c535644; // "LSVDLSVD"
@@ -80,9 +82,14 @@ inline auto get_data_ext(S3Ext ext)
     };
 }
 
-inline auto get_logobj_key(str image_name, seqnum_t seqnum) -> std::string
+inline auto get_logobj_key(strv image_name, seqnum_t seqnum)
 {
     return fmt::format("{}.{:08x}", image_name, seqnum);
+}
+
+inline auto get_cache_key(strv image_name, seqnum_t seqnum, usize offset)
+{
+    return fmt::format("{}.{:08x}:{}", image_name, seqnum, offset);
 }
 
 // === Journal entries ===

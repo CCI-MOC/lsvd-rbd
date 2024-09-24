@@ -1,9 +1,13 @@
 #include <boost/outcome/try.hpp>
 #include <folly/experimental/coro/Invoke.h>
+#include <folly/logging/xlog.h>
+#include <zpp_bits.h>
 
+#include "folly/String.h"
 #include "image.h"
 #include "representation.h"
 #include "smartiov.h"
+#include "src/read_cache.h"
 #include "utils.h"
 
 class LogObj
@@ -34,6 +38,7 @@ class LogObj
 
     auto remaining() { return data.size() - bytes_written; }
     auto as_iov() { return iovec{data.data(), bytes_written}; }
+    auto as_buffer() { return buffer{data.data(), bytes_written}; }
     auto at(S3Ext ext) { return data.data() + ext.offset; }
 
     Task<void> wait_for_writes() { co_await writes_done_baton; }
@@ -51,7 +56,7 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
     // Since backend objects are immutable, we just need a read lock for as long
     // as we're getting the extents. Once we have the extents, the map can be
     // moified and we don't care.
-    auto exts = co_await extmap.lookup(offset, iovs.bytes());
+    auto exts = co_await extmap->lookup(offset, iovs.bytes());
 
     folly::fbvector<folly::SemiFuture<Result<void>>> tasks;
     tasks.reserve(exts.size());
@@ -147,7 +152,7 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
     auto obj = cur_logobj;
     obj->write_start();
     auto [ext, buf] = obj->append(data_bytes);
-    co_await log_rollover(false);
+    co_await rollover_log(false);
     lck.unlock();
 
     // Write out the data
@@ -166,7 +171,7 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
     // Update the extent map and ack. The extent map takes extents that do not
     // include headers, so strip those off before updating.
     auto data_ext = get_data_ext(ext);
-    co_await extmap.update(offset, data_bytes, data_ext);
+    co_await extmap->update(offset, data_bytes, data_ext);
 
     obj->write_end();
     co_return outcome::success();
@@ -182,7 +187,7 @@ ResTask<void> LsvdImage::trim(off_t offset, usize len)
     auto obj = cur_logobj;
     obj->write_start();
     auto [ext, buf] = obj->append(len);
-    co_await log_rollover(false);
+    co_await rollover_log(false);
     ol.unlock();
 
     // Write out the data
@@ -194,7 +199,7 @@ ResTask<void> LsvdImage::trim(off_t offset, usize len)
     };
 
     BOOST_OUTCOME_CO_TRY(co_await journal->record_trim(offset, len, ext));
-    co_await extmap.unmap(offset, len);
+    co_await extmap->unmap(offset, len);
 
     obj->write_end();
     co_return outcome::success();
@@ -203,7 +208,7 @@ ResTask<void> LsvdImage::trim(off_t offset, usize len)
 ResTask<void> LsvdImage::flush()
 {
     auto ol = co_await logobj_mtx.co_scoped_lock();
-    auto obj = co_await log_rollover(true);
+    auto obj = co_await rollover_log(true);
     ol.unlock();
 
     co_await obj->wait_for_writes();
@@ -211,7 +216,7 @@ ResTask<void> LsvdImage::flush()
 }
 
 // Assumes that the logobj_mtx is held exclusively
-Task<sptr<LogObj>> LsvdImage::log_rollover(bool force)
+Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
 {
     if (!force && cur_logobj->remaining() > rollover_threshold) {
         co_return cur_logobj;
@@ -222,7 +227,10 @@ Task<sptr<LogObj>> LsvdImage::log_rollover(bool force)
 
     // add new checkpoint if needed
     if (new_seqnum > prev->seqnum + checkpoint_interval_epoch) {
-        co_await checkpoint(new_seqnum);
+        auto ckpt_buf = co_await extmap->serialise();
+        checkpoint(new_seqnum, std::move(ckpt_buf))
+            .scheduleOn(co_await folly::coro::co_current_executor)
+            .start();
         new_seqnum += 1;
     }
 
@@ -241,29 +249,145 @@ Task<sptr<LogObj>> LsvdImage::log_rollover(bool force)
     co_return prev;
 }
 
-Task<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
+ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
 {
     co_await obj->wait_for_writes();
-    auto k = get_key(obj->seqnum);
+    auto k = get_logobj_key(name, obj->seqnum);
 
     // TODO think about what to do in the case of failure here
-    std::ignore = co_await s3->write(k, obj->as_iov());
-    std::ignore = co_await cache->insert_obj(obj->seqnum, obj->as_iov());
+    BOOST_OUTCOME_CO_TRYX(co_await s3->write(k, obj->as_iov()));
+    BOOST_OUTCOME_CO_TRYX(
+        co_await cache->insert_obj(obj->seqnum, obj->as_buffer()));
 
     auto l = co_await pending_mtx.co_scoped_lock();
     pending_objs.erase(obj->seqnum);
+
+    co_return outcome::success();
 }
 
-Task<void> LsvdImage::checkpoint(seqnum_t seqnum)
+ResTask<void> LsvdImage::checkpoint(seqnum_t seqnum, vec<byte> buf)
 {
-    auto buf = co_await extmap.serialise();
-    auto k = get_key(seqnum);
-    auto f = folly::coro::co_invoke(
-        [this, k](auto buf) -> Task<void> {
-            // TODO what to do if the checkpoint fails?
-            std::ignore =
-                co_await s3->write(k, iovec{(void *)buf.data(), buf.size()});
-        },
-        std::move(buf));
-    std::move(f).scheduleOn(co_await folly::coro::co_current_executor).start();
+    auto k = get_logobj_key(name, seqnum);
+
+    // TODO handle failure
+    BOOST_OUTCOME_CO_TRYX(co_await s3->write(k, iovec{buf.data(), buf.size()}));
+
+    // update superblock with new checkpoint
+    superblock.checkpoints.push_back(seqnum);
+    auto super_buf = superblock.serialise().value();
+
+    BOOST_OUTCOME_CO_TRYX(
+        co_await s3->write(name, iovec{super_buf.data(), super_buf.size()}));
+
+    co_return outcome::success();
+}
+
+ResTask<void> LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf,
+                                    usize start_byte)
+{
+    u32 consumed_bytes = start_byte;
+    while (consumed_bytes < buf.size()) {
+        auto entry = reinterpret_cast<log_entry *>(buf.data() + consumed_bytes);
+        switch (entry->type) {
+        case log_entry_type::WRITE:
+            co_await extmap->update(entry->offset, entry->len,
+                                    S3Ext{seq, consumed_bytes, entry->len});
+            break;
+        case log_entry_type::TRIM:
+            co_await extmap->unmap(entry->offset, entry->len);
+            break;
+        default:
+            XLOG(ERR, "Unknown log entry type {}",
+                 static_cast<u32>(entry->type));
+            co_return outcome::failure(std::errc::io_error);
+        }
+        consumed_bytes += sizeof(log_entry) + entry->len;
+    }
+
+    co_return outcome::success();
+}
+
+ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
+                                          fstr cfg_str)
+{
+    XLOG(INFO, "Mounting {} with config {}", name, cfg_str);
+    auto img = std::unique_ptr<LsvdImage>(new LsvdImage(name));
+
+    img->cfg = BOOST_OUTCOME_CO_TRYX(LsvdConfig::parse(cfg_str));
+
+    SuperblockInfo superblock;
+    auto super_buf = BOOST_OUTCOME_CO_TRYX(co_await s3->read_all(name));
+    BOOST_OUTCOME_CO_TRYX(superblock.deserialise(super_buf));
+    img->superblock = superblock;
+
+    XLOG(INFO, "Found checkpoints: {}",
+         folly::join(", ", superblock.checkpoints));
+    img->last_checkpoint = superblock.checkpoints.back();
+    auto last_ckpt_key = get_logobj_key(name, img->last_checkpoint);
+    auto last_ckpt_buf =
+        BOOST_OUTCOME_CO_TRYX(co_await s3->read_all(last_ckpt_key));
+    img->extmap = ExtMap::deserialise(last_ckpt_buf);
+
+    img->s3 = s3;
+    img->cache = make_image_cache(s3, name);
+    img->journal =
+        BOOST_OUTCOME_CO_TRYX(co_await Journal::open(img->cfg.journal_path));
+
+    // recover the image starting from the last checkpoint
+    u32 err_count = 0;
+    for (auto cur_seq = img->last_checkpoint + 1;
+         err_count < LOG_REPLAY_OBJECT_COUNT; cur_seq++) {
+        auto lo_buf = co_await s3->read_all(get_logobj_key(name, cur_seq));
+        if (lo_buf.has_value())
+            BOOST_OUTCOME_CO_TRYX(
+                co_await img->replay_obj(cur_seq, lo_buf.value(), 0));
+        else
+            err_count++;
+    }
+
+    // TODO search for uncommited objects in the journal and replay them too
+
+    co_return img;
+}
+
+Task<void> LsvdImage::unmount()
+{
+    auto ol = co_await logobj_mtx.co_scoped_lock();
+    auto obj = co_await rollover_log(true);
+    co_await obj->wait_for_writes();
+}
+
+ResTask<void> LsvdImage::create(sptr<ObjStore> s3, fstr name, usize size)
+{
+    XLOG(INFO, "Creating new image {}", name);
+
+    XLOG(DBG, "Writing out checkpoint of empty extmap");
+    ExtMap extmap;
+    auto extmap_buf = co_await extmap.serialise();
+    auto ckpt_key = get_logobj_key(name, 1);
+    BOOST_OUTCOME_CO_TRYX(co_await s3->write(
+        ckpt_key, iovec{extmap_buf.data(), extmap_buf.size()}));
+
+    XLOG(DBG, "Creating superblock for image of size {}", size);
+    auto superblock = SuperblockInfo{
+        .image_size = size, .clones = {}, .checkpoints = {1}, .snapshots = {}};
+    auto super_buf = BOOST_OUTCOME_CO_TRYX(superblock.serialise());
+    BOOST_OUTCOME_CO_TRYX(
+        co_await s3->write(name, iovec{super_buf.data(), super_buf.size()}));
+
+    co_return outcome::success();
+}
+
+ResTask<void> LsvdImage::remove(sptr<ObjStore> s3, fstr name)
+{
+    XLOG(INFO, "Removing image {}", name);
+    // TODO
+    co_return outcome::failure(std::errc::not_supported);
+}
+
+ResTask<void> LsvdImage::clone(sptr<ObjStore> s3, fstr src, fstr dst)
+{
+    XLOG(INFO, "Cloning image {} to {}", src, dst);
+    // TODO
+    co_return outcome::failure(std::errc::not_supported);
 }

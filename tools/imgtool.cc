@@ -116,7 +116,7 @@ int main(int argc, char **argv)
     auto pool = vm["pool"].as<str>();
     auto img = vm["img"].as<str>();
 
-    auto io = connect_to_pool(pool).value();
+    auto io = ObjStore::connect_to_pool(pool).value();
 
     if (cmd == "create") {
         auto size = parseint(vm["size"].as<str>());

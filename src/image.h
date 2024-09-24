@@ -10,6 +10,8 @@
 #include "smartiov.h"
 #include "utils.h"
 
+const u32 LOG_REPLAY_OBJECT_COUNT = 16;
+
 template <typename T> using FutRes = folly::Future<Result<T>>;
 
 struct SuperblockInfo {
@@ -21,6 +23,9 @@ struct SuperblockInfo {
     std::map<seqnum_t, std::string> clones;
     std::vector<seqnum_t> checkpoints;
     std::vector<seqnum_t> snapshots;
+
+    Result<void> deserialise(vec<byte> buf);
+    Result<vec<byte>> serialise();
 };
 
 class LogObj;
@@ -33,9 +38,11 @@ class LsvdImage
     const usize checkpoint_interval_epoch = 100;
 
   public:
-    const str name;
+    const fstr name;
 
   private:
+    LsvdImage(fstr name) : name(name) {}
+
     // Cannot be copied or moved
     LsvdImage(LsvdImage &) = delete;
     LsvdImage(LsvdImage &&) = delete;
@@ -48,8 +55,8 @@ class LsvdImage
 
     // Utilities
     LsvdConfig cfg;
-    ExtMap extmap;
-    uptr<ObjStore> s3;
+    uptr<ExtMap> extmap;
+    sptr<ObjStore> s3;
     uptr<ReadCache> cache;
     uptr<Journal> journal;
 
@@ -60,19 +67,19 @@ class LsvdImage
     folly::F14FastMap<seqnum_t, sptr<LogObj>> pending_objs;
 
     // Internal functions
-    std::string get_key(seqnum_t seqnum);
-    Task<sptr<LogObj>> log_rollover(bool force);
-    Task<void> flush_logobj(sptr<LogObj> obj);
-    Task<void> checkpoint(seqnum_t seqnum);
+    Task<sptr<LogObj>> rollover_log(bool force);
+    ResTask<void> flush_logobj(sptr<LogObj> obj);
+    ResTask<void> checkpoint(seqnum_t seqnum, vec<byte> buf);
+    ResTask<void> replay_obj(seqnum_t seq, vec<byte> buf, usize start_byte);
 
   public:
-    static Result<uptr<LsvdImage>> mount(sptr<ObjStore> s3, str name,
-                                         str config);
-    void unmount();
+    static ResTask<uptr<LsvdImage>> mount(sptr<ObjStore> s3, fstr name,
+                                          fstr config);
+    Task<void> unmount();
 
-    static FutRes<void> create(sptr<ObjStore> s3, str name);
-    static FutRes<void> remove(sptr<ObjStore> s3, str name);
-    static FutRes<void> clone(sptr<ObjStore> s3, str src, str dst);
+    static ResTask<void> create(sptr<ObjStore> s3, fstr name, usize size);
+    static ResTask<void> remove(sptr<ObjStore> s3, fstr name);
+    static ResTask<void> clone(sptr<ObjStore> s3, fstr src, fstr dst);
 
     ResTask<void> read(off_t offset, smartiov iovs);
     ResTask<void> write(off_t offset, smartiov iovs);

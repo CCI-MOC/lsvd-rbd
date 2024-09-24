@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <folly/logging/xlog.h>
 #include <memory>
 
 #include "extmap.h"
@@ -16,7 +17,7 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
     // the whole address space should be mapped, so if we don't find anything
     // that means we're looking at a corrupted map
     if (it == map.end()) {
-        log_error("Corrupt map: no entry found for offset {}", offset);
+        XLOG(ERR, "Corrupt map: no entry found for offset {}", offset);
         co_return res;
     }
 
@@ -30,7 +31,7 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
 
         if (it == map.end() || base > offset + len ||
             base != offset + bytes_found) {
-            log_error("Corrupt map detected on {}+{}", offset, len);
+            XLOG(ERR, "Corrupt map detected on {}+{}", offset, len);
             co_return res;
         }
 
@@ -55,29 +56,61 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
 
 void ExtMap::unmap_locked(usize offset, usize len)
 {
+    auto start = offset;
+    auto end = offset + len;
+    // Find first extent where its base is > offset
     auto it = map.upper_bound(offset);
-    it--;
+    it--; // go back one for <=
+
+    // Check for case 1 where we bisect an existing extent
+    // |----- existing extent -----------|
+    //          |--- update ---|
+    // |--left--|              |--right--|
+    if (it->first < start && it->first + it->second.len > end) {
+        auto &[base, ext] = *it;
+        ext.len = start - base;
+
+        auto right_len = base + ext.len - end;
+        auto right_off = ext.offset + (ext.len - right_len);
+        map[end] = S3Ext{
+            .seqnum = ext.seqnum,
+            .offset = static_cast<u32>(right_off),
+            .len = right_len,
+        };
+
+        return;
+    }
+
+    // Case 2 We partially overlap with one or more existing extents
+    // |------|--- existing ---|-------
+    // |-------- update --------------|
 
     // Shrink the extent before the offset to end at the new extent start
-    if (it->first < offset) {
+    // ----- existing ----|
+    // --------offset---|---len---|
+    // -------- new ----|
+    if (it->first < start) {
         auto &[base, ext] = *it;
         map[base].len = offset - base;
         it++;
     }
 
     // Remove all extents that are fully contained in the new extent
-    while (it != map.end() && it->first < offset + len) {
+    while (it != map.end() && it->first < end) {
         auto &[base, ext] = *it;
-        if (base + ext.len < offset + len)
+        if (base + ext.len < end)
             it = map.erase(it);
     }
 
     // Shrink the extent after the offset to start at the new extent end
-    if (it != map.end() && it->first < offset + len) {
+    // -----------------|       |----existing ---
+    // --------offset---|---len---|
+    // -----------------|         |---- new ---
+    if (it != map.end() && it->first < end) {
         auto [base, ext] = *it;
         map.erase(it);
 
-        auto shrink_bytes = offset + len - base;
+        auto shrink_bytes = end - base;
         assert(shrink_bytes < ext.len);
         assert(shrink_bytes < UINT32_MAX);
         map[base + shrink_bytes] = S3Ext{
@@ -106,9 +139,9 @@ Task<void> ExtMap::unmap(usize base, usize len)
 Task<vec<byte>> ExtMap::serialise()
 {
     vec<byte> buf;
-    auto lck = co_await mtx.co_scoped_lock_shared();
     buf.reserve(map.size() * (sizeof(usize) + sizeof(S3Ext)));
     zpp::bits::out ar(buf);
+    auto lck = co_await mtx.co_scoped_lock_shared();
     auto res = ar(map);
     // TODO handle error
     assert(zpp::bits::failure(res) == false);
