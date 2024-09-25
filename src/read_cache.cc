@@ -5,7 +5,7 @@
 #include "smartiov.h"
 #include "utils.h"
 
-using Cache = facebook::cachelib::Lru2QAllocator;
+using Cache = facebook::cachelib::LruAllocator;
 using PoolId = facebook::cachelib::PoolId;
 
 struct iov {
@@ -18,15 +18,21 @@ class SharedCache
     uptr<Cache> cache;
     PoolId pid;
 
-    SharedCache(uptr<Cache> cache) : cache(std::move(cache))
+    SharedCache(uptr<Cache> cache_) : cache(std::move(cache_))
     {
         pid = cache->addPool("default",
                              cache->getCacheMemoryStats().ramCacheSize);
     }
 
+    inline static sptr<SharedCache> singleton = nullptr;
+
   public:
-    static auto make_cache(usize mem_bytes, usize nvm_bytes, fstr nvm_path)
+    static void init_cache(usize mem_bytes, usize nvm_bytes, fstr nvm_path)
     {
+        XLOGF(INFO,
+              "Initialising SharedCache with {} bytes of memory and {} "
+              "bytes of NVM cache at {}",
+              mem_bytes, nvm_bytes, nvm_path);
         Cache::NvmCacheConfig ncfg;
         ncfg.navyConfig.setBlockSize(4096);
         ncfg.navyConfig.setSimpleFile(nvm_path.toStdString(), nvm_bytes, true);
@@ -40,8 +46,16 @@ class SharedCache
         cfg.validate();
 
         auto c = std::make_unique<Cache>(cfg);
-        auto sc = new SharedCache(std::move(c));
-        return std::unique_ptr<SharedCache>(sc);
+        singleton = sptr<SharedCache>(new SharedCache(std::move(c)));
+    }
+
+    static sptr<SharedCache> get()
+    {
+        if (!singleton) [[unlikely]] {
+            XLOGF(FATAL, "SharedCache not initialized");
+            std::abort();
+        }
+        return singleton;
     }
 
     // returns true iff item was found
@@ -53,10 +67,10 @@ class SharedCache
             co_return false;
 
         if (dest.bytes() > h->getSize() + adjust) {
-            XLOG(ERR,
-                 "Object too small for read. key: {}, adjust {} cache entry "
-                 "size: {}, buffer size: {}",
-                 key, adjust, h->getSize(), dest.bytes());
+            XLOGF(ERR,
+                  "Object too small for read. key: {}, adjust {} cache entry "
+                  "size: {}, buffer size: {}",
+                  key, adjust, h->getSize(), dest.bytes());
             co_return false;
         }
 
@@ -68,7 +82,7 @@ class SharedCache
     {
         auto h = cache->allocate(pid, key, src.len);
         if (!h) {
-            XLOG(ERR, "Failed to allocate {} bytes for key: {}", src.len, key);
+            XLOGF(ERR, "Failed to allocate {} bytes for key: {}", src.len, key);
             co_return false;
         }
         std::memcpy(h->getMemory(), src.buf, src.len);
@@ -79,15 +93,21 @@ class SharedCache
 
 class ImageObjCache : public ReadCache
 {
-    static const usize chunk_size = 128 * 1024;
+    inline static const usize CACHE_CHUNK_SIZE = 128 * 1024;
 
     fstr imgname;
     sptr<ObjStore> s3;
     sptr<SharedCache> cache;
 
+  public:
+    ImageObjCache(fstr imgname, sptr<ObjStore> s3, sptr<SharedCache> cache)
+        : imgname(imgname), s3(s3), cache(cache)
+    {
+    }
+
     auto get_key(seqnum_t seq, usize offset) -> fstr
     {
-        assert(offset % chunk_size == 0);
+        assert(offset % CACHE_CHUNK_SIZE == 0);
         return get_cache_key(imgname, seq, offset);
     }
 
@@ -123,9 +143,10 @@ class ImageObjCache : public ReadCache
          */
         fvec<folly::SemiFuture<Result<void>>> tasks;
         for (usize bytes_read = 0; bytes_read < ext.len;) {
-            auto adjust = (ext.offset + bytes_read) % chunk_size;
+            auto adjust = (ext.offset + bytes_read) % CACHE_CHUNK_SIZE;
             auto chunk_off = ext.offset + bytes_read - adjust;
-            auto to_read = std::min(chunk_size - adjust, ext.len - bytes_read);
+            auto to_read =
+                std::min(CACHE_CHUNK_SIZE - adjust, ext.len - bytes_read);
             auto iov = dest.slice(bytes_read, bytes_read + to_read);
             tasks.push_back(
                 read_chunk(ext.seqnum, chunk_off, adjust, iov).semi());
@@ -144,9 +165,9 @@ class ImageObjCache : public ReadCache
     {
         // split into chunks of size chunk_size each, and then insert them
         // individually into the cache
-        for (usize off = 0; off < iov.len; off += chunk_size) {
+        for (usize off = 0; off < iov.len; off += CACHE_CHUNK_SIZE) {
             auto k = get_key(seqnum, off);
-            auto size = std::min(chunk_size, iov.len - off);
+            auto size = std::min(CACHE_CHUNK_SIZE, iov.len - off);
             // TODO figure out what to do for failure
             // In theory, it doesn't really matter if we fail since we'll miss
             // the next time and fetch it from backend
@@ -156,3 +177,13 @@ class ImageObjCache : public ReadCache
         co_return outcome::success();
     }
 };
+
+void ReadCache::init_cache(usize mem_bytes, usize nvm_bytes, fstr nvm_path)
+{
+    SharedCache::init_cache(mem_bytes, nvm_bytes, nvm_path);
+}
+
+uptr<ReadCache> ReadCache::make_image_cache(sptr<ObjStore> s3, fstr imgname)
+{
+    return std::make_unique<ImageObjCache>(imgname, s3, SharedCache::get());
+}

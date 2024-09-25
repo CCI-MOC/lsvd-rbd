@@ -5,9 +5,9 @@
 
 #include "folly/String.h"
 #include "image.h"
+#include "read_cache.h"
 #include "representation.h"
 #include "smartiov.h"
-#include "src/read_cache.h"
 #include "utils.h"
 
 class LogObj
@@ -43,7 +43,7 @@ class LogObj
 
     Task<void> wait_for_writes() { co_await writes_done_baton; }
     void mark_complete() { write_end(); }
-    void write_start() { writes_pending++; }
+    void write_start() { writes_pending.fetch_add(1); }
     void write_end()
     {
         if (writes_pending.fetch_sub(1) == 1)
@@ -222,15 +222,14 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         co_return cur_logobj;
     }
 
+    auto exe = co_await folly::coro::co_current_executor;
     auto prev = cur_logobj;
     auto new_seqnum = prev->seqnum + 1;
 
     // add new checkpoint if needed
     if (new_seqnum > prev->seqnum + checkpoint_interval_epoch) {
         auto ckpt_buf = co_await extmap->serialise();
-        checkpoint(new_seqnum, std::move(ckpt_buf))
-            .scheduleOn(co_await folly::coro::co_current_executor)
-            .start();
+        checkpoint(new_seqnum, std::move(ckpt_buf)).scheduleOn(exe).start();
         new_seqnum += 1;
     }
 
@@ -244,7 +243,6 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     cur_logobj = new_logobj;
     prev->mark_complete();
 
-    auto exe = co_await folly::coro::co_current_executor;
     flush_logobj(prev).scheduleOn(exe).start();
     co_return prev;
 }
@@ -297,8 +295,8 @@ ResTask<void> LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf,
             co_await extmap->unmap(entry->offset, entry->len);
             break;
         default:
-            XLOG(ERR, "Unknown log entry type {}",
-                 static_cast<u32>(entry->type));
+            XLOGF(ERR, "Unknown log entry type {}",
+                  static_cast<u32>(entry->type));
             co_return outcome::failure(std::errc::io_error);
         }
         consumed_bytes += sizeof(log_entry) + entry->len;
@@ -310,43 +308,60 @@ ResTask<void> LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf,
 ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
                                           fstr cfg_str)
 {
-    XLOG(INFO, "Mounting {} with config {}", name, cfg_str);
+    XLOGF(INFO, "Mounting {} with config {}", name, cfg_str);
     auto img = std::unique_ptr<LsvdImage>(new LsvdImage(name));
 
-    img->cfg = BOOST_OUTCOME_CO_TRYX(LsvdConfig::parse(cfg_str));
+    img->cfg = BOOST_OUTCOME_CO_TRYX(LsvdConfig::parse(name, cfg_str));
 
+    // get superblock and parse it
     SuperblockInfo superblock;
     auto super_buf = BOOST_OUTCOME_CO_TRYX(co_await s3->read_all(name));
     BOOST_OUTCOME_CO_TRYX(superblock.deserialise(super_buf));
     img->superblock = superblock;
+    XLOGF(INFO, "Found image of size {}", superblock.image_size);
+    XLOGF(INFO, "Found checkpoints: [{}]",
+          folly::join(", ", superblock.checkpoints));
+    XLOGF(INFO, "Found snapshots: [{}]",
+          folly::join(", ", superblock.snapshots));
 
-    XLOG(INFO, "Found checkpoints: {}",
-         folly::join(", ", superblock.checkpoints));
+    // deserialise the last checkpoint
     img->last_checkpoint = superblock.checkpoints.back();
     auto last_ckpt_key = get_logobj_key(name, img->last_checkpoint);
     auto last_ckpt_buf =
         BOOST_OUTCOME_CO_TRYX(co_await s3->read_all(last_ckpt_key));
     img->extmap = ExtMap::deserialise(last_ckpt_buf);
 
+    // build the cache and journal
     img->s3 = s3;
-    img->cache = make_image_cache(s3, name);
+    img->cache = ReadCache::make_image_cache(s3, name);
     img->journal =
         BOOST_OUTCOME_CO_TRYX(co_await Journal::open(img->cfg.journal_path));
 
     // recover the image starting from the last checkpoint
     u32 err_count = 0;
+    seqnum_t last_known_seq = 0;
     for (auto cur_seq = img->last_checkpoint + 1;
          err_count < LOG_REPLAY_OBJECT_COUNT; cur_seq++) {
         auto lo_buf = co_await s3->read_all(get_logobj_key(name, cur_seq));
-        if (lo_buf.has_value())
-            BOOST_OUTCOME_CO_TRYX(
-                co_await img->replay_obj(cur_seq, lo_buf.value(), 0));
-        else
+        if (!lo_buf.has_value()) {
             err_count++;
+            continue;
+        }
+
+        BOOST_OUTCOME_CO_TRYX(
+            co_await img->replay_obj(cur_seq, lo_buf.value(), 0));
+        last_known_seq = cur_seq;
     }
 
     // TODO search for uncommited objects in the journal and replay them too
 
+    // create the first log object
+    auto seq = last_known_seq + 1;
+    auto new_logobj = std::make_shared<LogObj>(seq, img->max_log_size);
+    img->pending_objs.emplace(seq, new_logobj);
+    img->cur_logobj = new_logobj;
+
+    XLOGF(INFO, "Mounted image {}", name);
     co_return img;
 }
 
@@ -359,16 +374,16 @@ Task<void> LsvdImage::unmount()
 
 ResTask<void> LsvdImage::create(sptr<ObjStore> s3, fstr name, usize size)
 {
-    XLOG(INFO, "Creating new image {}", name);
+    XLOGF(INFO, "Creating new image {}", name);
 
-    XLOG(DBG, "Writing out checkpoint of empty extmap");
+    XLOGF(DBG, "Writing out checkpoint of empty extmap");
     ExtMap extmap;
     auto extmap_buf = co_await extmap.serialise();
     auto ckpt_key = get_logobj_key(name, 1);
     BOOST_OUTCOME_CO_TRYX(co_await s3->write(
         ckpt_key, iovec{extmap_buf.data(), extmap_buf.size()}));
 
-    XLOG(DBG, "Creating superblock for image of size {}", size);
+    XLOGF(DBG, "Creating superblock for image of size {}", size);
     auto superblock = SuperblockInfo{
         .image_size = size, .clones = {}, .checkpoints = {1}, .snapshots = {}};
     auto super_buf = BOOST_OUTCOME_CO_TRYX(superblock.serialise());
@@ -380,14 +395,14 @@ ResTask<void> LsvdImage::create(sptr<ObjStore> s3, fstr name, usize size)
 
 ResTask<void> LsvdImage::remove(sptr<ObjStore> s3, fstr name)
 {
-    XLOG(INFO, "Removing image {}", name);
+    XLOGF(INFO, "Removing image {}", name);
     // TODO
     co_return outcome::failure(std::errc::not_supported);
 }
 
 ResTask<void> LsvdImage::clone(sptr<ObjStore> s3, fstr src, fstr dst)
 {
-    XLOG(INFO, "Cloning image {} to {}", src, dst);
+    XLOGF(INFO, "Cloning image {} to {}", src, dst);
     // TODO
     co_return outcome::failure(std::errc::not_supported);
 }

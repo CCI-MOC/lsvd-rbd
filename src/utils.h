@@ -24,21 +24,22 @@ template <typename T> using fut = std::future<T>;
 template <typename T> using fvec = folly::fbvector<T>;
 
 template <typename T, typename... Args>
-inline auto logerr_if_fail(Result<T> res, std::string_view msg,
-                           Args &...args)
+inline auto logerr_if_fail(Result<T> res, std::string_view msg, Args &...args)
 {
     if (res.has_failure()) {
         auto outmsg = fmt::format(msg, args...);
-        XLOG(ERR, "{}: {}", outmsg, res.error());
+        XLOGF(ERR, "{}: {}", outmsg, res.error());
     }
 }
 
-inline auto todo(std::source_location sl = std::source_location::current())
+inline auto todo(bool should_throw = false,
+                 std::source_location sl = std::source_location::current())
 {
     fmt::print(stderr, fg(fmt::color::red) | fmt::emphasis::bold,
                "[ERR {}:{} {}] TODO\n", sl.file_name(), sl.line(),
                sl.function_name());
-    throw std::runtime_error("TODO stub");
+    if (should_throw)
+        throw std::runtime_error("TODO stub");
 }
 
 inline auto

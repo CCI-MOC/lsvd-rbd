@@ -13,6 +13,7 @@ lsvd_deps = [
 
     cxx.find_library('rados', required: true),
     cxx.find_library('jemalloc', required: false),
+    cxx.find_library('atomic', required: true),
 
     dependency('threads', static: true),
     dependency(

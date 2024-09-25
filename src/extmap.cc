@@ -17,7 +17,7 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
     // the whole address space should be mapped, so if we don't find anything
     // that means we're looking at a corrupted map
     if (it == map.end()) {
-        XLOG(ERR, "Corrupt map: no entry found for offset {}", offset);
+        XLOGF(ERR, "Corrupt map: no entry found for offset {}", offset);
         co_return res;
     }
 
@@ -31,7 +31,7 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
 
         if (it == map.end() || base > offset + len ||
             base != offset + bytes_found) {
-            XLOG(ERR, "Corrupt map detected on {}+{}", offset, len);
+            XLOGF(ERR, "Corrupt map detected on {}+{}", offset, len);
             co_return res;
         }
 

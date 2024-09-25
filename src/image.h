@@ -1,6 +1,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <folly/AtomicHashMap.h>
 #include <folly/FBVector.h>
+#include <zpp_bits.h>
 
 #include "backend.h"
 #include "config.h"
@@ -24,8 +25,29 @@ struct SuperblockInfo {
     std::vector<seqnum_t> checkpoints;
     std::vector<seqnum_t> snapshots;
 
-    Result<void> deserialise(vec<byte> buf);
-    Result<vec<byte>> serialise();
+    Result<void> deserialise(vec<byte> buf)
+    {
+        zpp::bits::in ar(buf);
+        auto res = ar(*this);
+        if (zpp::bits::failure(res)) {
+            XLOGF(ERR, "Failed to deserialise superblock");
+            return outcome::failure(res.code);
+        }
+        return outcome::success();
+    }
+
+    Result<vec<byte>> serialise()
+    {
+        vec<byte> buf;
+        buf.reserve(4096);
+        zpp::bits::out ar(buf);
+        auto res = ar(*this);
+        if (zpp::bits::failure(res)) {
+            XLOGF(ERR, "Failed to serialise superblock");
+            return outcome::failure(res.code);
+        }
+        return buf;
+    }
 };
 
 class LogObj;

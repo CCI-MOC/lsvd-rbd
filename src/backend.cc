@@ -14,6 +14,7 @@
 class Rados : public ObjStore
 {
   private:
+    librados::Rados cluster;
     librados::IoCtx io;
 
     struct RadosCbWrap {
@@ -58,10 +59,17 @@ class Rados : public ObjStore
     }
 
   public:
-    Rados(rados_ioctx_t io)
+    Rados(rados_t cluster, rados_ioctx_t io)
     {
         assert(io != nullptr);
+        librados::Rados::from_rados_t(cluster, this->cluster);
         librados::IoCtx::from_rados_ioctx_t(io, this->io);
+    }
+
+    ~Rados() override
+    {
+        io.close();
+        cluster.shutdown();
     }
 
     auto get_size(fstr name) -> ResTask<usize> override
@@ -186,5 +194,5 @@ Result<uptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
     if (rc < 0)
         return outcome::failure(std::error_code(-rc, std::system_category()));
 
-    return uptr<ObjStore>(new Rados(io));
+    return uptr<ObjStore>(new Rados(cluster, io));
 }

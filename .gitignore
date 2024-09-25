@@ -12,6 +12,7 @@ qemu/*.iso
 qemu/bzImage
 
 CMakeLists.txt
+cmakebuild/
 vcpkg.json
 vcpkg-configuration.json
 vcpkg_installed/
