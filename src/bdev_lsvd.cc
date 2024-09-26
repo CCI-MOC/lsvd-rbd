@@ -167,7 +167,7 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
         lio->r = img->trim(offset, len, comp);
         break;
     default:
-        log_error("Unknown request type: {}", io->type);
+        XLOGF(ERR,"Unknown request type: {}", io->type);
         return;
     }
 
@@ -189,7 +189,7 @@ auto bdev_lsvd_create(str img_name, rados_ioctx_t ioctx,
     try {
         img = uptr<lsvd_image>(new lsvd_image(img_name, ioctx, cfg));
     } catch (std::runtime_error &e) {
-        log_error("Failed to create image '{}': {}", img_name, e.what());
+        XLOGF(ERR,"Failed to create image '{}': {}", img_name, e.what());
         return outcome::failure(std::errc::io_error);
     }
 
@@ -211,7 +211,7 @@ auto bdev_lsvd_create(str img_name, rados_ioctx_t ioctx,
 
     auto err = spdk_bdev_register(&iodev->bdev);
     if (err) {
-        log_error("Failed to register bdev: err {}", (err));
+        XLOGF(ERR,"Failed to register bdev: err {}", (err));
         spdk_io_device_unregister(
             iodev, [](void *ctx) { delete (lsvd_iodevice *)ctx; });
 
@@ -231,13 +231,13 @@ auto bdev_lsvd_create(str pool_name, str image_name,
 
 void bdev_lsvd_delete(str img_name, std::function<void(Result<void>)> cb)
 {
-    log_info("Deleting image '{}'", img_name);
+    XLOGF(INFO, "Deleting image '{}'", img_name);
     auto rc = spdk_bdev_unregister_by_name(
         img_name.c_str(), &lsvd_if,
         // some of the ugliest lifetime management code you'll ever see, but
         // it should work
         [](void *arg, int rc) {
-            log_info("Image deletion done, rc = {}", rc);
+            XLOGF(INFO, "Image deletion done, rc = {}", rc);
             auto cb = (std::function<void(Result<void>)> *)arg;
             (*cb)(errcode_to_result<void>(rc));
             delete cb;
@@ -245,7 +245,7 @@ void bdev_lsvd_delete(str img_name, std::function<void(Result<void>)> cb)
         new std::function<void(Result<void>)>(cb));
 
     if (rc != 0) {
-        log_error("Failed to delete image '{}': {}", img_name, rc);
+        XLOGF(ERR,"Failed to delete image '{}': {}", img_name, rc);
         cb(outcome::failure(std::error_code(rc, std::system_category())));
     }
 }

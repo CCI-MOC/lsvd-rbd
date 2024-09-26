@@ -9,6 +9,7 @@
 #include <system_error>
 
 #include "backend.h"
+#include "folly/logging/xlog.h"
 #include "utils.h"
 
 class Rados : public ObjStore
@@ -96,6 +97,7 @@ class Rados : public ObjStore
 
     auto read(fstr name, off_t offset, smartiov &v) -> ResTask<usize> override
     {
+        XLOGF(DBG3, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -107,6 +109,7 @@ class Rados : public ObjStore
 
     auto read(fstr name, off_t offset, iovec v) -> ResTask<usize> override
     {
+        XLOGF(DBG3, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -141,6 +144,7 @@ class Rados : public ObjStore
 
     auto write(fstr name, smartiov &v) -> ResTask<usize> override
     {
+        XLOGF(DBG3, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -151,6 +155,7 @@ class Rados : public ObjStore
 
     auto write(fstr name, iovec v) -> ResTask<usize> override
     {
+        XLOGF(DBG3, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -161,6 +166,7 @@ class Rados : public ObjStore
 
     auto remove(fstr name) -> ResTask<void> override
     {
+        XLOGF(DBG3, "Removing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto rc = io.aio_remove(name.toStdString(), cb.cb);
@@ -174,25 +180,35 @@ class Rados : public ObjStore
     }
 };
 
-Result<uptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
+Result<sptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
 {
+    XLOGF(INFO, "Connecting to pool '{}'", pool_name);
+
     rados_t cluster;
     auto rc = rados_create(&cluster, "admin");
-    if (rc < 0)
+    if (rc < 0) {
+        XLOGF(ERR, "Failed to create rados cluster: {}", -rc);
         return outcome::failure(std::error_code(-rc, std::system_category()));
+    }
 
     rc = rados_conf_read_file(cluster, nullptr);
-    if (rc < 0)
+    if (rc < 0) {
+        XLOGF(ERR, "Failed to read conf file: {}", -rc);
         return outcome::failure(std::error_code(-rc, std::system_category()));
+    }
 
     rc = rados_connect(cluster);
-    if (rc < 0)
+    if (rc < 0) {
+        XLOGF(ERR, "Failed to connect to the cluster: {}", -rc);
         return outcome::failure(std::error_code(-rc, std::system_category()));
+    }
 
     rados_ioctx_t io;
     rc = rados_ioctx_create(cluster, pool_name.toStdString().c_str(), &io);
-    if (rc < 0)
+    if (rc < 0) {
+        XLOGF(ERR, "Failed to connect to the pool: {}", -rc);
         return outcome::failure(std::error_code(-rc, std::system_category()));
+    }
 
     return uptr<ObjStore>(new Rados(cluster, io));
 }

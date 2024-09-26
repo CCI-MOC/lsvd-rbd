@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "extmap.h"
+#include "folly/String.h"
 #include "zpp_bits.h"
 
 Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
@@ -96,10 +97,13 @@ void ExtMap::unmap_locked(usize offset, usize len)
     }
 
     // Remove all extents that are fully contained in the new extent
+    // BUG: not sure how
     while (it != map.end() && it->first < end) {
         auto &[base, ext] = *it;
         if (base + ext.len < end)
             it = map.erase(it);
+        else
+            break;
     }
 
     // Shrink the extent after the offset to start at the new extent end
@@ -155,5 +159,27 @@ uptr<ExtMap> ExtMap::deserialise(vec<byte> buf)
     auto res = ar(map);
     // TODO handle error
     assert(zpp::bits::failure(res) == false);
-    return std::make_unique<ExtMap>(map);
+    XLOGF(INFO, "Deserialised map with {} entries", map.size());
+    return std::unique_ptr<ExtMap>(new ExtMap(std::move(map)));
+}
+
+uptr<ExtMap> ExtMap::create_empty(usize len)
+{
+    auto m = std::unique_ptr<ExtMap>(new ExtMap());
+    m->map.insert({0, S3Ext{0, 0, len}});
+    return m;
+}
+
+Task<std::string> ExtMap::to_string()
+{
+    auto l = co_await mtx.co_scoped_lock();
+    fvec<std::string> entries;
+    for (auto &[base, ext] : map) {
+        auto s =
+            fmt::format("Extent: {:#x} -> {:#x}: (seqnum: {:#x}, "
+                        "offset: {:#x}, len: {:#x})",
+                        base, base + ext.len, ext.seqnum, ext.offset, ext.len);
+        entries.push_back(s);
+    }
+    co_return folly::join("\n", entries);
 }

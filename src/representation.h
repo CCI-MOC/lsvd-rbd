@@ -70,15 +70,15 @@ struct __attribute((packed)) log_entry {
     byte data[];
 };
 
-const uint32_t LOG_WRITE_ENTRY_SIZE = sizeof(log_entry);
-static_assert(LOG_WRITE_ENTRY_SIZE == 16);
+const uint32_t LOG_ENTRY_SIZE = sizeof(log_entry);
+static_assert(LOG_ENTRY_SIZE == 16);
 
 inline auto get_data_ext(S3Ext ext)
 {
     return S3Ext{
         .seqnum = ext.seqnum,
-        .offset = ext.offset + LOG_WRITE_ENTRY_SIZE,
-        .len = ext.len - LOG_WRITE_ENTRY_SIZE,
+        .offset = ext.offset + LOG_ENTRY_SIZE,
+        .len = ext.len - LOG_ENTRY_SIZE,
     };
 }
 

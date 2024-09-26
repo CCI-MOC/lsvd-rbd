@@ -39,6 +39,11 @@ class smartiov
         return siov;
     }
 
+    static smartiov from_ptr(void *ptr, size_t len)
+    {
+        return smartiov((char *)ptr, len);
+    }
+
     smartiov() {}
 
     smartiov(const iovec *iov, int iovcnt)

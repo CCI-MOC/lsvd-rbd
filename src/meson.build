@@ -3,8 +3,15 @@ lsvd_src = files(
     'extmap.cc',
     'image.cc',
     'journal.cc',
-    'main.cc',
     'read_cache.cc',
+)
+
+lsvd_tgt_src = files(
+    'main.cc',
+)
+
+lsvd_inc = include_directories(
+    '.',
 )
 
 lsvd_deps = [

@@ -35,10 +35,24 @@ cxx = meson.get_compiler('cpp')
 
 subdir('src')
 
-executable(
+lsvd_ar = static_library(
     'lsvd',
     lsvd_src,
+    include_directories: lsvd_inc,
+    dependencies: lsvd_deps,
+)
+
+executable(
+    'lsvd',
+    lsvd_tgt_src + lsvd_src,
     dependencies: lsvd_deps + [dependency('_spdk')],
+)
+
+executable(
+    'imgtool',
+    ['src/imgtool.cc'],
+    link_with: lsvd_ar,
+    dependencies: lsvd_deps,
 )
 
 # executable(
@@ -48,4 +62,4 @@ executable(
 #     dependencies: lsvd_deps,
 # )
 
-# subdir('test')
+subdir('test')

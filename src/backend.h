@@ -23,7 +23,7 @@ class ObjStore
     virtual ResTask<usize> write(fstr name, iovec iov) = 0;
     virtual ResTask<void> remove(fstr name) = 0;
 
-    static Result<uptr<ObjStore>> connect_to_pool(fstr pool_name);
+    static Result<sptr<ObjStore>> connect_to_pool(fstr pool_name);
 };
 
 class FileIo

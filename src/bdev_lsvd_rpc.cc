@@ -94,7 +94,7 @@ static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
             spdk_json_write_bool(w, true);
             spdk_jsonrpc_end_result(req_json, w);
         } else {
-            log_error("Failed to destroy lsvd bdev: {}", res.error().message());
+            XLOGF(ERR,"Failed to destroy lsvd bdev: {}", res.error().message());
             spdk_jsonrpc_send_error_response(req_json, rc,
                                              "Failed to destroy lsvd bdev");
         }

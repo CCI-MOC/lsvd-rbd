@@ -1,10 +1,15 @@
 #include <folly/String.h>
 #include <folly/init/Init.h>
+#include <folly/logging/Init.h>
+#include <folly/logging/xlog.h>
 
 #include "backend.h"
 #include "image.h"
 #include "representation.h"
 #include "utils.h"
+
+FOLLY_INIT_LOGGING_CONFIG(
+    ".=DBG,folly=INFO,cachelib=WARNING; default:async=true");
 
 ResTask<std::string> main_task()
 {
@@ -12,14 +17,15 @@ ResTask<std::string> main_task()
     (co_await LsvdImage::create(pool, "testimg", 1 * 1024 * 1024)).value();
     auto img = (co_await LsvdImage::mount(pool, "testimg", "")).value();
 
-    vec<byte> bufin(4096);
+    vec<byte> bufw(4096);
     auto instr = "hello world";
-    std::memcpy(bufin.data(), instr, std::strlen(instr));
-    (co_await img->write(0, smartiov::from_buf(bufin))).value();
+    std::memcpy(bufw.data(), instr, std::strlen(instr));
+    (co_await img->write(0, smartiov::from_buf(bufw))).value();
+    XLOGF(INFO, "Wrote: {}", instr);
 
-    vec<byte> buf(4096);
-    (co_await img->read(0, smartiov::from_buf(buf))).value();
-    auto dump = folly::hexDump(buf.data(), 512);
+    vec<byte> bufr(4096);
+    (co_await img->read(0, smartiov::from_buf(bufr))).value();
+    auto dump = folly::hexDump(bufr.data(), 512);
 
     co_await img->unmount();
     co_return dump;

@@ -1,20 +1,18 @@
-seq = executable(
-	'test-seq',
-	'test-seq.cc',
-	include_directories: lsvd_inc,
-	link_with: lsvd_ar,
-	dependencies: lsvd_deps,
+test_seq = executable(
+    'test_seq',
+    ['test_sequential_rw.cc'],
+    include_directories: lsvd_inc,
+    link_with: lsvd_ar,
+    dependencies: lsvd_deps,
 )
 
-extentmap = executable(
-	'test-extentmap',
-	'test-extentmap.cc',
-	include_directories: lsvd_inc,
-	link_with: lsvd_ar,
-	dependencies: lsvd_deps,
+test_extmap = executable(
+    'test_extentmap',
+    ['test_extmap.cc'],
+    include_directories: lsvd_inc,
+    link_with: lsvd_ar,
+    dependencies: lsvd_deps,
 )
 
-# executable('lsvd_crash_test', 'lsvd_crash_test.cc', include_directories: lsvd_inc, link_with: liblsvd, dependencies: lsvd_deps)
-
-test('Sequential write/read', seq)
-# test('Misc unit tests', extentmap)
+test('Extentmap unit tests', test_extmap)
+test('Sequential write/read', test_seq)
