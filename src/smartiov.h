@@ -1,9 +1,17 @@
 #pragma once
-
 #include <cassert>
 #include <string.h>
 #include <sys/uio.h>
-#include <vector>
+
+#include "utils.h"
+
+using byte = std::byte;
+using usize = size_t;
+
+struct buffer {
+    byte *buf;
+    usize len;
+};
 
 /* this makes readv / writev a lot easier...
  */
@@ -12,6 +20,30 @@ class smartiov
     vec<iovec> iovs;
 
   public:
+    static smartiov from_buf(vec<byte> &buf)
+    {
+        return smartiov((char *)buf.data(), buf.size());
+    }
+
+    static smartiov from_str(std::string_view str)
+    {
+        return smartiov((char *)str.data(), str.size());
+    }
+
+    static smartiov from_iovecs(const iovec *iov, int iovcnt)
+    {
+        smartiov siov;
+        for (int i = 0; i < iovcnt; i++)
+            if (iov[i].iov_len > 0)
+                siov.iovs.push_back(iov[i]);
+        return siov;
+    }
+
+    static smartiov from_ptr(void *ptr, size_t len)
+    {
+        return smartiov((char *)ptr, len);
+    }
+
     smartiov() {}
 
     smartiov(const iovec *iov, int iovcnt)
@@ -35,10 +67,7 @@ class smartiov
     iovec &operator[](int i) { return iovs[i]; }
     int size(void) { return iovs.size(); }
 
-    std::pair<iovec *, int> c_iov(void)
-    {
-        return std::pair(iovs.data(), (int)iovs.size());
-    }
+    vec<iovec> &iovs_vec(void) { return iovs; }
 
     size_t bytes(void)
     {
@@ -87,15 +116,7 @@ class smartiov
         }
     }
 
-    void copy_in(char *buf)
-    {
-        for (auto i : iovs) {
-            memcpy((void *)i.iov_base, (void *)buf, (size_t)i.iov_len);
-            buf += i.iov_len;
-        }
-    }
-
-    void copy_in(char *buf, size_t limit)
+    void copy_in(byte *buf, size_t limit)
     {
         if (limit == 0) // do nothing
             return;
@@ -114,55 +135,11 @@ class smartiov
         }
     }
 
-    void copy_out(char *buf)
+    void copy_out(byte *buf)
     {
         for (auto i : iovs) {
             memcpy((void *)buf, (void *)i.iov_base, (size_t)i.iov_len);
             buf += i.iov_len;
         }
     }
-
-    bool aligned(int n)
-    {
-        for (auto i : iovs)
-            if (((long)i.iov_base & (n - 1)) != 0)
-                return false;
-        return true;
-    }
 };
-
-#ifdef TEST
-
-#include <cassert>
-#include <cstdlib>
-
-void test1(void)
-{
-    char *buf1 = (char *)calloc(1001, 1);
-    char *buf2 = (char *)calloc(1001, 1);
-    memset(buf1, 'A', 1000);
-    iovec iov1[] = {{buf1, 117},
-                    {buf1 + 117, 204},
-                    {buf1 + 117 + 204, 412},
-                    {buf1 + 733, 1000 - 733}};
-    auto s = smartiov(iov1, 4);
-    s.copy_out(buf2);
-    assert(strlen(buf2) == 1000);
-
-    auto z = s.slice(200, 500); // 0, 83+121, 0+179
-    assert(z.bytes() == 300);
-    assert(z.size() == 2);
-    assert(z.iov()[0].iov_base == buf1 + 200);
-
-    s.slice(200, 500).zero();
-    assert(strlen(buf1) == 200);
-    assert(memchr(buf1 + 200, 'A', 800) == buf1 + 500);
-
-    memset(buf2, 0, 1001);
-    s.slice(400, 700).copy_out(buf2);
-    assert(memchr(buf2, 'A', 300) == buf2 + 100);
-    assert(strlen(buf2 + 100) == 200);
-}
-
-int main(int argc, char **argv) { test1(); }
-#endif

@@ -1,3 +1,5 @@
+#include "folly/String.h"
+#include "folly/executors/GlobalExecutor.h"
 #include <argp.h>
 #include <boost/program_options.hpp>
 #include <boost/program_options/options_description.hpp>
@@ -5,15 +7,17 @@
 #include <cstdlib>
 #include <fcntl.h>
 #include <fmt/format.h>
+#include <folly/init/Init.h>
+#include <folly/logging/Init.h>
 #include <rados/librados.h>
 #include <stdlib.h>
 #include <string>
-#include <uuid/uuid.h>
 
-#include "backend.h"
 #include "image.h"
-#include "objects.h"
-#include "utils.h"
+
+FOLLY_INIT_LOGGING_CONFIG(".=DBG,folly=INFO");
+
+using str = std::string;
 
 static usize parseint(str i)
 {
@@ -31,71 +35,52 @@ static usize parseint(str i)
     return val;
 }
 
-static void create(rados_ioctx_t io, str name, usize size, bool thick)
+static auto info(sptr<ObjStore> s3, str name) -> Task<void>
 {
-    auto rc = lsvd_image::create_new(name, size, io);
-    THROW_MSG_ON(rc != 0, "Failed to create new image '{}'", name);
-}
+    XLOGF(INFO, "Getting info for image {}", name);
+    SuperblockInfo sb;
+    auto sbuf = co_await s3->read_all(name);
+    if (sbuf.has_failure()) {
+        XLOGF(ERR, "Failed to read superblock: {}", sbuf.error().message());
+        co_return;
+    }
 
-static void remove(rados_ioctx_t io, str name)
-{
-    auto rc = lsvd_image::delete_image(name, io);
-    THROW_MSG_ON(rc != 0, "Failed to delete image '{}'", name);
-}
+    (sb.deserialise(sbuf.value())).value();
 
-static void clone(rados_ioctx_t io, str src, str dst)
-{
-    auto rc = lsvd_image::clone_image(src, dst, io);
-    THROW_MSG_ON(rc != 0, "Failed to clone image '{}' to '{}'", src, dst);
-}
+    fmt::println("Image: {}", name);
+    fmt::println("Size (bytes/GB/GiB): {}/{}/{}", sb.image_size,
+                 sb.image_size / 1e9, sb.image_size / (1024 * 1024 * 1024));
+    fmt::println("Checkpoints: [{}]", folly::join(", ", sb.checkpoints));
+    fmt::println("Snapshots: [{}]", folly::join(", ", sb.snapshots));
 
-static void info(rados_ioctx_t io, str name)
-{
-    auto be = make_rados_backend(io);
-    auto parser = object_reader(be);
+    for (auto &[a, b] : sb.clones)
+        fmt::println("Clone: {} -> {}", a, b);
 
-    auto sb = parser.read_superblock(name);
-    THROW_MSG_ON(!sb, "Superblock not found");
-
-    auto i = *sb;
-    char uuid_str[37];
-    uuid_unparse_lower(i.uuid, uuid_str);
-
-    using namespace fmt;
-    print("=== Image info ===\n");
-    print("Name: {}\n", name);
-    print("UUID: {}\n", uuid_str);
-    print("Size: {} bytes / {} GiB\n", i.vol_size,
-          (double)i.vol_size / 1024 / 1024 / 1024);
-    print("Checkpoints: {}\n", i.ckpts);
-
-    for (auto &c : i.clones)
-        print("Base: '{}' upto seq {}\n", c->name, c->last_seq);
-
-    for (auto &c : i.snaps)
-        print("Snapshot: '{}' at seq {}\n", c->name, c->seq);
+    // look at the extmap
+    auto last_ckpt = sb.checkpoints.back();
+    auto key = get_logobj_key(name, last_ckpt);
+    auto extmap = ExtMap::deserialise((co_await s3->read_all(key)).value());
+    auto extmap_s = co_await extmap->to_string();
+    fmt::print("Extent map:\n{}", extmap_s);
 }
 
 int main(int argc, char **argv)
 {
-    std::set_terminate([]() {
-        try {
-            std::cerr << boost::stacktrace::stacktrace();
-        } catch (...) {
-        }
-        std::abort();
-    });
+    auto argv_save = argv;
+    int i = 0;
+    auto folly_init = folly::Init(&i, &argv);
+    argv = argv_save;
 
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
 
     // clang-format off
     desc.add_options()
-        ("help", "produce help message")
-        ("cmd", po::value<str>(), "subcommand: create, clone, delete, info")
-        ("img", po::value<str>(), "name of the iname")
-        ("pool", po::value<str>(), "pool where the image resides")
-        ("size", po::value<str>()->default_value("1G"), 
+        ("help,h", "produce help message")
+        ("cmd,c", po::value<str>(), "subcommand: create, clone, delete, info")
+        ("img,i", po::value<str>(), "name of the iname")
+        ("pool,p", po::value<str>(), "pool where the image resides")
+        ("size,s", po::value<str>()->default_value("1G"), 
                                     "size in bytes (M=2^20,G=2^30)")
         ("thick", po::value<bool>()->default_value(false), 
             "thick provision when creating an image (not currently supported)")
@@ -117,27 +102,28 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    auto exe = folly::getGlobalCPUExecutor();
+
     auto cmd = vm["cmd"].as<str>();
     auto pool = vm["pool"].as<str>();
     auto img = vm["img"].as<str>();
 
-    auto io = connect_to_pool(pool);
-    THROW_MSG_ON(io == nullptr, "Failed to connect to pool '{}'", pool);
+    XLOGF(DBG, "Running command {}", cmd);
+    auto io = ObjStore::connect_to_pool(pool).value();
 
     if (cmd == "create") {
         auto size = parseint(vm["size"].as<str>());
         auto thick = vm["thick"].as<bool>();
-        create(io, img, size, thick);
-    } else if (cmd == "delete")
-        remove(io, img);
-    else if (cmd == "clone") {
-        THROW_MSG_ON(!vm.count("dest"), "Destination image not specified");
+        LsvdImage::create(io, img, size).scheduleOn(exe).start().wait();
+    } else if (cmd == "delete") {
+        LsvdImage::remove(io, img).scheduleOn(exe).start().wait();
+    } else if (cmd == "clone") {
+        if (!vm.count("dest"))
+            XLOGF(FATAL, "Destination image not specified");
         auto dst = vm["dest"].as<str>();
-        clone(io, img, dst);
+        LsvdImage::clone(io, img, dst).scheduleOn(exe).start().wait();
     } else if (cmd == "info")
-        info(io, img);
+        info(io, img).scheduleOn(exe).start().wait();
     else
-        THROW_MSG_ON(true, "Unknown command '{}'", cmd);
-
-    rados_ioctx_destroy(io);
+        XLOGF(FATAL, "Unknown command '{}'", cmd);
 }

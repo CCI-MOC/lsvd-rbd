@@ -1,14 +1,11 @@
-#include "rados/librados.h"
+#include "folly/executors/GlobalExecutor.h"
 #include "spdk/bdev_module.h"
-#include <future>
+#include "spdk/thread.h"
 
 #include "backend.h"
 #include "bdev_lsvd.h"
-#include "config.h"
 #include "image.h"
-#include "request.h"
 #include "smartiov.h"
-#include "spdk/thread.h"
 #include "utils.h"
 
 static int bdev_lsvd_init(void);
@@ -56,15 +53,15 @@ class lsvd_iodevice
 {
   public:
     spdk_bdev bdev;
-    uptr<lsvd_image> img;
+    uptr<LsvdImage> img;
 
-    lsvd_iodevice(uptr<lsvd_image> img_) : img(std::move(img_))
+    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_))
     {
         std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("Log-structured Virtual Disk");
-        bdev.name = strdup(img->imgname.c_str());
+        bdev.name = strdup(img->name.c_str());
         bdev.blocklen = 4096;
-        bdev.blockcnt = img->size / bdev.blocklen;
+        bdev.blockcnt = img->get_size() / bdev.blocklen;
         bdev.ctxt = this;
         bdev.module = &lsvd_if;
         bdev.fn_table = &lsvd_fn_table;
@@ -113,19 +110,19 @@ static spdk_io_channel *lsvd_get_io_channel(void *ctx)
 struct lsvd_bdev_io {
     spdk_thread *submit_td;
     spdk_bdev_io_status status;
-    request *r;
 };
 
 static int bdev_lsvd_io_ctx_size(void) { return sizeof(lsvd_bdev_io); }
 
-static void lsvd_io_done(lsvd_bdev_io *io, int rc)
+static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret)
 {
     auto sth = io->submit_td;
     assert(sth != nullptr);
 
-    // error is -errno, succ is 0 or bytes read/written
-    io->status =
-        rc >= 0 ? SPDK_BDEV_IO_STATUS_SUCCESS : SPDK_BDEV_IO_STATUS_FAILED;
+    if (ret.hasValue() && ret->has_value())
+        io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
+    else
+        io->status = SPDK_BDEV_IO_STATUS_FAILED;
 
     spdk_thread_send_msg(
         sth,
@@ -148,30 +145,29 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
     smartiov iov(io->u.bdev.iovs, io->u.bdev.iovcnt);
 
-    auto comp = [lio](int rc) { lsvd_io_done(lio, rc); };
+    auto exe = folly::getGlobalCPUExecutor();
+    auto cb = [lio](auto &&r) { lsvd_io_done(lio, r); };
 
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ:
-        lio->r = img->read(offset, iov, comp);
+        img->read(offset, iov).scheduleOn(exe).start().defer(cb);
         break;
     case SPDK_BDEV_IO_TYPE_WRITE:
-        lio->r = img->write(offset, iov, comp);
+        img->write(offset, iov).scheduleOn(exe).start().defer(cb);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        lio->r = img->flush(comp);
+        img->flush().scheduleOn(exe).start().defer(cb);
         break;
     case SPDK_BDEV_IO_TYPE_UNMAP:
-        lio->r = img->trim(offset, len, comp);
+        img->trim(offset, len).scheduleOn(exe).start().defer(cb);
         break;
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        lio->r = img->trim(offset, len, comp);
+        img->trim(offset, len).scheduleOn(exe).start().defer(cb);
         break;
     default:
-        log_error("Unknown request type: {}", io->type);
+        XLOGF(ERR, "Unknown request type: {}", io->type);
         return;
     }
-
-    lio->r->run(nullptr);
 }
 
 // Just copying from bdev_rbd, not sure where this is actually used
@@ -180,19 +176,19 @@ struct lsvd_bdev_io_channel {
     spdk_io_channel *io_channel;
 };
 
-int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
+auto bdev_lsvd_create(str pool_name, str img_name, str cfg) -> Result<void>
 {
+    auto s3 = ObjStore::connect_to_pool(pool_name);
+    LOGERR_AND_RET_IF_FAIL(s3, "Failed to connect to pool '{}'", pool_name);
     assert(!img_name.empty());
 
-    uptr<lsvd_image> img;
-    try {
-        img = uptr<lsvd_image>(new lsvd_image(img_name, ioctx, cfg));
-    } catch (std::runtime_error &e) {
-        log_error("Failed to create image '{}': {}", img_name, e.what());
-        return -1;
-    }
-
-    auto iodev = new lsvd_iodevice(std::move(img));
+    auto img = LsvdImage::mount(s3.value(), img_name, cfg)
+                   .scheduleOn(folly::getGlobalCPUExecutor())
+                   .start()
+                   .wait()
+                   .value();
+    LOGERR_AND_RET_IF_FAIL(img, "Failed to mount image '{}'", img_name);
+    auto iodev = new lsvd_iodevice(std::move(img.value()));
 
     spdk_io_device_register(
         iodev,
@@ -210,41 +206,33 @@ int bdev_lsvd_create(str img_name, rados_ioctx_t ioctx, lsvd_config cfg)
 
     auto err = spdk_bdev_register(&iodev->bdev);
     if (err) {
-        log_error("Failed to register bdev: err {}", (err));
+        XLOGF(ERR, "Failed to register bdev: err {}", (err));
         spdk_io_device_unregister(
             iodev, [](void *ctx) { delete (lsvd_iodevice *)ctx; });
-        return err;
+
+        return std::error_code(err, std::system_category());
     }
 
-    return 0;
+    return outcome::success();
 }
 
-int bdev_lsvd_create(str pool_name, str image_name, str user_cfg)
+void bdev_lsvd_delete(str img_name, std::function<void(Result<void>)> cb)
 {
-    auto be = connect_to_pool(pool_name);
-    auto cfg = lsvd_config::from_user_cfg(user_cfg);
-    PR_RET_IF(!cfg.has_value(), -1, "Failed to read config file");
-
-    return bdev_lsvd_create(image_name, be, cfg.value());
-}
-
-void bdev_lsvd_delete(str img_name, std::function<void(int)> cb)
-{
-    log_info("Deleting image '{}'", img_name);
+    XLOGF(INFO, "Deleting image '{}'", img_name);
     auto rc = spdk_bdev_unregister_by_name(
         img_name.c_str(), &lsvd_if,
         // some of the ugliest lifetime management code you'll ever see, but
         // it should work
         [](void *arg, int rc) {
-            log_info("Image deletion done, rc = {}", rc);
-            auto cb = (std::function<void(int)> *)arg;
-            (*cb)(rc);
+            XLOGF(INFO, "Image deletion done, rc = {}", rc);
+            auto cb = (std::function<void(Result<void>)> *)arg;
+            (*cb)(errcode_to_result<void>(rc));
             delete cb;
         },
-        new std::function<void(int)>(cb));
+        new std::function<void(Result<void>)>(cb));
 
     if (rc != 0) {
-        log_error("Failed to delete image '{}': {}", img_name, rc);
-        cb(rc);
+        XLOGF(ERR, "Failed to delete image '{}': {}", img_name, rc);
+        cb(outcome::failure(std::error_code(rc, std::system_category())));
     }
 }

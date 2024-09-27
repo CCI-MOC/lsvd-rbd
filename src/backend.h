@@ -1,55 +1,33 @@
 #pragma once
 
-#include <memory>
+#include <folly/File.h>
 #include <rados/librados.h>
 #include <sys/uio.h>
 
-#include "request.h"
+#include "representation.h"
 #include "smartiov.h"
 #include "utils.h"
 
-class backend
+class ObjStore
 {
   public:
-    virtual ~backend() {}
+    virtual ~ObjStore() {}
 
-    virtual int write(std::string name, smartiov &iov) = 0;
-    virtual int read(std::string name, off_t offset, smartiov &iov) = 0;
-    virtual int delete_obj(std::string name) = 0;
+    virtual ResTask<usize> get_size(fstr name) = 0;
+    virtual ResTask<bool> exists(fstr name) = 0;
 
-    virtual request *aio_write(std::string name, smartiov &iov) = 0;
-    virtual request *aio_read(std::string name, off_t offset,
-                              smartiov &iov) = 0;
-    virtual request *aio_delete(std::string name) = 0;
+    virtual ResTask<vec<byte>> read_all(fstr name) = 0;
+    virtual ResTask<usize> read(fstr name, off_t offset, smartiov &iov) = 0;
+    virtual ResTask<usize> read(fstr name, off_t offset, iovec iov) = 0;
+    virtual ResTask<usize> write(fstr name, smartiov &iov) = 0;
+    virtual ResTask<usize> write(fstr name, iovec iov) = 0;
+    virtual ResTask<void> remove(fstr name) = 0;
 
-    int write(std::string name, void *buf, size_t len)
-    {
-        smartiov iov((char *)buf, len);
-        return write(name, iov);
-    }
-
-    int read(std::string name, off_t offset, void *buf, size_t len)
-    {
-        smartiov iov((char *)buf, len);
-        return read(name, offset, iov);
-    }
-
-    request *aio_write(std::string name, void *buf, size_t len)
-    {
-        smartiov iov((char *)buf, len);
-        return aio_write(name, iov);
-    }
-
-    request *aio_read(std::string name, off_t offset, void *buf, size_t len)
-    {
-        smartiov iov((char *)buf, len);
-        return aio_read(name, offset, iov);
-    }
-
-    virtual opt<u64> get_size(std::string name) = 0;
-    virtual opt<vec<byte>> read_whole_obj(std::string name) = 0;
-    virtual bool exists(std::string name) = 0;
+    static Result<sptr<ObjStore>> connect_to_pool(fstr pool_name);
 };
 
-extern std::shared_ptr<backend> make_rados_backend(rados_ioctx_t io);
-rados_ioctx_t connect_to_pool(str pool_name);
+class FileIo
+{
+    virtual ResTask<void> preadv(off_t offset, smartiov iov) = 0;
+    virtual ResTask<void> pwritev(off_t offset, smartiov iov) = 0;
+};
