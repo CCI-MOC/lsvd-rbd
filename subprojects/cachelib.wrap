@@ -1,0 +1,10 @@
+[wrap-git]
+url = https://github.com/facebook/cachelib.git
+revision = v20240621
+patch_directory = cachelib
+clone-recursive = false
+; method = cmake
+depth = 1
+
+[provide]
+cachelib = cachelib_dep
