@@ -4,6 +4,7 @@
 #include <fmt/color.h>
 #include <folly/experimental/coro/Promise.h>
 #include <folly/experimental/coro/Task.h>
+// #include <folly/experimental/symbolizer/Symbolizer.h>
 #include <folly/logging/xlog.h>
 #include <future>
 #include <linux/fs.h>
@@ -23,13 +24,20 @@ template <typename T> using vec = std::vector<T>;
 template <typename T> using fut = std::future<T>;
 template <typename T> using fvec = folly::fbvector<T>;
 
-template <typename T, typename... Args>
-inline auto logerr_if_fail(Result<T> res, std::string_view msg, Args &...args)
+#define LOGERR_AND_RET_IF_FAIL(res, msg, ...)                                  \
+    do {                                                                       \
+        if (res.has_failure()) {                                               \
+            auto outmsg = fmt::format(msg, __VA_ARGS__);                       \
+            XLOGF(ERR, "{}: {}", outmsg, res.error().message());               \
+            return res.error();                                                \
+        }                                                                      \
+    } while (0)
+
+template <typename T> inline auto errcode_to_result(int err) -> Result<T>
 {
-    if (res.has_failure()) {
-        auto outmsg = fmt::format(msg, args...);
-        XLOGF(ERR, "{}: {}", outmsg, res.error());
-    }
+    if (err == 0)
+        return outcome::success();
+    return outcome::failure(std::error_code(err, std::system_category()));
 }
 
 inline auto todo(bool should_throw = false,

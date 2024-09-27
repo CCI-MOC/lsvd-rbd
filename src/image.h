@@ -107,4 +107,6 @@ class LsvdImage
     ResTask<void> write(off_t offset, smartiov iovs);
     ResTask<void> trim(off_t offset, usize len);
     ResTask<void> flush();
+
+    usize get_size() { return superblock.image_size; }
 };

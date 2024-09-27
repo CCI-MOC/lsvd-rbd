@@ -1,9 +1,5 @@
-#include "spdk/bdev.h"
 #include "spdk/json.h"
 #include "spdk/jsonrpc.h"
-#include "spdk/likely.h"
-#include "spdk/log.h"
-#include "spdk/nvme.h"
 #include "spdk/rpc.h"
 #include "spdk/util.h"
 
@@ -94,7 +90,8 @@ static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
             spdk_json_write_bool(w, true);
             spdk_jsonrpc_end_result(req_json, w);
         } else {
-            XLOGF(ERR,"Failed to destroy lsvd bdev: {}", res.error().message());
+            XLOGF(ERR, "Failed to destroy lsvd bdev: {}",
+                  res.error().message());
             spdk_jsonrpc_send_error_response(req_json, rc,
                                              "Failed to destroy lsvd bdev");
         }

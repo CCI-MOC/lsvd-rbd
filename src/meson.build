@@ -8,6 +8,8 @@ lsvd_src = files(
 
 lsvd_tgt_src = files(
     'main.cc',
+    'bdev_lsvd_rpc.cc',
+    'bdev_lsvd.cc',
 )
 
 lsvd_inc = include_directories(
