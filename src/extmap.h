@@ -6,6 +6,10 @@
 #include "representation.h"
 #include "utils.h"
 
+#ifndef VERIFY_MAP_INTEGRITY_ON_UPDATE
+#define VERIFY_MAP_INTEGRITY_ON_UPDATE true
+#endif
+
 /**
 Maps a range of addresses to an extent on the backend.
 
@@ -35,12 +39,18 @@ class ExtMap
     extents with seqnum = 0 are ignored and can be of any value
      */
     std::map<usize, S3Ext> map;
+    usize total_len = 0;
 
     // Internal use, assumes the lock is already held
     void unmap_locked(usize base, usize len);
+    void verify_integrity();
 
-    ExtMap() {}
-    ExtMap(std::map<usize, S3Ext> map) : map(std::move(map)) {}
+    ExtMap(usize len) : total_len(len) { map.insert({0, S3Ext{0, 0, len}}); }
+    ExtMap(std::map<usize, S3Ext> map_) : map(std::move(map_))
+    {
+        for (auto &[base, ext] : map)
+            total_len += ext.len;
+    }
 
   public:
     ~ExtMap() {}

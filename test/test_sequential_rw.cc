@@ -1,13 +1,16 @@
+#include "folly/String.h"
+#include "folly/init/Init.h"
 #include <array>
 #include <cassert>
+#include <folly/logging/Init.h>
 #include <iostream>
 #include <rados/librados.h>
 
 #include "backend.h"
-#include "folly/String.h"
-#include "folly/init/Init.h"
 #include "image.h"
 #include "utils.h"
+
+FOLLY_INIT_LOGGING_CONFIG(".=INFO,folly=INFO");
 
 const size_t LSVD_BLOCK_SIZE = 4096;
 using comp_buf = std::array<uint8_t, LSVD_BLOCK_SIZE>;
@@ -61,10 +64,10 @@ bool verify_buf(uint64_t block_num, const comp_buf &buf,
     fill_buf(block_num, expected_buf);
 
     if (buf != expected_buf) {
-        XLOGF(ERR, "Error reading block {:08x}.\nExpected:\n{}\nActual:\n{}",
-              block_num,
-              folly::hexDump(expected_buf.data(), expected_buf.size()),
-              folly::hexDump(buf.data(), buf.size()));
+        fmt::println("Error reading block {:08x}.\nExpected:\n{}\nActual:\n{}",
+                     block_num,
+                     folly::hexDump(expected_buf.data(), expected_buf.size()),
+                     folly::hexDump(buf.data(), buf.size()));
         return false;
     }
 
@@ -76,15 +79,14 @@ auto run_test(sptr<ObjStore> s3) -> Task<void>
     XLOGF(INFO, "Starting sequential write then readback test");
 
     XLOGF(INFO, "Removing old image if one exists");
-    auto res = co_await LsvdImage::remove(s3, "random-test-img");
-    res.value();
+    std::ignore = co_await LsvdImage::remove(s3, "random-test-img");
 
     // size_t img_size = 1 * 1024 * 1024 * 1024;
     size_t img_size = 100 * 1024 * 1024;
 
     // create the image for our own use
     XLOGF(INFO, "Creating image {} of size {}", "random-test-img", img_size);
-    res = co_await LsvdImage::create(s3, "random-test-img", img_size);
+    auto res = co_await LsvdImage::create(s3, "random-test-img", img_size);
     res.value();
 
     // open the image
@@ -140,6 +142,10 @@ int main(int argc, char *argv[])
     std::string pool_name = "pone";
     auto s3 = ObjStore::connect_to_pool(pool_name).value();
 
-    run_test(s3).scheduleOn(folly::getGlobalCPUExecutor()).start().wait();
+    auto ret =
+        run_test(s3).scheduleOn(folly::getGlobalCPUExecutor()).start().wait();
+    auto res = ret.result();
+    if (res.hasException())
+        XLOGF(FATAL, "Error:\n{}", res.exception().what());
     return 0;
 }

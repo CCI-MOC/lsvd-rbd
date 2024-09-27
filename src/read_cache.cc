@@ -59,7 +59,7 @@ class SharedCache
     }
 
     // returns true iff item was found
-    auto read(strv key, usize adjust, smartiov &dest) -> Task<bool>
+    auto read(strv key, usize adjust, smartiov dest) -> Task<bool>
     {
         auto h = co_await cache->find(key).toSemiFuture();
 
@@ -112,7 +112,7 @@ class ImageObjCache : public ReadCache
     }
 
     auto read_chunk(seqnum_t seq, usize offset, usize adjust,
-                    smartiov &dest) -> ResTask<void>
+                    smartiov dest) -> ResTask<void>
     {
         auto k = get_key(seq, offset);
         auto in_cache = co_await cache->read(k, adjust, dest);
@@ -130,7 +130,7 @@ class ImageObjCache : public ReadCache
         co_return outcome::success();
     }
 
-    ResTask<void> read(S3Ext ext, smartiov &dest) override
+    ResTask<void> read(S3Ext ext, smartiov dest) override
     {
         /**
         |-----------------------entire object---------------------------------|
@@ -150,6 +150,7 @@ class ImageObjCache : public ReadCache
             auto iov = dest.slice(bytes_read, bytes_read + to_read);
             tasks.push_back(
                 read_chunk(ext.seqnum, chunk_off, adjust, iov).semi());
+            bytes_read += to_read;
         }
 
         auto all = co_await folly::collectAll(tasks);

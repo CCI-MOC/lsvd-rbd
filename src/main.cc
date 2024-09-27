@@ -8,13 +8,11 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_INIT_LOGGING_CONFIG(
-    ".=DBG,folly=INFO,cachelib=WARNING; default:async=true");
+FOLLY_INIT_LOGGING_CONFIG(".=DBG,folly=INFO");
 
 ResTask<std::string> main_task()
 {
     sptr<ObjStore> pool = ObjStore::connect_to_pool("pone").value();
-    (co_await LsvdImage::create(pool, "testimg", 1 * 1024 * 1024)).value();
     auto img = (co_await LsvdImage::mount(pool, "testimg", "")).value();
 
     vec<byte> bufw(4096);

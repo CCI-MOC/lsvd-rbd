@@ -56,6 +56,11 @@ class LogObj
 
 ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
 {
+    assert(offset >= 0);
+    assert(iovs.bytes() > 0 && iovs.bytes() % block_size == 0);
+    if (offset + iovs.bytes() > superblock.image_size)
+        co_return outcome::failure(std::errc::invalid_argument);
+
     // Since backend objects are immutable, we just need a read lock for as long
     // as we're getting the extents. Once we have the extents, the map can be
     // moified and we don't care.

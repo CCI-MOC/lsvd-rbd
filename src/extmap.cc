@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdint>
 #include <folly/logging/xlog.h>
 #include <memory>
@@ -8,19 +9,13 @@
 
 Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
 {
+    assert(offset + len <= total_len);
     auto l = co_await mtx.co_scoped_lock_shared();
     vec<std::pair<usize, S3Ext>> res;
 
     // upper_bound returns the first element that is > offset, so the element
     // at which we start is always the one before that
     auto it = map.upper_bound(offset);
-
-    // the whole address space should be mapped, so if we don't find anything
-    // that means we're looking at a corrupted map
-    if (it == map.end()) {
-        XLOGF(ERR, "Corrupt map: no entry found for offset {}", offset);
-        co_return res;
-    }
 
     // Go back one so we start at the right place
     it--;
@@ -100,7 +95,7 @@ void ExtMap::unmap_locked(usize offset, usize len)
     // BUG: not sure how
     while (it != map.end() && it->first < end) {
         auto &[base, ext] = *it;
-        if (base + ext.len < end)
+        if (base + ext.len <= end)
             it = map.erase(it);
         else
             break;
@@ -131,6 +126,9 @@ Task<void> ExtMap::update(usize base, usize len, S3Ext ext)
     auto l = co_await mtx.co_scoped_lock();
     unmap_locked(base, len);
     map[base] = ext;
+
+    if (VERIFY_MAP_INTEGRITY_ON_UPDATE)
+        verify_integrity();
 }
 
 Task<void> ExtMap::unmap(usize base, usize len)
@@ -138,6 +136,19 @@ Task<void> ExtMap::unmap(usize base, usize len)
     auto l = co_await mtx.co_scoped_lock();
     unmap_locked(base, len);
     map[base] = {0, 0, len};
+}
+
+void ExtMap::verify_integrity()
+{
+    usize last_base = 0, last_len = 0, total = 0;
+    for (auto &[base, ext] : map) {
+        assert(base >= last_base);
+        assert(base == last_base + last_len);
+        last_base = base;
+        last_len = ext.len;
+        total += ext.len;
+    }
+    assert(total == total_len);
 }
 
 Task<vec<byte>> ExtMap::serialise()
@@ -165,9 +176,7 @@ uptr<ExtMap> ExtMap::deserialise(vec<byte> buf)
 
 uptr<ExtMap> ExtMap::create_empty(usize len)
 {
-    auto m = std::unique_ptr<ExtMap>(new ExtMap());
-    m->map.insert({0, S3Ext{0, 0, len}});
-    return m;
+    return std::unique_ptr<ExtMap>(new ExtMap(len));
 }
 
 Task<std::string> ExtMap::to_string()
