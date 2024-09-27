@@ -66,12 +66,13 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
     // moified and we don't care.
     auto exts = co_await extmap->lookup(offset, iovs.bytes());
 
+    // MAYBE: optimise for the case where len(exts) == 1
+
     folly::fbvector<folly::SemiFuture<Result<void>>> tasks;
     tasks.reserve(exts.size());
 
     // We can hold on to this for a while since we only write to the map on
     // rollover, and those are fairly rare compared to reads
-    auto l = co_await pending_mtx.co_scoped_lock_shared();
     for (auto &[img_off, ext] : exts) {
         auto base = img_off - offset;
 
@@ -84,17 +85,22 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
         auto ext_iov = iovs.slice(base, ext.len);
 
         // First try to read from the write log in case it's in memory
+        auto l = co_await pending_mtx.co_scoped_lock_shared();
         auto it = pending_objs.find(ext.seqnum);
         if (it != pending_objs.end()) {
-            auto ptr = it->second->at(ext);
+            // shared_ptr to logobj; will pin it in memory until scope ends
+            sptr<LogObj> obj = it->second;
+            l.unlock();
+
+            auto ptr = obj->at(ext);
             iovs.copy_in(ptr, ext.len);
             continue;
         }
+        l.unlock();
 
         // Not in pending logobjs, get it from the read-through backend cache
         tasks.push_back(cache->read(ext, ext_iov).semi());
     }
-    l.unlock();
 
     auto all = co_await folly::collectAll(tasks);
     for (auto &t : all)
