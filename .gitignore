@@ -11,12 +11,12 @@ qemu/*.img
 qemu/*.iso
 qemu/bzImage
 
-CMakeLists.txt
+# CMakeLists.txt
 cmakebuild/
-vcpkg.json
-vcpkg-configuration.json
+# vcpkg.json
+# vcpkg-configuration.json
 vcpkg_installed/
-vcpkg_overlay_ports/
+# vcpkg_overlay_ports/
 
 subprojects/
 !subprojects/*.wrap

@@ -1,0 +1,13 @@
+{
+    "dependencies": [
+        "cachelib",
+        "fmt",
+        "folly",
+        "jemalloc",
+        "liburing",
+        "zpp-bits",
+        "spdk",
+        "boost-outcome",
+        "boost-program-options"
+    ]
+}
