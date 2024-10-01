@@ -64,7 +64,7 @@ class lsvd_iodevice
         bdev.blockcnt = img->get_size() / bdev.blocklen;
         bdev.ctxt = this;
         bdev.module = &lsvd_if;
-        // bdev.max_rw_size = 128 * 1024;
+        bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &lsvd_fn_table;
     }
 

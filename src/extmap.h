@@ -7,7 +7,7 @@
 #include "utils.h"
 
 #ifndef VERIFY_MAP_INTEGRITY_ON_UPDATE
-#define VERIFY_MAP_INTEGRITY_ON_UPDATE true
+#define VERIFY_MAP_INTEGRITY_ON_UPDATE false
 #endif
 
 /**

@@ -24,6 +24,8 @@ template <typename T> using vec = std::vector<T>;
 template <typename T> using fut = std::future<T>;
 template <typename T> using fvec = folly::fbvector<T>;
 
+using str = std::string;
+
 #define LOGERR_AND_RET_IF_FAIL(res, msg, ...)                                  \
     do {                                                                       \
         if (res.has_failure()) {                                               \

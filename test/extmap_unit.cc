@@ -1,5 +1,6 @@
+#define VERIFY_MAP_INTEGRITY_ON_UPDATE true
 #include "extmap.h"
 
-int main() {
-    return 0;
-}
+#include <gtest/gtest.h>
+
+int main() { return 0; }

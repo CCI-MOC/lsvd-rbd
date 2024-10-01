@@ -161,10 +161,14 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
     assert(data_bytes > 0 && data_bytes % block_size == 0);
 
     // pin the current object to reserve space in the logobj, and while the
-    // log is held check if we have to rollover
+    // lock is held check if we have to rollover
     auto lck = co_await logobj_mtx.co_scoped_lock();
     auto obj = cur_logobj;
     obj->write_start();
+
+    // INVARIANT: the logobj always has enough space for 1 more write
+    // (max_rw_size in bdev_lsvd.cc). Only after this write is done do we
+    // check if we need to rollover to maintain this invariant
     auto [ext, buf] = obj->append(data_bytes + LOG_ENTRY_SIZE);
     co_await rollover_log(false);
     lck.unlock();
@@ -249,6 +253,9 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         new_seqnum += 1;
     }
 
+    // this is where we allocate new log objects
+    // POTENTIAL OPTIMISATION: we could start recycling objects, or just
+    // manually manage the allocations (ex alloc rdma memory)
     auto new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
     {
         auto l = co_await pending_mtx.co_scoped_lock();

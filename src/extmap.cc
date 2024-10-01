@@ -63,17 +63,17 @@ void ExtMap::unmap_locked(usize offset, usize len)
     //          |--- update ---|
     // |--left--|              |--right--|
     if (it->first < start && it->first + it->second.len > end) {
-        auto &[base, ext] = *it;
-        ext.len = start - base;
+        auto &[base, left_ext] = *it;
 
-        auto right_len = base + ext.len - end;
-        auto right_off = ext.offset + (ext.len - right_len);
+        auto right_len = base + left_ext.len - end;
+        auto right_off = left_ext.offset + (left_ext.len - right_len);
         map[end] = S3Ext{
-            .seqnum = ext.seqnum,
+            .seqnum = left_ext.seqnum,
             .offset = static_cast<u32>(right_off),
             .len = right_len,
         };
 
+        left_ext.len = start - base;
         return;
     }
 
