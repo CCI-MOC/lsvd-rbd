@@ -9,7 +9,7 @@ project(
         'b_colorout=always',
         'b_sanitize=address,undefined',
         'b_asneeded=false',
-        'b_lto=true',
+        'b_lto=false',
         'b_thinlto_cache=true',
         'b_lundef=false',
     ],

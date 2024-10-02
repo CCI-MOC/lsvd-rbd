@@ -15,7 +15,7 @@ dlfcn_dep = cc.find_library('dl', has_headers: ['dlfcn.h'])
 uuid_dep = cc.find_library('uuid', dirs: [], has_headers: ['uuid/uuid.h'])
 numa_dep = cc.find_library('numa', has_headers: ['numaif.h'])
 archive_dep = cc.find_library('archive', has_headers: ['archive.h'])
-rbd_dep = cc.find_library('rbd', has_headers: ['librbd.h'])
+rbd_dep = cc.find_library('rbd')
 
 if get_option('build_subprojects') and not fs.exists('build')
     message('Configuring ..')
@@ -122,6 +122,7 @@ spdk_deps = [
     ssl_dep,
     ssl_dep,
     archive_dep,
+    rbd_dep,
 ]
 
 spdk_paths = []

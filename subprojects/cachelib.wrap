@@ -5,6 +5,7 @@ patch_directory = cachelib
 clone-recursive = false
 ; method = cmake
 depth = 1
+diff_files=cachelib/0001.patch
 
 [provide]
 cachelib = cachelib_dep

@@ -21,6 +21,10 @@ clean:
 	cd build-rel; meson compile --clean
 	cd build-dbg; meson compile --clean
 
+cmake:
+	cmake --preset=vcpkg
+	cmake --build build-cm
+
 install-deps:
 	# Folly deps
 	sudo apt install -y libboost-all-dev libdouble-conversion-dev libevent-dev \

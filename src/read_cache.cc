@@ -121,8 +121,10 @@ class ImageObjCache : public ReadCache
 
         vec<byte> chunk_buf;
         auto siov = smartiov::from_buf(chunk_buf);
-        auto n = BOOST_OUTCOME_CO_TRYX(co_await s3->read(k, offset, siov));
-        if (n == 0)
+        auto read_res = co_await s3->read(k, offset, siov);
+        if (read_res.has_error())
+            co_return read_res.as_failure();
+        else if (read_res.value() == 0)
             co_return outcome::failure(std::errc::no_such_file_or_directory);
 
         co_await cache->insert(k, buffer{chunk_buf.data(), chunk_buf.size()});

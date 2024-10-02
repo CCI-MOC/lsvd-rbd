@@ -20,6 +20,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 add_compile_options(-Wall -Wextra)
 # disable some annoying warnings from headers
 add_compile_options(-Wno-deprecated-declarations)
+add_compile_options(-fdiagnostics-color=always)
 
 # enable asan/ubsan on debug builds
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address,undefined -fno-omit-frame-pointer")

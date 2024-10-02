@@ -18,6 +18,7 @@ cmakebuild/
 vcpkg_installed/
 # vcpkg_overlay_ports/
 
-subprojects/
-!subprojects/*.wrap
-!subprojects/packagefiles/
+subprojects/spdk/
+subprojects/cachelib/
+subprojects/zpp_bits*
+subprojects/packagecache/

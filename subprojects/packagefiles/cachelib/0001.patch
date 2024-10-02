@@ -1,0 +1,13 @@
+diff --git a/contrib/build.sh b/contrib/build.sh
+index b9de071b..ae0f1f15 100755
+--- a/contrib/build.sh
++++ b/contrib/build.sh
+@@ -163,7 +163,7 @@ detect_os
+ if test -z "$skip_os_pkgs" ; then
+   case "$DETECTED" in
+     debian10|debian11) build_debian_10 ;;
+-    ubuntu18.04|ubuntu20.04|ubuntu21.04|ubuntu22.04) build_ubuntu_18 ;;
++    ubuntu18.04|ubuntu20.04|ubuntu21.04|ubuntu22.04|ubuntu24.04) build_ubuntu_18 ;;
+     centos8|rocky8.*) build_centos_8 ;;
+     centos9) build_centos_9 ;;
+     rocky9.?) build_rocky_9 ;;
