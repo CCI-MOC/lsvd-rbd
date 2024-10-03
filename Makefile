@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := debug
-.PHONY: setup setup-debug release debug paper clean
+.PHONY: setup release debug clean cmake
 
 setup:
 	meson setup --native-file meson.ini build-rel --buildtype=release -Db_sanitize=none
@@ -8,14 +8,11 @@ setup:
 
 debug:
 	meson setup --native-file meson.ini build-dbg --buildtype=debug 
-	cd build-dbg; meson compile
+	meson compile -C build-dbg
 
 release:
 	meson setup --native-file meson.ini build-rel --buildtype=release -Db_sanitize=none
-	cd build-rel; meson compile
-
-paper:
-	@$(MAKE) -C atc2024
+	meson compile -C build-rel
 
 clean:
 	cd build-rel; meson compile --clean

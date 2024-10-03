@@ -1,0 +1,2 @@
+# known leak in librados
+leak:rados_ioctx_create

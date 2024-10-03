@@ -9,7 +9,7 @@ project(
         'b_colorout=always',
         'b_sanitize=address,undefined',
         'b_asneeded=false',
-        'b_lto=false',
+        'b_lto=true',
         'b_thinlto_cache=true',
         'b_lundef=false',
     ],
@@ -54,6 +54,13 @@ executable(
     link_with: lsvd_ar,
     dependencies: lsvd_deps,
 )
+
+# executable(
+#     'misc',
+#     ['src/misc.cc'],
+#     link_with: lsvd_ar,
+#     dependencies: lsvd_deps,
+# )
 
 # executable(
 #     'imgtool',

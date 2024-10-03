@@ -5,8 +5,8 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
-builddir
 build
+build-*/
 qemu/*.img
 qemu/*.iso
 qemu/bzImage
