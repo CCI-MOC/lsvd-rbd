@@ -2,9 +2,11 @@
 #include <cstdint>
 #include <folly/logging/xlog.h>
 #include <memory>
+#include <utility>
 
 #include "extmap.h"
 #include "folly/String.h"
+#include "representation.h"
 #include "zpp_bits.h"
 
 Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
@@ -20,29 +22,100 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
     // Go back one so we start at the right place
     it--;
 
+    /*
+    Terminology:
+        ...-----|--- it = extent ---|---...
+            |<------- len ----------------->|
+            ^-- offset
+            | bytes_found | bytes_remaining |
+                          ^-- cur_off
+                ^-- ext_start
+                |<---- ext.len ---->|
+
+    There are two possible cases:
+
+    1. The base of the extent is *before* where we start reading
+        |--- it = existing extent ----|---...
+            a. |--- eq size read ----|
+               |--- small read ---|
+         or b. |--- large read ---------|
+
+        This is only possible on the 1st iteration since all following
+        iterations should have its ext_start align with bytes_remaining
+
+    2. The base of the extent is the same as where we start reading
+            ...---|--- it = existing extent ---|---...
+            a. |--- small read ---|
+               |--- same size read----------|
+            b. |--- large read-------------------|
+    */
+
     usize bytes_found = 0;
     while (bytes_found < len) {
-        auto &[base, ext] = *it;
+        auto &[ext_start, ext] = *it;
+        auto cur_off = offset + bytes_found;
         auto bytes_remaining = len - bytes_found;
 
-        if (it == map.end() || base > offset + len ||
-            base != offset + bytes_found) {
+        if (it == map.end() || ext_start > offset + len) {
             XLOGF(ERR, "Corrupt map detected on {}+{}", offset, len);
+            XLOGF(DBG3, "Map: {}", co_await to_string());
+            co_return {{offset, S3Ext{0, 0, len}}};
+        }
+
+        if (ext_start < cur_off) { // case 1
+            // bytes_remaining is a. (<= ext.len) or b. (> ext.len)
+            auto adjust = cur_off - ext_start;
+            if (adjust >= UINT32_MAX && ext.seqnum != 0) {
+                XLOGF(ERR,
+                      "Corrupt extmap on read {}+{}. Already found {}, "
+                      "current extent: start={},seq={},off={},len={} has "
+                      "adjust {}",
+                      offset, len, bytes_found, ext_start, ext.seqnum,
+                      ext.offset, ext.len, adjust);
+                XLOGF(DBG3, "Map: {}", co_await to_string());
+                co_return {{offset, S3Ext{0, 0, len}}};
+            }
+
+            if (adjust >= UINT32_MAX && ext.seqnum == 0)
+                adjust = 0;
+
+            assert(adjust < UINT32_MAX);
+            auto obj_off = ext.offset + (u32)(adjust);
+
+            if (bytes_remaining <= ext.len) { // case a
+                res.push_back({ext_start, S3Ext{
+                                              .seqnum = ext.seqnum,
+                                              .offset = obj_off,
+                                              .len = bytes_remaining,
+                                          }});
+                co_return res;
+            } else { // case b
+                res.push_back({ext_start, S3Ext{
+                                              .seqnum = ext.seqnum,
+                                              .offset = obj_off,
+                                              .len = ext.len,
+                                          }});
+                bytes_found += ext.len;
+                it++;
+                continue;
+            }
+        }
+
+        // case 2. once again, two possibilities: bytes_remaining is either
+        // a. (<= ext.len) or b. (> ext.len)
+
+        // a. We have more extent remaining than we need, chop it off and return
+        if (bytes_remaining <= ext.len) {
+            res.push_back({ext_start, S3Ext{
+                                          .seqnum = ext.seqnum,
+                                          .offset = ext.offset,
+                                          .len = bytes_remaining,
+                                      }});
             co_return res;
         }
 
-        // We have more extent remaining than we need, chop it off and return
-        if (ext.len > bytes_remaining) {
-            res.push_back({base, S3Ext{
-                                     .seqnum = ext.seqnum,
-                                     .offset = ext.offset,
-                                     .len = bytes_remaining,
-                                 }});
-            co_return res;
-        }
-
-        // We still need more, add the current one and look or more
-        res.push_back({base, ext});
+        // b. We still need more, add the current one and look or more
+        res.push_back({ext_start, ext});
         bytes_found += ext.len;
         it++;
     }

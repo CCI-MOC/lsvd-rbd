@@ -14,6 +14,6 @@ ResTask<void> Journal::record_write(off_t offset, iovec iov, S3Ext ext)
 
 ResTask<void> Journal::record_trim(off_t offset, usize len, S3Ext ext)
 {
-    todo();
+    // todo();
     co_return outcome::success();
 }

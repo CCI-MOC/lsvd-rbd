@@ -137,7 +137,7 @@ int main(int argc, char *argv[])
 {
     auto folly_init = folly::Init(&argc, &argv);
     const usize GIB = 1024 * 1024 * 1024;
-    ReadCache::init_cache(1 * GIB, 1 * GIB, "/tmp/lsvd.rcache");
+    ReadCache::init_cache(4 * GIB, 4 * GIB, "/tmp/lsvd.rcache");
 
     std::string pool_name = "pone";
     auto s3 = ObjStore::connect_to_pool(pool_name).value();

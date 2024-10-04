@@ -31,6 +31,8 @@ class LogObj
 
     auto append(usize len) -> std::pair<S3Ext, byte *>
     {
+        XLOGF(DBG9, "Appending seq {:#x} len={}, written={}", seqnum, len,
+              bytes_written);
         assert(bytes_written + len <= data.size());
         auto ret = bytes_written;
         bytes_written += len;
@@ -56,8 +58,11 @@ class LogObj
 
 ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
 {
+    auto data_bytes = iovs.bytes();
+    XLOGF(DBG8, " SR off={} len={}", offset, data_bytes);
+
     assert(offset >= 0);
-    assert(iovs.bytes() > 0 && iovs.bytes() % block_size == 0);
+    assert(iovs.bytes() > 0 && iovs.bytes() % sector_size == 0);
     if (offset + iovs.bytes() > superblock.image_size)
         co_return outcome::failure(std::errc::invalid_argument);
 
@@ -109,6 +114,7 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
         else
             BOOST_OUTCOME_CO_TRYX(t.value());
 
+    XLOGF(DBG9, "ER off={} len={}", offset, data_bytes);
     co_return outcome::success();
 }
 
@@ -156,9 +162,11 @@ parallelism.
 */
 ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
 {
-    assert(offset >= 0);
     auto data_bytes = iovs.bytes();
-    assert(data_bytes > 0 && data_bytes % block_size == 0);
+    XLOGF(DBG8, "SW off={} len={}", offset, data_bytes);
+
+    assert(offset >= 0);
+    assert(data_bytes > 0 && data_bytes % sector_size == 0);
 
     // pin the current object to reserve space in the logobj, and while the
     // lock is held check if we have to rollover
@@ -192,11 +200,14 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
     co_await extmap->update(offset, data_bytes, data_ext);
 
     obj->write_end();
+
+    XLOGF(DBG9, "EW off={} len={}", offset, data_bytes);
     co_return outcome::success();
 }
 
 ResTask<void> LsvdImage::trim(off_t offset, usize len)
 {
+    XLOGF(DBG8, "ST off={} len={}", offset, len);
     assert(offset >= 0);
     if (len == 0)
         co_return outcome::success();
@@ -204,7 +215,7 @@ ResTask<void> LsvdImage::trim(off_t offset, usize len)
     auto ol = co_await logobj_mtx.co_scoped_lock();
     auto obj = cur_logobj;
     obj->write_start();
-    auto [ext, buf] = obj->append(len);
+    auto [ext, buf] = obj->append(LOG_ENTRY_SIZE);
     co_await rollover_log(false);
     ol.unlock();
 
@@ -220,16 +231,19 @@ ResTask<void> LsvdImage::trim(off_t offset, usize len)
     co_await extmap->unmap(offset, len);
 
     obj->write_end();
+    XLOGF(DBG9, "ET off={} len={}", offset, len);
     co_return outcome::success();
 }
 
 ResTask<void> LsvdImage::flush()
 {
+    XLOGF(DBG8, "SFlush");
     auto ol = co_await logobj_mtx.co_scoped_lock();
     auto obj = co_await rollover_log(true);
     ol.unlock();
 
     co_await obj->wait_for_writes();
+    XLOGF(DBG9, "EFlush");
     co_return outcome::success();
 }
 
@@ -319,16 +333,17 @@ ResTask<void> LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf,
         case log_entry_type::WRITE:
             co_await extmap->update(entry->offset, entry->len,
                                     S3Ext{seq, consumed_bytes, entry->len});
+            consumed_bytes += sizeof(log_entry) + entry->len;
             break;
         case log_entry_type::TRIM:
             co_await extmap->unmap(entry->offset, entry->len);
+            consumed_bytes += sizeof(log_entry);
             break;
         default:
             XLOGF(ERR, "Unknown log entry type {}",
                   static_cast<u32>(entry->type));
             co_return outcome::failure(std::errc::io_error);
         }
-        consumed_bytes += sizeof(log_entry) + entry->len;
     }
 
     co_return outcome::success();
@@ -360,6 +375,7 @@ ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
         BOOST_OUTCOME_CO_TRYX(co_await s3->read_all(last_ckpt_key));
     img->extmap = ExtMap::deserialise(last_ckpt_buf);
     XLOGF(INFO, "Deserialised checkpoint {:#x}", img->last_checkpoint);
+    XLOGF(DBG7, "Extmap {}", co_await img->extmap->to_string());
 
     // build the cache and journal
     img->s3 = s3;

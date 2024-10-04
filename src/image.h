@@ -56,7 +56,7 @@ class LsvdImage
 {
     const usize rollover_threshold = 8 * 1024 * 1024;
     const usize max_log_size = rollover_threshold * 2;
-    const usize block_size = 4096;
+    const usize sector_size = 512;
     const usize checkpoint_interval_epoch = 100;
 
   public:

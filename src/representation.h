@@ -70,6 +70,12 @@ struct __attribute((packed)) log_entry {
     byte data[];
 };
 
+struct __attribute((packed)) log_entry_hdr_only {
+    uint64_t type : 2;
+    uint64_t offset : 62;
+    uint64_t len;
+};
+
 const uint32_t LOG_ENTRY_SIZE = sizeof(log_entry);
 static_assert(LOG_ENTRY_SIZE == 16);
 

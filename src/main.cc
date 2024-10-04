@@ -7,7 +7,7 @@
 #include "image.h"
 #include "representation.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=INFO,folly=INFO");
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG8");
 
 static void lsvd_tgt_usage() {}
 static int lsvd_tgt_parse_arg(int ch, char *arg) { return 0; }

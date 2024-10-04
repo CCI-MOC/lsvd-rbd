@@ -59,29 +59,21 @@ class SharedCache
     }
 
     // returns true iff item was found
-    auto read(strv key, usize adjust, smartiov dest) -> Task<bool>
+    auto read(strv key, usize adjust, smartiov dest) -> ResTask<usize>
     {
         auto h = co_await cache->find(key).toSemiFuture();
-
         if (!h)
-            co_return false;
+            co_return outcome::failure(std::errc::no_such_file_or_directory);
 
-        if (dest.bytes() > h->getSize() + adjust) {
-            XLOGF(ERR,
-                  "Object too small for read. key: {}, adjust {} cache entry "
-                  "size: {}, buffer size: {}",
-                  key, adjust, h->getSize(), dest.bytes());
-            co_return false;
-        }
-
-        dest.copy_in((byte *)h->getMemory() + adjust, dest.bytes());
-        co_return true;
+        auto bytes_copied = h->getSize() - adjust;
+        dest.copy_in((byte *)h->getMemory() + adjust, bytes_copied);
+        co_return bytes_copied;
     }
 
     auto insert(strv key, buffer src) -> Task<bool>
     {
         auto h = cache->allocate(pid, key, src.len);
-        if (!h) {
+        if (!h) [[unlikely]] {
             XLOGF(ERR, "Failed to allocate {} bytes for key: {}", src.len, key);
             co_return false;
         }
@@ -111,24 +103,35 @@ class ImageObjCache : public ReadCache
         return get_cache_key(imgname, seq, offset);
     }
 
-    auto read_chunk(seqnum_t seq, usize offset, usize adjust,
+    auto read_chunk(seqnum_t seq, usize off, usize adjust,
                     smartiov dest) -> ResTask<void>
     {
-        auto k = get_key(seq, offset);
-        auto in_cache = co_await cache->read(k, adjust, dest);
-        if (in_cache)
+        auto k = get_key(seq, off);
+        auto get_res = co_await cache->read(k, adjust, dest);
+        if (get_res.has_value())
             co_return outcome::success();
 
-        vec<byte> chunk_buf;
+        // cache miss, fetch from backend
+        vec<byte> chunk_buf(CACHE_CHUNK_SIZE);
         auto siov = smartiov::from_buf(chunk_buf);
-        auto read_res = co_await s3->read(k, offset, siov);
-        if (read_res.has_error())
-            co_return read_res.as_failure();
-        else if (read_res.value() == 0)
-            co_return outcome::failure(std::errc::no_such_file_or_directory);
+        auto fetch_len = BOOST_OUTCOME_CO_TRYX(co_await s3->read(k, off, siov));
+        if (fetch_len == 0) [[unlikely]] {
+            XLOGF(ERR, "0-length read for key '{}', off {}, len {}", k, off,
+                  siov.bytes());
+            co_return outcome::failure(std::errc::io_error);
+        }
 
-        co_await cache->insert(k, buffer{chunk_buf.data(), chunk_buf.size()});
+        if (adjust + dest.bytes() > fetch_len) [[unlikely]] {
+            XLOGF(ERR,
+                  "Read past end of chunk: key {} adj {} len {}; found {}/{} ",
+                  k, adjust, dest.bytes(), fetch_len, adjust + dest.bytes());
+            co_return outcome::failure(std::errc::io_error);
+        }
+
+        // insert into cache and return
+        co_await cache->insert(k, buffer{chunk_buf.data(), fetch_len});
         dest.copy_in(chunk_buf.data() + adjust, dest.bytes());
+
         co_return outcome::success();
     }
 
