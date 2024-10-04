@@ -151,26 +151,29 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     // io details
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
-    auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
 
     auto exe = folly::getGlobalCPUExecutor();
     auto cb = [lio](auto &&r) { lsvd_io_done(lio, r); };
 
     switch (io->type) {
-    case SPDK_BDEV_IO_TYPE_READ:
+    case SPDK_BDEV_IO_TYPE_READ: {
+        auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
         img->read(offset, iov).semi().via(exe).then(cb);
         break;
-    case SPDK_BDEV_IO_TYPE_WRITE:
+    }
+    case SPDK_BDEV_IO_TYPE_WRITE: {
+        auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
         img->write(offset, iov).semi().via(exe).then(cb);
         break;
-    case SPDK_BDEV_IO_TYPE_FLUSH:
-        img->flush().semi().via(exe).then(cb);
-        break;
+    }
     case SPDK_BDEV_IO_TYPE_UNMAP:
         img->trim(offset, len).semi().via(exe).then(cb);
         break;
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
         img->trim(offset, len).semi().via(exe).then(cb);
+        break;
+    case SPDK_BDEV_IO_TYPE_FLUSH:
+        img->flush().semi().via(exe).then(cb);
         break;
     default:
         XLOGF(ERR, "Unknown request type: {}", io->type);

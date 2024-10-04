@@ -11,7 +11,7 @@
 
 Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
 {
-    assert(offset + len <= total_len);
+    ENSURE(offset + len <= total_len);
     auto l = co_await mtx.co_scoped_lock_shared();
     vec<std::pair<usize, S3Ext>> res;
 
@@ -76,25 +76,27 @@ Task<vec<std::pair<usize, S3Ext>>> ExtMap::lookup(usize offset, usize len)
                 co_return {{offset, S3Ext{0, 0, len}}};
             }
 
+            usize obj_adjust = adjust, img_adjust = adjust;
             if (adjust >= UINT32_MAX && ext.seqnum == 0)
-                adjust = 0;
+                obj_adjust = 0;
 
-            assert(adjust < UINT32_MAX);
-            auto obj_off = ext.offset + (u32)(adjust);
+            ENSURE(obj_adjust < UINT32_MAX);
+            auto obj_off = ext.offset + (u32)(obj_adjust);
+            auto img_off = ext_start + img_adjust;
 
             if (bytes_remaining <= ext.len) { // case a
-                res.push_back({ext_start, S3Ext{
-                                              .seqnum = ext.seqnum,
-                                              .offset = obj_off,
-                                              .len = bytes_remaining,
-                                          }});
+                res.push_back({img_off, S3Ext{
+                                            .seqnum = ext.seqnum,
+                                            .offset = obj_off,
+                                            .len = bytes_remaining,
+                                        }});
                 co_return res;
             } else { // case b
-                res.push_back({ext_start, S3Ext{
-                                              .seqnum = ext.seqnum,
-                                              .offset = obj_off,
-                                              .len = ext.len,
-                                          }});
+                res.push_back({img_off, S3Ext{
+                                            .seqnum = ext.seqnum,
+                                            .offset = obj_off,
+                                            .len = ext.len,
+                                        }});
                 bytes_found += ext.len;
                 it++;
                 continue;
@@ -183,8 +185,8 @@ void ExtMap::unmap_locked(usize offset, usize len)
         map.erase(it);
 
         auto shrink_bytes = end - base;
-        assert(shrink_bytes < ext.len);
-        assert(shrink_bytes < UINT32_MAX);
+        ENSURE(shrink_bytes < ext.len);
+        ENSURE(shrink_bytes < UINT32_MAX);
         map[base + shrink_bytes] = S3Ext{
             .seqnum = ext.seqnum,
             .offset = ext.offset + static_cast<uint32_t>(shrink_bytes),
@@ -195,7 +197,7 @@ void ExtMap::unmap_locked(usize offset, usize len)
 
 Task<void> ExtMap::update(usize base, usize len, S3Ext ext)
 {
-    assert(ext.len == len);
+    ENSURE(ext.len == len);
     auto l = co_await mtx.co_scoped_lock();
     unmap_locked(base, len);
     map[base] = ext;
@@ -209,19 +211,23 @@ Task<void> ExtMap::unmap(usize base, usize len)
     auto l = co_await mtx.co_scoped_lock();
     unmap_locked(base, len);
     map[base] = {0, 0, len};
+
+    // merge the extents before and after if they're both also unmapped
+    // auto it = map.find(base);
+    // ENSURE(it != map.end());
 }
 
 void ExtMap::verify_integrity()
 {
     usize last_base = 0, last_len = 0, total = 0;
     for (auto &[base, ext] : map) {
-        assert(base >= last_base);
-        assert(base == last_base + last_len);
+        ENSURE(base >= last_base);
+        ENSURE(base == last_base + last_len);
         last_base = base;
         last_len = ext.len;
         total += ext.len;
     }
-    assert(total == total_len);
+    ENSURE(total == total_len);
 }
 
 Task<vec<byte>> ExtMap::serialise()
@@ -232,7 +238,7 @@ Task<vec<byte>> ExtMap::serialise()
     auto lck = co_await mtx.co_scoped_lock_shared();
     auto res = ar(map);
     // TODO handle error
-    assert(zpp::bits::failure(res) == false);
+    ENSURE(zpp::bits::failure(res) == false);
     co_return buf;
 }
 
@@ -242,7 +248,7 @@ uptr<ExtMap> ExtMap::deserialise(vec<byte> buf)
     zpp::bits::in ar(buf);
     auto res = ar(map);
     // TODO handle error
-    assert(zpp::bits::failure(res) == false);
+    ENSURE(zpp::bits::failure(res) == false);
     XLOGF(INFO, "Deserialised map with {} entries", map.size());
     return std::unique_ptr<ExtMap>(new ExtMap(std::move(map)));
 }

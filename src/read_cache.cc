@@ -65,9 +65,9 @@ class SharedCache
         if (!h)
             co_return outcome::failure(std::errc::no_such_file_or_directory);
 
-        auto bytes_copied = h->getSize() - adjust;
-        dest.copy_in((byte *)h->getMemory() + adjust, bytes_copied);
-        co_return bytes_copied;
+        auto copy_len = std::min(h->getSize() - adjust, dest.bytes());
+        dest.copy_in((byte *)h->getMemory() + adjust, copy_len);
+        co_return copy_len;
     }
 
     auto insert(strv key, buffer src) -> Task<bool>
@@ -99,7 +99,7 @@ class ImageObjCache : public ReadCache
 
     auto get_key(seqnum_t seq, usize offset) -> fstr
     {
-        assert(offset % CACHE_CHUNK_SIZE == 0);
+        ENSURE(offset % CACHE_CHUNK_SIZE == 0);
         return get_cache_key(imgname, seq, offset);
     }
 
@@ -155,7 +155,7 @@ class ImageObjCache : public ReadCache
             auto chunk_off = ext.offset + bytes_read - adjust;
             auto to_read =
                 std::min(CACHE_CHUNK_SIZE - adjust, ext.len - bytes_read);
-            auto iov = dest.slice(bytes_read, bytes_read + to_read);
+            auto iov = dest.slice(bytes_read, to_read);
             tasks.push_back(
                 read_chunk(ext.seqnum, chunk_off, adjust, iov).semi());
             bytes_read += to_read;

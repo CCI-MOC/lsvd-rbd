@@ -1,5 +1,4 @@
 #pragma once
-#include <cassert>
 #include <string.h>
 #include <sys/uio.h>
 
@@ -23,15 +22,15 @@ class smartiov
   private:
     smartiov(char *buf, usize len) : total_bytes(len)
     {
-        assert(len > 0);
+        ENSURE(len > 0);
         iovs.push_back((iovec){buf, len});
     }
 
-    smartiov(vec<iovec> &&iovs) : iovs(std::move(iovs))
+    smartiov(vec<iovec> &&v) : iovs(std::move(v))
     {
-        assert(this->iovs.size() > 0);
-        for (auto [base, len] : this->iovs) {
-            assert(len > 0);
+        ENSURE(iovs.size() > 0);
+        for (auto [base, len] : iovs) {
+            ENSURE(len > 0);
             total_bytes += len;
         }
     }
@@ -49,7 +48,7 @@ class smartiov
 
     static smartiov from_iovecs(const iovec *iov, int iovcnt)
     {
-        assert(iovcnt > 0);
+        ENSURE(iovcnt > 0);
         vec<iovec> iovs;
         for (int i = 0; i < iovcnt; i++)
             if (iov[i].iov_len > 0)
@@ -66,53 +65,61 @@ class smartiov
     auto bytes(void) { return total_bytes; }
     const vec<iovec> &iovs_vec(void) { return iovs; }
 
-    // end is exclusive
-    smartiov slice(usize start, usize end)
+    smartiov slice(usize start, usize len)
     {
-        assert(end <= total_bytes);
+        ENSURE(start + len <= total_bytes);
         vec<iovec> other;
-        usize len = end - start;
-        for (auto it = iovs.begin(); it != iovs.end() && len > 0; it++) {
-            if (it->iov_len < start)
-                start -= it->iov_len;
-            else {
-                auto _len = std::min(len, it->iov_len - start);
-                other.push_back((iovec){(char *)it->iov_base + start, _len});
-                len -= _len;
-                start = 0;
+
+        usize skip = start, remaining = len;
+        for (auto [iovbase, iovlen] : iovs) {
+            if (iovlen <= skip) {
+                skip -= iovlen;
+                continue;
             }
+
+            auto use_len = std::min(remaining, iovlen - skip);
+            ENSURE(use_len > 0);
+            other.push_back((iovec){(byte *)iovbase + skip, use_len});
+            remaining -= use_len;
+            skip = 0;
+
+            if (remaining == 0)
+                break;
         }
+
         return smartiov(std::move(other));
     }
 
-    void zero(void)
+    void zero(usize start, usize len)
     {
-        for (auto i : iovs)
-            memset(i.iov_base, 0, i.iov_len);
-    }
+        ENSURE(start + len <= total_bytes);
 
-    void zero(usize off, usize limit)
-    {
-        usize len = limit - off;
-        for (auto it = iovs.begin(); it != iovs.end() && len > 0; it++) {
-            if (it->iov_len < off)
-                off -= it->iov_len;
-            else {
-                auto _len = std::min(len, it->iov_len - off);
-                memset((char *)it->iov_base + off, 0, _len);
-                len -= _len;
-                off = 0;
+        usize skip = start, remaining = len;
+        for (auto [iovbase, iovlen] : iovs) {
+            if (iovlen <= skip) {
+                skip -= iovlen;
+                continue;
             }
+
+            auto use_len = std::min(remaining, iovlen - skip);
+            ENSURE(use_len > 0);
+            memset((byte *)iovbase + skip, 0, use_len);
+            remaining -= use_len;
+            skip = 0;
+
+            if (remaining == 0)
+                break;
         }
     }
 
-    void copy_in(byte *buf, usize limit)
+    void copy_in(byte *buf, usize len)
     {
-        if (limit == 0) // do nothing
+        if (len == 0) // do nothing
             return;
+        ENSURE(buf != nullptr);
+        ENSURE(len <= total_bytes);
 
-        assert(buf != nullptr);
-        auto remaining = limit;
+        auto remaining = len;
         for (auto i : iovs) {
             auto to_copy = std::min(remaining, i.iov_len);
             remaining -= to_copy;

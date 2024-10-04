@@ -34,6 +34,25 @@ using str = std::string;
         }                                                                      \
     } while (0)
 
+#define ENSURE(cond)                                                           \
+    do {                                                                       \
+        if (!(cond)) {                                                         \
+            auto msg = fmt::format("Assertion failed: '{}'", #cond);           \
+            XLOG(ERR, msg);                                                    \
+            throw std::runtime_error(msg);                                     \
+        }                                                                      \
+    } while (0)
+
+#define FAIL_IF_NEGERR(rc, umsg)                                               \
+    do {                                                                       \
+        if (rc < 0) {                                                          \
+            auto errc = std::error_code(-rc, std::system_category());          \
+            auto msg = fmt::format("{}: {}", umsg, errc.message());            \
+            XLOG(ERR, msg);                                                    \
+            return outcome::failure(errc);                                     \
+        }                                                                      \
+    } while (0)
+
 template <typename T> inline auto errcode_to_result(int err) -> Result<T>
 {
     if (err == 0)

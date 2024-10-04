@@ -33,7 +33,7 @@ class LogObj
     {
         XLOGF(DBG9, "Appending seq {:#x} len={}, written={}", seqnum, len,
               bytes_written);
-        assert(bytes_written + len <= data.size());
+        ENSURE(bytes_written + len <= data.size());
         auto ret = bytes_written;
         bytes_written += len;
         return {S3Ext{seqnum, ret, len}, data.data() + ret};
@@ -61,8 +61,8 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
     auto data_bytes = iovs.bytes();
     XLOGF(DBG8, " SR off={} len={}", offset, data_bytes);
 
-    assert(offset >= 0);
-    assert(iovs.bytes() > 0 && iovs.bytes() % sector_size == 0);
+    ENSURE(offset >= 0);
+    ENSURE(iovs.bytes() > 0 && iovs.bytes() % sector_size == 0);
     if (offset + iovs.bytes() > superblock.image_size)
         co_return outcome::failure(std::errc::invalid_argument);
 
@@ -73,17 +73,17 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
 
     // MAYBE: optimise for the case where len(exts) == 1
 
-    folly::fbvector<folly::SemiFuture<Result<void>>> tasks;
+    fvec<folly::SemiFuture<Result<void>>> tasks;
     tasks.reserve(exts.size());
 
     // We can hold on to this for a while since we only write to the map on
     // rollover, and those are fairly rare compared to reads
-    for (auto &[img_off, ext] : exts) {
-        auto base = img_off - offset;
+    for (auto &[ext_img_off, ext] : exts) {
+        auto base = ext_img_off - offset;
 
         // Unmapped range; zero it and move on
         if (ext.seqnum == 0) {
-            iovs.zero(base, base + ext.len);
+            iovs.zero(base, ext.len);
             continue;
         }
 
@@ -165,8 +165,8 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
     auto data_bytes = iovs.bytes();
     XLOGF(DBG8, "SW off={} len={}", offset, data_bytes);
 
-    assert(offset >= 0);
-    assert(data_bytes > 0 && data_bytes % sector_size == 0);
+    ENSURE(offset >= 0);
+    ENSURE(data_bytes > 0 && data_bytes % sector_size == 0);
 
     // pin the current object to reserve space in the logobj, and while the
     // lock is held check if we have to rollover
@@ -208,7 +208,7 @@ ResTask<void> LsvdImage::write(off_t offset, smartiov iovs)
 ResTask<void> LsvdImage::trim(off_t offset, usize len)
 {
     XLOGF(DBG8, "ST off={} len={}", offset, len);
-    assert(offset >= 0);
+    ENSURE(offset >= 0);
     if (len == 0)
         co_return outcome::success();
 
@@ -274,7 +274,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     {
         auto l = co_await pending_mtx.co_scoped_lock();
         auto [it, inserted] = pending_objs.emplace(new_seqnum, new_logobj);
-        assert(inserted == true);
+        ENSURE(inserted == true);
     }
 
     cur_logobj = new_logobj;
@@ -293,7 +293,6 @@ ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
     // TODO think about what to do in the case of failure here
     BOOST_OUTCOME_CO_TRYX(co_await s3->write(k, obj->as_iov()));
     XLOGF(DBG, "Flushed log object {:#x}", obj->seqnum);
-    obj->flush_done();
 
     BOOST_OUTCOME_CO_TRYX(
         co_await cache->insert_obj(obj->seqnum, obj->as_buffer()));
@@ -301,6 +300,7 @@ ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
     auto l = co_await pending_mtx.co_scoped_lock();
     pending_objs.erase(obj->seqnum);
 
+    obj->flush_done();
     co_return outcome::success();
 }
 
