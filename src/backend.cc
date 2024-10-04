@@ -60,17 +60,29 @@ class Rados : public ObjStore
     }
 
   public:
-    Rados(rados_t cluster, rados_ioctx_t io)
-    {
-        assert(io != nullptr);
-        librados::Rados::from_rados_t(cluster, this->cluster);
-        librados::IoCtx::from_rados_ioctx_t(io, this->io);
-    }
+    Rados() {}
 
     ~Rados() override
     {
         io.close();
         cluster.shutdown();
+    }
+
+    static auto connect(fstr pool) -> Result<uptr<Rados>>
+    {
+        auto s3 = uptr<Rados>(new Rados());
+
+        int ret = 0;
+        ret = s3->cluster.init2("client.admin", "ceph", 0);
+        FAIL_IF_NEGERR(ret, "Init rados cluster failed");
+        ret = s3->cluster.conf_read_file("/etc/ceph/ceph.conf");
+        FAIL_IF_NEGERR(ret, "Couldn't read ceph config file");
+        ret = s3->cluster.connect();
+        FAIL_IF_NEGERR(ret, "Couldn't connect to rados cluster");
+        ret = s3->cluster.ioctx_create(pool.c_str(), s3->io);
+        FAIL_IF_NEGERR(ret, "Failed to connect to pool");
+
+        return outcome::success(std::move(s3));
     }
 
     auto get_size(fstr name) -> ResTask<usize> override
@@ -81,7 +93,7 @@ class Rados : public ObjStore
         u64 size;
         time_t mtime;
         auto rc = io.aio_stat(name.toStdString(), cb.cb, &size, &mtime);
-        assert(rc == 0);
+        ENSURE(rc == 0);
 
         rc = co_await std::move(f);
         if (rc < 0)
@@ -103,7 +115,7 @@ class Rados : public ObjStore
         auto bl = iov_to_bl(v);
         auto rc =
             io.aio_read(name.toStdString(), cb.cb, &bl, bl.length(), offset);
-        assert(rc == 0);
+        ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
@@ -115,7 +127,7 @@ class Rados : public ObjStore
         auto bl = iov_to_bl(v);
         auto rc =
             io.aio_read(name.toStdString(), cb.cb, &bl, bl.length(), offset);
-        assert(rc == 0);
+        ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
@@ -149,7 +161,7 @@ class Rados : public ObjStore
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
         auto rc = io.aio_write(name.toStdString(), cb.cb, bl, bl.length(), 0);
-        assert(rc == 0);
+        ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
@@ -160,7 +172,7 @@ class Rados : public ObjStore
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
         auto rc = io.aio_write(name.toStdString(), cb.cb, bl, bl.length(), 0);
-        assert(rc == 0);
+        ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
@@ -170,7 +182,7 @@ class Rados : public ObjStore
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto rc = io.aio_remove(name.toStdString(), cb.cb);
-        assert(rc == 0);
+        ENSURE(rc == 0);
         auto iores = co_await std::move(f);
         if (iores < 0)
             co_return outcome::failure(
@@ -182,33 +194,5 @@ class Rados : public ObjStore
 
 Result<sptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
 {
-    XLOGF(INFO, "Connecting to pool '{}'", pool_name);
-
-    rados_t cluster;
-    auto rc = rados_create(&cluster, "admin");
-    if (rc < 0) {
-        XLOGF(ERR, "Failed to create rados cluster: {}", -rc);
-        return outcome::failure(std::error_code(-rc, std::system_category()));
-    }
-
-    rc = rados_conf_read_file(cluster, nullptr);
-    if (rc < 0) {
-        XLOGF(ERR, "Failed to read conf file: {}", -rc);
-        return outcome::failure(std::error_code(-rc, std::system_category()));
-    }
-
-    rc = rados_connect(cluster);
-    if (rc < 0) {
-        XLOGF(ERR, "Failed to connect to the cluster: {}", -rc);
-        return outcome::failure(std::error_code(-rc, std::system_category()));
-    }
-
-    rados_ioctx_t io;
-    rc = rados_ioctx_create(cluster, pool_name.toStdString().c_str(), &io);
-    if (rc < 0) {
-        XLOGF(ERR, "Failed to connect to the pool: {}", -rc);
-        return outcome::failure(std::error_code(-rc, std::system_category()));
-    }
-
-    return uptr<ObjStore>(new Rados(cluster, io));
+    return BOOST_OUTCOME_TRYX(Rados::connect(pool_name));
 }
