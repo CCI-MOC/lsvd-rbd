@@ -106,30 +106,33 @@ class ImageObjCache : public ReadCache
     auto read_chunk(seqnum_t seq, usize off, usize adjust,
                     smartiov dest) -> ResTask<void>
     {
-        auto k = get_key(seq, off);
-        auto get_res = co_await cache->read(k, adjust, dest);
+        auto cache_key = get_key(seq, off);
+        auto get_res = co_await cache->read(cache_key, adjust, dest);
         if (get_res.has_value())
             co_return outcome::success();
 
         // cache miss, fetch from backend
+        auto obj_key = get_logobj_key(imgname, seq);
         vec<byte> chunk_buf(CACHE_CHUNK_SIZE);
         auto siov = smartiov::from_buf(chunk_buf);
-        auto fetch_len = BOOST_OUTCOME_CO_TRYX(co_await s3->read(k, off, siov));
-        if (fetch_len == 0) [[unlikely]] {
-            XLOGF(ERR, "0-length read for key '{}', off {}, len {}", k, off,
-                  siov.bytes());
-            co_return outcome::failure(std::errc::io_error);
-        }
+        auto fetch_len =
+            BOOST_OUTCOME_CO_TRYX(co_await s3->read(obj_key, off, siov));
 
+        if (fetch_len == 0) [[unlikely]] {
+            XLOGF(ERR, "0-length read for key '{}', off {}, len {}", cache_key,
+                  off, siov.bytes());
+            co_return outcome::failure(std::errc::no_message);
+        }
         if (adjust + dest.bytes() > fetch_len) [[unlikely]] {
             XLOGF(ERR,
                   "Read past end of chunk: key {} adj {} len {}; found {}/{} ",
-                  k, adjust, dest.bytes(), fetch_len, adjust + dest.bytes());
-            co_return outcome::failure(std::errc::io_error);
+                  cache_key, adjust, dest.bytes(), fetch_len,
+                  adjust + dest.bytes());
+            co_return outcome::failure(std::errc::value_too_large);
         }
 
         // insert into cache and return
-        co_await cache->insert(k, buffer{chunk_buf.data(), fetch_len});
+        co_await cache->insert(cache_key, buffer{chunk_buf.data(), fetch_len});
         dest.copy_in(chunk_buf.data() + adjust, dest.bytes());
 
         co_return outcome::success();

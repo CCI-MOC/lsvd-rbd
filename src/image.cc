@@ -324,7 +324,7 @@ ResTask<void> LsvdImage::checkpoint(seqnum_t seqnum, vec<byte> buf)
 ResTask<void> LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf,
                                     usize start_byte)
 {
-    XLOGF(DBG, "Replaying log object {:#x}", seq);
+    XLOGF(DBG7, "Replaying log object {:#x}", seq);
 
     u32 consumed_bytes = start_byte;
     while (consumed_bytes < buf.size()) {
@@ -398,6 +398,8 @@ ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
             co_await img->replay_obj(cur_seq, lo_buf.value(), 0));
         last_known_seq = cur_seq;
     }
+
+    XLOGF(DBG7, "Post-recovery extmap\n{}", co_await img->extmap->to_string());
 
     // TODO search for uncommited objects in the journal and replay them too
 

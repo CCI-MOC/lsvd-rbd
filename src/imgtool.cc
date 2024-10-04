@@ -14,7 +14,7 @@
 #include <string>
 
 #include "image.h"
-#include "src/representation.h"
+#include "representation.h"
 
 FOLLY_INIT_LOGGING_CONFIG(".=DBG,folly=INFO");
 

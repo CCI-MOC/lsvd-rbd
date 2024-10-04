@@ -120,10 +120,17 @@ static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret)
     auto sth = io->submit_td;
     assert(sth != nullptr);
 
-    if (ret.hasValue() && ret->has_value())
+    if (ret.hasValue() && ret->has_value()) [[likely]]
         io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
     else
         io->status = SPDK_BDEV_IO_STATUS_FAILED;
+
+    if (io->status != SPDK_BDEV_IO_STATUS_SUCCESS) [[unlikely]] {
+        if (ret.hasException())
+            XLOGF(ERR, "IO failed with exception: {}", ret.exception().what());
+        else
+            XLOGF(ERR, "IO failed with error: {}", ret->error().message());
+    }
 
     spdk_thread_send_msg(
         sth,

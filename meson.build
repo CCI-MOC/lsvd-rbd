@@ -55,12 +55,12 @@ executable(
     dependencies: lsvd_deps,
 )
 
-# executable(
-#     'misc',
-#     ['src/misc.cc'],
-#     link_with: lsvd_ar,
-#     dependencies: lsvd_deps,
-# )
+executable(
+    'misc',
+    ['src/misc.cc'],
+    link_with: lsvd_ar,
+    dependencies: lsvd_deps,
+)
 
 # executable(
 #     'imgtool',
