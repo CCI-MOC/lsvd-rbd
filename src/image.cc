@@ -258,12 +258,13 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     auto prev = cur_logobj;
     auto new_seqnum = prev->seqnum + 1;
 
-    XLOGF(DBG, "Rollover log from {:#x} to {:#x}", prev->seqnum, new_seqnum);
+    XLOGF(DBG7, "Rollover log from {:#x} to {:#x}", prev->seqnum, new_seqnum);
 
     // add new checkpoint if needed
-    if (new_seqnum > prev->seqnum + checkpoint_interval_epoch) {
+    if (new_seqnum > last_checkpoint + checkpoint_interval_epoch) {
         auto ckpt_buf = co_await extmap->serialise();
         checkpoint(new_seqnum, std::move(ckpt_buf)).scheduleOn(exe).start();
+        last_checkpoint = new_seqnum;
         new_seqnum += 1;
     }
 
@@ -286,7 +287,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
 
 ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
 {
-    XLOGF(DBG, "Flushing log object {:#x}", obj->seqnum);
+    XLOGF(DBG8, "Flushing log object {:#x}", obj->seqnum);
     co_await obj->wait_for_writes();
     auto k = get_logobj_key(name, obj->seqnum);
 
@@ -324,7 +325,7 @@ ResTask<void> LsvdImage::checkpoint(seqnum_t seqnum, vec<byte> buf)
 ResTask<void> LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf,
                                     usize start_byte)
 {
-    XLOGF(DBG7, "Replaying log object {:#x}", seq);
+    XLOGF(DBG8, "Replaying log object {:#x}", seq);
 
     u32 consumed_bytes = start_byte;
     while (consumed_bytes < buf.size()) {
@@ -374,8 +375,8 @@ ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
     auto last_ckpt_buf =
         BOOST_OUTCOME_CO_TRYX(co_await s3->read_all(last_ckpt_key));
     img->extmap = ExtMap::deserialise(last_ckpt_buf);
-    XLOGF(INFO, "Deserialised checkpoint {:#x}", img->last_checkpoint);
-    XLOGF(DBG7, "Extmap {}", co_await img->extmap->to_string());
+    XLOGF(INFO, "Deserialised checkpoint {:#x}", img->last_checkpoint.load());
+    // XLOGF(DBG9, "Extmap {}", co_await img->extmap->to_string());
 
     // build the cache and journal
     img->s3 = s3;
@@ -399,7 +400,7 @@ ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
         last_known_seq = cur_seq;
     }
 
-    XLOGF(DBG7, "Post-recovery extmap\n{}", co_await img->extmap->to_string());
+    XLOGF(DBG9, "Post-recovery extmap\n{}", co_await img->extmap->to_string());
 
     // TODO search for uncommited objects in the journal and replay them too
 

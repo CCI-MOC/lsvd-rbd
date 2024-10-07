@@ -7,7 +7,7 @@
 #include "image.h"
 #include "representation.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG8");
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG7");
 
 static void lsvd_tgt_usage() {}
 static int lsvd_tgt_parse_arg(int ch, char *arg) { return 0; }
@@ -22,7 +22,7 @@ const usize GIB = 1024 * 1024 * 1024;
 int main(int argc, char **argv)
 {
     auto folly_init = folly::Init(&argc, &argv);
-    ReadCache::init_cache(4 * GIB, 4 * GIB, "/tmp/lsvd.rcache");
+    ReadCache::init_cache(10 * GIB, 10 * GIB, "/tmp/lsvd.rcache");
 
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));

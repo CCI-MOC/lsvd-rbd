@@ -109,7 +109,7 @@ class Rados : public ObjStore
 
     auto read(fstr name, off_t offset, smartiov &v) -> ResTask<usize> override
     {
-        XLOGF(DBG3, "Reading object '{}'", name);
+        XLOGF(DBG8, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -121,7 +121,7 @@ class Rados : public ObjStore
 
     auto read(fstr name, off_t offset, iovec v) -> ResTask<usize> override
     {
-        XLOGF(DBG3, "Reading object '{}'", name);
+        XLOGF(DBG8, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -156,7 +156,7 @@ class Rados : public ObjStore
 
     auto write(fstr name, smartiov &v) -> ResTask<usize> override
     {
-        XLOGF(DBG3, "Writing object '{}'", name);
+        XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
@@ -167,7 +167,7 @@ class Rados : public ObjStore
 
     auto write(fstr name, iovec v) -> ResTask<usize> override
     {
-        XLOGF(DBG3, "Writing object '{}'", name);
+        XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);

@@ -57,7 +57,7 @@ class LsvdImage
     const usize rollover_threshold = 8 * 1024 * 1024;
     const usize max_log_size = rollover_threshold * 2;
     const usize sector_size = 512;
-    const usize checkpoint_interval_epoch = 100;
+    const usize checkpoint_interval_epoch = 128;
 
   public:
     const fstr name;
@@ -73,7 +73,7 @@ class LsvdImage
 
     // Clone, checkpoint, and snapshopt metadata
     SuperblockInfo superblock;
-    seqnum_t last_checkpoint;
+    std::atomic<seqnum_t> last_checkpoint;
 
     // Utilities
     LsvdConfig cfg;

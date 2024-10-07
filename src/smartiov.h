@@ -16,49 +16,47 @@ struct buffer {
  */
 class smartiov
 {
-    usize total_bytes;
-    vec<iovec> iovs;
+    const usize total_bytes;
+    const vec<iovec> iovs;
 
   private:
-    smartiov(char *buf, usize len) : total_bytes(len)
-    {
-        ENSURE(len > 0);
-        iovs.push_back((iovec){buf, len});
-    }
-
-    smartiov(vec<iovec> &&v) : iovs(std::move(v))
+    smartiov(vec<iovec> &&v, usize len) : total_bytes(len), iovs(std::move(v))
     {
         ENSURE(iovs.size() > 0);
-        for (auto [base, len] : iovs) {
-            ENSURE(len > 0);
-            total_bytes += len;
-        }
+        usize total = 0;
+        for (auto [base, len] : iovs)
+            total += len;
+        ENSURE(total == total_bytes);
     }
 
   public:
     static smartiov from_buf(vec<byte> &buf)
     {
-        return smartiov((char *)buf.data(), buf.size());
+        return smartiov({(iovec){buf.data(), buf.size()}}, buf.size());
     }
 
     static smartiov from_str(std::string_view str)
     {
-        return smartiov((char *)str.data(), str.size());
+        return smartiov({(iovec){(void *)str.data(), str.size()}}, str.size());
+    }
+
+    static smartiov from_ptr(void *ptr, usize len)
+    {
+        return smartiov({(iovec){ptr, len}}, len);
     }
 
     static smartiov from_iovecs(const iovec *iov, int iovcnt)
     {
         ENSURE(iovcnt > 0);
+        usize total_len = 0;
         vec<iovec> iovs;
         for (int i = 0; i < iovcnt; i++)
-            if (iov[i].iov_len > 0)
+            if (iov[i].iov_len > 0) {
                 iovs.push_back(iov[i]);
-        return smartiov(std::move(iovs));
-    }
+                total_len += iov[i].iov_len;
+            }
 
-    static smartiov from_ptr(void *ptr, usize len)
-    {
-        return smartiov((char *)ptr, len);
+        return smartiov(std::move(iovs), total_len);
     }
 
     auto num_vecs(void) { return iovs.size(); }
@@ -87,7 +85,7 @@ class smartiov
                 break;
         }
 
-        return smartiov(std::move(other));
+        return smartiov(std::move(other), len);
     }
 
     void zero(usize start, usize len)
