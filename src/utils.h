@@ -1,6 +1,7 @@
 #pragma once
 #include <boost/outcome.hpp>
 #include <boost/stacktrace.hpp>
+#include <csignal>
 #include <fmt/color.h>
 #include <folly/experimental/coro/Promise.h>
 #include <folly/experimental/coro/Task.h>
@@ -27,7 +28,7 @@ using str = std::string;
 
 #define LOGERR_AND_RET_IF_FAIL(res, msg, ...)                                  \
     do {                                                                       \
-        if (res.has_failure()) {                                               \
+        if (res.has_failure()) [[unlikely]] {                                  \
             auto outmsg = fmt::format(msg, __VA_ARGS__);                       \
             XLOGF(ERR, "{}: {}", outmsg, res.error().message());               \
             return res.error();                                                \
@@ -36,16 +37,24 @@ using str = std::string;
 
 #define ENSURE(cond)                                                           \
     do {                                                                       \
-        if (!(cond)) {                                                         \
+        if (!(cond)) [[unlikely]] {                                            \
             auto msg = fmt::format("Assertion failed: '{}'", #cond);           \
             XLOG(ERR, msg);                                                    \
             throw std::runtime_error(msg);                                     \
         }                                                                      \
     } while (0)
 
+#define DEBUG_IF_FAIL(cond)                                                    \
+    do {                                                                       \
+        if (cond.has_error()) [[unlikely]] {                                   \
+            raise(SIGTRAP);                                                    \
+            co_return cond.as_failure();                                       \
+        }                                                                      \
+    } while (0)
+
 #define FAIL_IF_NEGERR(rc, umsg)                                               \
     do {                                                                       \
-        if (rc < 0) {                                                          \
+        if (rc < 0) [[unlikely]] {                                             \
             auto errc = std::error_code(-rc, std::system_category());          \
             auto msg = fmt::format("{}: {}", umsg, errc.message());            \
             XLOG(ERR, msg);                                                    \

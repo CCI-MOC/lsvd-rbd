@@ -94,6 +94,9 @@ class LsvdImage
     ResTask<void> checkpoint(seqnum_t seqnum, vec<byte> buf);
     ResTask<void> replay_obj(seqnum_t seq, vec<byte> buf, usize start_byte);
 
+    // debug utils to maintain consistency and integrity
+    folly::Synchronized<folly::F14FastMap<seqnum_t, usize>> obj_sizes;
+
   public:
     static ResTask<uptr<LsvdImage>> mount(sptr<ObjStore> s3, fstr name,
                                           fstr config);
@@ -105,8 +108,10 @@ class LsvdImage
 
     ResTask<void> read(off_t offset, smartiov iovs);
     ResTask<void> write(off_t offset, smartiov iovs);
+    ResTask<void> write_and_verify(off_t offset, smartiov iovs);
     ResTask<void> trim(off_t offset, usize len);
     ResTask<void> flush();
 
+    Task<void> verify_integrity();
     usize get_size() { return superblock.image_size; }
 };

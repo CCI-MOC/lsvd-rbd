@@ -3,6 +3,7 @@
 #include <folly/logging/xlog.h>
 #include <zpp_bits.h>
 
+#include "config.h"
 #include "folly/String.h"
 #include "image.h"
 #include "read_cache.h"
@@ -103,6 +104,12 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
         }
         l.unlock();
 
+        if (ENABLE_SEQUENTIAL_DEBUG_READS) {
+            auto res = co_await cache->read(ext, ext_iov);
+            DEBUG_IF_FAIL(res);
+        } else {
+            tasks.push_back(cache->read(ext, ext_iov).semi());
+        }
         // Not in pending logobjs, get it from the read-through backend cache
         tasks.push_back(cache->read(ext, ext_iov).semi());
     }
@@ -111,8 +118,8 @@ ResTask<void> LsvdImage::read(off_t offset, smartiov iovs)
     for (auto &t : all)
         if (t.hasException())
             co_return outcome::failure(std::errc::io_error);
-        else
-            BOOST_OUTCOME_CO_TRYX(t.value());
+        else if (t->has_error())
+            co_return t->as_failure();
 
     XLOGF(DBG9, "ER off={} len={}", offset, data_bytes);
     co_return outcome::success();
@@ -291,6 +298,9 @@ ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
     co_await obj->wait_for_writes();
     auto k = get_logobj_key(name, obj->seqnum);
 
+    auto obj_iov = obj->as_iov();
+    obj_sizes.wlock()->emplace(obj->seqnum, obj_iov.iov_len);
+
     // TODO think about what to do in the case of failure here
     BOOST_OUTCOME_CO_TRYX(co_await s3->write(k, obj->as_iov()));
     XLOGF(DBG, "Flushed log object {:#x}", obj->seqnum);
@@ -400,6 +410,7 @@ ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
         last_known_seq = cur_seq;
     }
 
+    img->extmap->verify_self_integrity();
     XLOGF(DBG9, "Post-recovery extmap\n{}", co_await img->extmap->to_string());
 
     // TODO search for uncommited objects in the journal and replay them too
@@ -421,6 +432,21 @@ Task<void> LsvdImage::unmount()
     auto obj = co_await rollover_log(true);
     co_await obj->wait_for_writes();
     co_await obj->wait_for_flush();
+}
+
+ResTask<void> LsvdImage::write_and_verify(off_t offset, smartiov iovs)
+{
+    auto res = co_await write(offset, iovs);
+    DEBUG_IF_FAIL(res);
+    co_await verify_integrity();
+    co_return outcome::success();
+}
+
+Task<void> LsvdImage::verify_integrity()
+{
+    obj_sizes.withRLock(
+        [this](auto &locked) { extmap->verify_ext_integrity(locked); });
+    co_return;
 }
 
 ResTask<void> LsvdImage::create(sptr<ObjStore> s3, fstr name, usize size)

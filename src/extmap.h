@@ -6,10 +6,6 @@
 #include "representation.h"
 #include "utils.h"
 
-#ifndef VERIFY_MAP_INTEGRITY_ON_UPDATE
-#define VERIFY_MAP_INTEGRITY_ON_UPDATE false
-#endif
-
 /**
 Maps a range of addresses to an extent on the backend.
 
@@ -43,7 +39,6 @@ class ExtMap
 
     // Internal use, assumes the lock is already held
     void unmap_locked(usize base, usize len);
-    void verify_integrity();
 
     ExtMap(usize len) : total_len(len) { map.insert({0, S3Ext{0, 0, len}}); }
     ExtMap(std::map<usize, S3Ext> map_) : map(std::move(map_))
@@ -54,6 +49,9 @@ class ExtMap
 
   public:
     ~ExtMap() {}
+    void verify_self_integrity();
+    void
+    verify_ext_integrity(const folly::F14FastMap<seqnum_t, usize> &obj_sizes);
 
     Task<vec<std::pair<usize, S3Ext>>> lookup(usize offset, usize len);
     Task<void> update(usize base, usize len, S3Ext val);

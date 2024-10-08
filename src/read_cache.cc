@@ -1,6 +1,7 @@
 #include "read_cache.h"
 #include "backend.h"
 #include "cachelib/allocator/CacheAllocator.h"
+#include "config.h"
 #include "representation.h"
 #include "smartiov.h"
 #include "utils.h"
@@ -156,8 +157,16 @@ class ImageObjCache : public ReadCache
             auto to_read =
                 std::min(CACHE_CHUNK_SIZE - adjust, ext.len - bytes_read);
             auto iov = dest.slice(bytes_read, to_read);
-            tasks.push_back(
-                read_chunk(ext.seqnum, chunk_off, adjust, iov).semi());
+
+            if (ENABLE_SEQUENTIAL_DEBUG_READS) {
+                auto res =
+                    co_await read_chunk(ext.seqnum, chunk_off, adjust, iov);
+                DEBUG_IF_FAIL(res);
+            } else {
+                tasks.push_back(
+                    read_chunk(ext.seqnum, chunk_off, adjust, iov).semi());
+            }
+
             bytes_read += to_read;
         }
 
@@ -165,8 +174,8 @@ class ImageObjCache : public ReadCache
         for (auto &t : all)
             if (t.hasException())
                 co_return outcome::failure(std::errc::io_error);
-            else
-                BOOST_OUTCOME_CO_TRYX(t.value());
+            else if (t->has_error())
+                co_return t->as_failure();
         co_return outcome::success();
     }
 

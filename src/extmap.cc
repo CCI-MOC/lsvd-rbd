@@ -1,11 +1,12 @@
 #include <cassert>
 #include <cstdint>
+#include <folly/String.h>
 #include <folly/logging/xlog.h>
 #include <memory>
 #include <utility>
 
+#include "config.h"
 #include "extmap.h"
-#include "folly/String.h"
 #include "representation.h"
 #include "zpp_bits.h"
 
@@ -162,6 +163,7 @@ void ExtMap::unmap_locked(usize offset, usize len)
     // -------- new ----|
     if (it->first < start) {
         auto &[base, ext] = *it;
+        ENSURE(offset - base < ext.len);
         map[base].len = offset - base;
         it++;
     }
@@ -203,7 +205,7 @@ Task<void> ExtMap::update(usize base, usize len, S3Ext ext)
     map[base] = ext;
 
     if (VERIFY_MAP_INTEGRITY_ON_UPDATE)
-        verify_integrity();
+        verify_self_integrity();
 }
 
 Task<void> ExtMap::unmap(usize base, usize len)
@@ -217,7 +219,7 @@ Task<void> ExtMap::unmap(usize base, usize len)
     // ENSURE(it != map.end());
 }
 
-void ExtMap::verify_integrity()
+void ExtMap::verify_self_integrity()
 {
     usize last_base = 0, last_len = 0, total = 0;
     for (auto &[base, ext] : map) {
@@ -270,4 +272,17 @@ Task<std::string> ExtMap::to_string()
         entries.push_back(s);
     }
     co_return folly::join("\n", entries);
+}
+
+void ExtMap::verify_ext_integrity(
+    const folly::F14FastMap<seqnum_t, usize> &obj_sizes)
+{
+    for (auto &[base, ext] : map) {
+        if (ext.seqnum == 0)
+            continue;
+
+        auto obj_len = obj_sizes.find(ext.seqnum);
+        if (obj_len != obj_sizes.end())
+            ENSURE(ext.offset + ext.len <= obj_len->second);
+    }
 }
