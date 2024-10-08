@@ -17,7 +17,6 @@ project(
 
 add_project_arguments('-fPIC', language: 'cpp')
 add_project_arguments('-Wno-unused-parameter', language: 'cpp')
-add_project_arguments('-Wno-deprecated-declarations', language: 'c')
 add_project_arguments('-Wno-deprecated-declarations', language: 'cpp')
 add_project_arguments('-Wno-nullability-completeness', language: 'cpp')
 add_project_arguments('-Wno-defaulted-function-deleted', language: 'cpp')

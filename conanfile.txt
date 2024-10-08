@@ -1,0 +1,8 @@
+[requires]
+zpp_bits/4.4.20
+concurrencpp/0.1.7
+andreasbuhr-cppcoro/cci.20230629
+
+[generators]
+PkgConfigDeps
+MesonToolchain

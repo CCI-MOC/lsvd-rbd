@@ -17,6 +17,7 @@ cmakebuild/
 # vcpkg-configuration.json
 vcpkg_installed/
 # vcpkg_overlay_ports/
+conan/
 
 subprojects/spdk/
 subprojects/cachelib/

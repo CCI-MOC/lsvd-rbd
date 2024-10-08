@@ -19,7 +19,9 @@ lsvd_inc = include_directories(
 
 lsvd_deps = [
     subproject('cachelib').get_variable('cachelib_dep'),
-    subproject('zpp_bits').get_variable('zppbits_dep'),
+    dependency('zpp_bits'),
+    dependency('concurrencpp'),
+    dependency('cppcoro'),
 
     cxx.find_library('rados', required: true),
     cxx.find_library('jemalloc', required: false),

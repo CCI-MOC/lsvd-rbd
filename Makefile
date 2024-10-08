@@ -7,6 +7,7 @@ setup:
 	ln -s build-dbg builddir
 
 debug:
+	conan install . --output-folder=conan --build=missing
 	meson setup --native-file meson.ini build-dbg --buildtype=debug 
 	meson compile -C build-dbg
 
@@ -36,3 +37,5 @@ install-deps:
 		libjemalloc-dev libradospp-dev pkg-config uuid-dev
 	# Convenience
 	sudo apt install -y fish
+	# tools
+	pip install conan

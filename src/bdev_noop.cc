@@ -75,7 +75,6 @@ class noop_iodevice
   public:
     spdk_bdev bdev;
     uptr<NoopImage> img;
-    folly::Executor::KeepAlive<> exe;
 
     noop_iodevice(uptr<NoopImage> img_) : img(std::move(img_))
     {
@@ -88,8 +87,6 @@ class noop_iodevice
         bdev.module = &noop_if;
         bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &noop_fn_table;
-
-        exe = folly::getGlobalCPUExecutor();
     }
 
     ~noop_iodevice()
@@ -160,6 +157,21 @@ static void noop_io_done(noop_bdev_io *io, folly::Try<void> ret)
         io);
 }
 
+static void noop_io_done(noop_bdev_io *io)
+{
+    auto sth = io->submit_td;
+    assert(sth != nullptr);
+
+    spdk_thread_send_msg(
+        sth,
+        [](void *ctx) {
+            auto io = (noop_bdev_io *)ctx;
+            spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io),
+                                  SPDK_BDEV_IO_STATUS_SUCCESS);
+        },
+        io);
+}
+
 auto test_task(std::function<void(void)> f) -> Task<void>
 {
     f();
@@ -177,37 +189,35 @@ static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
-    auto cb = [lio](auto &&r) { noop_io_done(lio, r); };
-    // folly::Try<void> synth;
-    // synth.emplace();
-    // auto scb = [cb, synth]() { cb(synth); };
-    // dev->exe->add(scb);
-    // test_task(scb).scheduleOn(dev->exe).start();
+    auto exe = folly::getGlobalCPUExecutor();
+    auto scb = [lio]() { noop_io_done(lio); };
+    test_task(scb).scheduleOn(exe).start();
 
-    switch (io->type) {
-    case SPDK_BDEV_IO_TYPE_READ: {
-        auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->read(offset, iov).semi().via(dev->exe).then(cb);
-        break;
-    }
-    case SPDK_BDEV_IO_TYPE_WRITE: {
-        auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->write(offset, iov).semi().via(dev->exe).then(cb);
-        break;
-    }
-    case SPDK_BDEV_IO_TYPE_UNMAP:
-        img->trim(offset, len).semi().via(dev->exe).then(cb);
-        break;
-    case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        img->trim(offset, len).semi().via(dev->exe).then(cb);
-        break;
-    case SPDK_BDEV_IO_TYPE_FLUSH:
-        img->flush().semi().via(dev->exe).then(cb);
-        break;
-    default:
-        XLOGF(ERR, "Unknown request type: {}", io->type);
-        return;
-    }
+    // auto cb = [lio](auto &&r) { noop_io_done(lio, r); };
+    // switch (io->type) {
+    // case SPDK_BDEV_IO_TYPE_READ: {
+    //     auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
+    //     img->read(offset, iov).semi().via(exe).then(cb);
+    //     break;
+    // }
+    // case SPDK_BDEV_IO_TYPE_WRITE: {
+    //     auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
+    //     img->write(offset, iov).semi().via(exe).then(cb);
+    //     break;
+    // }
+    // case SPDK_BDEV_IO_TYPE_UNMAP:
+    //     img->trim(offset, len).semi().via(exe).then(cb);
+    //     break;
+    // case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
+    //     img->trim(offset, len).semi().via(exe).then(cb);
+    //     break;
+    // case SPDK_BDEV_IO_TYPE_FLUSH:
+    //     img->flush().semi().via(exe).then(cb);
+    //     break;
+    // default:
+    //     XLOGF(ERR, "Unknown request type: {}", io->type);
+    //     return;
+    // }
 }
 
 // Just copying from bdev_rbd, not sure where this is actually used
