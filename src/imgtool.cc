@@ -20,22 +20,6 @@ FOLLY_INIT_LOGGING_CONFIG(".=DBG,folly=INFO");
 
 using str = std::string;
 
-static usize parseint(str i)
-{
-    usize processed;
-    auto val = std::stoll(i, &processed);
-    char *postfix = (char *)i.c_str() + processed;
-
-    if (toupper(*postfix) == 'G')
-        val *= (1024 * 1024 * 1024);
-    if (toupper(*postfix) == 'M')
-        val *= (1024 * 1024);
-    if (toupper(*postfix) == 'K')
-        val *= 1024;
-
-    return val;
-}
-
 static auto info(sptr<ObjStore> s3, str name) -> Task<void>
 {
     XLOGF(INFO, "Getting info for image {}", name);
@@ -158,7 +142,7 @@ int main(int argc, char **argv)
     auto io = ObjStore::connect_to_pool(pool).value();
 
     if (cmd == "create") {
-        auto size = parseint(vm["size"].as<str>());
+        auto size = parse_size_str(vm["size"].as<str>());
         auto thick = vm["thick"].as<bool>();
         XLOGF(INFO, "Creating '{}/{}', size={} bytes", pool, img, size);
         LsvdImage::create(io, img, size).scheduleOn(exe).start().wait();

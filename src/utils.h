@@ -87,3 +87,26 @@ unimplemented(std::source_location sl = std::source_location::current())
                sl.function_name());
     throw std::runtime_error("TODO stub");
 }
+
+inline static size_t parse_size_str(str i)
+{
+    size_t processed;
+    auto val = std::stoull(i, &processed);
+    if (processed == i.size())
+        return val;
+    else if (processed == 0)
+        throw std::invalid_argument("Not a positive number: " + i);
+
+    auto rest = i.substr(processed);
+    auto postfix = rest.size() == 1 ? rest[0] : 0;
+    if (std::toupper(postfix) == 'G')
+        val *= (1024 * 1024 * 1024);
+    else if (std::toupper(postfix) == 'M')
+        val *= (1024 * 1024);
+    else if (std::toupper(postfix) == 'K')
+        val *= 1024;
+    else
+        throw std::invalid_argument("Invalid postfix (not k/m/g): " + rest);
+
+    return val;
+}
