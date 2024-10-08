@@ -1,4 +1,5 @@
 #include "folly/executors/GlobalExecutor.h"
+#include "folly/experimental/coro/Sleep.h"
 #include "spdk/bdev_module.h"
 #include "spdk/thread.h"
 
@@ -9,14 +10,15 @@
 class NoopImage
 {
   private:
-    NoopImage(str name) : name(name) {}
+    usize size;
+    NoopImage(str name, usize size) : size(size), name(name) {}
 
   public:
     str name;
 
     static Task<uptr<NoopImage>> mount(str name, usize size)
     {
-        co_return uptr<NoopImage>(new NoopImage(name));
+        co_return uptr<NoopImage>(new NoopImage(name, size));
     }
 
     Task<void> read(off_t offset, smartiov iovs) { co_return; }
@@ -24,7 +26,7 @@ class NoopImage
     Task<void> trim(off_t offset, usize len) { co_return; }
     Task<void> flush() { co_return; }
 
-    usize get_size() { return 0; }
+    usize get_size() { return size; }
 };
 
 static int bdev_noop_init(void);
@@ -73,11 +75,12 @@ class noop_iodevice
   public:
     spdk_bdev bdev;
     uptr<NoopImage> img;
+    folly::Executor::KeepAlive<> exe;
 
     noop_iodevice(uptr<NoopImage> img_) : img(std::move(img_))
     {
         std::memset(&bdev, 0, sizeof(bdev));
-        bdev.product_name = strdup("Log-structured Virtual Disk");
+        bdev.product_name = strdup("No-op disk");
         bdev.name = strdup(img->name.c_str());
         bdev.blocklen = 4096;
         bdev.blockcnt = img->get_size() / bdev.blocklen;
@@ -85,6 +88,8 @@ class noop_iodevice
         bdev.module = &noop_if;
         bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &noop_fn_table;
+
+        exe = folly::getGlobalCPUExecutor();
     }
 
     ~noop_iodevice()
@@ -155,6 +160,12 @@ static void noop_io_done(noop_bdev_io *io, folly::Try<void> ret)
         io);
 }
 
+auto test_task(std::function<void(void)> f) -> Task<void>
+{
+    f();
+    co_return;
+}
+
 static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
     auto dev = static_cast<noop_iodevice *>(io->bdev->ctxt);
@@ -166,28 +177,32 @@ static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
-    auto exe = folly::getGlobalCPUExecutor();
     auto cb = [lio](auto &&r) { noop_io_done(lio, r); };
+    // folly::Try<void> synth;
+    // synth.emplace();
+    // auto scb = [cb, synth]() { cb(synth); };
+    // dev->exe->add(scb);
+    // test_task(scb).scheduleOn(dev->exe).start();
 
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->read(offset, iov).semi().via(exe).then(cb);
+        img->read(offset, iov).semi().via(dev->exe).then(cb);
         break;
     }
     case SPDK_BDEV_IO_TYPE_WRITE: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->write(offset, iov).semi().via(exe).then(cb);
+        img->write(offset, iov).semi().via(dev->exe).then(cb);
         break;
     }
     case SPDK_BDEV_IO_TYPE_UNMAP:
-        img->trim(offset, len).semi().via(exe).then(cb);
+        img->trim(offset, len).semi().via(dev->exe).then(cb);
         break;
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        img->trim(offset, len).semi().via(exe).then(cb);
+        img->trim(offset, len).semi().via(dev->exe).then(cb);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        img->flush().semi().via(exe).then(cb);
+        img->flush().semi().via(dev->exe).then(cb);
         break;
     default:
         XLOGF(ERR, "Unknown request type: {}", io->type);
@@ -201,6 +216,17 @@ struct noop_bdev_io_channel {
     spdk_io_channel *io_channel;
 };
 
+Task<void> getExecutorStats()
+{
+    while (true) {
+        co_await folly::coro::sleep(std::chrono::seconds(5));
+        auto stats = folly::getGlobalCPUExecutorCounters();
+        XLOGF(INFO, "CPU Executor: {} max threads, {} active, {} tasks pending",
+              stats.numThreads, stats.numActiveThreads, stats.numPendingTasks);
+    }
+    co_return;
+}
+
 auto bdev_noop_create(str img_name, usize size) -> Result<void>
 {
     assert(!img_name.empty());
@@ -211,6 +237,9 @@ auto bdev_noop_create(str img_name, usize size) -> Result<void>
                    .wait()
                    .value();
     auto iodev = new noop_iodevice(std::move(img));
+
+    // get executor stats periodically
+    getExecutorStats().scheduleOn(folly::getGlobalCPUExecutor()).start();
 
     spdk_io_device_register(
         iodev,

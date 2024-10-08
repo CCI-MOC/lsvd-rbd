@@ -1,3 +1,4 @@
+#include "folly/executors/GlobalExecutor.h"
 #include "spdk/event.h"
 #include "spdk/nvme.h"
 #include "spdk/nvmf.h"
@@ -10,7 +11,7 @@
 #include "bdev_lsvd.h"
 #include "image.h"
 #include "representation.h"
-#include "src/utils.h"
+#include "utils.h"
 
 FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG7");
 
@@ -210,6 +211,9 @@ static void call_fn(void *arg)
 
 int main(int argc, char **argv)
 {
+    fLU::FLAGS_folly_global_cpu_executor_threads =
+        std::thread::hardware_concurrency();
+
     int fake_argc = 0;
     auto folly_init = folly::Init(&fake_argc, &argv, false);
 
@@ -262,6 +266,8 @@ int main(int argc, char **argv)
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
+    opts.reactor_mask = "[0,1,2,3]"; // 6 cores for reactor
+
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
     spdk_app_fini();
 
