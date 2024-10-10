@@ -26,9 +26,22 @@ class LogObj
     folly::coro::Baton writes_done_baton;
     folly::coro::Baton flush_done_baton;
 
+    LogObj(seqnum_t seqnum, vec<byte> &&buf)
+        : seqnum(seqnum), data(std::move(buf))
+    {
+    }
+
   public:
     LogObj(seqnum_t seqnum, usize size) : seqnum(seqnum), data(size) {}
     ~LogObj() {}
+
+    auto recycle(seqnum_t seq)
+    {
+        ENSURE(writes_pending.load() == 0);
+        ENSURE(writes_done_baton.ready());
+        ENSURE(flush_done_baton.ready());
+        return sptr<LogObj>(new LogObj(seq, std::move(data)));
+    }
 
     auto append(usize len) -> std::pair<S3Ext, byte *>
     {
@@ -265,7 +278,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     auto prev = cur_logobj;
     auto new_seqnum = prev->seqnum + 1;
 
-    XLOGF(DBG7, "Rollover log from {:#x} to {:#x}", prev->seqnum, new_seqnum);
+    XLOGF(DBG8, "Rollover log from {:#x} to {:#x}", prev->seqnum, new_seqnum);
 
     // add new checkpoint if needed
     if (new_seqnum > last_checkpoint + checkpoint_interval_epoch) {
@@ -275,10 +288,16 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         new_seqnum += 1;
     }
 
-    // this is where we allocate new log objects
-    // POTENTIAL OPTIMISATION: we could start recycling objects, or just
-    // manually manage the allocations (ex alloc rdma memory)
-    auto new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
+    sptr<LogObj> new_logobj;
+    recycle_objs.withWLock([&new_logobj, new_seqnum](auto &recycle) {
+        if (recycle.empty())
+            return;
+        new_logobj = recycle.back()->recycle(new_seqnum);
+        recycle.pop_back();
+    });
+    if (new_logobj == nullptr)
+        new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
+
     {
         auto l = co_await pending_mtx.co_scoped_lock();
         auto [it, inserted] = pending_objs.emplace(new_seqnum, new_logobj);
@@ -294,7 +313,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
 
 ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
 {
-    XLOGF(DBG8, "Flushing log object {:#x}", obj->seqnum);
+    XLOGF(DBG9, "Flushing log object {:#x}", obj->seqnum);
     co_await obj->wait_for_writes();
     auto k = get_logobj_key(name, obj->seqnum);
 
@@ -303,20 +322,28 @@ ResTask<void> LsvdImage::flush_logobj(sptr<LogObj> obj)
 
     // TODO think about what to do in the case of failure here
     BOOST_OUTCOME_CO_TRYX(co_await s3->write(k, obj->as_iov()));
-    XLOGF(DBG, "Flushed log object {:#x}", obj->seqnum);
+    XLOGF(DBG8, "Flushed log object {:#x}", obj->seqnum);
 
     BOOST_OUTCOME_CO_TRYX(
         co_await cache->insert_obj(obj->seqnum, obj->as_buffer()));
 
-    auto l = co_await pending_mtx.co_scoped_lock();
-    pending_objs.erase(obj->seqnum);
+    {
+        auto l = co_await pending_mtx.co_scoped_lock();
+        pending_objs.erase(obj->seqnum);
+    }
 
     obj->flush_done();
+    recycle_objs.withWLock([obj, this](auto &recycle) {
+        if (recycle.size() <= max_recycle_objs)
+            recycle.push_back(obj);
+    });
+
     co_return outcome::success();
 }
 
 ResTask<void> LsvdImage::checkpoint(seqnum_t seqnum, vec<byte> buf)
 {
+    XLOGF(DBG6, "New checkpoint seq {:#x}", seqnum);
     auto k = get_logobj_key(name, seqnum);
 
     // TODO handle failure
@@ -416,6 +443,7 @@ ResTask<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
     // TODO search for uncommited objects in the journal and replay them too
 
     // create the first log object
+    XLOGF(DBG5, "Starting with seq {:#x}", last_known_seq + 1);
     auto seq = last_known_seq + 1;
     auto new_logobj = std::make_shared<LogObj>(seq, img->max_log_size);
     img->pending_objs.emplace(seq, new_logobj);

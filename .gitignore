@@ -5,6 +5,7 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
+perf.*
 build
 build-*/
 qemu/*.img

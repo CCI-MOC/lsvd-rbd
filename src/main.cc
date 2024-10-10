@@ -261,6 +261,8 @@ int main(int argc, char **argv)
         XLOGF(FATAL, "Usage: {} [nomount|mount_noop|mount_lsvd]", argv[0]);
     }
 
+    XLOGF(INFO, "Starting SPDK target, pid={}", getpid());
+
     ReadCache::init_cache(10 * GIB, 10 * GIB, "/tmp/lsvd.rcache");
 
     spdk_app_opts opts = {};

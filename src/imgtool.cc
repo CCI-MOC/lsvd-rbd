@@ -16,7 +16,7 @@
 #include "image.h"
 #include "representation.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=DBG,folly=INFO");
+FOLLY_INIT_LOGGING_CONFIG(".=INFO,folly=INFO");
 
 using str = std::string;
 

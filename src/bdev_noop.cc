@@ -157,8 +157,16 @@ static void noop_io_done(noop_bdev_io *io, folly::Try<void> ret)
         io);
 }
 
-static void noop_io_done(noop_bdev_io *io)
+using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
+static std::atomic<u64> total_lat_us{0};
+static std::atomic<u64> num_reqs{0};
+
+static void noop_io_done(noop_bdev_io *io, tp start)
 {
+    auto now = std::chrono::high_resolution_clock::now();
+    auto lat =
+        std::chrono::duration_cast<std::chrono::microseconds>(now - start);
+    total_lat_us.fetch_add(lat.count());
     auto sth = io->submit_td;
     assert(sth != nullptr);
 
@@ -178,6 +186,8 @@ auto test_task(std::function<void(void)> f) -> Task<void>
     co_return;
 }
 
+auto noop_task() -> Task<void> { co_return; }
+
 static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
     auto dev = static_cast<noop_iodevice *>(io->bdev->ctxt);
@@ -190,7 +200,13 @@ static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
     auto exe = folly::getGlobalCPUExecutor();
-    auto scb = [lio]() { noop_io_done(lio); };
+    auto now = std::chrono::high_resolution_clock::now();
+    auto old_num = num_reqs.fetch_add(1);
+    if (old_num > 0 && old_num % 10000 == 0)
+        XLOGF(INFO, "num {} total {} per iter {}", old_num, total_lat_us.load(),
+              total_lat_us / old_num);
+
+    auto scb = [lio, now]() { noop_io_done(lio, now); };
     test_task(scb).scheduleOn(exe).start();
 
     // auto cb = [lio](auto &&r) { noop_io_done(lio, r); };

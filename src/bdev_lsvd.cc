@@ -115,7 +115,12 @@ struct lsvd_bdev_io {
 
 static int bdev_lsvd_io_ctx_size(void) { return sizeof(lsvd_bdev_io); }
 
-static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret)
+using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
+static std::atomic<u64> total_lat_us{0};
+static std::atomic<u64> num_reqs{0};
+
+static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret,
+                         tp start)
 {
     auto sth = io->submit_td;
     assert(sth != nullptr);
@@ -139,6 +144,11 @@ static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret)
             spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
         },
         io);
+
+    auto now = std::chrono::high_resolution_clock::now();
+    auto lat =
+        std::chrono::duration_cast<std::chrono::microseconds>(now - start);
+    total_lat_us.fetch_add(lat.count());
 }
 
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
@@ -152,8 +162,15 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
+    // measure e2e latency
+    auto now = std::chrono::high_resolution_clock::now();
+    auto old_num = num_reqs.fetch_add(1);
+    if (old_num > 0 && old_num % 20000 == 0)
+        XLOGF(INFO, "num {}; total {}; per iter {}us", old_num,
+              total_lat_us.load(), total_lat_us / old_num);
+
     auto exe = folly::getGlobalCPUExecutor();
-    auto cb = [lio](auto &&r) { lsvd_io_done(lio, r); };
+    auto cb = [lio, now](auto &&r) { lsvd_io_done(lio, r, now); };
 
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ: {

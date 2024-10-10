@@ -54,10 +54,15 @@ class LogObj;
 
 class LsvdImage
 {
-    const usize rollover_threshold = 8 * 1024 * 1024;
-    const usize max_log_size = rollover_threshold * 2;
+  public:
+    const usize max_io_size = 128 * 1024;
+
+  private:
+    const usize max_log_size = 8 * 1024 * 1024;
+    const usize rollover_threshold = max_log_size - (2 * max_io_size);
     const usize sector_size = 512;
     const usize checkpoint_interval_epoch = 128;
+    const usize max_recycle_objs = 32;
 
   public:
     const fstr name;
@@ -87,6 +92,8 @@ class LsvdImage
     sptr<LogObj> cur_logobj;
     folly::coro::SharedMutex pending_mtx;
     folly::F14FastMap<seqnum_t, sptr<LogObj>> pending_objs;
+
+    folly::Synchronized<vec<sptr<LogObj>>> recycle_objs;
 
     // Internal functions
     Task<sptr<LogObj>> rollover_log(bool force);
