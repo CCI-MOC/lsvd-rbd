@@ -11,8 +11,8 @@ class Journal
     usize journ_size;
 
   public:
-    static ResTask<uptr<Journal>> open(fstr path);
+    static TaskRes<uptr<Journal>> open(fstr path);
 
-    ResTask<void> record_write(off_t offset, iovec iov, S3Ext ext);
-    ResTask<void> record_trim(off_t offset, usize len, S3Ext ext);
+    TaskUnit record_write(off_t offset, iovec iov, S3Ext ext);
+    TaskUnit record_trim(off_t offset, usize len, S3Ext ext);
 };

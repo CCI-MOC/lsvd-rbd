@@ -25,15 +25,12 @@ struct SuperblockInfo {
     std::vector<seqnum_t> checkpoints;
     std::vector<seqnum_t> snapshots;
 
-    Result<void> deserialise(vec<byte> buf)
+    static SuperblockInfo deserialise(vec<byte> &buf)
     {
+        SuperblockInfo ret;
         zpp::bits::in ar(buf);
-        auto res = ar(*this);
-        if (zpp::bits::failure(res)) {
-            XLOGF(ERR, "Failed to deserialise superblock");
-            return outcome::failure(res.code);
-        }
-        return outcome::success();
+        ar(ret).or_throw();
+        return ret;
     }
 
     Result<vec<byte>> serialise()
@@ -41,11 +38,7 @@ struct SuperblockInfo {
         vec<byte> buf;
         buf.reserve(4096);
         zpp::bits::out ar(buf);
-        auto res = ar(*this);
-        if (zpp::bits::failure(res)) {
-            XLOGF(ERR, "Failed to serialise superblock");
-            return outcome::failure(res.code);
-        }
+        ar(*this).or_throw();
         return buf;
     }
 };
@@ -59,13 +52,15 @@ class LsvdImage
 
   private:
     const usize max_log_size = 8 * 1024 * 1024;
-    const usize rollover_threshold = max_log_size - (2 * max_io_size);
+    const usize rollover_threshold = 2 * max_io_size;
     const usize sector_size = 512;
     const usize checkpoint_interval_epoch = 128;
     const usize max_recycle_objs = 32;
 
   public:
     const fstr name;
+
+    ~LsvdImage() { XLOGF(INFO, "Destructing image '{}'", name); }
 
   private:
     LsvdImage(fstr name) : name(name) {}
@@ -93,32 +88,33 @@ class LsvdImage
     folly::coro::SharedMutex pending_mtx;
     folly::F14FastMap<seqnum_t, sptr<LogObj>> pending_objs;
 
-    folly::Synchronized<vec<sptr<LogObj>>> recycle_objs;
+    folly::coro::SharedMutex recycle_mtx;
+    fvec<sptr<LogObj>> recycle_objs;
 
     // Internal functions
     Task<sptr<LogObj>> rollover_log(bool force);
-    ResTask<void> flush_logobj(sptr<LogObj> obj);
-    ResTask<void> checkpoint(seqnum_t seqnum, vec<byte> buf);
-    ResTask<void> replay_obj(seqnum_t seq, vec<byte> buf, usize start_byte);
+    TaskUnit flush_logobj(sptr<LogObj> obj);
+    TaskUnit checkpoint(seqnum_t seqnum, vec<byte> buf);
+    TaskUnit replay_obj(seqnum_t seq, vec<byte> buf, usize start_byte);
 
     // debug utils to maintain consistency and integrity
     folly::Synchronized<folly::F14FastMap<seqnum_t, usize>> obj_sizes;
 
   public:
-    static ResTask<uptr<LsvdImage>> mount(sptr<ObjStore> s3, fstr name,
+    static TaskRes<uptr<LsvdImage>> mount(sptr<ObjStore> s3, fstr name,
                                           fstr config);
     Task<void> unmount();
 
-    static ResTask<void> create(sptr<ObjStore> s3, fstr name, usize size);
-    static ResTask<void> remove(sptr<ObjStore> s3, fstr name);
-    static ResTask<void> clone(sptr<ObjStore> s3, fstr src, fstr dst);
+    static TaskUnit create(sptr<ObjStore> s3, fstr name, usize size);
+    static TaskUnit remove(sptr<ObjStore> s3, fstr name);
+    static TaskUnit clone(sptr<ObjStore> s3, fstr src, fstr dst);
 
-    ResTask<void> read(off_t offset, smartiov iovs);
-    ResTask<void> write(off_t offset, smartiov iovs);
-    ResTask<void> write_and_verify(off_t offset, smartiov iovs);
-    ResTask<void> trim(off_t offset, usize len);
-    ResTask<void> flush();
+    TaskUnit read(off_t offset, smartiov iovs);
+    TaskUnit write(off_t offset, smartiov iovs);
+    TaskUnit trim(off_t offset, usize len);
+    TaskUnit flush();
 
+    TaskUnit write_and_verify(off_t offset, smartiov iovs);
     Task<void> verify_integrity();
     usize get_size() { return superblock.image_size; }
 };

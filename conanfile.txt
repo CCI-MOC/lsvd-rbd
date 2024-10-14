@@ -2,6 +2,7 @@
 zpp_bits/4.4.20
 concurrencpp/0.1.7
 andreasbuhr-cppcoro/cci.20230629
+abseil/20240722.0
 
 [generators]
 PkgConfigDeps

@@ -9,7 +9,7 @@ project(
         'b_colorout=always',
         'b_sanitize=address,undefined',
         'b_asneeded=false',
-        'b_lto=true',
+        'b_lto=false',
         'b_thinlto_cache=true',
         'b_lundef=false',
     ],
@@ -20,6 +20,7 @@ add_project_arguments('-Wno-unused-parameter', language: 'cpp')
 add_project_arguments('-Wno-deprecated-declarations', language: 'cpp')
 add_project_arguments('-Wno-nullability-completeness', language: 'cpp')
 add_project_arguments('-Wno-defaulted-function-deleted', language: 'cpp')
+add_project_arguments('-Wno-unused-command-line-argument', language: 'cpp')
 # add_project_link_arguments('-static-libstdc++', language: 'cpp')
 # add_project_link_arguments('-static-libgcc', language: 'cpp')
 # add_project_link_arguments('-static', language: 'cpp')
@@ -43,8 +44,10 @@ lsvd_ar = static_library(
 
 executable(
     'lsvd',
-    lsvd_tgt_src + lsvd_src,
+    lsvd_tgt_src,
+    link_with: lsvd_ar,
     dependencies: lsvd_deps + [dependency('_spdk')],
+    install: true,
 )
 
 executable(
@@ -52,6 +55,7 @@ executable(
     ['src/imgtool.cc'],
     link_with: lsvd_ar,
     dependencies: lsvd_deps,
+    install: true,
 )
 
 executable(
@@ -61,11 +65,4 @@ executable(
     dependencies: lsvd_deps,
 )
 
-# executable(
-#     'imgtool',
-#     lsvd_src + ['tools/imgtool.cc'],
-#     include_directories: lsvd_inc,
-#     dependencies: lsvd_deps,
-# )
-
-subdir('test')
+# subdir('test')

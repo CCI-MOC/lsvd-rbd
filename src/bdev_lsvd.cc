@@ -1,3 +1,6 @@
+#include "absl/status/status.h"
+#include "folly/Function.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/GlobalExecutor.h"
 #include "spdk/bdev_module.h"
 #include "spdk/thread.h"
@@ -54,8 +57,10 @@ class lsvd_iodevice
   public:
     spdk_bdev bdev;
     uptr<LsvdImage> img;
+    folly::CPUThreadPoolExecutor ctpe;
+    folly::Executor::KeepAlive<> kexe;
 
-    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_))
+    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_)), ctpe(8)
     {
         std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("Log-structured Virtual Disk");
@@ -66,6 +71,8 @@ class lsvd_iodevice
         bdev.module = &lsvd_if;
         bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &lsvd_fn_table;
+
+        kexe = folly::getKeepAliveToken(ctpe);
     }
 
     ~lsvd_iodevice()
@@ -78,6 +85,8 @@ class lsvd_iodevice
 static int lsvd_destroy_bdev(void *ctx)
 {
     auto iodev = reinterpret_cast<lsvd_iodevice *>(ctx);
+    XLOGF(INFO, "Destroying LSVD bdev {}", iodev->bdev.name);
+    std::ignore = iodev->img->unmount().scheduleOn(iodev->kexe).start().wait();
     delete iodev;
     return 0;
 }
@@ -119,22 +128,19 @@ using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
 static std::atomic<u64> total_lat_us{0};
 static std::atomic<u64> num_reqs{0};
 
-static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret,
-                         tp start)
+static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret, tp start)
 {
     auto sth = io->submit_td;
     assert(sth != nullptr);
 
-    if (ret.hasValue() && ret->has_value()) [[likely]]
+    if (ret.hasValue() && ret->ok()) [[likely]]
         io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
-    else
+    else {
         io->status = SPDK_BDEV_IO_STATUS_FAILED;
-
-    if (io->status != SPDK_BDEV_IO_STATUS_SUCCESS) [[unlikely]] {
         if (ret.hasException())
             XLOGF(ERR, "IO failed with exception: {}", ret.exception().what());
         else
-            XLOGF(ERR, "IO failed with error: {}", ret->error().message());
+            XLOGF(ERR, "IO failed with error: {}", ret->status().ToString());
     }
 
     spdk_thread_send_msg(
@@ -151,9 +157,12 @@ static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<Result<void>> ret,
     total_lat_us.fetch_add(lat.count());
 }
 
+using Callback = folly::Function<void(folly::Try<ResUnit>)>;
+
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
     auto dev = static_cast<lsvd_iodevice *>(io->bdev->ctxt);
+    auto exe = dev->kexe;
     auto &img = dev->img;
     auto lio = (lsvd_bdev_io *)(io->driver_ctx);
     lio->submit_td = spdk_io_channel_get_thread(c);
@@ -165,11 +174,10 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     // measure e2e latency
     auto now = std::chrono::high_resolution_clock::now();
     auto old_num = num_reqs.fetch_add(1);
-    if (old_num > 0 && old_num % 20000 == 0)
+    if (old_num > 0 && old_num % 100000 == 0)
         XLOGF(INFO, "num {}; total {}; per iter {}us", old_num,
               total_lat_us.load(), total_lat_us / old_num);
 
-    auto exe = folly::getGlobalCPUExecutor();
     auto cb = [lio, now](auto &&r) { lsvd_io_done(lio, r, now); };
 
     switch (io->type) {
@@ -184,8 +192,7 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
         break;
     }
     case SPDK_BDEV_IO_TYPE_UNMAP:
-        img->trim(offset, len).semi().via(exe).then(cb);
-        break;
+        [[fallthrough]];
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
         img->trim(offset, len).semi().via(exe).then(cb);
         break;
@@ -204,7 +211,8 @@ struct lsvd_bdev_io_channel {
     spdk_io_channel *io_channel;
 };
 
-auto bdev_lsvd_create(str pool_name, str img_name, str cfg) -> Result<void>
+auto bdev_lsvd_create(str pool_name, str img_name,
+                      str cfg) -> Result<folly::Unit>
 {
     auto s3 = ObjStore::connect_to_pool(pool_name);
     LOGERR_AND_RET_IF_FAIL(s3, "Failed to connect to pool '{}'", pool_name);
@@ -238,13 +246,13 @@ auto bdev_lsvd_create(str pool_name, str img_name, str cfg) -> Result<void>
         spdk_io_device_unregister(
             iodev, [](void *ctx) { delete (lsvd_iodevice *)ctx; });
 
-        return std::error_code(err, std::system_category());
+        return absl::ErrnoToStatus(err, "Failed to register bdev");
     }
 
-    return outcome::success();
+    return folly::Unit();
 }
 
-void bdev_lsvd_delete(str img_name, std::function<void(Result<void>)> cb)
+void bdev_lsvd_delete(str img_name, std::function<void(ResUnit)> cb)
 {
     XLOGF(INFO, "Deleting image '{}'", img_name);
     auto rc = spdk_bdev_unregister_by_name(
@@ -253,14 +261,14 @@ void bdev_lsvd_delete(str img_name, std::function<void(Result<void>)> cb)
         // it should work
         [](void *arg, int rc) {
             XLOGF(INFO, "Image deletion done, rc = {}", rc);
-            auto cb = (std::function<void(Result<void>)> *)arg;
-            (*cb)(errcode_to_result<void>(rc));
+            auto cb = (std::function<void(ResUnit)> *)arg;
+            (*cb)(errcode_to_result(rc));
             delete cb;
         },
-        new std::function<void(Result<void>)>(cb));
+        new std::function<void(ResUnit)>(cb));
 
     if (rc != 0) {
         XLOGF(ERR, "Failed to delete image '{}': {}", img_name, rc);
-        cb(outcome::failure(std::error_code(rc, std::system_category())));
+        cb(absl::ErrnoToStatus(rc, "Failed to delete image"));
     }
 }

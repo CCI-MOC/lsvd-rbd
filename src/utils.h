@@ -1,5 +1,7 @@
 #pragma once
-#include <boost/outcome.hpp>
+#include "absl/status/status.h"
+#include "folly/Unit.h"
+#include <absl/status/statusor.h>
 #include <boost/stacktrace.hpp>
 #include <csignal>
 #include <fmt/color.h>
@@ -12,10 +14,11 @@
 #include <source_location>
 #include <vector>
 
-namespace outcome = boost::outcome_v2;
-template <typename T> using Result = outcome::result<T>;
 template <typename T> using Task = folly::coro::Task<T>;
-template <typename T> using ResTask = folly::coro::Task<outcome::result<T>>;
+template <typename T> using Result = absl::StatusOr<T>;
+template <typename T> using ResVoid = Result<folly::Unit>;
+template <typename T> using TaskRes = Task<Result<T>>;
+using TaskUnit = TaskRes<folly::Unit>;
 
 template <typename T> using sptr = std::shared_ptr<T>;
 template <typename T> using uptr = std::unique_ptr<T>;
@@ -28,10 +31,10 @@ using str = std::string;
 
 #define LOGERR_AND_RET_IF_FAIL(res, msg, ...)                                  \
     do {                                                                       \
-        if (res.has_failure()) [[unlikely]] {                                  \
+        if (!res.ok()) [[unlikely]] {                                          \
             auto outmsg = fmt::format(msg, __VA_ARGS__);                       \
-            XLOGF(ERR, "{}: {}", outmsg, res.error().message());               \
-            return res.error();                                                \
+            XLOGF(ERR, "{}: {}", outmsg, res.status().ToString());             \
+            return res.status();                                               \
         }                                                                      \
     } while (0)
 
@@ -44,29 +47,26 @@ using str = std::string;
         }                                                                      \
     } while (0)
 
-#define DEBUG_IF_FAIL(cond)                                                    \
+#define CRET_IF_NOTOK(stat)                                                    \
     do {                                                                       \
-        if (cond.has_error()) [[unlikely]] {                                   \
+        if (!stat.ok()) [[unlikely]] {                                         \
+            co_return stat.status();                                           \
+        }                                                                      \
+    } while (0)
+
+#define DEBUG_IF_FAIL(stat)                                                    \
+    do {                                                                       \
+        if (!stat.ok()) [[unlikely]] {                                         \
             raise(SIGTRAP);                                                    \
-            co_return cond.as_failure();                                       \
+            co_return stat.status();                                           \
         }                                                                      \
     } while (0)
 
-#define FAIL_IF_NEGERR(rc, umsg)                                               \
-    do {                                                                       \
-        if (rc < 0) [[unlikely]] {                                             \
-            auto errc = std::error_code(-rc, std::system_category());          \
-            auto msg = fmt::format("{}: {}", umsg, errc.message());            \
-            XLOG(ERR, msg);                                                    \
-            return outcome::failure(errc);                                     \
-        }                                                                      \
-    } while (0)
-
-template <typename T> inline auto errcode_to_result(int err) -> Result<T>
+inline auto errcode_to_result(int err) -> Result<folly::Unit>
 {
     if (err == 0)
-        return outcome::success();
-    return outcome::failure(std::error_code(err, std::system_category()));
+        return folly::Unit();
+    return absl::ErrnoToStatus(err, "");
 }
 
 inline auto todo(bool should_throw = false,
@@ -109,4 +109,13 @@ inline static size_t parse_size_str(str i)
         throw std::invalid_argument("Invalid postfix (not k/m/g): " + rest);
 
     return val;
+}
+
+inline auto
+tdiff_us(std::chrono::time_point<std::chrono::high_resolution_clock> end,
+         std::chrono::time_point<std::chrono::high_resolution_clock> start)
+{
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+                  .count();
+    return std::abs(us);
 }

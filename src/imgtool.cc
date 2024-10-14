@@ -23,14 +23,13 @@ using str = std::string;
 static auto info(sptr<ObjStore> s3, str name) -> Task<void>
 {
     XLOGF(INFO, "Getting info for image {}", name);
-    SuperblockInfo sb;
     auto sbuf = co_await s3->read_all(name);
-    if (sbuf.has_failure()) {
-        XLOGF(ERR, "Failed to read superblock: {}", sbuf.error().message());
+    if (!sbuf.ok()) {
+        XLOGF(ERR, "Failed to read superblock: {}", sbuf.status().ToString());
         co_return;
     }
 
-    (sb.deserialise(sbuf.value())).value();
+    auto sb = SuperblockInfo::deserialise(*sbuf);
 
     auto size_bytes = sb.image_size;
     auto size_gb = sb.image_size / 1e9;
@@ -53,25 +52,27 @@ static auto info(sptr<ObjStore> s3, str name) -> Task<void>
     fmt::print("Extent map:\n{}", extmap_s);
 }
 
-static auto objinfo(sptr<ObjStore> s3, str name, usize seq) -> Task<void>
+static auto objinfo(sptr<ObjStore> s3, str name, usize seq,
+                    bool hex) -> Task<void>
 {
     auto key = get_logobj_key(name, seq);
     XLOGF(INFO, "Analysing object {}", key);
     auto obj_bytes = co_await s3->get_size(key);
-    if (obj_bytes.has_failure()) {
-        XLOGF(ERR, "Failed to stat object: {}", obj_bytes.error().message());
+    if (!obj_bytes.ok()) {
+        XLOGF(ERR, "Failed to stat object: {}", obj_bytes.status().ToString());
         co_return;
     }
 
     vec<byte> buf(obj_bytes.value());
     auto fetch_res = co_await s3->read(key, 0, iovec{buf.data(), buf.size()});
-    if (fetch_res.has_failure()) {
-        XLOGF(ERR, "Failed to read object: {}", fetch_res.error().message());
+    if (!fetch_res.ok()) {
+        XLOGF(ERR, "Failed to read object: {}", fetch_res.status().ToString());
         co_return;
     }
 
-    fmt::println("Object: {}, size: {}\nHexdump:\n{}", key, buf.size(),
-                 folly::hexDump(buf.data(), buf.size()));
+    fmt::println("Object: {}, size: {}\n", key, buf.size());
+    if (hex)
+        fmt::println("Hexdump: {}", folly::hexDump(buf.data(), buf.size()));
 
     fmt::println("Deserialising log");
     u32 consumed_bytes = 0;
@@ -112,6 +113,7 @@ int main(int argc, char **argv)
         ("size,s", po::value<str>()->default_value("1G"), 
                                     "size in bytes (M=2^20,G=2^30)")
         ("seq,q", po::value<usize>(), "seqnum for objinfo")
+        ("hex,x", po::value<bool>()->default_value(false), "hexdump for objinfo")
         ("thick", po::value<bool>()->default_value(false), 
             "thick provision when creating an image (not currently supported)")
         ("dest", po::value<str>(), "destination (for clone)");
@@ -146,22 +148,33 @@ int main(int argc, char **argv)
         auto thick = vm["thick"].as<bool>();
         XLOGF(INFO, "Creating '{}/{}', size={} bytes", pool, img, size);
         LsvdImage::create(io, img, size).scheduleOn(exe).start().wait();
-    } else if (cmd == "delete") {
+    }
+
+    else if (cmd == "delete") {
         XLOGF(INFO, "Deleting '{}/{}'", pool, img);
         LsvdImage::remove(io, img).scheduleOn(exe).start().wait();
-    } else if (cmd == "clone") {
+    }
+
+    else if (cmd == "clone") {
         if (!vm.count("dest"))
             XLOGF(FATAL, "Destination image not specified");
         auto dst = vm["dest"].as<str>();
         XLOGF(INFO, "Cloning '{}/{}' to '{}/{}'", pool, img, pool, dst);
         LsvdImage::clone(io, img, dst).scheduleOn(exe).start().wait();
-    } else if (cmd == "info") {
+    }
+
+    else if (cmd == "info") {
         XLOGF(INFO, "Getting info for '{}/{}'", pool, img);
         info(io, img).scheduleOn(exe).start().wait();
-    } else if (cmd == "objinfo") {
+    }
+
+    else if (cmd == "objinfo") {
         auto seq = vm["seq"].as<usize>();
+        auto hex = vm["hex"].as<bool>();
         XLOGF(INFO, "Analysing '{}/{}' seq {:#x}", pool, img, seq);
-        objinfo(io, img, seq).scheduleOn(exe).start().wait();
-    } else
+        objinfo(io, img, seq, hex).scheduleOn(exe).start().wait();
+    }
+
+    else
         XLOGF(FATAL, "Unknown command '{}'", cmd);
 }

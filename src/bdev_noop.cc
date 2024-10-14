@@ -1,3 +1,8 @@
+#include "absl/status/status.h"
+#include "folly/Benchmark.h"
+#include "folly/BenchmarkUtil.h"
+#include "folly/Executor.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/GlobalExecutor.h"
 #include "folly/experimental/coro/Sleep.h"
 #include "spdk/bdev_module.h"
@@ -75,8 +80,10 @@ class noop_iodevice
   public:
     spdk_bdev bdev;
     uptr<NoopImage> img;
+    folly::Executor::KeepAlive<> kexe;
+    folly::CPUThreadPoolExecutor ctpe;
 
-    noop_iodevice(uptr<NoopImage> img_) : img(std::move(img_))
+    noop_iodevice(uptr<NoopImage> img_) : img(std::move(img_)), ctpe(8)
     {
         std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("No-op disk");
@@ -87,6 +94,8 @@ class noop_iodevice
         bdev.module = &noop_if;
         bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &noop_fn_table;
+
+        kexe = folly::getKeepAliveToken(ctpe);
     }
 
     ~noop_iodevice()
@@ -163,10 +172,6 @@ static std::atomic<u64> num_reqs{0};
 
 static void noop_io_done(noop_bdev_io *io, tp start)
 {
-    auto now = std::chrono::high_resolution_clock::now();
-    auto lat =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - start);
-    total_lat_us.fetch_add(lat.count());
     auto sth = io->submit_td;
     assert(sth != nullptr);
 
@@ -178,15 +183,29 @@ static void noop_io_done(noop_bdev_io *io, tp start)
                                   SPDK_BDEV_IO_STATUS_SUCCESS);
         },
         io);
+
+    // spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io),
+    //                       SPDK_BDEV_IO_STATUS_SUCCESS);
+
+    auto now = std::chrono::high_resolution_clock::now();
+    auto lat =
+        std::chrono::duration_cast<std::chrono::microseconds>(now - start);
+    total_lat_us.fetch_add(lat.count());
+}
+
+auto noop_task() -> Task<void>
+{
+    auto now = std::chrono::high_resolution_clock::now();
+    folly::doNotOptimizeAway(now);
+    co_return;
 }
 
 auto test_task(std::function<void(void)> f) -> Task<void>
 {
+    co_await noop_task();
     f();
     co_return;
 }
-
-auto noop_task() -> Task<void> { co_return; }
 
 static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
@@ -199,7 +218,6 @@ static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
-    auto exe = folly::getGlobalCPUExecutor();
     auto now = std::chrono::high_resolution_clock::now();
     auto old_num = num_reqs.fetch_add(1);
     if (old_num > 0 && old_num % 10000 == 0)
@@ -207,7 +225,9 @@ static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
               total_lat_us / old_num);
 
     auto scb = [lio, now]() { noop_io_done(lio, now); };
-    test_task(scb).scheduleOn(exe).start();
+    test_task(scb).scheduleOn(dev->kexe).start();
+    // noop_task().semi().via(exe).then(
+    //     [lio, now](auto) { noop_io_done(lio, now); });
 
     // auto cb = [lio](auto &&r) { noop_io_done(lio, r); };
     // switch (io->type) {
@@ -253,7 +273,7 @@ Task<void> getExecutorStats()
     co_return;
 }
 
-auto bdev_noop_create(str img_name, usize size) -> Result<void>
+auto bdev_noop_create(str img_name, usize size) -> ResUnit
 {
     assert(!img_name.empty());
 
@@ -287,13 +307,13 @@ auto bdev_noop_create(str img_name, usize size) -> Result<void>
         spdk_io_device_unregister(
             iodev, [](void *ctx) { delete (noop_iodevice *)ctx; });
 
-        return std::error_code(err, std::system_category());
+        return absl::ErrnoToStatus(err, "Failed to register bdev");
     }
 
-    return outcome::success();
+    return folly::Unit();
 }
 
-void bdev_noop_delete(str img_name, std::function<void(Result<void>)> cb)
+void bdev_noop_delete(str img_name, std::function<void(ResUnit)> cb)
 {
     XLOGF(INFO, "Deleting image '{}'", img_name);
     auto rc = spdk_bdev_unregister_by_name(
@@ -302,14 +322,14 @@ void bdev_noop_delete(str img_name, std::function<void(Result<void>)> cb)
         // it should work
         [](void *arg, int rc) {
             XLOGF(INFO, "Image deletion done, rc = {}", rc);
-            auto cb = (std::function<void(Result<void>)> *)arg;
-            (*cb)(errcode_to_result<void>(rc));
+            auto cb = (std::function<void(ResUnit)> *)arg;
+            (*cb)(errcode_to_result(rc));
             delete cb;
         },
-        new std::function<void(Result<void>)>(cb));
+        new std::function<void(ResUnit)>(cb));
 
     if (rc != 0) {
         XLOGF(ERR, "Failed to delete image '{}': {}", img_name, rc);
-        cb(outcome::failure(std::error_code(rc, std::system_category())));
+        cb(absl::ErrnoToStatus(rc, "Failed to delete image"));
     }
 }

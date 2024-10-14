@@ -13,7 +13,7 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG7");
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6");
 
 const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
 const char *HOSTNAME = "127.0.0.1";
@@ -237,7 +237,34 @@ int main(int argc, char **argv)
 
         start_fn = [=]() {
             auto res = bdev_lsvd_create(pool_name, image_name, "");
-            assert(res.has_value());
+            assert(res.ok());
+            setup_bdev_target(image_name);
+        };
+    }
+
+    else if (mode == "new_lsvd") {
+        if (argc < 3)
+            XLOGF(FATAL, "Usage: {} new_lsvd [pool]", argv[0]);
+
+        auto pool_name = argv[2];
+        auto image_name = "auto_lsvddev";
+        XLOGF(INFO, "Creating and mounting '{}'/'{}' on start", pool_name,
+              image_name);
+
+        auto exe = folly::getGlobalCPUExecutor();
+        start_fn = [=]() {
+            auto s3 = ObjStore::connect_to_pool("pone").value();
+            LsvdImage::remove(s3, image_name).scheduleOn(exe).start().wait();
+
+            LsvdImage::create(s3, image_name, 5 * GIB)
+                .scheduleOn(exe)
+                .start()
+                .wait()
+                .value()
+                .value();
+
+            auto res = bdev_lsvd_create(pool_name, image_name, "");
+            assert(res.ok());
             setup_bdev_target(image_name);
         };
     }
@@ -252,7 +279,7 @@ int main(int argc, char **argv)
 
         start_fn = [=]() {
             auto res = bdev_noop_create(name, size);
-            assert(res.has_value());
+            assert(res.ok());
             setup_bdev_target(name);
         };
     }
@@ -263,12 +290,12 @@ int main(int argc, char **argv)
 
     XLOGF(INFO, "Starting SPDK target, pid={}", getpid());
 
-    ReadCache::init_cache(10 * GIB, 10 * GIB, "/tmp/lsvd.rcache");
+    ReadCache::init_cache(10 * GIB, 100 * GIB, "/tmp/lsvd.rcache");
 
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
-    opts.reactor_mask = "[0,1,2,3]"; // 6 cores for reactor
+    opts.reactor_mask = "[0,1]";
 
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
     spdk_app_fini();

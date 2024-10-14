@@ -8,6 +8,7 @@
 #include <rados/librados.hpp>
 #include <system_error>
 
+#include "absl/status/status.h"
 #include "backend.h"
 #include "folly/logging/xlog.h"
 #include "utils.h"
@@ -37,10 +38,9 @@ class Rados : public ObjStore
     static auto neg_ec_to_result(int iores) -> Result<usize>
     {
         if (iores < 0)
-            return outcome::failure(
-                std::error_code(-iores, std::system_category()));
+            return absl::ErrnoToStatus(-iores, "Failed backend op");
         else
-            return outcome::success(iores);
+            return iores;
     }
 
     static auto iov_to_bl(smartiov &v)
@@ -68,6 +68,16 @@ class Rados : public ObjStore
         cluster.shutdown();
     }
 
+#define FAIL_IF_NEGERR(rc, umsg)                                               \
+    do {                                                                       \
+        if (rc < 0) [[unlikely]] {                                             \
+            auto errc = std::error_code(-rc, std::system_category());          \
+            auto msg = fmt::format("{}: {}", umsg, errc.message());            \
+            XLOG(ERR, msg);                                                    \
+            return absl::ErrnoToStatus(-rc, umsg);                             \
+        }                                                                      \
+    } while (0)
+
     static auto connect(fstr pool) -> Result<uptr<Rados>>
     {
         auto s3 = uptr<Rados>(new Rados());
@@ -82,10 +92,10 @@ class Rados : public ObjStore
         ret = s3->cluster.ioctx_create(pool.c_str(), s3->io);
         FAIL_IF_NEGERR(ret, "Failed to connect to pool");
 
-        return outcome::success(std::move(s3));
+        return std::move(s3);
     }
 
-    auto get_size(fstr name) -> ResTask<usize> override
+    auto get_size(fstr name) -> TaskRes<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
@@ -97,17 +107,12 @@ class Rados : public ObjStore
 
         rc = co_await std::move(f);
         if (rc < 0)
-            co_return std::error_code(-rc, std::system_category());
+            co_return absl::ErrnoToStatus(-rc, "Failed to stat object");
 
         co_return size;
     }
 
-    auto exists(fstr name) -> ResTask<bool> override
-    {
-        co_return (co_await get_size(name)).has_value();
-    }
-
-    auto read(fstr name, off_t offset, smartiov &v) -> ResTask<usize> override
+    auto read(fstr name, off_t offset, smartiov &v) -> TaskRes<usize> override
     {
         XLOGF(DBG8, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
@@ -119,7 +124,7 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read(fstr name, off_t offset, iovec v) -> ResTask<usize> override
+    auto read(fstr name, off_t offset, iovec v) -> TaskRes<usize> override
     {
         XLOGF(DBG8, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
@@ -131,30 +136,23 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read_all(fstr name) -> ResTask<vec<byte>> override
+    auto read_all(fstr name) -> TaskRes<vec<byte>> override
     {
         auto size_res = co_await get_size(name);
-        if (!size_res.has_value())
-            co_return size_res.error();
+        CRET_IF_NOTOK(size_res);
 
         auto size = size_res.value();
         vec<byte> buf(size);
         auto iores = co_await read(name, 0, iovec{buf.data(), buf.size()});
-
-        if (!iores.has_value())
-            co_return outcome::failure(iores.error());
+        CRET_IF_NOTOK(iores);
 
         if (iores.value() != size)
-            co_return outcome::failure(std::errc::io_error);
-
-        if (iores.value() < 0)
-            co_return outcome::failure(
-                std::error_code(-iores.value(), std::system_category()));
+            co_return absl::InternalError("Failed to read entire object");
 
         co_return buf;
     }
 
-    auto write(fstr name, smartiov &v) -> ResTask<usize> override
+    auto write(fstr name, smartiov &v) -> TaskRes<usize> override
     {
         XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
@@ -165,7 +163,7 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto write(fstr name, iovec v) -> ResTask<usize> override
+    auto write(fstr name, iovec v) -> TaskRes<usize> override
     {
         XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
@@ -176,23 +174,23 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto remove(fstr name) -> ResTask<void> override
+    auto remove(fstr name) -> TaskUnit override
     {
-        XLOGF(DBG3, "Removing object '{}'", name);
+        XLOGF(DBG8, "Removing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto rc = io.aio_remove(name.toStdString(), cb.cb);
         ENSURE(rc == 0);
+
         auto iores = co_await std::move(f);
         if (iores < 0)
-            co_return outcome::failure(
-                std::error_code(-iores, std::system_category()));
+            co_return absl::ErrnoToStatus(-iores, "Failed to remove object");
         else
-            co_return outcome::success();
+            co_return folly::Unit();
     }
 };
 
 Result<sptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
 {
-    return BOOST_OUTCOME_TRYX(Rados::connect(pool_name));
+    return Rados::connect(pool_name);
 }

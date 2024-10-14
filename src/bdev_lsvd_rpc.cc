@@ -46,8 +46,8 @@ static void rpc_bdev_lsvd_create(spdk_jsonrpc_request *req_json,
     }
 
     auto res = bdev_lsvd_create(req->pool_name, req->image_name, req->config);
-    if (!res.has_value()) {
-        spdk_jsonrpc_send_error_response(req_json, res.error().value(),
+    if (!res.ok()) {
+        spdk_jsonrpc_send_error_response(req_json, res.status().raw_code(),
                                          "Failed to create lsvd bdev");
         return;
     }
@@ -84,14 +84,14 @@ static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
         return;
     }
 
-    bdev_lsvd_delete(req->image_name, [=](Result<void> res) {
-        if (res.has_value()) {
+    bdev_lsvd_delete(req->image_name, [=](ResUnit res) {
+        if (res.ok()) {
             auto w = spdk_jsonrpc_begin_result(req_json);
             spdk_json_write_bool(w, true);
             spdk_jsonrpc_end_result(req_json, w);
         } else {
             XLOGF(ERR, "Failed to destroy lsvd bdev: {}",
-                  res.error().message());
+                  res.status().ToString());
             spdk_jsonrpc_send_error_response(req_json, rc,
                                              "Failed to destroy lsvd bdev");
         }

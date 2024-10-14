@@ -1,4 +1,5 @@
 #include "read_cache.h"
+#include "absl/status/status.h"
 #include "backend.h"
 #include "cachelib/allocator/CacheAllocator.h"
 #include "config.h"
@@ -60,11 +61,12 @@ class SharedCache
     }
 
     // returns true iff item was found
-    auto read(strv key, usize adjust, smartiov dest) -> ResTask<usize>
+    auto read(strv key, usize adjust, smartiov dest) -> TaskRes<usize>
     {
-        auto h = co_await cache->find(key).toSemiFuture();
+        // auto h = co_await cache->find(key).toSemiFuture();
+        auto h = cache->find(key);
         if (!h)
-            co_return outcome::failure(std::errc::no_such_file_or_directory);
+            co_return absl::NotFoundError(key);
 
         auto copy_len = std::min(h->getSize() - adjust, dest.bytes());
         dest.copy_in((byte *)h->getMemory() + adjust, copy_len);
@@ -79,7 +81,7 @@ class SharedCache
             co_return false;
         }
         std::memcpy(h->getMemory(), src.buf, src.len);
-        cache->insertOrReplace(h);
+        co_await cache->insertOrReplace(h).toSemiFuture();
         co_return true;
     }
 };
@@ -91,6 +93,10 @@ class ImageObjCache : public ReadCache
     fstr imgname;
     sptr<ObjStore> s3;
     sptr<SharedCache> cache;
+
+    std::atomic<u64> num_reads = 0;
+    std::atomic<u64> num_chunks_reads = 0;
+    std::atomic<u64> num_chunks_miss = 0;
 
   public:
     ImageObjCache(fstr imgname, sptr<ObjStore> s3, sptr<SharedCache> cache)
@@ -105,42 +111,53 @@ class ImageObjCache : public ReadCache
     }
 
     auto read_chunk(seqnum_t seq, usize off, usize adjust,
-                    smartiov dest) -> ResTask<void>
+                    smartiov dest) -> TaskUnit
     {
+        num_chunks_reads.fetch_add(1);
+
         auto cache_key = get_key(seq, off);
         auto get_res = co_await cache->read(cache_key, adjust, dest);
-        if (get_res.has_value())
-            co_return outcome::success();
+        if (get_res.ok())
+            co_return folly::Unit();
 
         // cache miss, fetch from backend
+        num_chunks_miss.fetch_add(1);
+
         auto obj_key = get_logobj_key(imgname, seq);
         vec<byte> chunk_buf(CACHE_CHUNK_SIZE);
         auto siov = smartiov::from_buf(chunk_buf);
-        auto fetch_len =
-            BOOST_OUTCOME_CO_TRYX(co_await s3->read(obj_key, off, siov));
+
+        auto fetch_res = co_await s3->read(obj_key, off, siov);
+        CRET_IF_NOTOK(fetch_res);
+        auto fetch_len = *fetch_res;
 
         if (fetch_len == 0) [[unlikely]] {
             XLOGF(ERR, "0-length read for key '{}', off {}, len {}", cache_key,
                   off, siov.bytes());
-            co_return outcome::failure(std::errc::no_message);
+            co_return absl::OutOfRangeError(cache_key);
         }
         if (adjust + dest.bytes() > fetch_len) [[unlikely]] {
             XLOGF(ERR,
                   "Read past end of chunk: key {} adj {} len {}; found {}/{} ",
                   cache_key, adjust, dest.bytes(), fetch_len,
                   adjust + dest.bytes());
-            co_return outcome::failure(std::errc::value_too_large);
+            co_return absl::OutOfRangeError(cache_key);
         }
 
         // insert into cache and return
         co_await cache->insert(cache_key, buffer{chunk_buf.data(), fetch_len});
         dest.copy_in(chunk_buf.data() + adjust, dest.bytes());
 
-        co_return outcome::success();
+        co_return folly::Unit();
     }
 
-    ResTask<void> read(S3Ext ext, smartiov dest) override
+    TaskUnit read(S3Ext ext, smartiov dest) override
     {
+        num_reads.fetch_add(1);
+        if (num_reads % 10'000 == 1)
+            XLOGF(INFO, "ReadCache stats: {} reads, {} chunks reads, {} misses",
+                  num_reads.load(), num_chunks_reads.load(),
+                  num_chunks_miss.load());
         /**
         |-----------------------entire object---------------------------------|
         |-----chunk1-----|-----chunk2-----|-----chunk3-----|-----chunk4-----|
@@ -150,7 +167,7 @@ class ImageObjCache : public ReadCache
 
         - Adjust is the offset in bytes from beginning of the chunk
          */
-        fvec<folly::SemiFuture<Result<void>>> tasks;
+        fvec<folly::SemiFuture<Result<folly::Unit>>> tasks;
         for (usize bytes_read = 0; bytes_read < ext.len;) {
             auto adjust = (ext.offset + bytes_read) % CACHE_CHUNK_SIZE;
             auto chunk_off = ext.offset + bytes_read - adjust;
@@ -170,16 +187,20 @@ class ImageObjCache : public ReadCache
             bytes_read += to_read;
         }
 
+        if (tasks.size() == 1) {
+            co_return co_await std::move(tasks.at(0));
+        }
+
         auto all = co_await folly::collectAll(tasks);
         for (auto &t : all)
             if (t.hasException())
-                co_return outcome::failure(std::errc::io_error);
-            else if (t->has_error())
-                co_return t->as_failure();
-        co_return outcome::success();
+                co_return absl::InternalError(t.exception().what());
+            else if (!t.value().ok())
+                co_return t->status();
+        co_return folly::Unit();
     }
 
-    ResTask<void> insert_obj(seqnum_t seqnum, buffer iov) override
+    TaskUnit insert_obj(seqnum_t seqnum, buffer iov) override
     {
         // split into chunks of size chunk_size each, and then insert them
         // individually into the cache
@@ -192,7 +213,7 @@ class ImageObjCache : public ReadCache
             co_await cache->insert(k, buffer{iov.buf + off, size});
         }
 
-        co_return outcome::success();
+        co_return folly::Unit();
     }
 };
 

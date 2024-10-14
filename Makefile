@@ -12,16 +12,13 @@ debug:
 	meson compile -C build-dbg
 
 release:
+	conan install . --output-folder=conan --build=missing
 	meson setup --native-file meson.ini build-rel --buildtype=release -Db_sanitize=none
 	meson compile -C build-rel
 
 clean:
-	cd build-rel; meson compile --clean
-	cd build-dbg; meson compile --clean
-
-cmake:
-	cmake --preset=vcpkg
-	cmake --build build-cm
+	meson -C build-rel clean
+	meson -C build-dbg clean
 
 install-deps:
 	# Folly deps

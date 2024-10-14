@@ -19,6 +19,7 @@ lsvd_inc = include_directories(
 
 lsvd_deps = [
     dependency('zpp_bits'),
+    dependency('abseil'),
     dependency('concurrencpp'),
     dependency('andreasbuhr-cppcoro'),
     subproject('cachelib').get_variable('cachelib_dep'),
