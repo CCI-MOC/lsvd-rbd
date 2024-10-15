@@ -48,6 +48,7 @@ auto img_task() -> Task<void>
 
     std::ignore = co_await img->write(0, iov);
     std::ignore = co_await img->write(8192, iov);
+    std::ignore = co_await img->read(4096, iov);
 
     std::ignore = co_await img->flush();
     std::ignore = co_await img->write(8192, iov);

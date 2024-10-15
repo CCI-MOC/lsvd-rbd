@@ -1,5 +1,4 @@
 #include "absl/status/status.h"
-#include "folly/Benchmark.h"
 #include "folly/BenchmarkUtil.h"
 #include "folly/Executor.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -80,8 +79,8 @@ class noop_iodevice
   public:
     spdk_bdev bdev;
     uptr<NoopImage> img;
-    folly::Executor::KeepAlive<> kexe;
     folly::CPUThreadPoolExecutor ctpe;
+    folly::Executor::KeepAlive<> kexe;
 
     noop_iodevice(uptr<NoopImage> img_) : img(std::move(img_)), ctpe(8)
     {
@@ -109,6 +108,7 @@ static int noop_destroy_bdev(void *ctx)
 {
     auto iodev = reinterpret_cast<noop_iodevice *>(ctx);
     delete iodev;
+    XLOGF(INFO, "Destroyed noop bdev");
     return 0;
 }
 
@@ -200,10 +200,8 @@ auto noop_task() -> Task<void>
     co_return;
 }
 
-auto test_task(std::function<void(void)> f) -> Task<void>
+auto test_task() -> Task<void>
 {
-    co_await noop_task();
-    f();
     co_return;
 }
 
@@ -224,8 +222,8 @@ static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
         XLOGF(INFO, "num {} total {} per iter {}", old_num, total_lat_us.load(),
               total_lat_us / old_num);
 
-    auto scb = [lio, now]() { noop_io_done(lio, now); };
-    test_task(scb).scheduleOn(dev->kexe).start();
+    auto scb = [lio, now](auto && a) { noop_io_done(lio, now); };
+    test_task().scheduleOn(dev->kexe).start(scb);
     // noop_task().semi().via(exe).then(
     //     [lio, now](auto) { noop_io_done(lio, now); });
 
@@ -285,7 +283,7 @@ auto bdev_noop_create(str img_name, usize size) -> ResUnit
     auto iodev = new noop_iodevice(std::move(img));
 
     // get executor stats periodically
-    getExecutorStats().scheduleOn(folly::getGlobalCPUExecutor()).start();
+    // getExecutorStats().scheduleOn(folly::getGlobalCPUExecutor()).start();
 
     spdk_io_device_register(
         iodev,

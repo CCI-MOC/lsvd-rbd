@@ -11,9 +11,21 @@
 #include "smartiov.h"
 #include "utils.h"
 
+using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
+static std::atomic<u64> num_reqs{0};
+static std::atomic<u64> total_lat_ns{0};
+static std::atomic<u64> spdk_lat_ns{0};
+
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
 static int bdev_lsvd_io_ctx_size(void);
+
+struct lsvd_bdev_io {
+    spdk_thread *submit_td;
+    spdk_bdev_io_status status;
+    tp start;
+    tp end1;
+};
 
 static spdk_bdev_module lsvd_if = {
     .module_init = bdev_lsvd_init,
@@ -60,7 +72,7 @@ class lsvd_iodevice
     folly::CPUThreadPoolExecutor ctpe;
     folly::Executor::KeepAlive<> kexe;
 
-    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_)), ctpe(8)
+    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_)), ctpe(4)
     {
         std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("Log-structured Virtual Disk");
@@ -117,18 +129,9 @@ static spdk_io_channel *lsvd_get_io_channel(void *ctx)
     return ch;
 }
 
-struct lsvd_bdev_io {
-    spdk_thread *submit_td;
-    spdk_bdev_io_status status;
-};
-
 static int bdev_lsvd_io_ctx_size(void) { return sizeof(lsvd_bdev_io); }
 
-using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
-static std::atomic<u64> total_lat_us{0};
-static std::atomic<u64> num_reqs{0};
-
-static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret, tp start)
+static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret)
 {
     auto sth = io->submit_td;
     assert(sth != nullptr);
@@ -143,66 +146,86 @@ static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret, tp start)
             XLOGF(ERR, "IO failed with error: {}", ret->status().ToString());
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    io->end1 = end;
+    auto lat1 = tdiff_ns(io->start, end);
+    total_lat_ns.fetch_add(lat1);
+
     spdk_thread_send_msg(
         sth,
         [](void *ctx) {
             auto io = (lsvd_bdev_io *)ctx;
             spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
+
+            auto end2 = std::chrono::high_resolution_clock::now();
+            auto spdk_lat = tdiff_ns(end2, io->end1);
+            spdk_lat_ns.fetch_add(spdk_lat);
+
+            if(spdk_lat > 10'000'000)
+                XLOGF(WARN, "spdk lat {}ns", spdk_lat);
         },
         io);
-
-    auto now = std::chrono::high_resolution_clock::now();
-    auto lat =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - start);
-    total_lat_us.fetch_add(lat.count());
 }
-
-using Callback = folly::Function<void(folly::Try<ResUnit>)>;
 
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+
     auto dev = static_cast<lsvd_iodevice *>(io->bdev->ctxt);
     auto exe = dev->kexe;
     auto &img = dev->img;
     auto lio = (lsvd_bdev_io *)(io->driver_ctx);
     lio->submit_td = spdk_io_channel_get_thread(c);
+    lio->start = start;
 
     // io details
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
-    // measure e2e latency
-    auto now = std::chrono::high_resolution_clock::now();
-    auto old_num = num_reqs.fetch_add(1);
-    if (old_num > 0 && old_num % 100000 == 0)
-        XLOGF(INFO, "num {}; total {}; per iter {}us", old_num,
-              total_lat_us.load(), total_lat_us / old_num);
-
-    auto cb = [lio, now](auto &&r) { lsvd_io_done(lio, r, now); };
+    // measure scheduling latency
+    auto cb = [lio](auto &&r) { lsvd_io_done(lio, r); };
 
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->read(offset, iov).semi().via(exe).then(cb);
+        // dev->read(offset, iov, lio).scheduleOn(exe).start();
+        img->read(offset, iov).scheduleOn(exe).start(cb);
+        // img->read(offset, iov).semi().via(exe).then(cb);
         break;
     }
     case SPDK_BDEV_IO_TYPE_WRITE: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->write(offset, iov).semi().via(exe).then(cb);
+        // dev->write(offset, iov, lio).scheduleOn(exe).start();
+        img->write(offset, iov).scheduleOn(exe).start(cb);
         break;
     }
     case SPDK_BDEV_IO_TYPE_UNMAP:
         [[fallthrough]];
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        img->trim(offset, len).semi().via(exe).then(cb);
+        // dev->trim(offset, len, lio).scheduleOn(exe).start();
+        img->trim(offset, len).scheduleOn(exe).start(cb);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        img->flush().semi().via(exe).then(cb);
+        // dev->flush(lio).scheduleOn(exe).start();
+        img->flush().scheduleOn(exe).start(cb);
         break;
     default:
         XLOGF(ERR, "Unknown request type: {}", io->type);
         return;
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto slat = tdiff_ns(start, end);
+    total_lat_ns.fetch_add(slat);
+
+    if(slat > 10'000'000)
+        XLOGF(WARN, "scheduling lat {}ns", slat);
+
+    auto old_num = num_reqs.fetch_add(1);
+    if (old_num > 0 && old_num % 100000 == 0)
+        XLOGF(INFO, "num {}; total {}; per iter {}ns, spdk {}ns", old_num,
+              total_lat_ns.load(), total_lat_ns / old_num,
+              spdk_lat_ns / old_num);
 }
 
 // Just copying from bdev_rbd, not sure where this is actually used

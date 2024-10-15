@@ -3,6 +3,7 @@
 #include "folly/Unit.h"
 #include <absl/status/statusor.h>
 #include <boost/stacktrace.hpp>
+#include <chrono>
 #include <csignal>
 #include <fmt/color.h>
 #include <folly/experimental/coro/Promise.h>
@@ -119,3 +120,13 @@ tdiff_us(std::chrono::time_point<std::chrono::high_resolution_clock> end,
                   .count();
     return std::abs(us);
 }
+
+inline auto
+tdiff_ns(std::chrono::time_point<std::chrono::high_resolution_clock> end,
+         std::chrono::time_point<std::chrono::high_resolution_clock> start)
+{
+    auto us = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+                  .count();
+    return std::abs(us);
+}
+

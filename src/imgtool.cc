@@ -145,7 +145,7 @@ int main(int argc, char **argv)
 
     if (cmd == "create") {
         auto size = parse_size_str(vm["size"].as<str>());
-        auto thick = vm["thick"].as<bool>();
+        // auto thick = vm["thick"].as<bool>();
         XLOGF(INFO, "Creating '{}/{}', size={} bytes", pool, img, size);
         LsvdImage::create(io, img, size).scheduleOn(exe).start().wait();
     }

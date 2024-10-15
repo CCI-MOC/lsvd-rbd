@@ -295,10 +295,11 @@ int main(int argc, char **argv)
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
-    opts.reactor_mask = "[0,1]";
+    opts.reactor_mask = "[0,1,2]";
 
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
     spdk_app_fini();
 
+    XLOGF(INFO, "SPDK app exited with rc={}", rc);
     return rc;
 }
