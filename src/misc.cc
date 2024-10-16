@@ -1,4 +1,3 @@
-#include "cppcoro/task.hpp"
 #include <chrono>
 #include <folly/String.h>
 #include <folly/init/Init.h>

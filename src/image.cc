@@ -155,7 +155,7 @@ TaskUnit LsvdImage::read(off_t offset, smartiov iovs)
     auto lat = tdiff_us(start, t3);
     static u64 ctr = 0;
     if (lat > 50'000 || ctr++ % 30000 == 0) {
-        XLOGF(DBG1, "Long read: {}us, extmap {}us, read1: {}us, read2: {}us",
+        XLOGF(DBG7, "Long read: {}us, extmap {}us, read1: {}us, read2: {}us",
               lat, tdiff_us(t1, start), tdiff_us(t2, t1), tdiff_us(t3, t2));
     }
 
@@ -256,7 +256,7 @@ TaskUnit LsvdImage::write(off_t offset, smartiov iovs)
 
     auto t4 = std::chrono::high_resolution_clock::now();
     if (tdiff_us(t4, stime) > 50'000) {
-        XLOGF(DBG1,
+        XLOGF(DBG7,
               "Long write: {}us, logobj {}us, rollover: {}us, journal: {}us, "
               "extmap: {}us",
               tdiff_us(t4, stime), tdiff_us(t1, stime), tdiff_us(t2, t1),

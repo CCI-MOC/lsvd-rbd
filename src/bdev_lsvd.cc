@@ -1,6 +1,8 @@
 #include "absl/status/status.h"
+#include "folly/Executor.h"
 #include "folly/Singleton.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
+#include "rte_thread.h"
 #include "spdk/bdev_module.h"
 #include "spdk/env.h"
 #include "spdk/thread.h"
@@ -9,15 +11,9 @@
 
 #include "backend.h"
 #include "bdev_lsvd.h"
-#include "engine.h"
 #include "image.h"
 #include "smartiov.h"
 #include "utils.h"
-
-using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
-static std::atomic<u64> num_reqs{0};
-static std::atomic<u64> total_lat_ns{0};
-static std::atomic<u64> spdk_lat_ns{0};
 
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
@@ -26,8 +22,6 @@ static int bdev_lsvd_io_ctx_size(void);
 struct lsvd_bdev_io {
     spdk_thread *submit_td;
     spdk_bdev_io_status status;
-    tp start;
-    tp end1;
 };
 
 static spdk_bdev_module lsvd_if = {
@@ -118,10 +112,12 @@ class LsvdThreadFactory : public folly::ThreadFactory
 folly::Singleton<LsvdThreadFactory, PrivateTag> LsvdThreadFactory::singleton_;
 
 static folly::Singleton<folly::CPUThreadPoolExecutor, PrivateTag>
-    lsvd_tp_singleton([]() {
+    lsvd_tp_inst([]() {
         auto tf = LsvdThreadFactory::getInstance();
         return new folly::CPUThreadPoolExecutor(8, tf);
     });
+
+auto get_exe() { return folly::getKeepAliveToken(*lsvd_tp_inst.try_get()); }
 
 class lsvd_iodevice
 {
@@ -143,7 +139,7 @@ class lsvd_iodevice
         bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &lsvd_fn_table;
 
-        kexe = folly::getKeepAliveToken(*lsvd_tp_singleton.try_get());
+        kexe = get_exe();
     }
 
     ~lsvd_iodevice()
@@ -181,23 +177,11 @@ static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret)
             XLOGF(ERR, "IO failed with error: {}", ret->status().ToString());
     }
 
-    auto end = std::chrono::high_resolution_clock::now();
-    io->end1 = end;
-    auto lat1 = tdiff_ns(io->start, end);
-    total_lat_ns.fetch_add(lat1);
-
     spdk_thread_send_msg(
         sth,
         [](void *ctx) {
             auto io = (lsvd_bdev_io *)ctx;
             spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
-
-            auto end2 = std::chrono::high_resolution_clock::now();
-            auto spdk_lat = tdiff_ns(end2, io->end1);
-            spdk_lat_ns.fetch_add(spdk_lat);
-
-            if (spdk_lat > 10'000'000)
-                XLOGF(WARN, "spdk lat {}ns", spdk_lat);
         },
         io);
 }
@@ -219,14 +203,11 @@ static bool lsvd_io_type_supported(void *ctx, spdk_bdev_io_type io_type)
 
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
-    auto start = std::chrono::high_resolution_clock::now();
-
     auto dev = static_cast<lsvd_iodevice *>(io->bdev->ctxt);
     auto exe = dev->kexe;
     auto &img = dev->img;
     auto lio = (lsvd_bdev_io *)(io->driver_ctx);
     lio->submit_td = spdk_io_channel_get_thread(c);
-    lio->start = start;
 
     // io details
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
@@ -238,44 +219,26 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        // dev->read(offset, iov, lio).scheduleOn(exe).start();
         img->read(offset, iov).scheduleOn(exe).start(cb);
-        // img->read(offset, iov).semi().via(exe).then(cb);
         break;
     }
     case SPDK_BDEV_IO_TYPE_WRITE: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        // dev->write(offset, iov, lio).scheduleOn(exe).start();
         img->write(offset, iov).scheduleOn(exe).start(cb);
         break;
     }
     case SPDK_BDEV_IO_TYPE_UNMAP:
         [[fallthrough]];
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        // dev->trim(offset, len, lio).scheduleOn(exe).start();
         img->trim(offset, len).scheduleOn(exe).start(cb);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        // dev->flush(lio).scheduleOn(exe).start();
         img->flush().scheduleOn(exe).start(cb);
         break;
     default:
         XLOGF(ERR, "Unknown request type: {}", io->type);
         return;
     }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    auto slat = tdiff_ns(start, end);
-    total_lat_ns.fetch_add(slat);
-
-    if (slat > 10'000'000)
-        XLOGF(WARN, "scheduling lat {}ns", slat);
-
-    auto old_num = num_reqs.fetch_add(1);
-    if (old_num > 0 && old_num % 100000 == 0)
-        XLOGF(INFO, "num {}; total {}; per iter {}ns, spdk {}ns", old_num,
-              total_lat_ns.load(), total_lat_ns / old_num,
-              spdk_lat_ns / old_num);
 }
 
 // Just copying from bdev_rbd, not sure where this is actually used
@@ -290,7 +253,6 @@ auto bdev_lsvd_create(str pool_name, str img_name,
     assert(!img_name.empty());
 
     auto create_lsvd = [&]() -> void * {
-        XLOGF(INFO, "Entering no_affinity");
         auto s3 = ObjStore::connect_to_pool(pool_name);
         if (!s3.ok()) {
             XLOGF(ERR, "Failed to connect to pool '{}'", pool_name);
@@ -298,7 +260,7 @@ auto bdev_lsvd_create(str pool_name, str img_name,
         }
 
         auto img = LsvdImage::mount(s3.value(), img_name, cfg)
-                       .scheduleOn(folly::getGlobalCPUExecutor())
+                       .scheduleOn(get_exe())
                        .start()
                        .wait()
                        .value();
@@ -309,7 +271,6 @@ auto bdev_lsvd_create(str pool_name, str img_name,
         }
 
         auto iodev = new lsvd_iodevice(std::move(img.value()));
-        XLOGF(INFO, "Exiting no_affinity");
         return iodev;
     };
     auto iodev = static_cast<lsvd_iodevice *>(spdk_call_unaffinitized(
