@@ -13,6 +13,8 @@ class LsvdConfig
   public:
     fstr journal_path;
 
+    bool should_checkpoint = true;
+
     static Result<LsvdConfig> parse(fstr imgname, fstr str)
     {
         LsvdConfig cfg{

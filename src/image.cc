@@ -328,8 +328,10 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
 
     // add new checkpoint if needed
     if (new_seqnum > last_checkpoint + checkpoint_interval_epoch) {
-        auto ckpt_buf = co_await extmap->serialise();
-        checkpoint(new_seqnum, std::move(ckpt_buf)).scheduleOn(exe).start();
+        if (cfg.should_checkpoint) {
+            auto ckpt_buf = co_await extmap->serialise();
+            checkpoint(new_seqnum, std::move(ckpt_buf)).scheduleOn(exe).start();
+        }
         last_checkpoint = new_seqnum;
         new_seqnum += 1;
     }

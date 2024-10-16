@@ -1,12 +1,15 @@
 #include "absl/status/status.h"
-#include "folly/Function.h"
+#include "folly/Singleton.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
-#include "folly/executors/GlobalExecutor.h"
 #include "spdk/bdev_module.h"
+#include "spdk/env.h"
 #include "spdk/thread.h"
+#include <folly/Conv.h>
+#include <folly/Range.h>
 
 #include "backend.h"
 #include "bdev_lsvd.h"
+#include "engine.h"
 #include "image.h"
 #include "smartiov.h"
 #include "utils.h"
@@ -64,16 +67,72 @@ static const spdk_bdev_fn_table lsvd_fn_table = {
     .get_io_channel = lsvd_get_io_channel,
 };
 
+namespace
+{
+struct PrivateTag {
+};
+} // namespace
+
+class LsvdThreadFactory : public folly::ThreadFactory
+{
+    constexpr static const std::string PREFIX = "LsvdTp_";
+
+  public:
+    explicit LsvdThreadFactory() : prefix_(PREFIX), suffix_(0) {}
+
+    std::thread newThread(folly::Func &&func) override
+    {
+        auto name = folly::to<std::string>(prefix_, suffix_++);
+        auto ret = std::thread(
+            [func_2 = std::move(func), name_2 = std::move(name)]() mutable {
+                // clear cpu affinity
+                rte_cpuset_t all_cpuset;
+                CPU_ZERO(&all_cpuset);
+                auto cores = sysconf(_SC_NPROCESSORS_CONF);
+                for (int i = 0; i < cores; i++)
+                    CPU_SET(i, &all_cpuset);
+                rte_thread_set_affinity(&all_cpuset);
+
+                folly::setThreadName(name_2);
+                func_2();
+            });
+        return ret;
+    }
+
+    void setNamePrefix(folly::StringPiece prefix) { prefix_ = prefix.str(); }
+    const std::string &getNamePrefix() const override { return prefix_; }
+
+  protected:
+    std::string prefix_;
+    std::atomic<uint64_t> suffix_;
+
+    static folly::Singleton<LsvdThreadFactory, PrivateTag> singleton_;
+
+  public:
+    static sptr<LsvdThreadFactory> getInstance()
+    {
+        return singleton_.try_get();
+    }
+};
+
+folly::Singleton<LsvdThreadFactory, PrivateTag> LsvdThreadFactory::singleton_;
+
+static folly::Singleton<folly::CPUThreadPoolExecutor, PrivateTag>
+    lsvd_tp_singleton([]() {
+        auto tf = LsvdThreadFactory::getInstance();
+        return new folly::CPUThreadPoolExecutor(8, tf);
+    });
+
 class lsvd_iodevice
 {
   public:
     spdk_bdev bdev;
     uptr<LsvdImage> img;
-    folly::CPUThreadPoolExecutor ctpe;
     folly::Executor::KeepAlive<> kexe;
 
-    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_)), ctpe(4)
+    lsvd_iodevice(uptr<LsvdImage> img_) : img(std::move(img_))
     {
+        XLOGF(INFO, "Creating LSVD bdev iodevice {}", img->name);
         std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("Log-structured Virtual Disk");
         bdev.name = strdup(img->name.c_str());
@@ -84,7 +143,7 @@ class lsvd_iodevice
         bdev.max_rw_size = 128 * 1024;
         bdev.fn_table = &lsvd_fn_table;
 
-        kexe = folly::getKeepAliveToken(ctpe);
+        kexe = folly::getKeepAliveToken(*lsvd_tp_singleton.try_get());
     }
 
     ~lsvd_iodevice()
@@ -93,30 +152,6 @@ class lsvd_iodevice
         free(bdev.name);
     }
 };
-
-static int lsvd_destroy_bdev(void *ctx)
-{
-    auto iodev = reinterpret_cast<lsvd_iodevice *>(ctx);
-    XLOGF(INFO, "Destroying LSVD bdev {}", iodev->bdev.name);
-    std::ignore = iodev->img->unmount().scheduleOn(iodev->kexe).start().wait();
-    delete iodev;
-    return 0;
-}
-
-static bool lsvd_io_type_supported(void *ctx, spdk_bdev_io_type io_type)
-{
-    switch (io_type) {
-    case SPDK_BDEV_IO_TYPE_READ:
-    case SPDK_BDEV_IO_TYPE_WRITE:
-    case SPDK_BDEV_IO_TYPE_FLUSH:        // we only use this to ensure ordering
-    case SPDK_BDEV_IO_TYPE_UNMAP:        // trim
-    case SPDK_BDEV_IO_TYPE_WRITE_ZEROES: // also just trim
-        return true;
-    case SPDK_BDEV_IO_TYPE_RESET: // block until all pending io aborts
-    default:
-        return false;
-    }
-}
 
 static spdk_io_channel *lsvd_get_io_channel(void *ctx)
 {
@@ -161,10 +196,25 @@ static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret)
             auto spdk_lat = tdiff_ns(end2, io->end1);
             spdk_lat_ns.fetch_add(spdk_lat);
 
-            if(spdk_lat > 10'000'000)
+            if (spdk_lat > 10'000'000)
                 XLOGF(WARN, "spdk lat {}ns", spdk_lat);
         },
         io);
+}
+
+static bool lsvd_io_type_supported(void *ctx, spdk_bdev_io_type io_type)
+{
+    switch (io_type) {
+    case SPDK_BDEV_IO_TYPE_READ:
+    case SPDK_BDEV_IO_TYPE_WRITE:
+    case SPDK_BDEV_IO_TYPE_FLUSH:        // we only use this to ensure ordering
+    case SPDK_BDEV_IO_TYPE_UNMAP:        // trim
+    case SPDK_BDEV_IO_TYPE_WRITE_ZEROES: // also just trim
+        return true;
+    case SPDK_BDEV_IO_TYPE_RESET: // block until all pending io aborts
+    default:
+        return false;
+    }
 }
 
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
@@ -218,7 +268,7 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto slat = tdiff_ns(start, end);
     total_lat_ns.fetch_add(slat);
 
-    if(slat > 10'000'000)
+    if (slat > 10'000'000)
         XLOGF(WARN, "scheduling lat {}ns", slat);
 
     auto old_num = num_reqs.fetch_add(1);
@@ -237,17 +287,40 @@ struct lsvd_bdev_io_channel {
 auto bdev_lsvd_create(str pool_name, str img_name,
                       str cfg) -> Result<folly::Unit>
 {
-    auto s3 = ObjStore::connect_to_pool(pool_name);
-    LOGERR_AND_RET_IF_FAIL(s3, "Failed to connect to pool '{}'", pool_name);
     assert(!img_name.empty());
 
-    auto img = LsvdImage::mount(s3.value(), img_name, cfg)
-                   .scheduleOn(folly::getGlobalCPUExecutor())
-                   .start()
-                   .wait()
-                   .value();
-    LOGERR_AND_RET_IF_FAIL(img, "Failed to mount image '{}'", img_name);
-    auto iodev = new lsvd_iodevice(std::move(img.value()));
+    auto create_lsvd = [&]() -> void * {
+        XLOGF(INFO, "Entering no_affinity");
+        auto s3 = ObjStore::connect_to_pool(pool_name);
+        if (!s3.ok()) {
+            XLOGF(ERR, "Failed to connect to pool '{}'", pool_name);
+            return nullptr;
+        }
+
+        auto img = LsvdImage::mount(s3.value(), img_name, cfg)
+                       .scheduleOn(folly::getGlobalCPUExecutor())
+                       .start()
+                       .wait()
+                       .value();
+        if (!img.ok()) {
+            XLOGF(ERR, "Failed to mount image '{}': {}", img_name,
+                  img.status().ToString());
+            return nullptr;
+        }
+
+        auto iodev = new lsvd_iodevice(std::move(img.value()));
+        XLOGF(INFO, "Exiting no_affinity");
+        return iodev;
+    };
+    auto iodev = static_cast<lsvd_iodevice *>(spdk_call_unaffinitized(
+        [](void *ctx) -> void * {
+            auto f = (decltype(create_lsvd) *)ctx;
+            return (*f)();
+        },
+        &create_lsvd));
+
+    if (iodev == nullptr)
+        return absl::InternalError("Failed to create LSVD device");
 
     spdk_io_device_register(
         iodev,
@@ -294,4 +367,13 @@ void bdev_lsvd_delete(str img_name, std::function<void(ResUnit)> cb)
         XLOGF(ERR, "Failed to delete image '{}': {}", img_name, rc);
         cb(absl::ErrnoToStatus(rc, "Failed to delete image"));
     }
+}
+
+static int lsvd_destroy_bdev(void *ctx)
+{
+    auto iodev = reinterpret_cast<lsvd_iodevice *>(ctx);
+    XLOGF(INFO, "Destroying LSVD bdev {}", iodev->bdev.name);
+    std::ignore = iodev->img->unmount().scheduleOn(iodev->kexe).start().wait();
+    delete iodev;
+    return 0;
 }
