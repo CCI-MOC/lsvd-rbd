@@ -13,7 +13,7 @@ const bool REPORT_READ_CACHE_STATS = false;
 const bool REPORT_LONG_OPS = true;
 
 const s64 LONG_READ_NS_THRES = 1 * MS_TO_NS;
-const s64 LONG_WRITE_NS_THRES = 10 * MS_TO_NS;
+const s64 LONG_WRITE_NS_THRES = 50 * MS_TO_NS;
 
 class LsvdConfig
 {

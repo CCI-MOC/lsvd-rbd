@@ -46,8 +46,8 @@ class LogObj
 
     auto append(usize len) -> std::pair<S3Ext, byte *>
     {
-        XLOGF(DBG9, "Appending seq {:#x} len={}, written={}", seqnum, len,
-              bytes_written);
+        // XLOGF(DBG9, "Appending seq {:#x} len={}, written={}", seqnum, len,
+        //       bytes_written);
         ENSURE(bytes_written + len <= data.size());
         auto ret = bytes_written;
         bytes_written += len;

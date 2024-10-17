@@ -28,7 +28,7 @@ class ObjStore
 class FileIo
 {
   public:
-    virtual ~FileIo() = 0;
+    virtual ~FileIo() {}
     virtual TaskRes<u32> preadv(off_t offset, smartiov iov) = 0;
     virtual TaskRes<u32> pwritev(off_t offset, smartiov iov) = 0;
 

@@ -1,4 +1,5 @@
 #include "absl/status/status.h"
+#include "folly/system/ThreadName.h"
 #include "liburing.h"
 #include <boost/outcome.hpp>
 #include <boost/outcome/success_failure.hpp>
@@ -222,26 +223,28 @@ class FileUring : public FileIo
 
     TaskRes<u32> preadv(off_t offset, smartiov iov) override
     {
-        co_await ring_mtx.co_scoped_lock();
+        auto l = co_await ring_mtx.co_scoped_lock();
         auto &&[p, f] = folly::coro::makePromiseContract<s32>();
         auto sqe = io_uring_get_sqe(&ring);
         io_uring_prep_readv(sqe, fd, iov.iovs_vec().data(),
                             iov.iovs_vec().size(), offset);
         io_uring_sqe_set_data(sqe, &p);
         io_uring_submit(&ring);
+        l.unlock();
 
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
     TaskRes<u32> pwritev(off_t offset, smartiov iov) override
     {
-        co_await ring_mtx.co_scoped_lock();
+        auto l = co_await ring_mtx.co_scoped_lock();
         auto &&[p, f] = folly::coro::makePromiseContract<s32>();
         auto sqe = io_uring_get_sqe(&ring);
         io_uring_prep_writev(sqe, fd, iov.iovs_vec().data(),
                              iov.iovs_vec().size(), offset);
         io_uring_sqe_set_data(sqe, &p);
         io_uring_submit(&ring);
+        l.unlock();
 
         co_return neg_ec_to_result(co_await std::move(f));
     }
@@ -249,6 +252,8 @@ class FileUring : public FileIo
   private:
     void cqe_worker_fn(std::stop_token st)
     {
+        folly::setThreadName("UringCqeWorker");
+
         __kernel_timespec timeout = {0, 100 * 1000}; // 100us
         while (!st.stop_requested()) {
             io_uring_cqe *cqe;

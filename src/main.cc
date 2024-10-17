@@ -13,7 +13,7 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6");
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG5");
 
 const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
 const char *HOSTNAME = "127.0.0.1";
