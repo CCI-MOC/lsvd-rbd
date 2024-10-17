@@ -25,7 +25,7 @@ class LsvdConfig
     bool gc_enable = false;
     f64 gc_live_ratio = 0.666;
 
-    bool checkpoint_enable = false;
+    bool checkpoint_enable = true;
     f64 cache_antithrash_ratio = 0.666;
 
     auto to_string()
