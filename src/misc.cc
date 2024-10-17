@@ -10,8 +10,7 @@
 #include "image.h"
 #include "representation.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG9");
-const usize GIB = 1024 * 1024 * 1024;
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=INFO");
 
 auto img_task() -> Task<void>
 {
@@ -117,7 +116,7 @@ auto folly_qd_latency_test()
     auto imgname = "lsvddev";
 
     XLOGF(INFO, "Opening image {}", imgname);
-    auto img = LsvdImage::mount(s3, imgname, "")
+    auto img = LsvdImage::mount(s3, imgname, "doesnotexist")
                    .scheduleOn(exe)
                    .start()
                    .wait()

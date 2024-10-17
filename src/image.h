@@ -58,12 +58,12 @@ class LsvdImage
     const usize max_recycle_objs = 32;
 
   public:
-    const fstr name;
+    const str name;
 
     ~LsvdImage() { XLOGF(INFO, "Destructing image '{}'", name); }
 
   private:
-    LsvdImage(fstr name) : name(name) {}
+    LsvdImage(str name) : name(name) {}
 
     // Cannot be copied or moved
     LsvdImage(LsvdImage &) = delete;
@@ -101,13 +101,13 @@ class LsvdImage
     folly::Synchronized<folly::F14FastMap<seqnum_t, usize>> obj_sizes;
 
   public:
-    static TaskRes<uptr<LsvdImage>> mount(sptr<ObjStore> s3, fstr name,
-                                          fstr config);
+    static TaskRes<uptr<LsvdImage>> mount(sptr<ObjStore> s3, str name,
+                                          str config);
     Task<void> unmount();
 
-    static TaskUnit create(sptr<ObjStore> s3, fstr name, usize size);
-    static TaskUnit remove(sptr<ObjStore> s3, fstr name);
-    static TaskUnit clone(sptr<ObjStore> s3, fstr src, fstr dst);
+    static TaskUnit create(sptr<ObjStore> s3, str name, usize size);
+    static TaskUnit remove(sptr<ObjStore> s3, str name);
+    static TaskUnit clone(sptr<ObjStore> s3, str src, str dst);
 
     TaskUnit read(off_t offset, smartiov iovs);
     TaskUnit write(off_t offset, smartiov iovs);

@@ -5,6 +5,7 @@
 #include <boost/stacktrace.hpp>
 #include <chrono>
 #include <csignal>
+#include <filesystem>
 #include <fmt/color.h>
 #include <folly/experimental/coro/Promise.h>
 #include <folly/experimental/coro/Task.h>
@@ -28,7 +29,10 @@ template <typename T> using vec = std::vector<T>;
 template <typename T> using fut = std::future<T>;
 template <typename T> using fvec = folly::fbvector<T>;
 
+using fspath = std::filesystem::path;
 using str = std::string;
+using strv = std::string_view;
+using strc = const std::string &;
 
 #define LOGERR_AND_RET_IF_FAIL(res, msg, ...)                                  \
     do {                                                                       \
@@ -129,4 +133,3 @@ tdiff_ns(std::chrono::time_point<std::chrono::high_resolution_clock> end,
                   .count();
     return std::abs(us);
 }
-

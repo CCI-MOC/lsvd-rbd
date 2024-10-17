@@ -138,12 +138,6 @@ TaskUnit LsvdImage::read(off_t offset, smartiov iovs)
     if (tasks.empty())
         co_return folly::Unit();
 
-    if (tasks.size() == 1) {
-        auto res = co_await std::move(tasks.at(0));
-        CRET_IF_NOTOK(res);
-        co_return folly::Unit();
-    }
-
     auto all = co_await folly::collectAll(tasks);
     for (auto &t : all)
         if (t.hasException())
@@ -153,11 +147,9 @@ TaskUnit LsvdImage::read(off_t offset, smartiov iovs)
 
     auto t3 = std::chrono::high_resolution_clock::now();
     auto lat = tdiff_us(start, t3);
-    static u64 ctr = 0;
-    if (lat > 50'000 || ctr++ % 30000 == 0) {
-        XLOGF(DBG7, "Long read: {}us, extmap {}us, read1: {}us, read2: {}us",
+    if (REPORT_LONG_OPS && lat > LONG_READ_NS_THRES / 1000)
+        XLOGF(DBG6, "Long read: {}us, extmap {}us, read1: {}us, read2: {}us",
               lat, tdiff_us(t1, start), tdiff_us(t2, t1), tdiff_us(t3, t2));
-    }
 
     XLOGF(DBG9, "ER off={} len={} dur={}", offset, data_bytes, lat);
     co_return folly::Unit();
@@ -255,10 +247,9 @@ TaskUnit LsvdImage::write(off_t offset, smartiov iovs)
     obj->write_end();
 
     auto t4 = std::chrono::high_resolution_clock::now();
-    if (tdiff_us(t4, stime) > 50'000) {
-        XLOGF(DBG7,
-              "Long write: {}us, logobj {}us, rollover: {}us, journal: {}us, "
-              "extmap: {}us",
+    if (REPORT_LONG_OPS && tdiff_us(t4, stime) > LONG_WRITE_NS_THRES / 1000) {
+        XLOGF(DBG6,
+              "Write: {}, logobj {}, rollover: {}, journal: {}, extmap: {}",
               tdiff_us(t4, stime), tdiff_us(t1, stime), tdiff_us(t2, t1),
               tdiff_us(t3, t2), tdiff_us(t4, t3));
     }
@@ -328,7 +319,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
 
     // add new checkpoint if needed
     if (new_seqnum > last_checkpoint + checkpoint_interval_epoch) {
-        if (cfg.should_checkpoint) {
+        if (cfg.checkpoint_enable) {
             auto ckpt_buf = co_await extmap->serialise();
             checkpoint(new_seqnum, std::move(ckpt_buf)).scheduleOn(exe).start();
         }
@@ -348,7 +339,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         }
     }
     if (new_logobj == nullptr) {
-        XLOGF(DBG7, "Creating new log object {:#x}", new_seqnum);
+        XLOGF(DBG6, "Creating new log object {:#x}", new_seqnum);
         new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
     }
 
@@ -366,12 +357,10 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     flush_logobj(prev).scheduleOn(exe).start();
 
     auto t3 = std::chrono::high_resolution_clock::now();
-    if (tdiff_us(t3, stime) > 1'000) {
-        XLOGF(
-            WARN,
-            "Rollover {}: {}us, checkpoint: {}us, recycle: {}us, pending: {}us",
-            new_seqnum, tdiff_us(t3, stime), tdiff_us(t1, stime),
-            tdiff_us(t2, t1), tdiff_us(t3, t2));
+    if (REPORT_LONG_OPS && tdiff_us(t3, stime) > 1'000) {
+        XLOGF(DBG6, "Rollover {}: tot {} ckpt {} recycle {} pending {}",
+              new_seqnum, tdiff_us(t3, stime), tdiff_us(t1, stime),
+              tdiff_us(t2, t1), tdiff_us(t3, t2));
     }
     co_return prev;
 }
@@ -412,7 +401,7 @@ TaskUnit LsvdImage::flush_logobj(sptr<LogObj> obj)
 // writes that are after itself in the log
 TaskUnit LsvdImage::checkpoint(seqnum_t seqnum, vec<byte> buf_)
 {
-    XLOGF(DBG7, "New checkpoint seq {:#x}", seqnum);
+    XLOGF(DBG6, "New checkpoint seq {:#x}", seqnum);
     auto k = get_logobj_key(name, seqnum);
 
     auto buf = co_await extmap->serialise();
@@ -459,8 +448,8 @@ TaskUnit LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf, usize start_byte)
     co_return folly::Unit();
 }
 
-TaskRes<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
-                                          fstr cfg_str)
+TaskRes<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, str name,
+                                          str cfg_str)
 {
     XLOGF(INFO, "Mounting {} with config {}", name, cfg_str);
     auto img = std::unique_ptr<LsvdImage>(new LsvdImage(name));
@@ -493,7 +482,8 @@ TaskRes<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, fstr name,
     // build the cache and journal
     img->s3 = s3;
     img->cache = ReadCache::make_image_cache(s3, name);
-    auto journ_res = co_await Journal::open(img->cfg.journal_path);
+    auto journ_res =
+        Journal::open(img->cfg.journal_path, img->cfg.journal_bytes);
     CRET_IF_NOTOK(journ_res);
     img->journal = std::move(*journ_res);
 
@@ -541,9 +531,9 @@ Task<void> LsvdImage::unmount()
     auto ol = co_await logobj_mtx.co_scoped_lock();
     auto obj = co_await rollover_log(true);
 
-    XLOGF(DBG7, "Waiting for writes to complete");
+    XLOGF(DBG6, "Waiting for writes to complete");
     co_await obj->wait_for_writes();
-    XLOGF(DBG7, "Waiting for flushes to complete");
+    XLOGF(DBG6, "Waiting for flushes to complete");
     co_await obj->wait_for_flush();
 }
 
@@ -562,7 +552,7 @@ Task<void> LsvdImage::verify_integrity()
     co_return;
 }
 
-TaskUnit LsvdImage::create(sptr<ObjStore> s3, fstr name, usize size)
+TaskUnit LsvdImage::create(sptr<ObjStore> s3, str name, usize size)
 {
     XLOGF(INFO, "Creating new image {}", name);
 
@@ -585,7 +575,7 @@ TaskUnit LsvdImage::create(sptr<ObjStore> s3, fstr name, usize size)
     co_return folly::Unit();
 }
 
-TaskUnit LsvdImage::remove(sptr<ObjStore> s3, fstr name)
+TaskUnit LsvdImage::remove(sptr<ObjStore> s3, str name)
 {
     XLOGF(INFO, "Removing image {}", name);
 
@@ -618,7 +608,7 @@ TaskUnit LsvdImage::remove(sptr<ObjStore> s3, fstr name)
     co_return folly::Unit();
 }
 
-TaskUnit LsvdImage::clone(sptr<ObjStore> s3, fstr src, fstr dst)
+TaskUnit LsvdImage::clone(sptr<ObjStore> s3, str src, str dst)
 {
     XLOGF(INFO, "Cloning image {} to {}", src, dst);
     // TODO

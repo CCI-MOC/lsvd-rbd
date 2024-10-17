@@ -59,6 +59,19 @@ class smartiov
         return smartiov(std::move(iovs), total_len);
     }
 
+    static smartiov from_iovecs(const iovec iov1)
+    {
+        ENSURE(iov1.iov_len > 0);
+        return smartiov({iov1}, iov1.iov_len);
+    }
+
+    static smartiov from_iovecs(const iovec iov1, const iovec iov2)
+    {
+        ENSURE(iov1.iov_len > 0 || iov2.iov_len > 0);
+        usize total_len = iov1.iov_len + iov2.iov_len;
+        return smartiov({iov1, iov2}, total_len);
+    }
+
     auto num_vecs(void) { return iovs.size(); }
     auto bytes(void) { return total_bytes; }
     const vec<iovec> &iovs_vec(void) { return iovs; }

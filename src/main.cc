@@ -200,8 +200,6 @@ static void setup_bdev_target(str bdev_name)
     // clang-format on
 }
 
-const usize GIB = 1024 * 1024 * 1024;
-
 using StartFn = std::function<void(void)>;
 static void call_fn(void *arg)
 {

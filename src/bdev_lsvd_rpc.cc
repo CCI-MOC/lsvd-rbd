@@ -17,14 +17,14 @@ struct rpc_create_lsvd {
     char *config;
 };
 
+// clang-format off
 static const struct spdk_json_object_decoder rpc_create_lsvd_decoders[] = {
-    {"image_name", offsetof(rpc_create_lsvd, image_name),
-     spdk_json_decode_string, false},
-    {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string,
-     false},
-    {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string,
-     true},
+    {"image_name", offsetof(rpc_create_lsvd, image_name), spdk_json_decode_string, false},
+    {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, false},
+    {"nvme_dir", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, false},
+    {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string, true},
 };
+// clang-format on
 
 static void rpc_bdev_lsvd_create(spdk_jsonrpc_request *req_json,
                                  const spdk_json_val *params)
@@ -63,10 +63,11 @@ struct rpc_delete_lsvd {
     char *image_name;
 };
 
+// clang-format off
 static const struct spdk_json_object_decoder rpc_delete_lsvd_decoders[] = {
-    {"image_name", offsetof(rpc_delete_lsvd, image_name),
-     spdk_json_decode_string, false},
+    {"image_name", offsetof(rpc_delete_lsvd, image_name), spdk_json_decode_string, false},
 };
+// clang-format on
 
 static void rpc_bdev_lsvd_delete(struct spdk_jsonrpc_request *req_json,
                                  const struct spdk_json_val *params)

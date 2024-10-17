@@ -63,8 +63,8 @@ class SharedCache
     // returns true iff item was found
     auto read(strv key, usize adjust, smartiov dest) -> TaskRes<usize>
     {
-        // auto h = co_await cache->find(key).toSemiFuture();
-        auto h = cache->find(key);
+        auto h = co_await cache->find(key).toSemiFuture();
+        // auto h = cache->find(key);
         if (!h)
             co_return absl::NotFoundError(key);
 
@@ -154,8 +154,8 @@ class ImageObjCache : public ReadCache
     TaskUnit read(S3Ext ext, smartiov dest) override
     {
         num_reads.fetch_add(1);
-        if (num_reads % 10'000 == 1)
-            XLOGF(INFO, "ReadCache stats: {} reads, {} chunks reads, {} misses",
+        if (REPORT_READ_CACHE_STATS && num_reads % 200'000 == 1)
+            XLOGF(DBG6, "ReadCache stats: {} reads, {} chunks, {} misses",
                   num_reads.load(), num_chunks_reads.load(),
                   num_chunks_miss.load());
         /**
@@ -185,10 +185,6 @@ class ImageObjCache : public ReadCache
             }
 
             bytes_read += to_read;
-        }
-
-        if (tasks.size() == 1) {
-            co_return co_await std::move(tasks.at(0));
         }
 
         auto all = co_await folly::collectAll(tasks);

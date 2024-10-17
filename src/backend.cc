@@ -1,17 +1,27 @@
+#include "absl/status/status.h"
+#include "liburing.h"
 #include <boost/outcome.hpp>
 #include <boost/outcome/success_failure.hpp>
 #include <cassert>
 #include <folly/experimental/coro/Promise.h>
+#include <folly/experimental/coro/SharedMutex.h>
 #include <folly/experimental/coro/Task.h>
 #include <rados/buffer.h>
 #include <rados/librados.h>
 #include <rados/librados.hpp>
 #include <system_error>
 
-#include "absl/status/status.h"
 #include "backend.h"
 #include "folly/logging/xlog.h"
 #include "utils.h"
+
+static auto neg_ec_to_result(int iores) -> Result<u32>
+{
+    if (iores < 0)
+        return absl::ErrnoToStatus(-iores, "Failed backend op");
+    else
+        return iores;
+}
 
 class Rados : public ObjStore
 {
@@ -34,14 +44,6 @@ class Rados : public ObjStore
         }
         ~RadosCbWrap() { cb->release(); }
     };
-
-    static auto neg_ec_to_result(int iores) -> Result<usize>
-    {
-        if (iores < 0)
-            return absl::ErrnoToStatus(-iores, "Failed backend op");
-        else
-            return iores;
-    }
 
     static auto iov_to_bl(smartiov &v)
     {
@@ -95,14 +97,14 @@ class Rados : public ObjStore
         return std::move(s3);
     }
 
-    auto get_size(fstr name) -> TaskRes<usize> override
+    auto get_size(strc name) -> TaskRes<usize> override
     {
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
 
         u64 size;
         time_t mtime;
-        auto rc = io.aio_stat(name.toStdString(), cb.cb, &size, &mtime);
+        auto rc = io.aio_stat(name, cb.cb, &size, &mtime);
         ENSURE(rc == 0);
 
         rc = co_await std::move(f);
@@ -112,31 +114,29 @@ class Rados : public ObjStore
         co_return size;
     }
 
-    auto read(fstr name, off_t offset, smartiov &v) -> TaskRes<usize> override
+    auto read(strc name, off_t offset, smartiov &v) -> TaskRes<u32> override
     {
         XLOGF(DBG8, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc =
-            io.aio_read(name.toStdString(), cb.cb, &bl, bl.length(), offset);
+        auto rc = io.aio_read(name, cb.cb, &bl, bl.length(), offset);
         ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read(fstr name, off_t offset, iovec v) -> TaskRes<usize> override
+    auto read(strc name, off_t offset, iovec v) -> TaskRes<u32> override
     {
         XLOGF(DBG8, "Reading object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc =
-            io.aio_read(name.toStdString(), cb.cb, &bl, bl.length(), offset);
+        auto rc = io.aio_read(name, cb.cb, &bl, bl.length(), offset);
         ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read_all(fstr name) -> TaskRes<vec<byte>> override
+    auto read_all(strc name) -> TaskRes<vec<byte>> override
     {
         auto size_res = co_await get_size(name);
         CRET_IF_NOTOK(size_res);
@@ -152,34 +152,34 @@ class Rados : public ObjStore
         co_return buf;
     }
 
-    auto write(fstr name, smartiov &v) -> TaskRes<usize> override
+    auto write(strc name, smartiov &v) -> TaskRes<u32> override
     {
         XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc = io.aio_write(name.toStdString(), cb.cb, bl, bl.length(), 0);
+        auto rc = io.aio_write(name, cb.cb, bl, bl.length(), 0);
         ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto write(fstr name, iovec v) -> TaskRes<usize> override
+    auto write(strc name, iovec v) -> TaskRes<u32> override
     {
         XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
         auto bl = iov_to_bl(v);
-        auto rc = io.aio_write(name.toStdString(), cb.cb, bl, bl.length(), 0);
+        auto rc = io.aio_write(name, cb.cb, bl, bl.length(), 0);
         ENSURE(rc == 0);
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto remove(fstr name) -> TaskUnit override
+    auto remove(strc name) -> TaskUnit override
     {
         XLOGF(DBG8, "Removing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
         RadosCbWrap cb(std::move(p));
-        auto rc = io.aio_remove(name.toStdString(), cb.cb);
+        auto rc = io.aio_remove(name, cb.cb);
         ENSURE(rc == 0);
 
         auto iores = co_await std::move(f);
@@ -193,4 +193,78 @@ class Rados : public ObjStore
 Result<sptr<ObjStore>> ObjStore::connect_to_pool(fstr pool_name)
 {
     return Rados::connect(pool_name);
+}
+
+class FileUring : public FileIo
+{
+  private:
+    static const u32 URING_QUEUE_ENTRIES = 32;
+
+    io_uring ring;
+    folly::coro::SharedMutex ring_mtx;
+    std::jthread cqe_worker;
+    int fd;
+
+    FileUring(int fd) : fd(fd)
+    {
+        int ret = io_uring_queue_init(URING_QUEUE_ENTRIES, &ring, 0);
+        assert(ret == 0);
+        cqe_worker = std::jthread([this](auto st) { cqe_worker_fn(st); });
+    }
+
+  public:
+    ~FileUring() override { io_uring_queue_exit(&ring); }
+
+    static uptr<FileIo> make_file_uring(s32 fd)
+    {
+        return std::unique_ptr<FileUring>(new FileUring(fd));
+    }
+
+    TaskRes<u32> preadv(off_t offset, smartiov iov) override
+    {
+        co_await ring_mtx.co_scoped_lock();
+        auto &&[p, f] = folly::coro::makePromiseContract<s32>();
+        auto sqe = io_uring_get_sqe(&ring);
+        io_uring_prep_readv(sqe, fd, iov.iovs_vec().data(),
+                            iov.iovs_vec().size(), offset);
+        io_uring_sqe_set_data(sqe, &p);
+        io_uring_submit(&ring);
+
+        co_return neg_ec_to_result(co_await std::move(f));
+    }
+
+    TaskRes<u32> pwritev(off_t offset, smartiov iov) override
+    {
+        co_await ring_mtx.co_scoped_lock();
+        auto &&[p, f] = folly::coro::makePromiseContract<s32>();
+        auto sqe = io_uring_get_sqe(&ring);
+        io_uring_prep_writev(sqe, fd, iov.iovs_vec().data(),
+                             iov.iovs_vec().size(), offset);
+        io_uring_sqe_set_data(sqe, &p);
+        io_uring_submit(&ring);
+
+        co_return neg_ec_to_result(co_await std::move(f));
+    }
+
+  private:
+    void cqe_worker_fn(std::stop_token st)
+    {
+        __kernel_timespec timeout = {0, 100 * 1000}; // 100us
+        while (!st.stop_requested()) {
+            io_uring_cqe *cqe;
+            auto wait_res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
+            if (wait_res < 0)
+                continue;
+
+            auto p = static_cast<folly::coro::Promise<s32> *>(
+                io_uring_cqe_get_data(cqe));
+            p->setValue(cqe->res);
+            io_uring_cqe_seen(&ring, cqe);
+        }
+    }
+};
+
+uptr<FileIo> FileIo::make_file_io(s32 fd)
+{
+    return FileUring::make_file_uring(fd);
 }
