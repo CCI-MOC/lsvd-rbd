@@ -16,6 +16,7 @@ COPY meson.* /app/
 COPY src /app/src
 COPY subprojects /app/subprojects
 COPY test /app/test
+COPY tools /app/tools
 
 RUN make install-deps \
     && make release

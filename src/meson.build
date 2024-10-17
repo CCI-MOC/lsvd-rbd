@@ -31,6 +31,8 @@ lsvd_deps = [
 	dependency('uuid'),
 	dependency('nlohmann_json'),
 	cxx.find_library('rados', required: true),
+	cxx.find_library('rbd', required: true),
+	cxx.find_library('aio', required: true),
 	cxx.find_library('jemalloc', required: false),
 ]
 
