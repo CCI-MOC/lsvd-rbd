@@ -79,7 +79,7 @@ spdk_nvmf_subsystem *add_nvme_ss(spdk_nvmf_tgt *tgt)
 {
     XLOGF(DBG7, "Creating SPDK controller subsystem");
     auto ss =
-        spdk_nvmf_subsystem_create(tgt, NVME_SS_NQN, SPDK_NVMF_SUBTYPE_NVME, 1);
+        spdk_nvmf_subsystem_create(tgt, NVME_SS_NQN, SPDK_NVMF_SUBTYPE_NVME, 0);
     assert(ss != nullptr);
     spdk_nvmf_subsystem_set_allow_any_host(ss, true);
     spdk_nvmf_subsystem_set_sn(ss, "SPDK_000001");
@@ -244,6 +244,9 @@ int main(int argc, char **argv)
             assert(res.ok());
             setup_bdev_target(image_name);
         };
+        g_unregister_on_exit = [=]() {
+            bdev_lsvd_delete(image_name, [](auto) { spdk_app_stop(0); });
+        };
     }
 
     else if (mode == "new_lsvd") {
@@ -306,10 +309,7 @@ int main(int argc, char **argv)
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
     opts.reactor_mask = "[0,1,2]";
-    opts.shutdown_cb = []() {
-        g_unregister_on_exit();
-        spdk_app_stop(0);
-    };
+    opts.shutdown_cb = []() { g_unregister_on_exit(); };
 
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
     XLOGF(INFO, "SPDK app exited with rc={}", rc);
