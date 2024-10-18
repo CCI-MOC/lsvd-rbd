@@ -51,6 +51,14 @@ class SharedCache
         singleton = sptr<SharedCache>(new SharedCache(std::move(c)));
     }
 
+    static void shutdown_cache()
+    {
+        if (singleton)
+            singleton->cache.reset();
+        else
+            XLOGF(ERR, "SharedCache not initialized");
+    }
+
     static sptr<SharedCache> get()
     {
         if (!singleton) [[unlikely]] {
@@ -217,6 +225,8 @@ void ReadCache::init_cache(usize mem_bytes, usize nvm_bytes, fstr nvm_path)
 {
     SharedCache::init_cache(mem_bytes, nvm_bytes, nvm_path);
 }
+
+void ReadCache::shutdown_cache() { SharedCache::shutdown_cache(); }
 
 uptr<ReadCache> ReadCache::make_image_cache(sptr<ObjStore> s3, fstr imgname)
 {

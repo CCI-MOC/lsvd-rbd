@@ -121,7 +121,6 @@ static bool noop_io_type_supported(void *ctx, spdk_bdev_io_type io_type)
     case SPDK_BDEV_IO_TYPE_UNMAP:        // trim
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES: // also just trim
         return true;
-    case SPDK_BDEV_IO_TYPE_RESET: // block until all pending io aborts
     default:
         return false;
     }
@@ -145,54 +144,6 @@ struct noop_bdev_io {
 
 static int bdev_noop_io_ctx_size(void) { return sizeof(noop_bdev_io); }
 
-static void noop_io_done(noop_bdev_io *io, folly::Try<void> ret)
-{
-    auto sth = io->submit_td;
-    assert(sth != nullptr);
-
-    if (ret.hasValue()) [[likely]]
-        io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
-    else {
-        io->status = SPDK_BDEV_IO_STATUS_FAILED;
-        XLOGF(ERR, "IO failed with exception: {}", ret.exception().what());
-    }
-
-    spdk_thread_send_msg(
-        sth,
-        [](void *ctx) {
-            auto io = (noop_bdev_io *)ctx;
-            spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
-        },
-        io);
-}
-
-using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
-static std::atomic<u64> total_lat_us{0};
-static std::atomic<u64> num_reqs{0};
-
-static void noop_io_done(noop_bdev_io *io, tp start)
-{
-    auto sth = io->submit_td;
-    assert(sth != nullptr);
-
-    spdk_thread_send_msg(
-        sth,
-        [](void *ctx) {
-            auto io = (noop_bdev_io *)ctx;
-            spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io),
-                                  SPDK_BDEV_IO_STATUS_SUCCESS);
-        },
-        io);
-
-    // spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io),
-    //                       SPDK_BDEV_IO_STATUS_SUCCESS);
-
-    auto now = std::chrono::high_resolution_clock::now();
-    auto lat =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - start);
-    total_lat_us.fetch_add(lat.count());
-}
-
 auto noop_task() -> Task<void>
 {
     auto now = std::chrono::high_resolution_clock::now();
@@ -200,58 +151,23 @@ auto noop_task() -> Task<void>
     co_return;
 }
 
-auto test_task() -> Task<void>
-{
-    co_return;
-}
-
 static void noop_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
     auto dev = static_cast<noop_iodevice *>(io->bdev->ctxt);
-    auto &img = dev->img;
     auto lio = (noop_bdev_io *)(io->driver_ctx);
     lio->submit_td = spdk_io_channel_get_thread(c);
-
-    // io details
-    auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
-    auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
-
-    auto now = std::chrono::high_resolution_clock::now();
-    auto old_num = num_reqs.fetch_add(1);
-    if (old_num > 0 && old_num % 10000 == 0)
-        XLOGF(INFO, "num {} total {} per iter {}", old_num, total_lat_us.load(),
-              total_lat_us / old_num);
-
-    auto scb = [lio, now](auto && a) { noop_io_done(lio, now); };
-    test_task().scheduleOn(dev->kexe).start(scb);
-    // noop_task().semi().via(exe).then(
-    //     [lio, now](auto) { noop_io_done(lio, now); });
-
-    // auto cb = [lio](auto &&r) { noop_io_done(lio, r); };
-    // switch (io->type) {
-    // case SPDK_BDEV_IO_TYPE_READ: {
-    //     auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-    //     img->read(offset, iov).semi().via(exe).then(cb);
-    //     break;
-    // }
-    // case SPDK_BDEV_IO_TYPE_WRITE: {
-    //     auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-    //     img->write(offset, iov).semi().via(exe).then(cb);
-    //     break;
-    // }
-    // case SPDK_BDEV_IO_TYPE_UNMAP:
-    //     img->trim(offset, len).semi().via(exe).then(cb);
-    //     break;
-    // case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-    //     img->trim(offset, len).semi().via(exe).then(cb);
-    //     break;
-    // case SPDK_BDEV_IO_TYPE_FLUSH:
-    //     img->flush().semi().via(exe).then(cb);
-    //     break;
-    // default:
-    //     XLOGF(ERR, "Unknown request type: {}", io->type);
-    //     return;
-    // }
+    noop_task().scheduleOn(dev->kexe).start([lio](auto &&a) {
+        auto sth = lio->submit_td;
+        assert(sth != nullptr);
+        spdk_thread_send_msg(
+            sth,
+            [](void *ctx) {
+                auto io = (noop_bdev_io *)ctx;
+                spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io),
+                                      SPDK_BDEV_IO_STATUS_SUCCESS);
+            },
+            lio);
+    });
 }
 
 // Just copying from bdev_rbd, not sure where this is actually used
@@ -260,17 +176,7 @@ struct noop_bdev_io_channel {
     spdk_io_channel *io_channel;
 };
 
-Task<void> getExecutorStats()
-{
-    while (true) {
-        co_await folly::coro::sleep(std::chrono::seconds(5));
-        auto stats = folly::getGlobalCPUExecutorCounters();
-        XLOGF(INFO, "CPU Executor: {} max threads, {} active, {} tasks pending",
-              stats.numThreads, stats.numActiveThreads, stats.numPendingTasks);
-    }
-    co_return;
-}
-
+void bdev_noop_delete(str img_name, std::function<void(ResUnit)> cb);
 auto bdev_noop_create(str img_name, usize size) -> ResUnit
 {
     assert(!img_name.empty());
@@ -281,9 +187,6 @@ auto bdev_noop_create(str img_name, usize size) -> ResUnit
                    .wait()
                    .value();
     auto iodev = new noop_iodevice(std::move(img));
-
-    // get executor stats periodically
-    // getExecutorStats().scheduleOn(folly::getGlobalCPUExecutor()).start();
 
     spdk_io_device_register(
         iodev,
@@ -307,6 +210,15 @@ auto bdev_noop_create(str img_name, usize size) -> ResUnit
 
         return absl::ErrnoToStatus(err, "Failed to register bdev");
     }
+
+    // TEST auto-delete it after a bit
+    spdk_thread_send_msg(
+        spdk_get_thread(),
+        [](void *ctx) {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            bdev_noop_delete("nim", [](auto) { XLOGF(INFO, "Deleted image"); });
+        },
+        nullptr);
 
     return folly::Unit();
 }

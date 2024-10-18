@@ -21,7 +21,7 @@ struct rpc_create_lsvd {
 static const struct spdk_json_object_decoder rpc_create_lsvd_decoders[] = {
     {"image_name", offsetof(rpc_create_lsvd, image_name), spdk_json_decode_string, false},
     {"pool_name", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, false},
-    {"nvme_dir", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, false},
+    {"nvme_dir", offsetof(rpc_create_lsvd, pool_name), spdk_json_decode_string, true},
     {"config", offsetof(rpc_create_lsvd, config), spdk_json_decode_string, true},
 };
 // clang-format on

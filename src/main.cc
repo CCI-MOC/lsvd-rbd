@@ -1,3 +1,4 @@
+#include "folly/Singleton.h"
 #include "folly/executors/GlobalExecutor.h"
 #include "spdk/event.h"
 #include "spdk/nvme.h"
@@ -169,8 +170,10 @@ static void setup_bdev_target(str bdev_name)
     XLOGF(INFO, "Configuring SPDK NVMe-oF target");
 
     // Setup spdk nvmf
-    auto tgt = create_target();
-    auto disc_ss = add_discovery_ss(tgt);
+    auto tgt = spdk_nvmf_get_tgt(nullptr);
+    assert(tgt != nullptr);
+
+    // auto disc_ss = add_discovery_ss(tgt);
     auto nvme_ss = add_nvme_ss(tgt);
     auto trid = get_trid(HOSTNAME, PORT);
 
@@ -186,17 +189,17 @@ static void setup_bdev_target(str bdev_name)
     assert(rc == 0);
 
     start_tgt_listen(tgt, trid);
-    add_ss_listener(tgt, disc_ss, trid, alloc_cb([=](int) { 
+    // add_ss_listener(tgt, disc_ss, trid, alloc_cb([=](int) { 
     add_ss_listener(tgt, nvme_ss, trid, alloc_cb([=](int rc) {
     assert(rc == 0);
 
     // Start both subsystems
     start_ss(nvme_ss, alloc_cb([=](int) {
-    start_ss(disc_ss, alloc_cb([=](int) {
+    // start_ss(disc_ss, alloc_cb([=](int) {
 
     XLOGF(INFO, "Successfully configured SPDK NVMe-oF target");
 
-    })); })); })); })); })); }));
+    })); })); })); })); //})); }));
     // clang-format on
 }
 
@@ -206,6 +209,9 @@ static void call_fn(void *arg)
     auto fn = (StartFn *)arg;
     (*fn)();
 }
+
+// hacky workaround for the shutdown cb not accepting anything
+static std::function<void(void)> g_unregister_on_exit = []() {};
 
 int main(int argc, char **argv)
 {
@@ -250,20 +256,23 @@ int main(int argc, char **argv)
               image_name);
 
         auto exe = folly::getGlobalCPUExecutor();
+        auto s3 = ObjStore::connect_to_pool("pone").value();
+        LsvdImage::remove(s3, image_name).scheduleOn(exe).start().wait();
+
+        LsvdImage::create(s3, image_name, 5 * GIB)
+            .scheduleOn(exe)
+            .start()
+            .wait()
+            .value()
+            .value();
+
         start_fn = [=]() {
-            auto s3 = ObjStore::connect_to_pool("pone").value();
-            LsvdImage::remove(s3, image_name).scheduleOn(exe).start().wait();
-
-            LsvdImage::create(s3, image_name, 5 * GIB)
-                .scheduleOn(exe)
-                .start()
-                .wait()
-                .value()
-                .value();
-
             auto res = bdev_lsvd_create(pool_name, image_name, "");
             assert(res.ok());
             setup_bdev_target(image_name);
+        };
+        g_unregister_on_exit = [=]() {
+            bdev_lsvd_delete(image_name, [](auto) { spdk_app_stop(0); });
         };
     }
 
@@ -280,6 +289,9 @@ int main(int argc, char **argv)
             assert(res.ok());
             setup_bdev_target(name);
         };
+        g_unregister_on_exit = [=]() {
+            bdev_noop_delete(name, [](auto) { spdk_app_stop(0); });
+        };
     }
 
     else {
@@ -294,10 +306,14 @@ int main(int argc, char **argv)
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
     opts.reactor_mask = "[0,1,2]";
+    opts.shutdown_cb = []() {
+        g_unregister_on_exit();
+        spdk_app_stop(0);
+    };
 
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
-    spdk_app_fini();
-
     XLOGF(INFO, "SPDK app exited with rc={}", rc);
+
+    spdk_app_fini();
     return rc;
 }

@@ -250,6 +250,7 @@ struct lsvd_bdev_io_channel {
 auto bdev_lsvd_create(str pool_name, str img_name,
                       str cfg) -> Result<folly::Unit>
 {
+    XLOGF(INFO, "Creating LSVD device '{}'", img_name);
     assert(!img_name.empty());
 
     auto create_lsvd = [&]() -> void * {
@@ -333,8 +334,10 @@ void bdev_lsvd_delete(str img_name, std::function<void(ResUnit)> cb)
 static int lsvd_destroy_bdev(void *ctx)
 {
     auto iodev = reinterpret_cast<lsvd_iodevice *>(ctx);
-    XLOGF(INFO, "Destroying LSVD bdev {}", iodev->bdev.name);
+    auto name = iodev->img->name;
+    XLOGF(INFO, "Destroying LSVD bdev {}", name);
     std::ignore = iodev->img->unmount().scheduleOn(iodev->kexe).start().wait();
     delete iodev;
+    XLOGF(DBG1, "Destroyed LSVD bdev {}", name);
     return 0;
 }

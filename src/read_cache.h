@@ -13,5 +13,6 @@ class ReadCache
     virtual TaskUnit insert_obj(seqnum_t seqnum, buffer iov) = 0;
 
     static void init_cache(usize mem_bytes, usize nvm_bytes, fstr nvm_path);
+    static void shutdown_cache();
     static uptr<ReadCache> make_image_cache(sptr<ObjStore> s3, fstr imgname);
 };
