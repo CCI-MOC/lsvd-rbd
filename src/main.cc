@@ -14,7 +14,7 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG5");
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6");
 
 const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
 const char *HOSTNAME = "127.0.0.1";
@@ -47,22 +47,6 @@ void invoke_and_free_cb(void *ctx, int status)
     auto cb = static_cast<std::function<void(int)> *>(ctx);
     (*cb)(status);
     delete cb;
-}
-
-spdk_nvmf_tgt *create_target()
-{
-    XLOGF(DBG7, "Creating NVMF target");
-    spdk_nvmf_target_opts opts = {
-        .name = "lsvd_nvmf_tgt",
-        .discovery_filter = SPDK_NVMF_TGT_DISCOVERY_MATCH_ANY,
-    };
-    auto tgt = spdk_nvmf_tgt_create(&opts);
-    assert(tgt != nullptr);
-
-    auto pg = spdk_nvmf_poll_group_create(tgt);
-    assert(pg != nullptr);
-
-    return tgt;
 }
 
 spdk_nvmf_subsystem *add_discovery_ss(spdk_nvmf_tgt *tgt)
@@ -165,11 +149,12 @@ void start_ss(spdk_nvmf_subsystem *ss, std::function<void(int)> *cb)
         cb);
 }
 
-static void setup_bdev_target(str bdev_name)
+static void setup_bdev_target(vec<str> bdev_names)
 {
     XLOGF(INFO, "Configuring SPDK NVMe-oF target");
 
     // Setup spdk nvmf
+    // use the target created by spdk_event_bdev instead of creating our own
     auto tgt = spdk_nvmf_get_tgt(nullptr);
     assert(tgt != nullptr);
 
@@ -177,7 +162,8 @@ static void setup_bdev_target(str bdev_name)
     auto nvme_ss = add_nvme_ss(tgt);
     auto trid = get_trid(HOSTNAME, PORT);
 
-    add_bdev_ns(nvme_ss, bdev_name);
+    for (auto name : bdev_names)
+        add_bdev_ns(nvme_ss, name);
 
     // some stupid formatting decisions up ahead due to tower-of-callback
     // it also looks cleaner without indents
@@ -242,7 +228,7 @@ int main(int argc, char **argv)
         start_fn = [=]() {
             auto res = bdev_lsvd_create(pool_name, image_name, "");
             assert(res.ok());
-            setup_bdev_target(image_name);
+            setup_bdev_target({image_name});
         };
         g_unregister_on_exit = [=]() {
             bdev_lsvd_delete(image_name, [](auto) { spdk_app_stop(0); });
@@ -251,32 +237,42 @@ int main(int argc, char **argv)
 
     else if (mode == "new_lsvd") {
         if (argc < 3)
-            XLOGF(FATAL, "Usage: {} new_lsvd [pool]", argv[0]);
+            XLOGF(FATAL, "Usage: {} new_lsvd <pool> [num]", argv[0]);
+
+        auto num = 1;
+        if (argc > 3)
+            num = std::stoi(argv[3]);
+
+        vec<str> img_names;
+        for (auto i = 0; i < num; i++)
+            img_names.push_back(fmt::format("auto_lsvddev_{}", i));
 
         auto pool_name = argv[2];
-        auto image_name = "auto_lsvddev";
-        XLOGF(INFO, "Creating and mounting '{}'/'{}' on start", pool_name,
-              image_name);
 
         auto exe = folly::getGlobalCPUExecutor();
         auto s3 = ObjStore::connect_to_pool("pone").value();
-        LsvdImage::remove(s3, image_name).scheduleOn(exe).start().wait();
 
-        LsvdImage::create(s3, image_name, 5 * GIB)
-            .scheduleOn(exe)
-            .start()
-            .wait()
-            .value()
-            .value();
+        for (auto name : img_names) {
+            XLOGF(INFO, "Creating and mounting '{}'/'{}' on start", pool_name,
+                  name);
+
+            LsvdImage::remove(s3, name).scheduleOn(exe).start().wait();
+            LsvdImage::create(s3, name, 5 * GIB)
+                .scheduleOn(exe)
+                .start()
+                .wait()
+                .value()
+                .value();
+        }
 
         start_fn = [=]() {
-            auto res = bdev_lsvd_create(pool_name, image_name, "");
-            assert(res.ok());
-            setup_bdev_target(image_name);
+            for (auto name : img_names) {
+                auto res = bdev_lsvd_create(pool_name, name, "");
+                assert(res.ok());
+            }
+            setup_bdev_target(img_names);
         };
-        g_unregister_on_exit = [=]() {
-            bdev_lsvd_delete(image_name, [](auto) { spdk_app_stop(0); });
-        };
+        g_unregister_on_exit = [=]() { spdk_app_stop(0); };
     }
 
     else if (mode == "mount_noop") {
@@ -290,7 +286,7 @@ int main(int argc, char **argv)
         start_fn = [=]() {
             auto res = bdev_noop_create(name, size);
             assert(res.ok());
-            setup_bdev_target(name);
+            setup_bdev_target({name});
         };
         g_unregister_on_exit = [=]() {
             bdev_noop_delete(name, [](auto) { spdk_app_stop(0); });
@@ -303,7 +299,7 @@ int main(int argc, char **argv)
 
     XLOGF(INFO, "Starting SPDK target, pid={}", getpid());
 
-    ReadCache::init_cache(10 * GIB, 100 * GIB, "/tmp/lsvd.rcache");
+    ReadCache::init_cache(10 * GIB, 100 * GIB, "/mnt/lsvd/lsvd.rcache");
 
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));

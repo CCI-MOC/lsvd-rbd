@@ -10,4 +10,5 @@ trap 'nvme disconnect -n nqn.2019-05.io.lsvd:cnode1' SIGINT SIGTERM EXIT
 sleep 1
 nvme list
 
-IOPATH=/dev/nvme1n1 fio $workload
+devices=$(nvme list | perl -lane 'print $F[0] if /SPDK_000001/' | perl -pe 'BEGIN { $/ = undef } s/\n/:/g; s/:$//;')
+IOPATH=$devices fio $workload
