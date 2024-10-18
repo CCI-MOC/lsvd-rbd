@@ -83,7 +83,7 @@ class LsvdThreadFactory : public folly::ThreadFactory
                 rte_cpuset_t all_cpuset;
                 CPU_ZERO(&all_cpuset);
                 auto cores = sysconf(_SC_NPROCESSORS_CONF);
-                for (int i = 0; i < cores; i++)
+                for (int i = 3; i < cores; i++)
                     CPU_SET(i, &all_cpuset);
                 rte_thread_set_affinity(&all_cpuset);
 
@@ -114,7 +114,8 @@ folly::Singleton<LsvdThreadFactory, PrivateTag> LsvdThreadFactory::singleton_;
 static folly::Singleton<folly::CPUThreadPoolExecutor, PrivateTag>
     lsvd_tp_inst([]() {
         auto tf = LsvdThreadFactory::getInstance();
-        return new folly::CPUThreadPoolExecutor(8, tf);
+        return new folly::CPUThreadPoolExecutor(
+            std::thread::hardware_concurrency() / 2, tf);
     });
 
 auto get_exe() { return folly::getKeepAliveToken(*lsvd_tp_inst.try_get()); }
@@ -132,7 +133,7 @@ class lsvd_iodevice
         std::memset(&bdev, 0, sizeof(bdev));
         bdev.product_name = strdup("Log-structured Virtual Disk");
         bdev.name = strdup(img->name.c_str());
-        bdev.blocklen = 4096;
+        bdev.blocklen = 512;
         bdev.blockcnt = img->get_size() / bdev.blocklen;
         bdev.ctxt = this;
         bdev.module = &lsvd_if;

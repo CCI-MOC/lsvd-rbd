@@ -208,8 +208,17 @@ class FileUring : public FileIo
 
     FileUring(int fd) : fd(fd)
     {
+        // set up polling
+        io_uring_params params;
+        params.flags |= IORING_SETUP_SQPOLL;
+        params.sq_thread_idle = 2000;
+
         int ret = io_uring_queue_init(URING_QUEUE_ENTRIES, &ring, 0);
         assert(ret == 0);
+
+        ret = io_uring_register_files(&ring, &fd, 1);
+        assert(ret == 0);
+
         cqe_worker = std::jthread([this](auto st) { cqe_worker_fn(st); });
     }
 
@@ -226,8 +235,9 @@ class FileUring : public FileIo
         auto l = co_await ring_mtx.co_scoped_lock();
         auto &&[p, f] = folly::coro::makePromiseContract<s32>();
         auto sqe = io_uring_get_sqe(&ring);
-        io_uring_prep_readv(sqe, fd, iov.iovs_vec().data(),
+        io_uring_prep_readv(sqe, 0, iov.iovs_vec().data(),
                             iov.iovs_vec().size(), offset);
+        sqe->flags |= IOSQE_FIXED_FILE;
         io_uring_sqe_set_data(sqe, &p);
         io_uring_submit(&ring);
         l.unlock();
@@ -240,8 +250,9 @@ class FileUring : public FileIo
         auto l = co_await ring_mtx.co_scoped_lock();
         auto &&[p, f] = folly::coro::makePromiseContract<s32>();
         auto sqe = io_uring_get_sqe(&ring);
-        io_uring_prep_writev(sqe, fd, iov.iovs_vec().data(),
+        io_uring_prep_writev(sqe, 0, iov.iovs_vec().data(),
                              iov.iovs_vec().size(), offset);
+        sqe->flags |= IOSQE_FIXED_FILE;
         io_uring_sqe_set_data(sqe, &p);
         io_uring_submit(&ring);
         l.unlock();
