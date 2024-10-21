@@ -18,8 +18,12 @@ lsvd_inc = include_directories(
 
 lsvd_deps = [
     dependency('zpp_bits'),
-    dependency('abseil'),
     subproject('cachelib').get_variable('cachelib_dep'),
+
+    dependency('absl_base'),
+    dependency('absl_status'),
+    dependency('absl_synchronization'),
+    dependency('absl_debugging'),
 
     cxx.find_library('rados', required: true),
     cxx.find_library('jemalloc', required: false),

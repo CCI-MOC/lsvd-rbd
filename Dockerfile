@@ -13,7 +13,6 @@ RUN sudo apt-get install -y wget lsb-release software-properties-common gnupg \
 WORKDIR /app
 COPY Makefile /app/Makefile
 COPY meson.* /app/
-COPY conanfile.txt /app/
 COPY src /app/src
 COPY subprojects /app/subprojects
 COPY test /app/test

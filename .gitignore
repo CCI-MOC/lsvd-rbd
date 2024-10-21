@@ -22,5 +22,6 @@ conan/
 
 subprojects/spdk/
 subprojects/cachelib/
-subprojects/zpp_bits*
+subprojects/zpp_bits-*/
+subprojects/abseil-*/
 subprojects/packagecache/
