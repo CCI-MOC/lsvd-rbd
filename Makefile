@@ -22,7 +22,7 @@ install-deps:
 	sudo apt install -y libboost-all-dev libdouble-conversion-dev libevent-dev \
 		libgflags-dev libgmock-dev libgoogle-glog-dev libgtest-dev \
 		liblz4-dev liblzma-dev libsnappy-dev libsodium-dev libunwind-dev \
-		libzstd-dev ninja-build zlib1g-dev \
+		libzstd-dev ninja-build zlib1g-dev liburing-dev \
 		libnuma-dev libarchive-dev libibverbs-dev librdmacm-dev \
 		python3-pyelftools libcunit1-dev libaio-dev nasm librados-dev librbd-dev \
 		libssl-dev libtool libncurses-dev help2man \
