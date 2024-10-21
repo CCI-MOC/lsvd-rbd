@@ -163,30 +163,6 @@ static spdk_io_channel *lsvd_get_io_channel(void *ctx)
 
 static int bdev_lsvd_io_ctx_size(void) { return sizeof(lsvd_bdev_io); }
 
-static void lsvd_io_done(lsvd_bdev_io *io, folly::Try<ResUnit> ret)
-{
-    auto sth = io->submit_td;
-    assert(sth != nullptr);
-
-    if (ret.hasValue() && ret->ok()) [[likely]]
-        io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
-    else {
-        io->status = SPDK_BDEV_IO_STATUS_FAILED;
-        if (ret.hasException())
-            XLOGF(ERR, "IO failed with exception: {}", ret.exception().what());
-        else
-            XLOGF(ERR, "IO failed with error: {}", ret->status().ToString());
-    }
-
-    spdk_thread_send_msg(
-        sth,
-        [](void *ctx) {
-            auto io = (lsvd_bdev_io *)ctx;
-            spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
-        },
-        io);
-}
-
 static bool lsvd_io_type_supported(void *ctx, spdk_bdev_io_type io_type)
 {
     switch (io_type) {
@@ -214,27 +190,48 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
 
-    // measure scheduling latency
-    auto cb = [lio](auto &&r) { lsvd_io_done(lio, r); };
+    auto comp = [lio](auto &&ret) {
+        auto sth = lio->submit_td;
+        assert(sth != nullptr);
+
+        if (ret.hasValue() && ret->ok()) [[likely]]
+            lio->status = SPDK_BDEV_IO_STATUS_SUCCESS;
+        else {
+            lio->status = SPDK_BDEV_IO_STATUS_FAILED;
+            if (ret.hasException())
+                XLOGF(ERR, "IO failed with exception: {}",
+                      ret.exception().what());
+            else
+                XLOGF(ERR, "IO failed with error: {}",
+                      ret->status().ToString());
+        }
+
+        spdk_thread_send_msg(
+            sth,
+            [](void *ctx) {
+                auto io = static_cast<decltype(lio)>(ctx);
+                spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
+            },
+            lio);
+    };
 
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->read(offset, iov).scheduleOn(exe).start(cb);
+        img->read(offset, iov).scheduleOn(exe).start(comp);
         break;
     }
     case SPDK_BDEV_IO_TYPE_WRITE: {
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->write(offset, iov).scheduleOn(exe).start(cb);
+        img->write(offset, iov).scheduleOn(exe).start(comp);
         break;
     }
     case SPDK_BDEV_IO_TYPE_UNMAP:
-        [[fallthrough]];
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        img->trim(offset, len).scheduleOn(exe).start(cb);
+        img->trim(offset, len).scheduleOn(exe).start(comp);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        img->flush().scheduleOn(exe).start(cb);
+        img->flush().scheduleOn(exe).start(comp);
         break;
     default:
         XLOGF(ERR, "Unknown request type: {}", io->type);

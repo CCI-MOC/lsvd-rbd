@@ -9,7 +9,6 @@ lsvd_src = files(
 lsvd_tgt_src = files(
     'bdev_lsvd.cc',
     'bdev_lsvd_rpc.cc',
-    'bdev_noop.cc',
     'main.cc',
 )
 

@@ -115,21 +115,3 @@ inline static size_t parse_size_str(str i)
 
     return val;
 }
-
-inline auto
-tdiff_us(std::chrono::time_point<std::chrono::high_resolution_clock> end,
-         std::chrono::time_point<std::chrono::high_resolution_clock> start)
-{
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-                  .count();
-    return std::abs(us);
-}
-
-inline auto
-tdiff_ns(std::chrono::time_point<std::chrono::high_resolution_clock> end,
-         std::chrono::time_point<std::chrono::high_resolution_clock> start)
-{
-    auto us = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-                  .count();
-    return std::abs(us);
-}

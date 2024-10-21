@@ -9,6 +9,7 @@
 #include "journal.h"
 #include "read_cache.h"
 #include "smartiov.h"
+#include "representation.h"
 #include "utils.h"
 
 const u32 LOG_REPLAY_OBJECT_COUNT = 16;

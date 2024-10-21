@@ -1,5 +1,6 @@
 #include "folly/FileUtil.h"
 
+#include "config.h"
 #include "journal.h"
 #include "representation.h"
 #include "utils.h"
@@ -47,6 +48,9 @@ struct journ_entry {
 
 TaskUnit Journal::record_write(off_t offset, iovec iov, S3Ext ext)
 {
+    if (!ENABLE_JOURNAL)
+        co_return folly::Unit();
+
     ENSURE(offset >= 0);
     usize cur_off, new_off;
 
@@ -79,6 +83,9 @@ TaskUnit Journal::record_write(off_t offset, iovec iov, S3Ext ext)
 
 TaskUnit Journal::record_trim(off_t offset, usize len, S3Ext ext)
 {
+    if (!ENABLE_JOURNAL)
+        co_return folly::Unit();
+
     ENSURE(offset >= 0);
     usize cur_off, new_off;
 

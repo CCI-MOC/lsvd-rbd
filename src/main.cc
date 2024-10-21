@@ -208,18 +208,18 @@ int main(int argc, char **argv)
     auto folly_init = folly::Init(&fake_argc, &argv, false);
 
     StartFn start_fn;
-    str mode = argc > 1 ? argv[1] : "nomount";
+    str mode = argc > 1 ? argv[1] : "none";
 
-    if (mode == "nomount") {
+    if (mode == "none") {
         if (argc > 2)
-            XLOGF(FATAL, "Usage: {} nomount", argv[0]);
+            XLOGF(FATAL, "Usage: {} none", argv[0]);
 
         start_fn = []() { XLOGF(INFO, "Starting SPDK app ..."); };
     }
 
-    else if (mode == "mount_lsvd") {
+    else if (mode == "mount") {
         if (argc < 4)
-            XLOGF(FATAL, "Usage: {} mount_lsvd [pool] [image_name]", argv[0]);
+            XLOGF(FATAL, "Usage: {} mount [pool] [image_name]", argv[0]);
 
         auto pool_name = argv[2];
         auto image_name = argv[3];
@@ -235,9 +235,9 @@ int main(int argc, char **argv)
         };
     }
 
-    else if (mode == "new_lsvd") {
+    else if (mode == "new") {
         if (argc < 3)
-            XLOGF(FATAL, "Usage: {} new_lsvd <pool> [num]", argv[0]);
+            XLOGF(FATAL, "Usage: {} new <pool> [num]", argv[0]);
 
         auto num = 1;
         if (argc > 3)
@@ -273,28 +273,6 @@ int main(int argc, char **argv)
             setup_bdev_target(img_names);
         };
         g_unregister_on_exit = [=]() { spdk_app_stop(0); };
-    }
-
-    else if (mode == "mount_noop") {
-        if (argc < 4)
-            XLOGF(FATAL, "Usage: {} mount_noop [name] [size]", argv[0]);
-
-        auto name = argv[2];
-        auto size = parse_size_str(argv[3]);
-        XLOGF(INFO, "Auto-mounting noop image '{}'/{} on start", name, size);
-
-        start_fn = [=]() {
-            auto res = bdev_noop_create(name, size);
-            assert(res.ok());
-            setup_bdev_target({name});
-        };
-        g_unregister_on_exit = [=]() {
-            bdev_noop_delete(name, [](auto) { spdk_app_stop(0); });
-        };
-    }
-
-    else {
-        XLOGF(FATAL, "Usage: {} [nomount|mount_noop|mount_lsvd]", argv[0]);
     }
 
     XLOGF(INFO, "Starting SPDK target, pid={}", getpid());

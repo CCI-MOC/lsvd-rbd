@@ -111,3 +111,34 @@ struct __attribute((packed)) journal_entry {
 
 const uint32_t JOURNAL_ENTRY_SIZE = sizeof(journal_entry);
 static_assert(JOURNAL_ENTRY_SIZE == 16);
+
+// === Timing utilities ===
+
+using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
+
+struct io_timing {
+    tp t0;
+    tp t1;
+    tp t2;
+    tp t3;
+    tp t4;
+    tp t5;
+    tp end;
+    tp complete;
+};
+
+inline auto tnow() { return std::chrono::high_resolution_clock::now(); }
+
+inline auto tdiff_us(tp end, tp start)
+{
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+                  .count();
+    return std::abs(us);
+}
+
+inline auto tdiff_ns(tp end, tp start)
+{
+    auto us = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+                  .count();
+    return std::abs(us);
+}
