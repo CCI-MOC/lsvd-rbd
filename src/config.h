@@ -15,6 +15,7 @@ const bool ENABLE_JOURNAL = true;
 
 const s64 LONG_READ_NS_THRES = 1 * MS_TO_NS;
 const s64 LONG_WRITE_NS_THRES = 50 * MS_TO_NS;
+const s64 LONG_URING_NS_THRES = 20 * MS_TO_NS;
 
 class LsvdConfig
 {

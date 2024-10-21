@@ -1,4 +1,5 @@
 #include "absl/status/status.h"
+#include "config.h"
 #include "folly/system/ThreadName.h"
 #include "liburing.h"
 #include <boost/outcome.hpp>
@@ -7,6 +8,7 @@
 #include <folly/experimental/coro/Promise.h>
 #include <folly/experimental/coro/SharedMutex.h>
 #include <folly/experimental/coro/Task.h>
+#include <pthread.h>
 #include <rados/buffer.h>
 #include <rados/librados.h>
 #include <rados/librados.hpp>
@@ -232,6 +234,8 @@ class FileUring : public FileIo
 
     TaskRes<u32> preadv(off_t offset, smartiov iov) override
     {
+        auto start = tnow();
+
         auto l = co_await ring_mtx.co_scoped_lock();
         auto &&[p, f] = folly::coro::makePromiseContract<s32>();
         auto sqe = io_uring_get_sqe(&ring);
@@ -242,11 +246,19 @@ class FileUring : public FileIo
         io_uring_submit(&ring);
         l.unlock();
 
-        co_return neg_ec_to_result(co_await std::move(f));
+        auto res = co_await std::move(f);
+        auto end = tnow();
+        auto lat = tdiff_ns(start, end);
+        if (REPORT_LONG_OPS && lat > LONG_URING_NS_THRES)
+            XLOGF(DBG6, "preadv lat: {}us", lat / 1000);
+
+        co_return neg_ec_to_result(res);
     }
 
     TaskRes<u32> pwritev(off_t offset, smartiov iov) override
     {
+        auto start = tnow();
+
         auto l = co_await ring_mtx.co_scoped_lock();
         auto &&[p, f] = folly::coro::makePromiseContract<s32>();
         auto sqe = io_uring_get_sqe(&ring);
@@ -257,7 +269,13 @@ class FileUring : public FileIo
         io_uring_submit(&ring);
         l.unlock();
 
-        co_return neg_ec_to_result(co_await std::move(f));
+        auto res = co_await std::move(f);
+        auto end = tnow();
+        auto lat = tdiff_ns(start, end);
+        if (REPORT_LONG_OPS && lat > LONG_URING_NS_THRES)
+            XLOGF(DBG6, "pwritev lat: {}us", lat / 1000);
+
+        co_return neg_ec_to_result(res);
     }
 
   private:
