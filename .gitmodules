@@ -1,6 +1,0 @@
-[submodule "lsvd-atc24"]
-	path = atc2024
-	url = git@github.com:CCI-MOC/lsvd-atc24.git
-[submodule "block_on_object"]
-	path = block_on_object
-	url = git@github.khoury.northeastern.edu:pjd/block_on_object.git
