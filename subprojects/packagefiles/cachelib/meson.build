@@ -68,7 +68,7 @@ cachelib_vendored_deps = [
     'folly_exception_tracer_base',
     'folly_test_util',
     'follybenchmark',
-    # 'gflags',
+    'gflags',
     # 'gflags_nothreads',
     'glog',
     'gmock',

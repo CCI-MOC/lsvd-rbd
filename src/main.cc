@@ -1,5 +1,6 @@
 #include "folly/Singleton.h"
 #include "folly/executors/GlobalExecutor.h"
+#include "gflags/gflags.h"
 #include "spdk/event.h"
 #include "spdk/nvme.h"
 #include "spdk/nvmf.h"
@@ -8,13 +9,19 @@
 #include <folly/init/Init.h>
 #include <folly/logging/Init.h>
 #include <folly/logging/xlog.h>
+#include <folly/portability/GFlags.h>
 
 #include "bdev_lsvd.h"
 #include "image.h"
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6");
+FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram_gib, 10, "RAM cache size in GiB");
+FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm_gib, 100, "NVM cache size in GiB");
+FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
+                           "Path to lsvd read cache");
+
+FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6; default:async=true");
 
 const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
 const char *HOSTNAME = "127.0.0.1";
@@ -204,8 +211,8 @@ int main(int argc, char **argv)
     fLU::FLAGS_folly_global_cpu_executor_threads =
         std::thread::hardware_concurrency();
 
-    int fake_argc = 0;
-    auto folly_init = folly::Init(&fake_argc, &argv, false);
+    gflags::SetUsageMessage("Usage: lsvd_tgt [none|mount|new] [args]");
+    auto folly_init = folly::Init(&argc, &argv, true);
 
     StartFn start_fn;
     str mode = argc > 1 ? argv[1] : "none";
@@ -277,7 +284,9 @@ int main(int argc, char **argv)
 
     XLOGF(INFO, "Starting SPDK target, pid={}", getpid());
 
-    ReadCache::init_cache(10 * GIB, 100 * GIB, "/mnt/lsvd/lsvd.rcache");
+    ReadCache::init_cache(FLAGS_lsvd_cache_ram_gib * GIB,
+                          FLAGS_lsvd_cache_nvm_gib * GIB,
+                          FLAGS_lsvd_cache_path);
 
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));
