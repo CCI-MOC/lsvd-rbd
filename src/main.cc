@@ -16,8 +16,8 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram_gib, 10, "RAM cache size in GiB");
-FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm_gib, 100, "NVM cache size in GiB");
+FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
+FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
                            "Path to lsvd read cache");
 
@@ -284,8 +284,8 @@ int main(int argc, char **argv)
 
     XLOGF(INFO, "Starting SPDK target, pid={}", getpid());
 
-    ReadCache::init_cache(FLAGS_lsvd_cache_ram_gib * GIB,
-                          FLAGS_lsvd_cache_nvm_gib * GIB,
+    ReadCache::init_cache(FLAGS_lsvd_cache_ram * GIB,
+                          FLAGS_lsvd_cache_nvm * GIB,
                           FLAGS_lsvd_cache_path);
 
     spdk_app_opts opts = {};
