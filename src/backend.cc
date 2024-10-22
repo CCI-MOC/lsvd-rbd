@@ -283,7 +283,7 @@ class FileUring : public FileIo
     {
         folly::setThreadName("UringCqeWorker");
 
-        __kernel_timespec timeout = {0, 100 * 1000}; // 100us
+        __kernel_timespec timeout = {0, 1'000'000}; // 1ms
         while (!st.stop_requested()) {
             io_uring_cqe *cqe;
             auto wait_res = io_uring_wait_cqe_timeout(&ring, &cqe, &timeout);
