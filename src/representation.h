@@ -117,28 +117,38 @@ static_assert(JOURNAL_ENTRY_SIZE == 16);
 using tp = std::chrono::time_point<std::chrono::high_resolution_clock>;
 
 struct io_timing {
-    tp t0;
+    tp submit;
+    tp start;
     tp t1;
     tp t2;
     tp t3;
     tp t4;
     tp t5;
-    tp end;
+    tp t6;
+    tp t7;
+    tp t8;
+    tp done;
     tp complete;
 };
 
-inline auto tnow() { return std::chrono::high_resolution_clock::now(); }
+extern io_timing empty_timing;
 
-inline auto tdiff_us(tp end, tp start)
+inline auto tnow() { return std::chrono::high_resolution_clock::now(); }
+inline auto is_zero(tp t) { return t.time_since_epoch().count() == 0; }
+
+template <typename T> auto tdiff(tp a, tp b)
 {
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-                  .count();
-    return std::abs(us);
+    if (is_zero(a) || is_zero(b))
+        return 0l;
+    return std::abs(std::chrono::duration_cast<T>(a - b).count());
 }
 
-inline auto tdiff_ns(tp end, tp start)
+inline auto tdiff_us(tp a, tp b)
 {
-    auto us = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-                  .count();
-    return std::abs(us);
+    return tdiff<std::chrono::microseconds>(a, b);
+}
+
+inline auto tdiff_ns(tp a, tp b)
+{
+    return tdiff<std::chrono::nanoseconds>(a, b);
 }

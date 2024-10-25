@@ -65,4 +65,4 @@ executable(
     dependencies: lsvd_deps,
 )
 
-# subdir('test')
+subdir('test')

@@ -1,15 +1,14 @@
-#include <boost/uuid/uuid.hpp>
-#include <folly/AtomicHashMap.h>
-#include <folly/FBVector.h>
-#include <zpp_bits.h>
+#include "folly/FBVector.h"
+#include "folly/fibers/Semaphore.h"
+#include "zpp_bits.h"
 
 #include "backend.h"
 #include "config.h"
 #include "extmap.h"
 #include "journal.h"
 #include "read_cache.h"
-#include "smartiov.h"
 #include "representation.h"
+#include "smartiov.h"
 #include "utils.h"
 
 const u32 LOG_REPLAY_OBJECT_COUNT = 16;
@@ -56,7 +55,6 @@ class LsvdImage
     const usize rollover_threshold = 2 * max_io_size;
     const usize sector_size = 512;
     const usize checkpoint_interval_epoch = 128;
-    const usize max_recycle_objs = 32;
 
   public:
     const str name;
@@ -64,7 +62,10 @@ class LsvdImage
     ~LsvdImage() { XLOGF(INFO, "Destructing image '{}'", name); }
 
   private:
-    LsvdImage(str name) : name(name) {}
+    LsvdImage(str name, LsvdConfig cfg_)
+        : name(name), cfg(cfg_), num_flushing_objs(cfg.max_backend_ios)
+    {
+    }
 
     // Cannot be copied or moved
     LsvdImage(LsvdImage &) = delete;
@@ -88,6 +89,7 @@ class LsvdImage
     sptr<LogObj> cur_logobj;
     folly::coro::SharedMutex pending_mtx;
     folly::F14FastMap<seqnum_t, sptr<LogObj>> pending_objs;
+    folly::fibers::Semaphore num_flushing_objs;
 
     folly::coro::SharedMutex recycle_mtx;
     fvec<sptr<LogObj>> recycle_objs;
@@ -110,10 +112,24 @@ class LsvdImage
     static TaskUnit remove(sptr<ObjStore> s3, str name);
     static TaskUnit clone(sptr<ObjStore> s3, str src, str dst);
 
-    TaskUnit read(off_t offset, smartiov iovs);
-    TaskUnit write(off_t offset, smartiov iovs);
-    TaskUnit trim(off_t offset, usize len);
-    TaskUnit flush();
+    TaskUnit read(off_t offset, smartiov iovs, io_timing &tim);
+    TaskUnit write(off_t offset, smartiov iovs, io_timing &tim);
+    TaskUnit trim(off_t offset, usize len, io_timing &tim);
+    TaskUnit flush(io_timing &tim);
+
+    TaskUnit read(off_t offset, smartiov iovs)
+    {
+        return read(offset, iovs, empty_timing);
+    }
+    TaskUnit write(off_t offset, smartiov iovs)
+    {
+        return write(offset, iovs, empty_timing);
+    }
+    TaskUnit trim(off_t offset, usize len)
+    {
+        return trim(offset, len, empty_timing);
+    }
+    TaskUnit flush() { return flush(empty_timing); }
 
     TaskUnit write_and_verify(off_t offset, smartiov iovs);
     Task<void> verify_integrity();

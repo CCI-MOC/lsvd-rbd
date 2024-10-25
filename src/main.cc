@@ -1,4 +1,3 @@
-#include "folly/Singleton.h"
 #include "folly/executors/GlobalExecutor.h"
 #include "gflags/gflags.h"
 #include "spdk/event.h"

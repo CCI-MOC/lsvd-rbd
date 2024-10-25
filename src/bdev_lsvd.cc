@@ -1,4 +1,5 @@
 #include "absl/status/status.h"
+#include "fmt/format.h"
 #include "folly/Executor.h"
 #include "folly/Singleton.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -13,15 +14,27 @@
 #include "bdev_lsvd.h"
 #include "image.h"
 #include "smartiov.h"
+#include "src/config.h"
 #include "utils.h"
 
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
 static int bdev_lsvd_io_ctx_size(void);
 
+enum class lsvd_iotype {
+    READ = 1,
+    WRITE = 2,
+    FLUSH = 3,
+    TRIM = 4,
+};
+
+auto format_as(lsvd_iotype t) { return fmt::underlying(t); }
+
 struct lsvd_bdev_io {
     spdk_thread *submit_td;
     spdk_bdev_io_status status;
+    lsvd_iotype type;
+    io_timing tim;
 };
 
 static spdk_bdev_module lsvd_if = {
@@ -178,6 +191,9 @@ static bool lsvd_io_type_supported(void *ctx, spdk_bdev_io_type io_type)
     }
 }
 
+auto noop_fn() -> TaskUnit { co_return folly::Unit(); }
+void report_io_timing(lsvd_iotype type, io_timing &tim);
+
 static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
 {
     auto dev = static_cast<lsvd_iodevice *>(io->bdev->ctxt);
@@ -189,6 +205,8 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
     // io details
     auto offset = io->u.bdev.offset_blocks * io->bdev->blocklen;
     auto len = io->u.bdev.num_blocks * io->bdev->blocklen;
+
+    lio->tim.submit = tnow();
 
     auto comp = [lio](auto &&ret) {
         auto sth = lio->submit_td;
@@ -206,32 +224,45 @@ static void lsvd_submit_io(spdk_io_channel *c, spdk_bdev_io *io)
                       ret->status().ToString());
         }
 
+        lio->tim.done = tnow();
+
         spdk_thread_send_msg(
             sth,
             [](void *ctx) {
                 auto io = static_cast<decltype(lio)>(ctx);
+                io->tim.complete = tnow();
                 spdk_bdev_io_complete(spdk_bdev_io_from_ctx(io), io->status);
+                report_io_timing(io->type, io->tim);
             },
             lio);
     };
 
+    if (LSVD_IS_NOOP) {
+        noop_fn().scheduleOn(exe).start(comp);
+        return;
+    }
+
     switch (io->type) {
     case SPDK_BDEV_IO_TYPE_READ: {
+        lio->type = lsvd_iotype::READ;
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->read(offset, iov).scheduleOn(exe).start(comp);
+        img->read(offset, iov, lio->tim).scheduleOn(exe).start(comp);
         break;
     }
     case SPDK_BDEV_IO_TYPE_WRITE: {
+        lio->type = lsvd_iotype::WRITE;
         auto iov = smartiov::from_iovecs(io->u.bdev.iovs, io->u.bdev.iovcnt);
-        img->write(offset, iov).scheduleOn(exe).start(comp);
+        img->write(offset, iov, lio->tim).scheduleOn(exe).start(comp);
         break;
     }
     case SPDK_BDEV_IO_TYPE_UNMAP:
     case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
-        img->trim(offset, len).scheduleOn(exe).start(comp);
+        lio->type = lsvd_iotype::TRIM;
+        img->trim(offset, len, lio->tim).scheduleOn(exe).start(comp);
         break;
     case SPDK_BDEV_IO_TYPE_FLUSH:
-        img->flush().scheduleOn(exe).start(comp);
+        lio->type = lsvd_iotype::FLUSH;
+        img->flush(lio->tim).scheduleOn(exe).start(comp);
         break;
     default:
         XLOGF(ERR, "Unknown request type: {}", io->type);
@@ -338,4 +369,50 @@ static int lsvd_destroy_bdev(void *ctx)
     delete iodev;
     XLOGF(DBG1, "Destroyed LSVD bdev {}", name);
     return 0;
+}
+
+void report_io_timing(lsvd_iotype type, io_timing &tim)
+{
+    static std::atomic<u64> total = 0;
+    auto lat = tdiff_ns(tim.submit, tim.complete);
+
+    if (!(total.fetch_add(1) % 20'000 == 1 ||
+          (type == lsvd_iotype::WRITE && lat > LONG_WRITE_NS_THRES) ||
+          (type == lsvd_iotype::READ && lat > LONG_READ_NS_THRES)))
+        return;
+
+    // // clang-format off
+    // XLOGF(DBG6, "Op {}: {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+    //     type, lat,
+    //     tdiff_ns(tim.submit, tim.start),
+    //     tdiff_ns(tim.start, tim.t1),
+    //     tdiff_ns(tim.t1, tim.t2),
+    //     tdiff_ns(tim.t3, tim.t2),
+    //     tdiff_ns(tim.t3, tim.t4),
+    //     tdiff_ns(tim.t5, tim.t4),
+    //     tdiff_ns(tim.t5, tim.t6),
+    //     tdiff_ns(tim.t7, tim.t6),
+    //     tdiff_ns(tim.t7, tim.t8),
+    //     tdiff_ns(tim.done, tim.t8),
+    //     tdiff_ns(tim.done, tim.callback),
+    //     tdiff_ns(tim.complete, tim.callback)
+    //     );
+    // // clang-format on
+
+    // clang-format off
+    XLOGF(DBG6, "Op {}: {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", 
+        type, lat / 1000,
+        tdiff_us(tim.submit, tim.start),
+        tdiff_us(tim.submit, tim.t1),
+        tdiff_us(tim.submit, tim.t2),
+        tdiff_us(tim.submit, tim.t3),
+        tdiff_us(tim.submit, tim.t4),
+        tdiff_us(tim.submit, tim.t5),
+        tdiff_us(tim.submit, tim.t6),
+        tdiff_us(tim.submit, tim.t7),
+        tdiff_us(tim.submit, tim.t8),
+        tdiff_us(tim.submit, tim.done),
+        tdiff_us(tim.submit, tim.complete)
+        );
+    // clang-format on
 }

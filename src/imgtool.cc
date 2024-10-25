@@ -64,7 +64,8 @@ static auto objinfo(sptr<ObjStore> s3, str name, usize seq,
     }
 
     vec<byte> buf(obj_bytes.value());
-    auto fetch_res = co_await s3->read(key, 0, iovec{buf.data(), buf.size()});
+    auto iov = smartiov::from_buf(buf);
+    auto fetch_res = co_await s3->read(key, 0, iov);
     if (!fetch_res.ok()) {
         XLOGF(ERR, "Failed to read object: {}", fetch_res.status().ToString());
         co_return;

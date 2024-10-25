@@ -1,17 +1,21 @@
 #pragma once
+#include <filesystem>
+
 #include "representation.h"
 #include "utils.h"
-#include <filesystem>
 
 const s64 MS_TO_NS = 1'000'000;
 const usize MIB = 1024 * 1024;
 const usize GIB = 1024 * 1024 * 1024;
+
+const bool LSVD_IS_NOOP = false;
 
 const bool ENABLE_SEQUENTIAL_DEBUG_READS = false;
 const bool VERIFY_MAP_INTEGRITY_ON_UPDATE = false;
 const bool REPORT_READ_CACHE_STATS = false;
 const bool REPORT_LONG_OPS = true;
 const bool ENABLE_JOURNAL = true;
+const bool ENABLE_FLUSH = true;
 
 const s64 LONG_READ_NS_THRES = 1 * MS_TO_NS;
 const s64 LONG_WRITE_NS_THRES = 50 * MS_TO_NS;
@@ -29,6 +33,8 @@ class LsvdConfig
 
     bool checkpoint_enable = true;
     f64 cache_antithrash_ratio = 0.666;
+
+    u32 max_backend_ios = 16;
 
     auto to_string()
     {

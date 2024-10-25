@@ -128,17 +128,6 @@ class Rados : public ObjStore
         co_return neg_ec_to_result(co_await std::move(f));
     }
 
-    auto read(strc name, off_t offset, iovec v) -> TaskRes<u32> override
-    {
-        XLOGF(DBG8, "Reading object '{}'", name);
-        auto &&[p, f] = folly::coro::makePromiseContract<int>();
-        RadosCbWrap cb(std::move(p));
-        auto bl = iov_to_bl(v);
-        auto rc = io.aio_read(name, cb.cb, &bl, bl.length(), offset);
-        ENSURE(rc == 0);
-        co_return neg_ec_to_result(co_await std::move(f));
-    }
-
     auto read_all(strc name) -> TaskRes<vec<byte>> override
     {
         auto size_res = co_await get_size(name);
@@ -146,7 +135,8 @@ class Rados : public ObjStore
 
         auto size = size_res.value();
         vec<byte> buf(size);
-        auto iores = co_await read(name, 0, iovec{buf.data(), buf.size()});
+        auto iov = smartiov::from_buf(buf);
+        auto iores = co_await read(name, 0, iov);
         CRET_IF_NOTOK(iores);
 
         if (iores.value() != size)
@@ -156,17 +146,6 @@ class Rados : public ObjStore
     }
 
     auto write(strc name, smartiov &v) -> TaskRes<u32> override
-    {
-        XLOGF(DBG8, "Writing object '{}'", name);
-        auto &&[p, f] = folly::coro::makePromiseContract<int>();
-        RadosCbWrap cb(std::move(p));
-        auto bl = iov_to_bl(v);
-        auto rc = io.aio_write(name, cb.cb, bl, bl.length(), 0);
-        ENSURE(rc == 0);
-        co_return neg_ec_to_result(co_await std::move(f));
-    }
-
-    auto write(strc name, iovec v) -> TaskRes<u32> override
     {
         XLOGF(DBG8, "Writing object '{}'", name);
         auto &&[p, f] = folly::coro::makePromiseContract<int>();
@@ -213,6 +192,7 @@ class FileUring : public FileIo
         // set up polling
         io_uring_params params;
         params.flags |= IORING_SETUP_SQPOLL;
+        params.flags |= IORING_SETUP_IOPOLL;
         params.sq_thread_idle = 2000;
 
         int ret = io_uring_queue_init(URING_QUEUE_ENTRIES, &ring, 0);
@@ -232,12 +212,17 @@ class FileUring : public FileIo
         return std::unique_ptr<FileUring>(new FileUring(fd));
     }
 
+    struct comp_with_time {
+        tp cqe_time;
+        s32 res;
+    };
+
     TaskRes<u32> preadv(off_t offset, smartiov iov) override
     {
         auto start = tnow();
 
         auto l = co_await ring_mtx.co_scoped_lock();
-        auto &&[p, f] = folly::coro::makePromiseContract<s32>();
+        auto &&[p, f] = folly::coro::makePromiseContract<comp_with_time>();
         auto sqe = io_uring_get_sqe(&ring);
         io_uring_prep_readv(sqe, 0, iov.iovs_vec().data(),
                             iov.iovs_vec().size(), offset);
@@ -246,7 +231,7 @@ class FileUring : public FileIo
         io_uring_submit(&ring);
         l.unlock();
 
-        auto res = co_await std::move(f);
+        auto [tc, res] = co_await std::move(f);
         auto end = tnow();
         auto lat = tdiff_ns(start, end);
         if (REPORT_LONG_OPS && lat > LONG_URING_NS_THRES)
@@ -255,12 +240,12 @@ class FileUring : public FileIo
         co_return neg_ec_to_result(res);
     }
 
-    TaskRes<u32> pwritev(off_t offset, smartiov iov) override
+    TaskRes<u32> pwritev(off_t offset, smartiov iov, io_timing &tim) override
     {
-        auto start = tnow();
+        tim.t4 = tnow();
 
         auto l = co_await ring_mtx.co_scoped_lock();
-        auto &&[p, f] = folly::coro::makePromiseContract<s32>();
+        auto &&[p, f] = folly::coro::makePromiseContract<comp_with_time>();
         auto sqe = io_uring_get_sqe(&ring);
         io_uring_prep_writev(sqe, 0, iov.iovs_vec().data(),
                              iov.iovs_vec().size(), offset);
@@ -269,11 +254,11 @@ class FileUring : public FileIo
         io_uring_submit(&ring);
         l.unlock();
 
-        auto res = co_await std::move(f);
-        auto end = tnow();
-        auto lat = tdiff_ns(start, end);
-        if (REPORT_LONG_OPS && lat > LONG_URING_NS_THRES)
-            XLOGF(DBG6, "pwritev lat: {}us", lat / 1000);
+        tim.t5 = tnow();
+
+        auto [tc, res] = co_await std::move(f);
+        tim.t6 = tc;
+        tim.t7 = tnow();
 
         co_return neg_ec_to_result(res);
     }
@@ -290,9 +275,10 @@ class FileUring : public FileIo
             if (wait_res < 0)
                 continue;
 
-            auto p = static_cast<folly::coro::Promise<s32> *>(
+            auto t = tnow();
+            auto p = static_cast<folly::coro::Promise<comp_with_time> *>(
                 io_uring_cqe_get_data(cqe));
-            p->setValue(cqe->res);
+            p->setValue(comp_with_time{t, cqe->res});
             io_uring_cqe_seen(&ring, cqe);
         }
     }

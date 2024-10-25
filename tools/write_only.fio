@@ -5,14 +5,14 @@ runtime=30
 time_based=1
 bs=4Ki
 filename=${IOPATH}
-iodepth=16
+iodepth=8
 size=4Gi
 
-[seq_write]
-#wait_for=random_read
+[t1]
 rw=write
+stonewall
 
-[rand_write]
-wait_for=seq_write
+[t2]
 rw=randwrite
+stonewall
 

@@ -22,6 +22,6 @@ class Journal
     ~Journal();
     static Result<uptr<Journal>> open(fspath path, usize size);
 
-    TaskUnit record_write(off_t offset, iovec iov, S3Ext ext);
-    TaskUnit record_trim(off_t offset, usize len, S3Ext ext);
+    TaskUnit record_write(off_t offset, iovec iov, S3Ext ext, io_timing &tim);
+    TaskUnit record_trim(off_t offset, usize len, S3Ext ext, io_timing &tim);
 };

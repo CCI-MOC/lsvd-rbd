@@ -46,7 +46,8 @@ struct journ_entry {
 // no mechanism to sync, wait for writes, etc. It's good enough to emulate
 // the performance characteristics of a real journal, but provides no durability
 
-TaskUnit Journal::record_write(off_t offset, iovec iov, S3Ext ext)
+TaskUnit Journal::record_write(off_t offset, iovec iov, S3Ext ext,
+                               io_timing &tim)
 {
     if (!ENABLE_JOURNAL)
         co_return folly::Unit();
@@ -73,15 +74,18 @@ TaskUnit Journal::record_write(off_t offset, iovec iov, S3Ext ext)
         .iov_len = sizeof(entry),
     };
 
+    tim.t3 = tnow();
+
     auto jiov = smartiov::from_iovecs(entry_iov, iov);
-    auto write_res = co_await journ_io->pwritev(cur_off, jiov);
+    auto write_res = co_await journ_io->pwritev(cur_off, jiov, tim);
     CRET_IF_NOTOK(write_res);
 
     // TODO handle partial write
     co_return folly::Unit();
 }
 
-TaskUnit Journal::record_trim(off_t offset, usize len, S3Ext ext)
+TaskUnit Journal::record_trim(off_t offset, usize len, S3Ext ext,
+                              io_timing &tim)
 {
     if (!ENABLE_JOURNAL)
         co_return folly::Unit();
@@ -109,7 +113,7 @@ TaskUnit Journal::record_trim(off_t offset, usize len, S3Ext ext)
     };
 
     auto jiov = smartiov::from_iovecs(entry_iov);
-    auto write_res = co_await journ_io->pwritev(cur_off, jiov);
+    auto write_res = co_await journ_io->pwritev(cur_off, jiov, tim);
     CRET_IF_NOTOK(write_res);
 
     // TODO handle partial write
