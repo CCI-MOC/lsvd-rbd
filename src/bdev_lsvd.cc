@@ -1,14 +1,14 @@
 #include "absl/status/status.h"
 #include "fmt/format.h"
+#include "folly/Conv.h"
 #include "folly/Executor.h"
+#include "folly/Range.h"
 #include "folly/Singleton.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "rte_thread.h"
 #include "spdk/bdev_module.h"
 #include "spdk/env.h"
 #include "spdk/thread.h"
-#include <folly/Conv.h>
-#include <folly/Range.h>
 
 #include "backend.h"
 #include "bdev_lsvd.h"
@@ -381,38 +381,20 @@ void report_io_timing(lsvd_iotype type, io_timing &tim)
           (type == lsvd_iotype::READ && lat > LONG_READ_NS_THRES)))
         return;
 
-    // // clang-format off
-    // XLOGF(DBG6, "Op {}: {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-    //     type, lat,
-    //     tdiff_ns(tim.submit, tim.start),
-    //     tdiff_ns(tim.start, tim.t1),
-    //     tdiff_ns(tim.t1, tim.t2),
-    //     tdiff_ns(tim.t3, tim.t2),
-    //     tdiff_ns(tim.t3, tim.t4),
-    //     tdiff_ns(tim.t5, tim.t4),
-    //     tdiff_ns(tim.t5, tim.t6),
-    //     tdiff_ns(tim.t7, tim.t6),
-    //     tdiff_ns(tim.t7, tim.t8),
-    //     tdiff_ns(tim.done, tim.t8),
-    //     tdiff_ns(tim.done, tim.callback),
-    //     tdiff_ns(tim.complete, tim.callback)
-    //     );
-    // // clang-format on
-
     // clang-format off
     XLOGF(DBG6, "Op {}: {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", 
         type, lat / 1000,
         tdiff_us(tim.submit, tim.start),
-        tdiff_us(tim.submit, tim.t1),
-        tdiff_us(tim.submit, tim.t2),
-        tdiff_us(tim.submit, tim.t3),
-        tdiff_us(tim.submit, tim.t4),
-        tdiff_us(tim.submit, tim.t5),
-        tdiff_us(tim.submit, tim.t6),
-        tdiff_us(tim.submit, tim.t7),
-        tdiff_us(tim.submit, tim.t8),
-        tdiff_us(tim.submit, tim.done),
-        tdiff_us(tim.submit, tim.complete)
+        tdiff_us(tim.start, tim.t1),
+        tdiff_us(tim.t1, tim.t2),
+        tdiff_us(tim.t3, tim.t2),
+        tdiff_us(tim.t3, tim.t4),
+        tdiff_us(tim.t5, tim.t4),
+        tdiff_us(tim.t5, tim.t6),
+        tdiff_us(tim.t7, tim.t6),
+        tdiff_us(tim.t7, tim.t8),
+        tdiff_us(tim.done, tim.t8),
+        tdiff_us(tim.done, tim.complete)
         );
     // clang-format on
 }

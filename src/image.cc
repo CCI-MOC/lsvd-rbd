@@ -1,11 +1,9 @@
-#include <boost/outcome/try.hpp>
-#include <folly/experimental/coro/Invoke.h>
-#include <folly/logging/xlog.h>
-#include <zpp_bits.h>
-
 #include "absl/status/status.h"
-#include "config.h"
 #include "folly/String.h"
+#include "folly/experimental/coro/Baton.h"
+#include "folly/logging/xlog.h"
+
+#include "config.h"
 #include "image.h"
 #include "read_cache.h"
 #include "representation.h"
@@ -297,7 +295,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         co_return cur_logobj;
     }
 
-    auto stime = std::chrono::high_resolution_clock::now();
+    auto stime = tnow();
 
     auto exe = co_await folly::coro::co_current_executor;
     auto prev = cur_logobj;
@@ -316,7 +314,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         new_seqnum += 1;
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = tnow();
 
     sptr<LogObj> new_logobj;
     {
@@ -332,7 +330,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
         new_logobj = std::make_shared<LogObj>(new_seqnum, max_log_size);
     }
 
-    auto t2 = std::chrono::high_resolution_clock::now();
+    auto t2 = tnow();
 
     {
         auto l = co_await pending_mtx.co_scoped_lock();
@@ -343,14 +341,17 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     cur_logobj = new_logobj;
     prev->mark_complete();
 
+    auto t3 = tnow();
+
     co_await num_flushing_objs.co_wait();
+    auto t4 = tnow();
     flush_logobj(prev).scheduleOn(exe).start();
 
-    auto t3 = std::chrono::high_resolution_clock::now();
-    if (REPORT_LONG_OPS && tdiff_us(t3, stime) > 1'000) {
-        XLOGF(DBG6, "Rollover {}: tot {} ckpt {} recycle {} pending {}",
-              new_seqnum, tdiff_us(t3, stime), tdiff_us(t1, stime),
-              tdiff_us(t2, t1), tdiff_us(t3, t2));
+    auto t5 = tnow();
+    if (REPORT_LONG_OPS && tdiff_us(t5, stime) > 1'000) {
+        XLOGF(DBG6, "Rollover {}: ckpt {} recycle {} pend {} bp {} up {}",
+              new_seqnum, tdiff_us(t1, stime), tdiff_us(t2, t1),
+              tdiff_us(t3, t2), tdiff_us(t3, t4), tdiff_us(t4, t5));
     }
     co_return prev;
 }

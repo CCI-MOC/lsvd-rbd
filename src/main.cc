@@ -1,14 +1,13 @@
 #include "folly/executors/GlobalExecutor.h"
+#include "folly/init/Init.h"
+#include "folly/logging/Init.h"
+#include "folly/logging/xlog.h"
+#include "folly/portability/GFlags.h"
 #include "gflags/gflags.h"
 #include "spdk/event.h"
 #include "spdk/nvme.h"
 #include "spdk/nvmf.h"
 #include "spdk/nvmf_spec.h"
-#include <folly/String.h>
-#include <folly/init/Init.h>
-#include <folly/logging/Init.h>
-#include <folly/logging/xlog.h>
-#include <folly/portability/GFlags.h>
 
 #include "bdev_lsvd.h"
 #include "image.h"
@@ -284,8 +283,7 @@ int main(int argc, char **argv)
     XLOGF(INFO, "Starting SPDK target, pid={}", getpid());
 
     ReadCache::init_cache(FLAGS_lsvd_cache_ram * GIB,
-                          FLAGS_lsvd_cache_nvm * GIB,
-                          FLAGS_lsvd_cache_path);
+                          FLAGS_lsvd_cache_nvm * GIB, FLAGS_lsvd_cache_path);
 
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));

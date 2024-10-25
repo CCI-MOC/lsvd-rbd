@@ -1,17 +1,14 @@
 #include "absl/status/status.h"
+#include "boost/outcome.hpp"
 #include "config.h"
+#include "folly/experimental/coro/Promise.h"
+#include "folly/experimental/coro/SharedMutex.h"
 #include "folly/system/ThreadName.h"
 #include "liburing.h"
-#include <boost/outcome.hpp>
-#include <boost/outcome/success_failure.hpp>
+#include "rados/buffer.h"
+#include "rados/librados.h"
+#include "rados/librados.hpp"
 #include <cassert>
-#include <folly/experimental/coro/Promise.h>
-#include <folly/experimental/coro/SharedMutex.h>
-#include <folly/experimental/coro/Task.h>
-#include <pthread.h>
-#include <rados/buffer.h>
-#include <rados/librados.h>
-#include <rados/librados.hpp>
 #include <system_error>
 
 #include "backend.h"

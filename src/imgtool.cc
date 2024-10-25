@@ -1,15 +1,12 @@
+#include "boost/program_options.hpp"
+#include "boost/program_options/options_description.hpp"
+#include "boost/program_options/positional_options.hpp"
 #include "folly/String.h"
 #include "folly/executors/GlobalExecutor.h"
-#include <argp.h>
-#include <boost/program_options.hpp>
-#include <boost/program_options/options_description.hpp>
-#include <boost/program_options/positional_options.hpp>
+#include "folly/init/Init.h"
+#include "folly/logging/Init.h"
 #include <cstdlib>
 #include <fcntl.h>
-#include <fmt/format.h>
-#include <folly/init/Init.h>
-#include <folly/logging/Init.h>
-#include <rados/librados.h>
 #include <stdlib.h>
 #include <string>
 

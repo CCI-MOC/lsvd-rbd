@@ -1,9 +1,5 @@
 #pragma once
 
-#include <folly/File.h>
-#include <rados/librados.h>
-#include <sys/uio.h>
-
 #include "representation.h"
 #include "smartiov.h"
 #include "utils.h"

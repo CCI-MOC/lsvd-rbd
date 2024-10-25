@@ -1,12 +1,8 @@
-#include <chrono>
-#include <folly/String.h>
-#include <folly/init/Init.h>
-#include <folly/logging/Init.h>
-#include <folly/logging/xlog.h>
-
-#include "folly/Unit.h"
 #include "folly/executors/GlobalExecutor.h"
 #include "folly/futures/Future.h"
+#include "folly/init/Init.h"
+#include "folly/logging/Init.h"
+
 #include "image.h"
 #include "representation.h"
 

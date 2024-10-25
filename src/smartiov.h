@@ -1,5 +1,4 @@
 #pragma once
-#include <string.h>
 #include <sys/uio.h>
 
 #include "utils.h"
@@ -135,7 +134,7 @@ class smartiov
             auto to_copy = std::min(remaining, i.iov_len);
             remaining -= to_copy;
 
-            memcpy((void *)i.iov_base, (void *)buf, to_copy);
+            std::memcpy((void *)i.iov_base, (void *)buf, to_copy);
             buf += i.iov_len;
 
             if (remaining == 0)
@@ -146,7 +145,7 @@ class smartiov
     void copy_out(byte *buf)
     {
         for (auto i : iovs) {
-            memcpy((void *)buf, (void *)i.iov_base, (usize)i.iov_len);
+            std::memcpy((void *)buf, (void *)i.iov_base, (usize)i.iov_len);
             buf += i.iov_len;
         }
     }
