@@ -27,12 +27,13 @@ sudo docker run --net host \
     ghcr.io/cci-moc/lsvd-rbd:main
 ```
 
-If you run into an error, you might need to rebuild the image on your machine:
+If you run into an error, you might need to rebuild the image on your machine.
+Be warned, a clean build takes about half an hour so be patient.
 
 ```
 git clone https://github.com/cci-moc/lsvd-rbd.git
 cd lsvd-rbd
-docker build -t lsvd-rbd .
+docker buildx build -t lsvd-rbd .
 sudo docker run --net host \
     -v /dev/hugepages:/dev/hugepages \
     -v /etc/ceph:/etc/ceph \
