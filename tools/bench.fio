@@ -16,3 +16,10 @@ stonewall
 rw=randwrite
 stonewall
 
+[t3]
+rw=read
+stonewall
+
+[t4]
+rw=randread
+stonewall

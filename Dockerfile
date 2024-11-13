@@ -23,3 +23,5 @@ COPY test /app/test
 COPY tools /app/tools
 
 RUN make release
+ENTRYPOINT ["/app/build-rel/lsvd", "none"]
+CMD ["--lsvd_cache_ram=100", "--lsvd_cache_nvm=500"]
