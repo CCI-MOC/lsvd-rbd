@@ -231,7 +231,7 @@ class FileUring : public FileIo
         auto [tc, res] = co_await std::move(f);
         auto end = tnow();
         auto lat = tdiff_ns(start, end);
-        if (REPORT_LONG_OPS && lat > LONG_URING_NS_THRES)
+        if (FLAGS_lsvd_report_long_ops && lat > LONG_URING_NS_THRES)
             XLOGF(DBG6, "preadv lat: {}us", lat / 1000);
 
         co_return neg_ec_to_result(res);

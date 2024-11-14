@@ -10,6 +10,9 @@
 #include "smartiov.h"
 #include "utils.h"
 
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_long_ops, false,
+                         "Report long ops to stdout");
+
 io_timing empty_timing = {};
 
 class LogObj
@@ -348,7 +351,7 @@ Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
     flush_logobj(prev).scheduleOn(exe).start();
 
     auto t5 = tnow();
-    if (REPORT_LONG_OPS && tdiff_us(t5, stime) > 1'000) {
+    if (FLAGS_lsvd_report_long_ops && tdiff_us(t5, stime) > 1'000) {
         XLOGF(DBG6, "Rollover {}: ckpt {} recycle {} pend {} bp {} up {}",
               new_seqnum, tdiff_us(t1, stime), tdiff_us(t2, t1),
               tdiff_us(t3, t2), tdiff_us(t3, t4), tdiff_us(t4, t5));

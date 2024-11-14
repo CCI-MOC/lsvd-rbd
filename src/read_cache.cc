@@ -8,6 +8,9 @@
 #include "smartiov.h"
 #include "utils.h"
 
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_cache_stats, false,
+                         "Report read cache stats to stdout periodically");
+
 using Cache = facebook::cachelib::LruAllocator;
 using PoolId = facebook::cachelib::PoolId;
 
