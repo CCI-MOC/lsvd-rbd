@@ -17,6 +17,9 @@
 #include "src/config.h"
 #include "utils.h"
 
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_iotiming, false,
+                         "Report IO timing statistics to stdout");
+
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
 static int bdev_lsvd_io_ctx_size(void);
