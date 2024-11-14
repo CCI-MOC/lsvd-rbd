@@ -17,6 +17,7 @@ const bool ENABLE_JOURNAL = true;
 const bool ENABLE_FLUSH = true;
 FOLLY_GFLAGS_DECLARE_bool(lsvd_report_long_ops);
 FOLLY_GFLAGS_DECLARE_bool(lsvd_report_cache_stats);
+FOLLY_GFLAGS_DECLARE_bool(lsvd_report_iotiming);
 
 const s64 LONG_READ_NS_THRES = 1 * MS_TO_NS;
 const s64 LONG_WRITE_NS_THRES = 50 * MS_TO_NS;

@@ -373,6 +373,9 @@ static int lsvd_destroy_bdev(void *ctx)
 
 void report_io_timing(lsvd_iotype type, io_timing &tim)
 {
+    if (!fLB::FLAGS_lsvd_report_iotiming)
+        return;
+
     static std::atomic<u64> total = 0;
     auto lat = tdiff_ns(tim.submit, tim.complete);
 
