@@ -1,6 +1,7 @@
 #pragma once
 #include <filesystem>
 
+#include "folly/portability/GFlags.h"
 #include "representation.h"
 #include "utils.h"
 
@@ -12,10 +13,10 @@ const bool LSVD_IS_NOOP = false;
 
 const bool ENABLE_SEQUENTIAL_DEBUG_READS = false;
 const bool VERIFY_MAP_INTEGRITY_ON_UPDATE = false;
-const bool REPORT_READ_CACHE_STATS = false;
 const bool REPORT_LONG_OPS = true;
 const bool ENABLE_JOURNAL = true;
 const bool ENABLE_FLUSH = true;
+FOLLY_GFLAGS_DECLARE_bool(lsvd_report_cache_stats);
 
 const s64 LONG_READ_NS_THRES = 1 * MS_TO_NS;
 const s64 LONG_WRITE_NS_THRES = 50 * MS_TO_NS;

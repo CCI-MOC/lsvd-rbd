@@ -163,7 +163,7 @@ class ImageObjCache : public ReadCache
     TaskUnit read(S3Ext ext, smartiov dest) override
     {
         num_reads.fetch_add(1);
-        if (REPORT_READ_CACHE_STATS && num_reads % 200'000 == 1)
+        if (FLAGS_lsvd_report_cache_stats && num_reads % 200'000 == 1)
             XLOGF(DBG6, "ReadCache stats: {} reads, {} chunks, {} misses",
                   num_reads.load(), num_chunks_reads.load(),
                   num_chunks_miss.load());

@@ -14,6 +14,9 @@
 #include "representation.h"
 #include "utils.h"
 
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_cache_stats, false,
+                         "Report read cache stats to stdout periodically");
+
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
