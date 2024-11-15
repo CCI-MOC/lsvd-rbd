@@ -12,13 +12,16 @@
 
 #include "backend.h"
 #include "bdev_lsvd.h"
+#include "config.h"
 #include "image.h"
 #include "smartiov.h"
-#include "src/config.h"
 #include "utils.h"
 
 FOLLY_GFLAGS_DEFINE_bool(lsvd_report_iotiming, false,
                          "Report IO timing statistics to stdout");
+FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
+                          std::thread::hardware_concurrency() / 2,
+                          "Number of worker threads for LSVD (global)");
 
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
@@ -130,8 +133,7 @@ folly::Singleton<LsvdThreadFactory, PrivateTag> LsvdThreadFactory::singleton_;
 static folly::Singleton<folly::CPUThreadPoolExecutor, PrivateTag>
     lsvd_tp_inst([]() {
         auto tf = LsvdThreadFactory::getInstance();
-        return new folly::CPUThreadPoolExecutor(
-            std::thread::hardware_concurrency() / 2, tf);
+        return new folly::CPUThreadPoolExecutor(FLAGS_lsvd_num_threads, tf);
     });
 
 auto get_exe() { return folly::getKeepAliveToken(*lsvd_tp_inst.try_get()); }
