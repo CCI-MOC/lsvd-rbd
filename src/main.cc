@@ -255,7 +255,7 @@ int main(int argc, char **argv)
         auto pool_name = argv[2];
 
         auto exe = folly::getGlobalCPUExecutor();
-        auto s3 = ObjStore::connect_to_pool("pone").value();
+        auto s3 = ObjStore::connect_to_pool("lsvd-ssd").value();
 
         for (auto name : img_names) {
             XLOGF(INFO, "Creating and mounting '{}'/'{}' on start", pool_name,
