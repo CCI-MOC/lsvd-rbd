@@ -77,6 +77,7 @@ custom_libnames = [
     'spdk_bdev_raid',
     'spdk_bdev_rbd',
     'spdk_bdev_split',
+    'spdk_bdev_uring',
     'spdk_bdev_virtio',
     'spdk_bdev_zone_block',
     'spdk_blob',
