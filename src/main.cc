@@ -21,9 +21,9 @@ FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
 
 FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6; default:async=true");
 
-const char *NVME_SS_NQN = "nqn.2019-05.io.lsvd:cnode1";
+const char *NVME_SS_NQN = "nqn.2016-06.io.spdk:cnode1";
 const char *HOSTNAME = "127.0.0.1";
-const char *PORT = "4420";
+const char *PORT = "9922";
 
 spdk_nvme_transport_id get_trid(const char *host, const char *port)
 {
