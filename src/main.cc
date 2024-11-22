@@ -224,7 +224,7 @@ int main(int argc, char **argv)
     gflags::SetUsageMessage("Usage: lsvd_tgt [none|mount|new] [args]");
     auto folly_init = folly::Init(&argc, &argv, true);
 
-    XLOGF(INFO, "Spawning {} worker threads on node {}", cpus_on_cur_node,
+    XLOGF(INFO, "Spawning {} worker threads on node {}", FLAGS_lsvd_num_threads,
           cur_node);
 
     StartFn start_fn;
