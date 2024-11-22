@@ -5,10 +5,13 @@
 #include "folly/Range.h"
 #include "folly/Singleton.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
+#include "numa.h"
+#include "rte_os.h"
 #include "rte_thread.h"
 #include "spdk/bdev_module.h"
 #include "spdk/env.h"
 #include "spdk/thread.h"
+#include <sched.h>
 
 #include "backend.h"
 #include "bdev_lsvd.h"
@@ -17,11 +20,7 @@
 #include "smartiov.h"
 #include "utils.h"
 
-FOLLY_GFLAGS_DEFINE_bool(lsvd_report_iotiming, false,
-                         "Report IO timing statistics to stdout");
-FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
-                          std::thread::hardware_concurrency() / 2,
-                          "Number of worker threads for LSVD (global)");
+FOLLY_GFLAGS_DECLARE_int64(lsvd_num_threads);
 
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
@@ -98,14 +97,16 @@ class LsvdThreadFactory : public folly::ThreadFactory
         auto name = folly::to<std::string>(prefix_, suffix_++);
         auto ret = std::thread(
             [func_2 = std::move(func), name_2 = std::move(name)]() mutable {
-                // clear cpu affinity
-                rte_cpuset_t all_cpuset;
-                CPU_ZERO(&all_cpuset);
-                auto cores = sysconf(_SC_NPROCESSORS_CONF);
-                for (int i = 3; i < cores; i++)
-                    CPU_SET(i, &all_cpuset);
-                rte_thread_set_affinity(&all_cpuset);
+                // set affinity to only the cpus in the current numa domain
+                rte_cpuset_t cpuset;
+                CPU_ZERO(&cpuset);
 
+                auto cur_node = numa_node_of_cpu(sched_getcpu());
+                for (int i = 0; i < CPU_SETSIZE; i++)
+                    if (numa_node_of_cpu(i) == cur_node)
+                        CPU_SET(i, &cpuset);
+
+                rte_thread_set_affinity(&cpuset);
                 folly::setThreadName(name_2);
                 func_2();
             });

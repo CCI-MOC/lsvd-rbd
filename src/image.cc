@@ -12,6 +12,8 @@
 
 FOLLY_GFLAGS_DEFINE_bool(lsvd_report_long_ops, false,
                          "Report long ops to stdout");
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_iotiming, false,
+                         "Report IO timing statistics to stdout");
 
 io_timing empty_timing = {};
 
@@ -58,6 +60,7 @@ class LogObj
     }
 
     auto remaining() { return data.size() - bytes_written; }
+    auto is_empty() { return bytes_written == 0; }
     auto as_iov() { return iovec{data.data(), bytes_written}; }
     auto as_buffer() { return buffer{data.data(), bytes_written}; }
     auto at(S3Ext ext) { return data.data() + ext.offset; }
@@ -294,9 +297,8 @@ TaskUnit LsvdImage::flush(io_timing &tim)
 // Assumes that the logobj_mtx is held exclusively
 Task<sptr<LogObj>> LsvdImage::rollover_log(bool force)
 {
-    if (!force && cur_logobj->remaining() > rollover_threshold) {
+    if (!force && cur_logobj->remaining() > rollover_threshold)
         co_return cur_logobj;
-    }
 
     auto stime = tnow();
 
@@ -527,8 +529,10 @@ Task<void> LsvdImage::unmount()
 {
     XLOGF(INFO, "Unmounting image {}", name);
     auto ol = co_await logobj_mtx.co_scoped_lock();
-    auto obj = co_await rollover_log(true);
+    if (cur_logobj->is_empty())
+        co_return;
 
+    auto obj = co_await rollover_log(true);
     XLOGF(DBG6, "Waiting for writes to complete");
     co_await obj->wait_for_writes();
     XLOGF(DBG6, "Waiting for flushes to complete");

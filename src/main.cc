@@ -4,6 +4,7 @@
 #include "folly/logging/xlog.h"
 #include "folly/portability/GFlags.h"
 #include "gflags/gflags.h"
+#include "numa.h"
 #include "spdk/event.h"
 #include "spdk/nvme.h"
 #include "spdk/nvmf.h"
@@ -18,6 +19,9 @@ FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
                            "Path to lsvd read cache");
+FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
+                          std::thread::hardware_concurrency() / 2,
+                          "Number of worker threads for LSVD (global)");
 
 FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6; default:async=true");
 
@@ -206,11 +210,20 @@ static std::function<void(void)> g_unregister_on_exit = []() {};
 
 int main(int argc, char **argv)
 {
-    fLU::FLAGS_folly_global_cpu_executor_threads =
-        std::thread::hardware_concurrency();
+    int cpus_on_cur_node = 0;
+    auto cur_node = numa_node_of_cpu(sched_getcpu());
+    for (int i = 0; i < CPU_SETSIZE; i++)
+        if (numa_node_of_cpu(i) == cur_node)
+            cpus_on_cur_node++;
+
+    fLU::FLAGS_folly_global_cpu_executor_threads = cpus_on_cur_node;
+    FLAGS_lsvd_num_threads = cpus_on_cur_node;
 
     gflags::SetUsageMessage("Usage: lsvd_tgt [none|mount|new] [args]");
     auto folly_init = folly::Init(&argc, &argv, true);
+
+    XLOGF(INFO, "Spawning {} worker threads on node {}", cpus_on_cur_node,
+          cur_node);
 
     StartFn start_fn;
     str mode = argc > 1 ? argv[1] : "none";
@@ -255,7 +268,7 @@ int main(int argc, char **argv)
         auto pool_name = argv[2];
 
         auto exe = folly::getGlobalCPUExecutor();
-        auto s3 = ObjStore::connect_to_pool("lsvd-ssd").value();
+        auto s3 = ObjStore::connect_to_pool(pool_name).value();
 
         for (auto name : img_names) {
             XLOGF(INFO, "Creating and mounting '{}'/'{}' on start", pool_name,
