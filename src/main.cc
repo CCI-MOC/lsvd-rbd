@@ -15,7 +15,7 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_GFLAGS_DEFINE_bool(lsvd_restrict_to_node, true,
+FOLLY_GFLAGS_DEFINE_bool(lsvd_restrict_to_node, false,
                          "Restrict lsvd worker threads to current numa node");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
