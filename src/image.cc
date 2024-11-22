@@ -452,7 +452,7 @@ TaskUnit LsvdImage::replay_obj(seqnum_t seq, vec<byte> buf, usize start_byte)
 TaskRes<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, str name,
                                           str cfg_str)
 {
-    XLOGF(INFO, "Mounting {} with config {}", name, cfg_str);
+    XLOGF(INFO, "Mounting {} with config '{}'", name, cfg_str);
     auto parse_cfg = LsvdConfig::parse(name, cfg_str);
     CRET_IF_NOTOK(parse_cfg);
 
@@ -616,4 +616,51 @@ TaskUnit LsvdImage::clone(sptr<ObjStore> s3, str src, str dst)
     XLOGF(INFO, "Cloning image {} to {}", src, dst);
     // TODO
     co_return absl::UnimplementedError("Cloning not yet implemented");
+}
+
+Result<LsvdConfig> LsvdConfig::parse(str imgname, str cfg_str)
+{
+    // defaults
+    LsvdConfig cfg;
+    cfg.journal_path = cfg.nvme_dir / fmt::format("{}.lsvd_journal", imgname);
+    if (cfg_str.empty() || cfg_str == "default")
+        return cfg;
+
+    vec<strv> kvs;
+    folly::split(',', cfg_str, kvs);
+
+    for (auto kv_entry : kvs) {
+        kv_entry = folly::trimWhitespace(kv_entry);
+        if (kv_entry.length() == 0)
+            continue;
+
+        vec<strv> kv;
+        folly::split('=', kv_entry, kv);
+
+        if (kv.size() != 2)
+            return absl::InvalidArgumentError(
+                fmt::format("Invalid config entry: '{}'", kv_entry));
+
+        auto key = folly::trimWhitespace(kv[0]);
+        auto val = folly::trimWhitespace(kv[1]);
+
+        if (key == "nvme_dir")
+            cfg.nvme_dir = str(val);
+        else if (key == "journal_path")
+            cfg.journal_path = str(val);
+        else if (key == "journal_bytes")
+            cfg.journal_bytes = folly::to<u64>(val);
+        else if (key == "checkpoint_enable")
+            cfg.checkpoint_enable = (val == "true");
+        else if (key == "cache_antithrash_ratio")
+            cfg.cache_antithrash_ratio = folly::to<f64>(val);
+        else if (key == "max_backend_ios")
+            cfg.max_backend_ios = folly::to<u64>(val);
+        else
+            return absl::InvalidArgumentError(
+                fmt::format("Unknown config key: '{}'", key));
+    }
+
+    XLOGF(INFO, "Using config {}", cfg.to_string());
+    return cfg;
 }

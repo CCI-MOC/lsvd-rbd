@@ -5,7 +5,7 @@ runtime=30
 time_based=1
 bs=4Ki
 filename=${IOPATH}
-iodepth=8
+iodepth=16
 size=4Gi
 
 [t1]

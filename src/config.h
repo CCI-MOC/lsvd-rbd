@@ -48,14 +48,5 @@ class LsvdConfig
             gc_live_ratio, checkpoint_enable, cache_antithrash_ratio);
     }
 
-    static Result<LsvdConfig> parse(str imgname, str cfg_str)
-    {
-        todo();
-
-        LsvdConfig cfg;
-        cfg.journal_path =
-            cfg.nvme_dir / fmt::format("{}.lsvd_journal", imgname);
-        XLOGF(INFO, "Using config {}", cfg.to_string());
-        return cfg;
-    }
+    static Result<LsvdConfig> parse(str imgname, str cfg_str);
 };
