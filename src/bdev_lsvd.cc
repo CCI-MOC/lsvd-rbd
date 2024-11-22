@@ -21,6 +21,7 @@
 #include "utils.h"
 
 FOLLY_GFLAGS_DECLARE_int64(lsvd_num_threads);
+FOLLY_GFLAGS_DECLARE_bool(lsvd_restrict_to_node);
 
 static int bdev_lsvd_init(void);
 static void bdev_lsvd_finish(void);
@@ -103,7 +104,8 @@ class LsvdThreadFactory : public folly::ThreadFactory
 
                 auto cur_node = numa_node_of_cpu(sched_getcpu());
                 for (int i = 0; i < CPU_SETSIZE; i++)
-                    if (numa_node_of_cpu(i) == cur_node)
+                    if (!FLAGS_lsvd_restrict_to_node ||
+                        numa_node_of_cpu(i) == cur_node)
                         CPU_SET(i, &cpuset);
 
                 rte_thread_set_affinity(&cpuset);

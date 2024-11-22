@@ -15,6 +15,8 @@
 #include "representation.h"
 #include "utils.h"
 
+FOLLY_GFLAGS_DEFINE_bool(lsvd_restrict_to_node, true,
+                         "Restrict lsvd worker threads to current numa node");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
@@ -217,7 +219,7 @@ int main(int argc, char **argv)
             cpus_on_cur_node++;
 
     fLU::FLAGS_folly_global_cpu_executor_threads = cpus_on_cur_node;
-    FLAGS_lsvd_num_threads = cpus_on_cur_node;
+    FLAGS_lsvd_num_threads = cpus_on_cur_node / 2;
 
     gflags::SetUsageMessage("Usage: lsvd_tgt [none|mount|new] [args]");
     auto folly_init = folly::Init(&argc, &argv, true);
@@ -301,7 +303,7 @@ int main(int argc, char **argv)
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
-    opts.reactor_mask = "[0,1,2]";
+    opts.reactor_mask = "[0,1,2,3]";
     opts.shutdown_cb = []() { g_unregister_on_exit(); };
 
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
