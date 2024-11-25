@@ -208,7 +208,6 @@ static void call_fn(void *arg)
 {
     auto fn = (StartFn *)arg;
     (*fn)();
-    spdk_scheduler_set("dynamic");
 }
 
 // hacky workaround for the shutdown cb not accepting anything
