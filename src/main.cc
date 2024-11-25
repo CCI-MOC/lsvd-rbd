@@ -9,6 +9,7 @@
 #include "spdk/nvme.h"
 #include "spdk/nvmf.h"
 #include "spdk/nvmf_spec.h"
+#include "spdk/scheduler.h"
 
 #include "bdev_lsvd.h"
 #include "image.h"
@@ -24,6 +25,8 @@ FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
 FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
                           std::thread::hardware_concurrency() / 2,
                           "Number of worker threads for LSVD (global)");
+FOLLY_GFLAGS_DEFINE_string(spdk_reactor_cores, "[0,1,2,3]",
+                           "Reactor cores for SPDK");
 
 FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6; default:async=true");
 
@@ -205,6 +208,7 @@ static void call_fn(void *arg)
 {
     auto fn = (StartFn *)arg;
     (*fn)();
+    spdk_scheduler_set("dynamic");
 }
 
 // hacky workaround for the shutdown cb not accepting anything
@@ -303,7 +307,7 @@ int main(int argc, char **argv)
     spdk_app_opts opts = {};
     spdk_app_opts_init(&opts, sizeof(opts));
     opts.name = "lsvd_tgt";
-    opts.reactor_mask = "[0,1,2,3]";
+    opts.reactor_mask = FLAGS_spdk_reactor_cores.c_str();
     opts.shutdown_cb = []() { g_unregister_on_exit(); };
 
     int rc = spdk_app_start(&opts, call_fn, &start_fn);
