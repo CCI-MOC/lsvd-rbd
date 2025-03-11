@@ -19,7 +19,7 @@ FOLLY_GFLAGS_DEFINE_bool(lsvd_restrict_to_node, false,
                          "Restrict lsvd worker threads to current numa node");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
-FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/lsvd/lsvd.rcache",
+FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/local/lsvd.rcache",
                            "Path to lsvd read cache");
 FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
                           std::thread::hardware_concurrency() / 2,
