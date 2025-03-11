@@ -1,16 +1,3 @@
-diff --git a/cachelib/allocator/memory/Slab.h b/cachelib/allocator/memory/Slab.h
-index f852941..d1f4a54 100644
---- a/cachelib/allocator/memory/Slab.h
-+++ b/cachelib/allocator/memory/Slab.h
-@@ -80,7 +80,7 @@ class CACHELIB_PACKED_ATTR Slab {
-   static constexpr unsigned int kNumSlabBits = 22;
-
-   // minimum of 64 byte allocations.
--  static constexpr unsigned int kMinAllocPower = 6;
-+  static constexpr unsigned int kMinAllocPower = 12;
-   static constexpr size_t kMinAllocSize = 1 << kMinAllocPower;
-
-   static constexpr size_t kSize = 1 << kNumSlabBits;
 diff --git a/contrib/build.sh b/contrib/build.sh
 index b9de071b..ae0f1f15 100755
 --- a/contrib/build.sh
