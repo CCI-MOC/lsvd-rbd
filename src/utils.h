@@ -12,6 +12,7 @@
 #include <optional>
 #include <source_location>
 #include <vector>
+#include <chrono>
 
 template <typename T> using Task = folly::coro::Task<T>;
 template <typename T> using Result = absl::StatusOr<T>;
@@ -69,6 +70,13 @@ inline auto errcode_to_result(int err) -> Result<folly::Unit>
     if (err == 0)
         return folly::Unit();
     return absl::ErrnoToStatus(err, "");
+}
+
+inline auto get_now_us()
+{
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
 }
 
 inline auto todo(bool should_throw = false,

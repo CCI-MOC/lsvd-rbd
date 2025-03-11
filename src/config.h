@@ -26,8 +26,6 @@ const s64 LONG_URING_NS_THRES = 20 * MS_TO_NS;
 class LsvdConfig
 {
   public:
-    std::filesystem::path nvme_dir = "/mnt/lsvd/";
-    std::filesystem::path journal_path;
     u64 journal_bytes = 1 * GIB;
 
     bool gc_enable = false;
@@ -42,10 +40,10 @@ class LsvdConfig
     {
         return fmt::format(
             "LsvdConfig: "
-            "nvme_dir={}\njournal_path={}\njournal_bytes={}\ngc_enable={}\ngc_"
+            "journal_bytes={}\ngc_enable={}\ngc_"
             "live_ratio={}\ncheckpoint_enable={}\ncache_antithrash_ratio={}",
-            nvme_dir.string(), journal_path.string(), journal_bytes, gc_enable,
-            gc_live_ratio, checkpoint_enable, cache_antithrash_ratio);
+            journal_bytes, gc_enable, gc_live_ratio, checkpoint_enable,
+            cache_antithrash_ratio);
     }
 
     static Result<LsvdConfig> parse(str imgname, str cfg_str);

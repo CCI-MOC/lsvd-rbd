@@ -14,6 +14,8 @@ FOLLY_GFLAGS_DEFINE_bool(lsvd_report_long_ops, false,
                          "Report long ops to stdout");
 FOLLY_GFLAGS_DEFINE_bool(lsvd_report_iotiming, false,
                          "Report IO timing statistics to stdout");
+FOLLY_GFLAGS_DEFINE_string(lsvd_journ_dir, "/mnt/remote/",
+                           "Path to dir for write journals and stats files");
 
 io_timing empty_timing = {};
 
@@ -482,8 +484,8 @@ TaskRes<uptr<LsvdImage>> LsvdImage::mount(sptr<ObjStore> s3, str name,
     // build the cache and journal
     img->s3 = s3;
     img->cache = ReadCache::make_image_cache(s3, name);
-    auto journ_res =
-        Journal::open(img->cfg.journal_path, img->cfg.journal_bytes);
+    auto journ_path = fspath(FLAGS_lsvd_journ_dir) / (name + ".lsvd_journal");
+    auto journ_res = Journal::open(journ_path, img->cfg.journal_bytes);
     CRET_IF_NOTOK(journ_res);
     img->journal = std::move(*journ_res);
 
@@ -622,7 +624,6 @@ Result<LsvdConfig> LsvdConfig::parse(str imgname, str cfg_str)
 {
     // defaults
     LsvdConfig cfg;
-    cfg.journal_path = cfg.nvme_dir / fmt::format("{}.lsvd_journal", imgname);
     if (cfg_str.empty() || cfg_str == "default")
         return cfg;
 
@@ -644,11 +645,7 @@ Result<LsvdConfig> LsvdConfig::parse(str imgname, str cfg_str)
         auto key = folly::trimWhitespace(kv[0]);
         auto val = folly::trimWhitespace(kv[1]);
 
-        if (key == "nvme_dir")
-            cfg.nvme_dir = str(val);
-        else if (key == "journal_path")
-            cfg.journal_path = str(val);
-        else if (key == "journal_bytes")
+        if (key == "journal_bytes")
             cfg.journal_bytes = folly::to<u64>(val);
         else if (key == "checkpoint_enable")
             cfg.checkpoint_enable = (val == "true");

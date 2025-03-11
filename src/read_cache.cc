@@ -1,5 +1,8 @@
 #include "absl/status/status.h"
 #include "cachelib/allocator/CacheAllocator.h"
+#include "fmt/format.h"
+#include "fmt/os.h"
+#include "fmt/ostream.h"
 
 #include "backend.h"
 #include "config.h"
@@ -8,10 +11,13 @@
 #include "smartiov.h"
 #include "utils.h"
 
-FOLLY_GFLAGS_DEFINE_bool(lsvd_report_cache_stats, false,
-                         "Report read cache stats to stdout periodically");
+FOLLY_GFLAGS_DECLARE_string(lsvd_journ_dir);
+FOLLY_GFLAGS_DEFINE_int64(lsvd_stats_interval, 10'000,
+                          "Interval for reporting cache statistics");
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_cache_stats, true,
+                         "Interval for reporting cache statistics");
 
-using Cache = facebook::cachelib::LruAllocator;
+using Cache = facebook::cachelib::TinyLFUAllocator;
 using PoolId = facebook::cachelib::PoolId;
 
 struct iov {
@@ -23,8 +29,17 @@ class SharedCache
 {
     uptr<Cache> cache;
     PoolId pid;
+    fmt::ostream shared_stats_f;
+    fmt::ostream img_stats_f;
 
-    SharedCache(uptr<Cache> cache_) : cache(std::move(cache_))
+    // stats
+    std::atomic<u64> num_shared_read = 0;
+    std::atomic<u64> num_shared_hit = 0;
+    std::atomic<u64> num_all_ops = 0;
+
+    SharedCache(uptr<Cache> cache_, fmt::ostream shared_f, fmt::ostream img_f)
+        : cache(std::move(cache_)), shared_stats_f(std::move(shared_f)),
+          img_stats_f(std::move(img_f))
     {
         pid = cache->addPool("default",
                              cache->getCacheMemoryStats().ramCacheSize);
@@ -52,7 +67,18 @@ class SharedCache
         cfg.validate();
 
         auto c = std::make_unique<Cache>(cfg);
-        singleton = sptr<SharedCache>(new SharedCache(std::move(c)));
+        auto shared_stats_f =
+            fmt::output_file(FLAGS_lsvd_journ_dir + "/shared_cache_stats" +
+                             std::to_string(get_now_us()) + ".txt");
+        auto img_stats_f =
+            fmt::output_file(FLAGS_lsvd_journ_dir + "/img_cache_stats" +
+                             std::to_string(get_now_us()) + ".txt");
+
+        img_stats_f.print("time,imgname,reads,chunks,misses\n");
+        shared_stats_f.print("time,reads,hits,misses,hit_ratio,ram,nvm\n");
+
+        singleton = sptr<SharedCache>(new SharedCache(
+            std::move(c), std::move(shared_stats_f), std::move(img_stats_f)));
     }
 
     static void shutdown_cache()
@@ -75,11 +101,13 @@ class SharedCache
     // returns true iff item was found
     auto read(strv key, usize adjust, smartiov dest) -> TaskRes<usize>
     {
+        num_shared_read.fetch_add(1);
         auto h = co_await cache->find(key).toSemiFuture();
         // auto h = cache->find(key);
         if (!h)
             co_return absl::NotFoundError(key);
 
+        num_shared_hit.fetch_add(1);
         auto copy_len = std::min(h->getSize() - adjust, dest.bytes());
         dest.copy_in((byte *)h->getMemory() + adjust, copy_len);
         co_return copy_len;
@@ -95,6 +123,32 @@ class SharedCache
         std::memcpy(h->getMemory(), src.buf, src.len);
         co_await cache->insertOrReplace(h).toSemiFuture();
         co_return true;
+    }
+
+    auto log_img_stats(fstr imgname, u64 reads, u64 chunks, u64 misses)
+    {
+        auto now_us = get_now_us();
+        img_stats_f.print("{},{},{},{},{}\n", now_us, imgname, reads, chunks,
+                          misses);
+    }
+
+    auto register_imgread()
+    {
+        auto total_ops = num_all_ops.fetch_add(1);
+
+        if (total_ops % FLAGS_lsvd_stats_interval != 1)
+            return;
+
+        auto now_us = get_now_us();
+        auto stats = cache->getCacheMemoryStats();
+        auto chunks = num_shared_read.load();
+        auto hits = num_shared_hit.load();
+        auto misses = chunks - hits;
+        auto hit_ratio = (chunks == 0) ? 0.0 : (f64(hits) / chunks);
+
+        shared_stats_f.print("{},{},{},{},{},{},{}\n", now_us, chunks, hits,
+                             misses, hit_ratio, stats.ramCacheSize,
+                             stats.nvmCacheSize);
     }
 };
 
@@ -125,6 +179,7 @@ class ImageObjCache : public ReadCache
     auto read_chunk(seqnum_t seq, usize off, usize adjust,
                     smartiov dest) -> TaskUnit
     {
+        cache->register_imgread();
         num_chunks_reads.fetch_add(1);
 
         auto cache_key = get_key(seq, off);
@@ -166,10 +221,11 @@ class ImageObjCache : public ReadCache
     TaskUnit read(S3Ext ext, smartiov dest) override
     {
         num_reads.fetch_add(1);
-        if (FLAGS_lsvd_report_cache_stats && num_reads % 200'000 == 1)
-            XLOGF(DBG6, "ReadCache stats: {} reads, {} chunks, {} misses",
-                  num_reads.load(), num_chunks_reads.load(),
-                  num_chunks_miss.load());
+        if (FLAGS_lsvd_report_cache_stats &&
+            num_reads % FLAGS_lsvd_stats_interval == 1)
+            cache->log_img_stats(imgname, num_reads.load(),
+                                 num_chunks_reads.load(),
+                                 num_chunks_miss.load());
         /**
         |-----------------------entire object---------------------------------|
         |-----chunk1-----|-----chunk2-----|-----chunk3-----|-----chunk4-----|

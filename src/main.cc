@@ -9,7 +9,6 @@
 #include "spdk/nvme.h"
 #include "spdk/nvmf.h"
 #include "spdk/nvmf_spec.h"
-#include "spdk/scheduler.h"
 
 #include "bdev_lsvd.h"
 #include "image.h"
