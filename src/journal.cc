@@ -19,9 +19,14 @@ Result<uptr<Journal>> Journal::open(fspath path, usize size)
     if (fd < 0)
         return absl::ErrnoToStatus(-errno, "Failed to open journal file");
 
-    int tr = folly::ftruncateNoInt(fd, size);
+    auto tr = folly::ftruncateNoInt(fd, size);
     if (tr < 0)
         return absl::ErrnoToStatus(-errno, "Failed to truncate journal file");
+
+    auto falloc_res = fallocate(fd, 0, 0, size);
+    if (falloc_res < 0)
+        return absl::ErrnoToStatus(-errno,
+                                   "Failed to allocate space for journal file");
 
     auto journ_io = FileIo::make_file_io(fd);
     if (!journ_io)
