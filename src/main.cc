@@ -27,7 +27,8 @@ FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
 FOLLY_GFLAGS_DEFINE_string(spdk_reactor_cores, "[0,1,2,3]",
                            "Reactor cores for SPDK");
 
-FOLLY_INIT_LOGGING_CONFIG(".=WARN,src=DBG6; default:async=true");
+FOLLY_GFLAGS_DEFINE_string(folly_log_cfg, ".=WARN,src=DBG6; default:async=true",
+                           "Folly log config");
 
 const char *NVME_SS_NQN = "nqn.2016-06.io.spdk:cnode1";
 const char *HOSTNAME = "127.0.0.1";
@@ -225,6 +226,7 @@ int main(int argc, char **argv)
 
     gflags::SetUsageMessage("Usage: lsvd_tgt [none|mount|new] [args]");
     auto folly_init = folly::Init(&argc, &argv, true);
+    folly::initLoggingOrDie(FLAGS_folly_log_cfg);
 
     XLOGF(INFO, "Spawning {} worker threads on node {}", FLAGS_lsvd_num_threads,
           cur_node);
