@@ -1,8 +1,6 @@
 #include "absl/status/status.h"
 #include "cachelib/allocator/CacheAllocator.h"
-#include "fmt/format.h"
 #include "fmt/os.h"
-#include "fmt/ostream.h"
 
 #include "backend.h"
 #include "config.h"
@@ -75,7 +73,7 @@ class SharedCache
                              std::to_string(get_now_us()) + ".txt");
 
         img_stats_f.print("time,imgname,reads,chunks,misses\n");
-        shared_stats_f.print("time,reads,hits,misses,hit_ratio,ram,nvm\n");
+        shared_stats_f.print("time,reads,chunks,hits,misses,hit_ratio,ram,nvm\n");
 
         singleton = sptr<SharedCache>(new SharedCache(
             std::move(c), std::move(shared_stats_f), std::move(img_stats_f)));
@@ -146,9 +144,9 @@ class SharedCache
         auto misses = chunks - hits;
         auto hit_ratio = (chunks == 0) ? 0.0 : (f64(hits) / chunks);
 
-        shared_stats_f.print("{},{},{},{},{},{},{}\n", now_us, chunks, hits,
-                             misses, hit_ratio, stats.ramCacheSize,
-                             stats.nvmCacheSize);
+        shared_stats_f.print("{},{},{},{},{},{},{},{}\n", now_us, total_ops,
+                             chunks, hits, misses, hit_ratio,
+                             stats.ramCacheSize, stats.nvmCacheSize);
     }
 };
 
