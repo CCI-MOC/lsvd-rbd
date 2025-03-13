@@ -16,6 +16,10 @@ FOLLY_GFLAGS_DEFINE_bool(lsvd_report_iotiming, false,
                          "Report IO timing statistics to stdout");
 FOLLY_GFLAGS_DEFINE_string(lsvd_journ_dir, "/mnt/remote/",
                            "Path to dir for write journals and stats files");
+FOLLY_GFLAGS_DEFINE_bool(
+    lsvd_write_to_cache, true,
+    "Don't do full object insertions into cache. Can be controlled on a "
+    "per-image basis with write_to_cache config");
 
 io_timing empty_timing = {};
 
@@ -380,8 +384,10 @@ TaskUnit LsvdImage::flush_logobj(sptr<LogObj> obj)
         XLOGF(DBG8, "Flushed log object {:#x}", obj->seqnum);
     }
 
-    auto cres = co_await cache->insert_obj(obj->seqnum, obj->as_buffer());
-    CRET_IF_NOTOK(cres);
+    if (FLAGS_lsvd_write_to_cache && cfg.write_to_cache) {
+        auto cres = co_await cache->insert_obj(obj->seqnum, obj->as_buffer());
+        CRET_IF_NOTOK(cres);
+    }
 
     {
         auto l = co_await pending_mtx.co_scoped_lock();
@@ -653,6 +659,8 @@ Result<LsvdConfig> LsvdConfig::parse(str imgname, str cfg_str)
             cfg.cache_antithrash_ratio = folly::to<f64>(val);
         else if (key == "max_backend_ios")
             cfg.max_backend_ios = folly::to<u64>(val);
+        else if (key == "write_to_cache")
+            cfg.max_backend_ios = (val == "true");
         else
             return absl::InvalidArgumentError(
                 fmt::format("Unknown config key: '{}'", key));

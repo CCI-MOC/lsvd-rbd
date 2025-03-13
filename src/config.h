@@ -35,15 +35,18 @@ class LsvdConfig
     f64 cache_antithrash_ratio = 0.666;
 
     u32 max_backend_ios = 16;
+    bool write_to_cache = true;
 
     auto to_string()
     {
-        return fmt::format(
-            "LsvdConfig: "
-            "journal_bytes={}\ngc_enable={}\ngc_"
-            "live_ratio={}\ncheckpoint_enable={}\ncache_antithrash_ratio={}",
-            journal_bytes, gc_enable, gc_live_ratio, checkpoint_enable,
-            cache_antithrash_ratio);
+        return fmt::format("LsvdConfig: journal_bytes={}\n"
+                           "gc_enable={}\n"
+                           "gc_live_ratio={}\n"
+                           "checkpoint_enable={}\n"
+                           "cache_antithrash_ratio={}\n",
+                           "write_to_cache={}", journal_bytes, gc_enable,
+                           gc_live_ratio, checkpoint_enable,
+                           cache_antithrash_ratio, write_to_cache);
     }
 
     static Result<LsvdConfig> parse(str imgname, str cfg_str);
