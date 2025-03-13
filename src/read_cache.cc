@@ -70,9 +70,9 @@ class SharedCache
 
         auto c = std::make_unique<Cache>(cfg);
         auto shared_stats_f = fmt::output_file(
-            FLAGS_lsvd_journ_dir + "/shared_cache_stats" + now_ts + ".txt");
+            FLAGS_lsvd_journ_dir + "/shared_cache_stats." + now_ts + ".txt");
         auto img_stats_f = fmt::output_file(
-            FLAGS_lsvd_journ_dir + "/img_cache_stats" + now_ts + ".txt");
+            FLAGS_lsvd_journ_dir + "/img_cache_stats." + now_ts + ".txt");
 
         img_stats_f.print("time,imgname,reads,chunks,misses\n");
         shared_stats_f.print(
