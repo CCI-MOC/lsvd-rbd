@@ -77,7 +77,7 @@ To configure nvmf:
 cd subprojects/spdk/scripts
 ./rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 ./rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
-./rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 0.0.0.0 -s 9922
+./rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 0.0.0.0 -s 33331
 ```
 
 To mount images on the gateway:
@@ -104,7 +104,7 @@ Fill in the appropriate IP address:
 modprobe nvme-fabrics
 nvme disconnect -n nqn.2016-06.io.spdk:cnode1
 export gw_ip=${gw_ip:-192.168.52.109}
-nvme connect -t tcp  --traddr $gw_ip -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+nvme connect -t tcp  --traddr $gw_ip -s 33331 -n nqn.2016-06.io.spdk:cnode1 -o normal
 sleep 2
 nvme list
 dev_name=$(nvme list | perl -lane 'print @F[0] if /SPDK/')
@@ -130,7 +130,7 @@ export gateway_ip=127.0.0.1
 export img=lsvddev
 ./rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
 ./rpc.py nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
-./rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 9922
+./rpc.py nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a $gateway_ip -s 33331
 ./rpc.py --plugin rpc_plugin bdev_lsvd_create pone $img -c 'config_here'
 ./rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $img
 ```
@@ -138,7 +138,7 @@ export img=lsvddev
 Connect to the target:
 
 ```
-nvme connect -t tcp  --traddr localhost -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+nvme connect -t tcp  --traddr localhost -s 33331 -n nqn.2016-06.io.spdk:cnode1 -o normal
 ```
 
 Disconnect: 

@@ -32,7 +32,7 @@ FOLLY_GFLAGS_DEFINE_string(folly_log_cfg, ".=WARN,src=DBG6; default:async=true",
 
 const char *NVME_SS_NQN = "nqn.2016-06.io.spdk:cnode1";
 const char *HOSTNAME = "127.0.0.1";
-const char *PORT = "9922";
+const char *PORT = "33331";
 
 spdk_nvme_transport_id get_trid(const char *host, const char *port)
 {

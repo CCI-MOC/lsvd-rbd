@@ -4,7 +4,7 @@ set -xeuo pipefail
 workload=$1
 echo "Benchmarking automount with fio $workload"
 
-nvme connect -t tcp  --traddr localhost -s 9922 -n nqn.2016-06.io.spdk:cnode1 -o normal
+nvme connect -t tcp  --traddr localhost -s 33331 -n nqn.2016-06.io.spdk:cnode1 -o normal
 trap 'nvme disconnect -n nqn.2016-06.io.spdk:cnode1' SIGINT SIGTERM EXIT
 
 sleep 1
