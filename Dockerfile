@@ -14,11 +14,19 @@ RUN apt install -y libboost-all-dev libdouble-conversion-dev libevent-dev \
 		meson mold libfmt-dev librados-dev libjemalloc-dev libradospp-dev \
 		pkg-config uuid-dev fish
 
+# cache cachelib build, this saves 20mins of build time
+COPY subprojects /app/subprojects
+WORKDIR /app/subprojects/
+RUN git clone https://github.com/facebook/cachelib.git && git checkout v20240621
+COPY subprojects/packagefiles/cachelib/* /app/subprojects/cachelib/
+WORKDIR /app/subprojects/cachelib/
+RUN git apply *.patch
+RUN contrib/build.sh -j
+
 WORKDIR /app
 COPY Makefile /app/Makefile
 COPY meson.* /app/
 COPY src /app/src
-COPY subprojects /app/subprojects
 COPY test /app/test
 COPY tools /app/tools
 
