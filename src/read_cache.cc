@@ -1,5 +1,6 @@
 #include "absl/status/status.h"
 #include "cachelib/allocator/CacheAllocator.h"
+#include "fmt/chrono.h"
 #include "fmt/os.h"
 
 #include "backend.h"
@@ -64,16 +65,18 @@ class SharedCache
         cfg.setCacheSize(mem_bytes);
         cfg.validate();
 
+        auto t = std::time(nullptr);
+        auto now_ts = fmt::format("{:%Y%m%d_%H%M%S}", fmt::localtime(t));
+
         auto c = std::make_unique<Cache>(cfg);
-        auto shared_stats_f =
-            fmt::output_file(FLAGS_lsvd_journ_dir + "/shared_cache_stats" +
-                             std::to_string(get_now_us()) + ".txt");
-        auto img_stats_f =
-            fmt::output_file(FLAGS_lsvd_journ_dir + "/img_cache_stats" +
-                             std::to_string(get_now_us()) + ".txt");
+        auto shared_stats_f = fmt::output_file(
+            FLAGS_lsvd_journ_dir + "/shared_cache_stats" + now_ts + ".txt");
+        auto img_stats_f = fmt::output_file(
+            FLAGS_lsvd_journ_dir + "/img_cache_stats" + now_ts + ".txt");
 
         img_stats_f.print("time,imgname,reads,chunks,misses\n");
-        shared_stats_f.print("time,reads,chunks,hits,misses,hit_ratio,ram,nvm\n");
+        shared_stats_f.print(
+            "time,reads,chunks,hits,misses,hit_ratio,ram,nvm\n");
 
         singleton = sptr<SharedCache>(new SharedCache(
             std::move(c), std::move(shared_stats_f), std::move(img_stats_f)));
