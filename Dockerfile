@@ -17,7 +17,7 @@ RUN apt install -y libboost-all-dev libdouble-conversion-dev libevent-dev \
 # cache cachelib build, this saves 20mins of build time
 COPY subprojects /app/subprojects
 WORKDIR /app/subprojects/
-RUN ./get_and_build_subprojects.sh
+RUN ./get_and_build_subprojects.bash
 
 WORKDIR /app
 COPY Makefile /app/Makefile

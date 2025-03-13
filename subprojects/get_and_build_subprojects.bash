@@ -4,7 +4,7 @@ set -xeuo pipefail
 # call this script in docker to build subprojects so we can cache them
 
 # spdk
-git clone -b v24.09 https://github.com/spdk/spdk.git --depth=1
+git clone -b v24.09 https://github.com/spdk/spdk.git --depth=1 --recurse-submodules
 cp packagefiles/spdk/* spdk/
 cd spdk
 ./configure-spdk.sh release
