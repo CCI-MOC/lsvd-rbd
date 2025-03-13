@@ -17,11 +17,13 @@ RUN apt install -y libboost-all-dev libdouble-conversion-dev libevent-dev \
 # cache cachelib build, this saves 20mins of build time
 COPY subprojects /app/subprojects
 WORKDIR /app/subprojects/
-RUN git clone https://github.com/facebook/cachelib.git && git checkout v20240621
-COPY subprojects/packagefiles/cachelib/* /app/subprojects/cachelib/
-WORKDIR /app/subprojects/cachelib/
-RUN git apply *.patch
-RUN contrib/build.sh -j
+RUN git clone https://github.com/facebook/cachelib.git \
+	&& cd cachelib \
+	&& git checkout v20240621
+RUN cp packagefiles/cachelib/* cachelib/ \
+	&& cd cachelib \
+	&& git apply *.patch \
+	&& contrib/build.sh -j
 
 WORKDIR /app
 COPY Makefile /app/Makefile
