@@ -376,7 +376,7 @@ TaskUnit LsvdImage::flush_logobj(sptr<LogObj> obj)
     auto obj_iov = obj->as_iov();
     obj_sizes.wlock()->emplace(obj->seqnum, obj_iov.iov_len);
 
-    if (ENABLE_FLUSH) {
+    if (ENABLE_FLUSH && !obj->is_empty()) {
         // TODO think about what to do in the case of failure here
         auto iov = smartiov::from_iovecs(obj->as_iov());
         auto s3res = co_await s3->write(k, iov);
