@@ -13,8 +13,8 @@
 FOLLY_GFLAGS_DECLARE_string(lsvd_journ_dir);
 FOLLY_GFLAGS_DEFINE_int64(lsvd_stats_interval, 10'000,
                           "Interval for reporting cache statistics");
-FOLLY_GFLAGS_DEFINE_bool(lsvd_report_cache_stats, true,
-                         "Interval for reporting cache statistics");
+FOLLY_GFLAGS_DEFINE_bool(lsvd_report_cache_stats, false,
+                         "Whether to report cache statistics");
 
 using Cache = facebook::cachelib::TinyLFUAllocator;
 using PoolId = facebook::cachelib::PoolId;

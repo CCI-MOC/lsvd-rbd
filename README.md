@@ -55,16 +55,40 @@ be built along with the rest of the code in the container):
 ```
 
 The target listens to rpc commands on `/var/tmp/spdk.sock` by default.
-The gateway accepts three notable flags:
+The gateway accepts these options (see `lsvd --help`):
 
 ```
 lsvd: Usage: lsvd_tgt [none|mount|new] [args]
 
+  Flags from ../src/image.cc:
+    -lsvd_journ_dir (Path to dir for write journals and stats files)
+      type: string default: "/mnt/remote/"
+    -lsvd_report_iotiming (Report IO timing statistics to stdout) type: bool
+      default: false
+    -lsvd_report_long_ops (Report long ops to stdout) type: bool default: false
+    -lsvd_write_to_cache (Don't do full object insertions into cache. Can be
+      controlled on a per-image basis with write_to_cache config) type: bool
+      default: true
+
   Flags from ../src/main.cc:
+    -folly_log_cfg (Folly log config) type: string
+      default: ".=WARN,src=DBG6; default:async=true"
     -lsvd_cache_nvm (NVM cache size in GiB) type: uint64 default: 100
     -lsvd_cache_path (Path to lsvd read cache) type: string
-      default: "/mnt/lsvd/lsvd.rcache"
+      default: "/mnt/local/lsvd.rcache"
     -lsvd_cache_ram (RAM cache size in GiB) type: uint64 default: 10
+    -lsvd_num_threads (Number of worker threads for LSVD (global)) type: int64
+      default: 88 currently: 22
+    -lsvd_restrict_to_node (Restrict lsvd worker threads to current numa node)
+      type: bool default: false
+    -spdk_reactor_cores (Reactor cores for SPDK) type: string
+      default: "[0,1,2,3]"
+
+  Flags from ../src/read_cache.cc:
+    -lsvd_report_cache_stats (Interval for reporting cache statistics)
+      type: bool default: true
+    -lsvd_stats_interval (Interval for reporting cache statistics) type: int64
+      default: 10000
 ```
 
 To configure nvmf:

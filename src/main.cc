@@ -15,7 +15,7 @@
 #include "representation.h"
 #include "utils.h"
 
-FOLLY_GFLAGS_DEFINE_bool(lsvd_restrict_to_node, false,
+FOLLY_GFLAGS_DEFINE_bool(lsvd_restrict_to_node, true,
                          "Restrict lsvd worker threads to current numa node");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_ram, 10, "RAM cache size in GiB");
 FOLLY_GFLAGS_DEFINE_uint64(lsvd_cache_nvm, 100, "NVM cache size in GiB");
@@ -24,7 +24,7 @@ FOLLY_GFLAGS_DEFINE_string(lsvd_cache_path, "/mnt/local/lsvd.rcache",
 FOLLY_GFLAGS_DEFINE_int64(lsvd_num_threads,
                           std::thread::hardware_concurrency() / 2,
                           "Number of worker threads for LSVD (global)");
-FOLLY_GFLAGS_DEFINE_string(spdk_reactor_cores, "[0,1,2,3]",
+FOLLY_GFLAGS_DEFINE_string(spdk_reactor_cores, "[1,3,5,7]",
                            "Reactor cores for SPDK");
 
 FOLLY_GFLAGS_DEFINE_string(folly_log_cfg, ".=WARN,src=DBG6; default:async=true",
