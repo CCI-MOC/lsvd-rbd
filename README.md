@@ -94,14 +94,28 @@ docker kill <container id>
 
 ## Mount a client
 
+You'll need `nvme-cli` installed on the client. You may also need to install
+additional kernel modules for NVMe over Fabrics. For example, on Ubuntu:
+
+```
+sudo apt install linux-modules-extra-$(uname -r)
+```
+
 Fill in the appropriate IP address:
 
 ```
+# load kernel modules
+modprobe nvme-tcp
 modprobe nvme-fabrics
-nvme disconnect -n nqn.2016-06.io.spdk:cnode1
-export gw_ip=${gw_ip:-192.168.52.109}
+
+# disconnect any existing
+nvme disconnect -n nqn.2016-06.io.spdk:cnode1 
+
+# connect to the target
+export gw_ip=127.0.0.1
 nvme connect -t tcp  --traddr $gw_ip -s 33331 -n nqn.2016-06.io.spdk:cnode1 -o normal
-sleep 2
+
+# check the connection
 nvme list
 dev_name=$(nvme list | perl -lane 'print @F[0] if /SPDK/')
 printf "Using device $dev_name\n"
