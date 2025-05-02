@@ -5,53 +5,56 @@ Original paper [here](https://dl.acm.org/doi/10.1145/3492321.3524271).
 ## How to run
 
 Note that the examples here use the fish shell, that the local nvme cache is
-`/dev/nvme0n1`, and that the ceph config files are available in `/etc/ceph`.
+`/mnt/nvme0`, and that the ceph config files are available in `/etc/ceph`.
 
-First, create an lsvd image on the backend:
+```
+git clone https://github.com/cci-moc/lsvd-rbd.git
+cd lsvd-rbd
+
+# build the container
+docker buildx build -t lsvd-rbd .
+
+# enable hugepages
+echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+
+# run
+# by default, the local cache is /mnt/local and remote is /mnt/remote
+# change those mountpoints to the appropriate drives for your use case
+# this will create an image on pool 'mypool' and mount it
+sudo docker run --net host \
+    -v /dev/hugepages:/dev/hugepages \
+    -v /etc/ceph:/etc/ceph \
+    -v /var/tmp:/var/tmp \
+    -v /dev/shm:/dev/shm \
+    -v /mnt/nvme0:/mnt/local \
+    -v /mnt/nvme0:/mnt/remote \
+    -i -t --privileged \
+    --entrypoint /app/build-rel/lsvd \
+    lsvd-rbd \
+    new mypool 1
+```
+
+The gateway has some helpful command line arguments:
+
+- `./lsvd none` will do nothing on startup.
+- `./lsvd new <pool> <num>` will create `<num>` images in `<pool>` and with
+  names `auto_lsvddev_<num>` and mount them (deleting them if one already
+  exists and creating a now one in its place).
+- `./lsvd mount <pool> <name>` will mount the image `<name>` in `<pool>`.
+
+Most utilities are available in the container, so you can either run them with
+`docker run` or attach to the container interactively with
+`docker exec -it <container id> bash` and run them from there.
+
+To create images manually, use the `imgtool` command line utility (it'll
+be built along with the rest of the code in the container):
 
 ```
 #./imgtool create <pool> <imgname> --size 100g
 ./imgtool create lsvd-ssd benchtest1 --size 100g
 ```
 
-```
-echo 4096 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
-sudo docker run --net host \
-    -v /dev/hugepages:/dev/hugepages \
-    -v /etc/ceph:/etc/ceph \
-    -v /var/tmp:/var/tmp \
-    -v /dev/shm:/dev/shm \
-    -v /mnt/nvme0:/mnt/lsvd \
-    -i -t --privileged \
-    --entrypoint /app/build-rel/lsvd \
-    ghcr.io/cci-moc/lsvd-rbd:main
-```
-
-If you run into an error, you might need to rebuild the image on your machine.
-Be warned, a clean build takes about half an hour so be patient.
-
-```
-git clone https://github.com/cci-moc/lsvd-rbd.git
-cd lsvd-rbd
-docker buildx build -t lsvd-rbd .
-sudo docker run --net host \
-    -v /dev/hugepages:/dev/hugepages \
-    -v /etc/ceph:/etc/ceph \
-    -v /var/tmp:/var/tmp \
-    -v /dev/shm:/dev/shm \
-    -v /mnt/nvme0:/mnt/lsvd \
-    -i -t --privileged \
-    --entrypoint /app/build-rel/lsvd \
-    lsvd-rbd
-```
-
-To start the gateway:
-
-```
-./build-rel/lsvd
-```
-
-The target will start listening to rpc commands on `/var/tmp/spdk.sock`.
+The target listens to rpc commands on `/var/tmp/spdk.sock` by default.
 The gateway accepts three notable flags:
 
 ```
@@ -63,13 +66,6 @@ lsvd: Usage: lsvd_tgt [none|mount|new] [args]
       default: "/mnt/lsvd/lsvd.rcache"
     -lsvd_cache_ram (RAM cache size in GiB) type: uint64 default: 10
 ```
-
-The gateway also has some helpful command line arguments:
-
-- `./lsvd new <pool> <num>` will create `<num>` images in `<pool>` and with
-  names `auto_lsvddev_<num>` and mount them (deleting them if one already
-  exists and creating a now one in its place).
-- `./lsvd mount <pool> <name>` will mount the image `<name>` in `<pool>`.
 
 To configure nvmf:
 
@@ -84,7 +80,7 @@ To mount images on the gateway:
 
 ```
 export PYTHONPATH=/app/src/
-./rpc.py --plugin rpc_plugin bdev_lsvd_create lsvd-ssd benchtest1 -c 'TODO'
+./rpc.py --plugin rpc_plugin bdev_lsvd_create lsvd-ssd benchtest1 -c ''
 ./rpc.py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 benchtest1
 ```
 
