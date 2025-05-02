@@ -29,6 +29,8 @@ FOLLY_GFLAGS_DEFINE_string(spdk_reactor_cores, "[0,1,2,3]",
 
 FOLLY_GFLAGS_DEFINE_string(folly_log_cfg, ".=WARN,src=DBG6; default:async=true",
                            "Folly log config");
+FOLLY_GFLAGS_DEFINE_string(rados_user, "client.admin",
+                           "User to use for rados connection");
 
 const char *NVME_SS_NQN = "nqn.2016-06.io.spdk:cnode1";
 const char *HOSTNAME = "127.0.0.1";

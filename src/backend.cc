@@ -10,10 +10,12 @@
 #include "rados/librados.hpp"
 #include <cassert>
 #include <system_error>
+#include "folly/logging/xlog.h"
 
 #include "backend.h"
-#include "folly/logging/xlog.h"
 #include "utils.h"
+
+FOLLY_GFLAGS_DECLARE_string(rados_user);
 
 static auto neg_ec_to_result(int iores) -> Result<u32>
 {
@@ -85,7 +87,7 @@ class Rados : public ObjStore
         auto s3 = uptr<Rados>(new Rados());
 
         int ret = 0;
-        ret = s3->cluster.init2("client.admin", "ceph", 0);
+        ret = s3->cluster.init2(FLAGS_rados_user.c_str(), "ceph", 0);
         FAIL_IF_NEGERR(ret, "Init rados cluster failed");
         ret = s3->cluster.conf_read_file("/etc/ceph/ceph.conf");
         FAIL_IF_NEGERR(ret, "Couldn't read ceph config file");
